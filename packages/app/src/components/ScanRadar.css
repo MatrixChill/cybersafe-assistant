@@ -1,0 +1,133 @@
+.scan-radar-wrapper {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 1.5rem;
+  padding: 2rem;
+  background: rgba(0, 0, 0, 0.3);
+  border-radius: var(--radius-lg);
+  border: 1px solid var(--border-color);
+  margin: 1.5rem 0;
+  position: relative;
+  overflow: hidden;
+  align-items: center;
+}
+
+.radar-circle {
+  width: 220px;
+  height: 220px;
+  border-radius: 50%;
+  border: 1px solid rgba(160, 32, 240, 0.2);
+  position: relative;
+  background: radial-gradient(circle, rgba(160, 32, 240, 0.05) 0%, transparent 70%);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.radar-sweep {
+  position: absolute;
+  top: 0;
+  left: 0;
+  width: 100%;
+  height: 100%;
+  border-radius: 50%;
+  background: conic-gradient(from 0deg, rgba(160, 32, 240, 0) 0deg, rgba(160, 32, 240, 0.4) 360deg);
+  z-index: 1;
+  pointer-events: none;
+}
+
+.radar-ring {
+  position: absolute;
+  top: 50%;
+  left: 50%;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(160, 32, 240, 0.1);
+  border-radius: 50%;
+  pointer-events: none;
+}
+
+.ring-1 { width: 33%; height: 33%; }
+.ring-2 { width: 66%; height: 66%; }
+.ring-3 { width: 100%; height: 100%; }
+
+.radar-center {
+  background: #000;
+  border: 2px solid var(--accent);
+  width: 48px;
+  height: 48px;
+  border-radius: 50%;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  z-index: 2;
+  box-shadow: 0 0 15px var(--accent-glow);
+}
+
+.radar-icon {
+  width: 24px;
+  height: 24px;
+  color: var(--accent);
+}
+
+.radar-blip {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--cyber-blue);
+  border-radius: 50%;
+  box-shadow: 0 0 10px var(--cyber-blue);
+  z-index: 2;
+}
+
+.blip-1 { top: 20%; left: 30%; }
+.blip-2 { top: 60%; left: 70%; }
+.blip-3 { top: 40%; left: 55%; }
+
+.radar-status {
+  text-align: center;
+  width: 100%;
+}
+
+.status-header {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  margin-bottom: 0.25rem;
+  font-family: 'JetBrains Mono', monospace;
+  font-size: 0.75rem;
+  letter-spacing: 0.1em;
+  font-weight: 700;
+  color: var(--text-muted);
+}
+
+.status-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+}
+
+.status-dot.online {
+  background: var(--success);
+  box-shadow: 0 0 8px var(--success);
+}
+
+.spinning-icon {
+  width: 14px;
+  height: 14px;
+  animation: spin 2s linear infinite;
+  color: var(--accent);
+}
+
+.status-message {
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  margin: 0;
+}
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}

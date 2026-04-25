@@ -1,0 +1,17 @@
+{
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "baseUrl": ".",
+    "module": "ESNext",
+    "moduleResolution": "node",
+    "declaration": true,
+    "outDir": "dist",
+    "rootDir": "src",
+    "paths": {
+      "@cybersafe/shared-types": ["../shared-types/src/index.ts"],
+      "@cybersafe/core": ["../core/src/index.ts"],
+      "@cybersafe/native-windows": ["../native-windows/src/index.ts"]
+    }
+  },
+  "include": ["src"]
+}

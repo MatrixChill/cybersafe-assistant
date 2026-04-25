@@ -1,0 +1,27 @@
+{
+  "name": "@cybersafe/desktop",
+  "version": "0.1.0",
+  "private": true,
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "start": "electron .",
+    "typecheck": "node -e \"console.log('desktop typecheck delegated to app/core workspaces')\""
+  },
+  "dependencies": {
+    "@cybersafe/core": "0.1.0",
+    "@cybersafe/shared-types": "0.1.0",
+    "@cybersafe/service": "0.1.0"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.0",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.1",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron-renderer": "^0.14.6"
+  }
+}

@@ -1,0 +1,27 @@
+{
+  "name": "cybersafe-assistant",
+  "private": true,
+  "version": "0.1.0",
+  "description": "CyberSafe Assistant monorepo",
+  "scripts": {
+    "core:build": "npm run build -w @cybersafe/core",
+    "dev:app": "npm run dev -w @cybersafe/app",
+    "dev:api": "npm run dev -w api",
+    "dev:desktop": "npm run dev -w @cybersafe/desktop",
+    "dev:service": "npm run dev -w @cybersafe/service",
+    "dev": "concurrently \"npm run dev:service\" \"npm run dev:api\" \"npm run dev:app\" \"npm run dev:desktop\"",
+    "build:all": "npm run build --workspaces",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

@@ -1,0 +1,22 @@
+[
+  {
+    "id": "embedded-powershell-download",
+    "label": "Suspicious PowerShell downloader",
+    "severity": "high",
+    "strings": [
+      "powershell -enc",
+      "invoke-webrequest",
+      "downloadstring"
+    ]
+  },
+  {
+    "id": "credential-theft-keywords",
+    "label": "Credential theft markers",
+    "severity": "critical",
+    "strings": [
+      "mimikatz",
+      "sekurlsa::logonpasswords",
+      "lsass"
+    ]
+  }
+]

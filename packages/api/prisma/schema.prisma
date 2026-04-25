@@ -1,0 +1,38 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+enum Severity {
+  low
+  medium
+  high
+  critical
+}
+
+model ThreatEvent {
+  id             String   @id @default(cuid())
+  source         String
+  url            String
+  domain         String
+  severity       String
+  confidence     Float
+  rulesTriggered Json
+  createdAt      DateTime @default(now())
+
+  @@index([createdAt])
+  @@index([severity])
+  @@index([source])
+}
+
+model TrainingResult {
+  id           String   @id @default(cuid())
+  correctCount Int
+  totalCount   Int
+  score        Float
+  completedAt  DateTime @default(now())
+}
