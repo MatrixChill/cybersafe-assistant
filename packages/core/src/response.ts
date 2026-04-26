@@ -38,6 +38,8 @@ export class QuarantineManager {
       const id = crypto.randomUUID();
       const quarantinePath = path.join(this.quarantineDir, `${id}.quarantine`);
       await fs.rename(analysis.artifactPath, quarantinePath);
+      // Remove all permissions to prevent execution
+      await fs.chmod(quarantinePath, 0o000);
       const entry: QuarantineEntry = {
         id,
         originalPath: analysis.artifactPath,

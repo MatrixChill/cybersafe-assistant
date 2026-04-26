@@ -11,3 +11,4 @@ export * from "./trust.js";
 export * from "./yara.js";
 export * from "./virustotal.js";
 export * from "./hardware.js";
+export * from "./exclusions.js";

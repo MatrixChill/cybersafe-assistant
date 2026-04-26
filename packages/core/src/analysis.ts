@@ -56,6 +56,12 @@ export class MalwareAnalyzer {
     const metadata = analyzeDownloadFilename(fileName);
     const sha256 = await sha256File(artifactPath);
     const stats = statSync(artifactPath);
+    
+    // Gatekeeper para arquivos gigantes (previne crash de memória e lentidão)
+    if (stats.size > 100 * 1024 * 1024) { // 100MB limit
+      return this.generateResultForLargeFile(artifactPath, sha256, stats, fileName, extension, signer);
+    }
+
     const fileHandle = await fs.open(artifactPath, "r");
     const header = Buffer.alloc(8192);
     const { bytesRead } = await fileHandle.read(header, 0, header.length, 0);
@@ -63,7 +69,25 @@ export class MalwareAnalyzer {
     const sample = header.slice(0, Math.max(bytesRead, 1));
     const magic = detectMagic(sample);
     const entropy = Number(calculateEntropy(sample).toFixed(2));
-    const yaraMatches = this.deps.yara.match(sample);
+    
+    // Scan completo com YARA
+    const yaraMatches = await this.deps.yara.scanFile(artifactPath);
+    
+    // Scan com ClamAV
+    let clamavDetected = false;
+    try {
+      const { execSync } = await import("node:child_process");
+      // Timeout de 10 segundos para não travar a interface
+      execSync(`clamscan --no-summary "${artifactPath}"`, { 
+        stdio: "ignore", 
+        timeout: 10000 
+      });
+    } catch (error: any) {
+      if (error.status === 1) {
+        clamavDetected = true;
+      }
+    }
+
     const signatureMatch = this.deps.signatures.match(sha256);
     const trust = this.deps.trust.evaluate({ sha256, artifactPath, signer });
 
@@ -72,6 +96,7 @@ export class MalwareAnalyzer {
 
     if (signatureMatch) rules.add("known_bad_hash");
     if (yaraMatches.length > 0) rules.add("yara_match");
+    if (clamavDetected) rules.add("known_malware");
     if (artifactPath.toLowerCase().includes("\\downloads\\") || artifactPath.toLowerCase().includes("\\temp\\")) {
       rules.add("suspicious_location");
     }
@@ -117,6 +142,45 @@ export class MalwareAnalyzer {
       extension,
       size: stats.size,
       entropy,
+      scanTimestamp: new Date().toISOString(),
+    };
+  }
+
+  private generateResultForLargeFile(artifactPath: string, sha256: string, stats: any, fileName: string, extension: string, signer?: string): AnalysisResult {
+    const trust = this.deps.trust.evaluate({ sha256, artifactPath, signer });
+    const rules = new Set<HeuristicRuleId>();
+    
+    if (trust.publisherTrusted) rules.add("trusted_publisher");
+    if (trust.systemPathTrusted) rules.add("trusted_system_path");
+    if (!signer && (extension === ".exe" || extension === ".msi")) rules.add("unsigned_binary");
+
+    const score = scoreThreat({
+      signatureMatch: false,
+      yaraMatches: 0,
+      rulesTriggered: Array.from(rules),
+      trustDecision: trust.decision,
+    });
+
+    return {
+      artifactPath,
+      fileName,
+      sha256,
+      verdict: score.verdict,
+      severity: score.severity,
+      riskScore: score.riskScore,
+      confidence: 0.5,
+      rulesTriggered: Array.from(rules),
+      factors: score.factors,
+      recommendedAction: score.recommendedAction,
+      signer,
+      publisherTrusted: trust.publisherTrusted,
+      systemPathTrusted: trust.systemPathTrusted,
+      isExecutable: true,
+      magicNumber: undefined,
+      detectedExtension: extension,
+      extension,
+      size: stats.size,
+      entropy: 0,
       scanTimestamp: new Date().toISOString(),
     };
   }

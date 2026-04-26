@@ -6,9 +6,15 @@ import type { SecurityEvent } from "@cybersafe/shared-types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 let mainWindow: BrowserWindow | null = null;
+let splashWindow: BrowserWindow | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
 const client = new ServiceClient();
+const notificationHistory = new Map<string, number>();
+const DEBOUNCE_TIME = 15000; // 15 segundos de silêncio para o mesmo arquivo
+
+// Detecta se foi lançado via auto-start (boot do Windows) para iniciar escondido na tray
+const launchHidden = process.argv.includes("--hidden");
 
 function createWindow() {
   mainWindow = new BrowserWindow({
@@ -36,8 +42,13 @@ function createWindow() {
   }
 
   mainWindow.once("ready-to-show", () => {
-    mainWindow?.show();
-    mainWindow?.webContents.openDevTools();
+    // No auto-start (--hidden), a janela permanece oculta; o user abre pela tray.
+    if (!launchHidden) {
+      mainWindow?.show();
+    }
+    if (!app.isPackaged) {
+      mainWindow?.webContents.openDevTools();
+    }
   });
 
   mainWindow.on("close", (event) => {
@@ -48,22 +59,115 @@ function createWindow() {
   });
 }
 
-function createTray() {
-  const icon = nativeImage.createEmpty();
-  tray = new Tray(icon);
-  tray.setToolTip("CyberSafe Endpoint Protection");
+function createSplashScreen() {
+  splashWindow = new BrowserWindow({
+    width: 450,
+    height: 350,
+    transparent: true,
+    frame: false,
+    alwaysOnTop: true,
+    resizable: false,
+    skipTaskbar: true,
+    webPreferences: {
+      nodeIntegration: false,
+      contextIsolation: true,
+    },
+  });
+
+  const splashPath = path.join(__dirname, "assets", "splash.html");
+  splashWindow.loadFile(splashPath);
+}
+
+import { exec } from "node:child_process";
+import { promisify } from "node:util";
+
+const execAsync = promisify(exec);
+let isServiceRunning = false;
+
+async function checkServiceStatusLegacy(): Promise<'RUNNING' | 'STOPPED' | 'UNKNOWN'> {
+  try {
+    const { stdout } = await execAsync(
+      'powershell -NoProfile -Command "Get-Service -Name \'CyberSafe Engine\' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status"',
+      { windowsHide: true, timeout: 5000 }
+    );
+    if (stdout.trim() === 'Running') return 'RUNNING';
+    if (stdout.trim() === 'Stopped') return 'STOPPED';
+    return 'UNKNOWN';
+  } catch (error) {
+    console.error('Falha ao ler status do serviço:', error);
+    return 'UNKNOWN';
+  }
+}
+
+async function updateServiceStatus() {
+  const status = await checkServiceStatusLegacy();
+  const wasRunning = isServiceRunning;
+  isServiceRunning = status === 'RUNNING';
+  
+  // Atualiza apenas se houve mudança de status ou na primeira execução
+  updateTrayMenu();
+  
+  if (tray) {
+    try {
+      const activeIconPath = path.join(__dirname, "assets", "tray-icon-active.png");
+      const warningIconPath = path.join(__dirname, "assets", "tray-icon-warning.png");
+      const defaultIconPath = path.join(__dirname, "assets", "icon.png");
+      
+      // Usa fs para checar se as imagens específicas existem, senão faz fallback pro icon.png padrão
+      const fs = require("node:fs");
+      let iconPathToUse = defaultIconPath;
+      
+      if (isServiceRunning && fs.existsSync(activeIconPath)) {
+        iconPathToUse = activeIconPath;
+      } else if (!isServiceRunning && fs.existsSync(warningIconPath)) {
+        iconPathToUse = warningIconPath;
+      }
+      
+      tray.setImage(nativeImage.createFromPath(iconPathToUse));
+    } catch (e) {
+      console.error("Erro ao atualizar icone", e);
+    }
+  }
+}
+
+function updateTrayMenu() {
+  if (!tray) return;
+  const statusLabel = isServiceRunning ? "🔵 Status: ATIVO" : "⚠️ Status: PARADO (Serviço Inativo)";
+  
+  tray.setToolTip(isServiceRunning ? "CyberSafe: Serviço Ativo (Motor funcionando)" : "CyberSafe: Serviço Parado (clique para iniciar)");
+  
   tray.setContextMenu(Menu.buildFromTemplate([
-    { label: "CyberSafe Protection", enabled: false },
+    { label: statusLabel, enabled: false },
     { type: "separator" },
-    { label: "Open Console", click: () => mainWindow?.show() },
+    { label: "Abrir Painel de Controle", click: () => mainWindow?.show() },
     {
-      label: "Exit",
+      label: "Iniciar Motor (Admin)",
+      visible: !isServiceRunning,
+      click: () => {
+        // Tenta iniciar o serviço se estiver parado
+        exec('powershell -Command "Start-Process sc.exe -ArgumentList \'start\", \"\"CyberSafe Engine\"\"\' -Verb RunAs"');
+      }
+    },
+    {
+      label: "Sair",
       click: () => {
         isQuitting = true;
         app.quit();
       },
     },
   ]));
+}
+
+function createTray() {
+  const iconPath = path.join(__dirname, "assets", "icon.png");
+  const icon = nativeImage.createFromPath(iconPath);
+  tray = new Tray(icon);
+  
+  updateTrayMenu();
+  
+  // Poll service status every 5 seconds
+  setInterval(updateServiceStatus, 5000);
+  updateServiceStatus();
 }
 
 function wireRealtimeEvents() {
@@ -74,10 +178,17 @@ function wireRealtimeEvents() {
       (event.type === "threat.detected" || event.type === "process.blocked") &&
       (event.severity === "critical" || event.severity === "high")
     ) {
-      new Notification({
-        title: "CyberSafe Protection",
-        body: event.summary,
-      }).show();
+      const fileId = event.data?.artifactPath || event.summary;
+      const lastShown = notificationHistory.get(fileId) || 0;
+      const now = Date.now();
+
+      if (now - lastShown > DEBOUNCE_TIME) {
+        notificationHistory.set(fileId, now);
+        new Notification({
+          title: "CyberSafe Protection",
+          body: event.summary,
+        }).show();
+      }
     }
   });
 }
@@ -115,20 +226,47 @@ function registerIpc() {
   });
 }
 
+// ── Auto-Start Registration (Production Only, Windows Only) ──────────────────
+function configureAutoStart() {
+  if (process.platform !== "win32") return;
+
+  app.setLoginItemSettings({
+    openAtLogin: true,
+    path: process.execPath,
+    args: app.isPackaged ? ["--hidden"] : [path.resolve(process.argv[1]), "--hidden"],
+  });
+}
+
 app.whenReady().then(async () => {
+  // Splash só aparece se não for boot silencioso
+  if (!launchHidden) {
+    createSplashScreen();
+  }
+
   createWindow();
-  createTray();
   registerIpc();
-  app.setLoginItemSettings({ openAtLogin: true });
+  configureAutoStart();
+  createTray();
 
   try {
     await client.connect();
     wireRealtimeEvents();
+
+    // Fecha splash após conexão bem-sucedida
+    if (splashWindow) {
+      setTimeout(() => {
+        splashWindow?.close();
+        splashWindow = null;
+      }, 1000);
+    }
   } catch (error) {
     console.error("Failed to connect to service:", error);
+    splashWindow?.close();
+    splashWindow = null;
     dialog.showErrorBox(
       "Service Connection Failed",
       `Failed to start or connect to the CyberSafe background service. Underlying error:\n${error}`
     );
+    app.quit();
   }
 });

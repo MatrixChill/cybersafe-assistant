@@ -30,16 +30,17 @@ const RULE_WEIGHTS: Partial<Record<HeuristicRuleId, number>> = {
   executable_signature: 25,
   archive_with_exe: 30,
   magic_number_mismatch: 30,
-  high_entropy: 20,
+  high_entropy: 5, // Reduzido drasticamente (era 20)
   process_injection_indicator: 30,
   suspicious_location: 15,
   persistence_attempt: 30,
   known_bad_hash: 95,
   yara_match: 85,
+  known_malware: 95,
   allowlisted_hash: -60,
-  trusted_publisher: -20,
-  trusted_system_path: -15,
-  unsigned_binary: 15,
+  trusted_publisher: -30, // Aumentado (era -20)
+  trusted_system_path: -25, // Aumentado (era -15)
+  unsigned_binary: 10, // Reduzido (era 15)
   office_child_process: 20,
   script_spawns_binary: 20,
   rapid_process_fanout: 20,

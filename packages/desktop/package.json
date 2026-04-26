@@ -5,7 +5,7 @@
   "main": "dist/main.js",
   "type": "module",
   "scripts": {
-    "dev": "vite",
+    "dev": "concurrently -k \"vite build --watch\" \"wait-on dist/main.js && electron .\"",
     "build": "vite build",
     "start": "electron .",
     "typecheck": "node -e \"console.log('desktop typecheck delegated to app/core workspaces')\""

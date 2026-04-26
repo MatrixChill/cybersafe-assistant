@@ -144,25 +144,53 @@ export async function snapshotProcesses(): Promise<Map<number, ProcessSnapshot>>
   const map = new Map<number, ProcessSnapshot>();
   
   try {
-    const processes = await si.processes();
+    const { exec } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const execAsync = promisify(exec);
+
+    // No Windows, usamos PowerShell para obter a linha de comando completa, já que o wmic está depreciado
+    const { stdout } = await execAsync('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine | ConvertTo-Csv -NoTypeInformation"');
+    const lines = stdout.split('\n').filter(line => line.trim() !== "" && line.includes(","));
     const now = new Date().toISOString();
 
-    for (const processInfo of processes.list.slice(0, 500)) {
-      const pid = Number(processInfo.pid);
+    for (let i = 1; i < lines.length; i++) {
+      // O CSV do PowerShell pode conter aspas, vamos limpá-las
+      const line = lines[i].replace(/"/g, '');
+      const parts = line.split(',');
+      if (parts.length < 3) continue;
+
+      const pid = parseInt(parts[0] || "0");
+      const name = parts[1] || "";
+      const commandLine = parts.slice(2).join(',') || ""; // O comando pode conter vírgulas
+
       if (!Number.isFinite(pid) || pid <= 0) continue;
+
       map.set(pid, {
         pid,
-        ppid: Number((processInfo as any).parentPid ?? 0),
-        name: processInfo.name ?? `pid-${pid}`,
-        path: (processInfo as any).path ?? "",
-        commandLine: (processInfo as any).command ?? "",
-        user: processInfo.user,
-        cpu: Math.round((processInfo.cpu ?? 0) * 10) / 10,
-        memoryMb: Math.round(((processInfo.memRss ?? 0) / 1024)),
+        ppid: 0, // WMIC csv format here doesn't include parentPid by default
+        name: name || `pid-${pid}`,
+        path: "", // Path is harder to get in this specific wmic format without extra cols
+        commandLine,
+        user: "unknown",
+        cpu: 0,
+        memoryMb: 0,
         startedAt: now,
         signer: undefined,
         trusted: "neutral",
       });
+    }
+
+    // Fallback ou complemento com systeminformation para CPU/Memória
+    const siProcesses = await si.processes();
+    for (const p of siProcesses.list) {
+      const existing = map.get(Number(p.pid));
+      if (existing) {
+        existing.cpu = Math.round((p.cpu ?? 0) * 10) / 10;
+        existing.memoryMb = Math.round(((p.memRss ?? 0) / 1024));
+        existing.path = (p as any).path || existing.path;
+        existing.ppid = Number((p as any).parentPid || 0);
+        existing.user = p.user || existing.user;
+      }
     }
   } catch (err) {
     console.error("[ProcessMonitor] Falha ao coletar processos do S.O:", err);

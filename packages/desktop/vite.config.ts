@@ -2,7 +2,6 @@ import { defineConfig } from 'vite';
 import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
 import path from 'path';
-import fs from 'fs';
 
 export default defineConfig({
   plugins: [
@@ -49,7 +48,8 @@ export default defineConfig({
   },
   server: {
     port: 5174,
-    strictPort: true
+    // Desktop is a passive wrapper in dev; don't fail if 5174 is taken.
+    strictPort: false
   },
   build: {
     rollupOptions: {

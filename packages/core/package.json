@@ -12,9 +12,11 @@
   },
   "dependencies": {
     "@cybersafe/shared-types": "0.1.0",
+    "@litko/yara-x": "^0.5.0",
     "adm-zip": "^0.5.10",
     "chokidar": "^4.0.0",
-    "events": "^3.3.0"
+    "events": "^3.3.0",
+    "systeminformation": "^5.31.5"
   },
   "devDependencies": {
     "@types/adm-zip": "^0.5.5",

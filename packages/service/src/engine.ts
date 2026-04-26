@@ -17,6 +17,7 @@ import {
   encodeMessage,
   killProcessTree,
   scoreToStatus,
+  ExclusionManager,
 } from "@cybersafe/core";
 import {
   NativeWindowsWatcher,
@@ -73,6 +74,7 @@ export class ProtectionEngineService {
   private readonly clients = new Set<net.Socket>();
   private readonly vt = new VirusTotalClient(process.env.VIRUSTOTAL_API_KEY);
   private readonly hardware = new HardwareHealthEngine();
+  private readonly exclusions = new ExclusionManager();
 
   private server: net.Server | null = null;
   private events: SecurityEvent[] = [];
@@ -206,6 +208,25 @@ export class ProtectionEngineService {
     // Double-check safe list
     if (this.isSafeProcess(processInfo.name)) return;
 
+    // 1. Behavioral Check (Command Line)
+    const suspiciousPatterns = [
+      /powershell.*-nop.*-ep.*bypass/i,
+      /powershell.*-encodedcommand/i,
+      /cmd\.exe.*\/c.*del/i,
+      /wscript\.exe.*vbscript:/i,
+      /mshta\.exe.*http/i,
+    ];
+
+    if (processInfo.commandLine && suspiciousPatterns.some(pattern => pattern.test(processInfo.commandLine))) {
+      await terminateProcessTree(processInfo.pid);
+      this.eventBus.publish("process.blocked", "critical", `Suspicious behavior blocked: ${processInfo.name}`, {
+        ...processInfo,
+        reason: "Suspicious command line pattern detected"
+      });
+      return;
+    }
+
+    // 2. Path Check
     const lowerPath = processInfo.path.toLowerCase();
     if (this.blockedPaths.has(lowerPath)) {
       await terminateProcessTree(processInfo.pid);
@@ -213,11 +234,12 @@ export class ProtectionEngineService {
       return;
     }
 
+    // 3. Signature Check (Hash/YARA)
     if (processInfo.path) {
       const analysis = await this.scanArtifact(processInfo.path, "service");
       if (analysis?.results[0]?.sha256 && this.blockedHashes.has(analysis.results[0].sha256)) {
         await terminateProcessTree(processInfo.pid);
-        this.eventBus.publish("process.killed", "critical", `Killed blocked process: ${processInfo.name}`, processInfo);
+        this.eventBus.publish("process.killed", "critical", `Killed blocked process (Malware signature): ${processInfo.name}`, processInfo);
       }
     }
   }
@@ -237,8 +259,13 @@ export class ProtectionEngineService {
   }
 
   getProtectionState(): ProtectionState {
+    const recentThreats = this.threats.slice(0, 10);
+    const maxRisk = recentThreats.length > 0 
+      ? Math.max(...recentThreats.map(t => t.riskScore))
+      : 0;
+
     const stats: ProtectionStats = {
-      riskScore: this.threats[0]?.riskScore ?? 0,
+      riskScore: maxRisk,
       totalEvents: this.threats.length,
       highSeverityEvents: this.threats.filter((event) => event.severity === "high" || event.severity === "critical").length,
       blockedExecutions: this.events.filter((event) => event.type === "process.blocked" || event.type === "process.killed").length,
@@ -263,6 +290,28 @@ export class ProtectionEngineService {
 
   async scanArtifact(filePath: string, source: ThreatEvent["source"]): Promise<ServiceResponseMap["scan.artifact"]> {
     try {
+      // Gatekeeper: Check exclusions first
+      if (this.exclusions.isExcluded(filePath)) {
+        console.log(`[Service] Skipping scan for excluded path: ${filePath}`);
+        return {
+          results: [{
+            fileName: path.basename(filePath),
+            size: 0,
+            severity: "low",
+            confidence: 1,
+            rulesTriggered: [],
+            riskScore: 0,
+            verdict: "safe",
+            sha256: "",
+          }],
+          totalFiles: 1,
+          highRiskCount: 0,
+          overallSeverity: "low",
+          rulesTriggered: [],
+          riskScore: 0,
+        };
+      }
+
       const analysis = await this.analyzer.analyze(filePath);
       
       // Consult VT if enabled
@@ -410,9 +459,26 @@ export class ProtectionEngineService {
   }
 
   async updateDefinitions() {
-    this.definitionsUpdatedAt = new Date().toISOString();
-    this.eventBus.publish("engine.health", "low", "Definitions updated", { updatedAt: this.definitionsUpdatedAt });
-    return { success: true, updatedAt: this.definitionsUpdatedAt };
+    try {
+      // Importar o updater e forçar download agora
+      const { DefinitionUpdater } = await import("./updater.js");
+      const updater = new DefinitionUpdater(this.definitionsDir);
+      const result = await updater.checkAndUpdate(true);
+
+      // Hot-reload: recarrega as definições em memória sem reiniciar o serviço
+      await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.json"));
+      await this.yara.load(path.join(this.definitionsDir, "yara", "default.json"));
+
+      this.definitionsUpdatedAt = new Date().toISOString();
+      this.eventBus.publish("engine.health", "low", `Definitions updated (YARA: ${result.yaraUpdated}, ClamAV: ${result.clamUpdated}, Hashes: ${result.hashesUpdated})`, {
+        updatedAt: this.definitionsUpdatedAt,
+        ...result,
+      });
+      return { success: true, updatedAt: this.definitionsUpdatedAt };
+    } catch (err: any) {
+      console.error("[Engine] Falha ao atualizar definições:", err);
+      return { success: false, updatedAt: this.definitionsUpdatedAt };
+    }
   }
 
   async killProcess(pid: number) {
@@ -549,6 +615,10 @@ export class ProtectionEngineService {
         return this.hardware.getLastSnapshot() || await this.hardware.getSnapshot();
       case "process.analyze":
         return this.analyzeProcess((payload as { pid: number }).pid);
+      case "exclusions.get":
+        return this.exclusions.getConfig();
+      case "exclusions.update":
+        return this.exclusions.updateConfig(payload as any);
       default:
         throw new Error(`Unsupported method: ${String(method)}`);
     }

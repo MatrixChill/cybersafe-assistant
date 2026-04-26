@@ -1,0 +1,34 @@
+<service>
+	<id>cybersafeengine.exe</id>
+	<name>CyberSafe Engine</name>
+	<description>Motor de proteção em tempo real do CyberSafe Antivírus. Monitora arquivos, processos e conexões de rede.</description>
+	<executable>C:\Program Files\nodejs\node.exe</executable>
+	<argument>--import=tsx</argument>
+	<argument>--max-old-space-size=512</argument>
+	<argument>C:\Users\caioc\Downloads\cybersafe-assistant\node_modules\node-windows\lib\wrapper.js</argument>
+	<argument>--file</argument>
+	<argument>C:\Users\caioc\Downloads\cybersafe-assistant\packages\service\src\index.ts</argument>
+	<argument>--scriptoptions=</argument>
+	<argument>--log</argument>
+	<argument>CyberSafe Engine wrapper</argument>
+	<argument>--grow</argument>
+	<argument>0.5</argument>
+	<argument>--wait</argument>
+	<argument>2</argument>
+	<argument>--maxrestarts</argument>
+	<argument>10</argument>
+	<argument>--abortonerror</argument>
+	<argument>n</argument>
+	<argument>--stopparentfirst</argument>
+	<argument>undefined</argument>
+	<logmode>rotate</logmode>
+	<stoptimeout>30sec</stoptimeout>
+	<env name="NODE_ENV" value="production"/>
+	<env name="CYBERSAFE_SERVICE_MODE" value="windows-service"/>
+	<serviceaccount>
+		<domain>MATRIXX</domain>
+		<user>LocalSystem</user>
+		<password></password>
+	</serviceaccount>
+	<workingdirectory>C:\Users\caioc\Downloads\cybersafe-assistant\packages\service</workingdirectory>
+</service>

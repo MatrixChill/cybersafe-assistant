@@ -52,6 +52,7 @@ export type HeuristicRuleId =
   | "yara_match"
   | "allowlisted_hash"
   | "unsigned_binary"
+  | "known_malware"
   | "office_child_process"
   | "script_spawns_binary"
   | "rapid_process_fanout"
@@ -262,6 +263,12 @@ export interface ServiceSnapshot {
   quarantine: QuarantineEntry[];
 }
 
+export interface ExclusionConfig {
+  paths: string[];
+  extensions: string[];
+  files: string[];
+}
+
 export interface ServiceCommandMap {
   "protection.getState": undefined;
   "events.list": { limit?: number; cursor?: number } | undefined;
@@ -282,6 +289,8 @@ export interface ServiceCommandMap {
   "definitions.update": { source?: string } | undefined;
   "analysis.restricted": { path: string };
   "hardware.snapshot": undefined;
+  "exclusions.get": undefined;
+  "exclusions.update": Partial<ExclusionConfig>;
 }
 
 export interface ServiceResponseMap {
@@ -304,6 +313,8 @@ export interface ServiceResponseMap {
   "definitions.update": { success: boolean; updatedAt: string };
   "analysis.restricted": AnalysisResult | null;
   "hardware.snapshot": HardwareSnapshot;
+  "exclusions.get": ExclusionConfig;
+  "exclusions.update": { success: boolean };
 }
 
 // ── VirusTotal ──
