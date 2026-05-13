@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import type {
   ConnectionSnapshot,
   DashboardSummary,
@@ -81,6 +81,11 @@ function AuthenticatedApp() {
   const [error, setError] = useState("");
   const [isClearing, setIsClearing] = useState(false);
   const [toasts, setToasts] = useState<{ id: string; event: SecurityEvent }[]>([]);
+  /** Evita rajadas do mesmo ficheiro/alerta na UI (notificações nativas já têm debounce no Electron). */
+  const toastDebounceRef = useRef<Map<string, number>>(new Map());
+  const toastDismissTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
+  const TOAST_DEBOUNCE_MS = 12_000;
+  const TOAST_AUTO_DISMISS_MS = 10_000;
 
   useEffect(() => {
     const savedTheme = (localStorage.getItem("theme") as ThemeMode | null) ?? "dark";
@@ -139,13 +144,33 @@ function AuthenticatedApp() {
     const unsubscribe = window.electronAPI.onSecurityEvent((event) => {
       setEvents((prev) => [...prev.filter((entry) => entry.sequence !== event.sequence), event].slice(-100));
       if (event.type === "threat.detected" || event.type === "process.blocked") {
+        const data = event.data as { artifactPath?: string } | undefined;
+        const toastKey = data?.artifactPath || event.summary || event.id;
+        const now = Date.now();
+        const last = toastDebounceRef.current.get(toastKey) ?? 0;
+        if (now - last < TOAST_DEBOUNCE_MS) {
+          void fetchSnapshot();
+          return;
+        }
+        toastDebounceRef.current.set(toastKey, now);
+
         setToasts((prev) => [...prev, { id: event.id, event }].slice(-4));
+
+        const existing = toastDismissTimers.current.get(event.id);
+        if (existing) clearTimeout(existing);
+        const tid = setTimeout(() => {
+          setToasts((prev) => prev.filter((t) => t.id !== event.id));
+          toastDismissTimers.current.delete(event.id);
+        }, TOAST_AUTO_DISMISS_MS);
+        toastDismissTimers.current.set(event.id, tid);
       }
       void fetchSnapshot();
     });
 
     return () => {
       unsubscribe?.();
+      toastDismissTimers.current.forEach((t) => clearTimeout(t));
+      toastDismissTimers.current.clear();
     };
   }, [fetchSnapshot]);
 

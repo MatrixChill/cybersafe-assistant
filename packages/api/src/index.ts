@@ -48,10 +48,26 @@ function broadcastEvent(event: ThreatEvent) {
 }
 
 const app = express();
-const openai = new OpenAI({ 
-  apiKey: process.env.GROQ_API_KEY || "dummy-key",
-  baseURL: "https://api.groq.com/openai/v1"
+
+const groqApiKey = process.env.GROQ_API_KEY?.trim();
+const openai = new OpenAI({
+  apiKey: groqApiKey || "missing-groq-key",
+  baseURL: "https://api.groq.com/openai/v1",
 });
+
+/** Persona do assistente no painel do antivírus (Groq / OpenAI-compatible). */
+const CYBERSAFE_AI_SYSTEM_PROMPT = `És o assistente virtual do antivírus CyberSafe. Fala português (Portugal ou Brasil, conforme o utilizador).
+
+Objetivo: ajudar o utilizador a usar o produto e a perceber segurança — ameaças, boas práticas, phishing, passwords, VPN, atualizações, quarentena, scans, falsos positivos, e o que significam alertas do CyberSafe.
+
+Regras:
+- Sê claro, curto e acionável; usa listas quando ajudar.
+- Nunca inventes que o PC está infectado sem contexto; se não souberes, diz o que falta (ex.: resultado do scan, mensagem de erro).
+- Não peças nem repitas chaves API, passwords nem dados pessoais. Se o utilizador colar segredos, avisa para revogar e usar .env.
+- Não dês conselhos ilegais (cracking, evasão de segurança empresarial, malware).
+- Quando falares de risco, distingue "possível" vs "confirmado" e sugere o próximo passo seguro (scan, quarentena, verificação VirusTotal, contactar admin).
+- Podes usar **negrito** em markdown ligeiro; evita respostas enormes (máx. ~4 parágrafos curtos salvo se pedirem detalhe).`;
+
 const port = 4000;
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -294,19 +310,26 @@ app.get("/health", (_req, res) => {
 // ── AI Chat ──
 app.post("/api/ai/chat", async (req, res) => {
   try {
+    if (!groqApiKey) {
+      res.status(503).json({
+        message: "IA indisponível: define GROQ_API_KEY no ficheiro .env da API (packages/api) e reinicia o servidor.",
+      });
+      return;
+    }
+
     const { messages } = req.body;
     if (!messages || !Array.isArray(messages)) {
       res.status(400).json({ message: "Messages array is required" });
       return;
     }
-    
+
     const systemPrompt = {
-      role: "system",
-      content: "Você é um especialista em cibersegurança integrado ao antivírus CyberSafe. Explique ameaças, analise riscos e ajude o utilizador de forma clara, prática e educativa. Responda num tom profissional porém didático, usando markdown se necessário."
+      role: "system" as const,
+      content: CYBERSAFE_AI_SYSTEM_PROMPT,
     };
 
     const completion = await openai.chat.completions.create({
-      model: "llama-3.1-8b-instant", // Groq Llama 3.1 model
+      model: "llama-3.1-8b-instant",
       messages: [systemPrompt, ...messages],
       temperature: 0.7,
       max_tokens: 500,
