@@ -4,6 +4,14 @@ O CyberSafe Assistant é um antivírus focado em análises avançadas em segundo
 
 **Revisão do repositório:** 2026-05-13 (sincronização de metadados e versões do monorepo `0.1.1`).
 
+## Documentação e planos
+
+Toda a arquitetura, roadmap, FAQ para entrega ao professor, toolchain C++ no Windows e notas sobre Linguist/GitHub estão em **[`docs/`](./docs/README.md)**. Resumo executivo: [`docs/PLANO-CONSOLIDADO.md`](./docs/PLANO-CONSOLIDADO.md).
+
+## Motor nativo C++
+
+O pacote **[`packages/native-engine/`](./packages/native-engine/README.md)** contém o executável `scan-engine` (C++17). A integração automática com o serviço Node está descrita no roadmap; o binário pode ser compilado e testado já hoje.
+
 ## Como Executar
 
 Este projeto é um monorepo (utilizando npm workspaces). Para executar o antivírus, siga os passos abaixo:
