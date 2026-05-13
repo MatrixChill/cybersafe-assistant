@@ -1,3 +1,4 @@
+// Monorepo sync: 2026-05-13
 require("dotenv").config({ path: "packages/api/.env" });
 const { OpenAI } = require("openai");
 

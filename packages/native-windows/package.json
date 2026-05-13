@@ -1,6 +1,6 @@
 {
   "name": "@cybersafe/native-windows",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -11,7 +11,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@cybersafe/shared-types": "0.1.0",
+    "@cybersafe/shared-types": "0.1.1",
     "chokidar": "^4.0.0",
     "systeminformation": "^5.31.5"
   },

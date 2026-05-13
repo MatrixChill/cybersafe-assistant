@@ -1,6 +1,6 @@
 {
   "name": "extension",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -9,7 +9,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@cybersafe/shared-types": "0.1.0"
+    "@cybersafe/shared-types": "0.1.1"
   },
   "devDependencies": {
     "@types/chrome": "^0.1.26",

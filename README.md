@@ -2,6 +2,8 @@
 
 O CyberSafe Assistant é um antivírus focado em análises avançadas em segundo plano.
 
+**Revisão do repositório:** 2026-05-13 (sincronização de metadados e versões do monorepo `0.1.1`).
+
 ## Como Executar
 
 Este projeto é um monorepo (utilizando npm workspaces). Para executar o antivírus, siga os passos abaixo:

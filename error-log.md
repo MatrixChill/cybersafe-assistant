@@ -1,5 +1,7 @@
 # Error Log - CyberSafe Desktop
 
+> Revisão do repositório: **2026-05-13**.
+
 ## Current Status
 - **Vite Resolution**: FIXED (Added alias `@` to `vite.config.ts`).
 - **Font Rendering**: FIXED (Loaded Google Fonts in `index.html`).

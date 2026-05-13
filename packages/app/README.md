@@ -1,3 +1,5 @@
+> Revisão do repositório: **2026-05-13** (sincronização de versões do monorepo).
+
 # React + TypeScript + Vite
 
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.

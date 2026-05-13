@@ -1,6 +1,6 @@
 {
   "name": "api",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "scripts": {
@@ -14,7 +14,7 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
-    "@cybersafe/shared-types": "0.1.0",
+    "@cybersafe/shared-types": "0.1.1",
     "@prisma/client": "^6.19.2",
     "adm-zip": "^0.5.16",
     "bcryptjs": "^3.0.3",

@@ -1,7 +1,7 @@
 {
   "name": "cybersafe-assistant",
   "private": true,
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "CyberSafe Assistant monorepo",
   "scripts": {
     "core:build": "npm run build -w @cybersafe/core",

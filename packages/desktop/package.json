@@ -1,6 +1,6 @@
 {
   "name": "@cybersafe/desktop",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "main": "dist/main.js",
   "type": "module",
@@ -11,9 +11,9 @@
     "typecheck": "node -e \"console.log('desktop typecheck delegated to app/core workspaces')\""
   },
   "dependencies": {
-    "@cybersafe/core": "0.1.0",
-    "@cybersafe/shared-types": "0.1.0",
-    "@cybersafe/service": "0.1.0"
+    "@cybersafe/core": "0.1.1",
+    "@cybersafe/shared-types": "0.1.1",
+    "@cybersafe/service": "0.1.1"
   },
   "devDependencies": {
     "@types/node": "^24.12.0",

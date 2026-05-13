@@ -1,6 +1,6 @@
 {
   "name": "@cybersafe/service",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "type": "module",
   "main": "dist/index.js",
@@ -16,9 +16,9 @@
     "service:status": "tsx src/windows-service.ts status"
   },
   "dependencies": {
-    "@cybersafe/core": "0.1.0",
-    "@cybersafe/native-windows": "0.1.0",
-    "@cybersafe/shared-types": "0.1.0",
+    "@cybersafe/core": "0.1.1",
+    "@cybersafe/native-windows": "0.1.1",
+    "@cybersafe/shared-types": "0.1.1",
     "dotenv": "^16.4.7",
     "node-windows": "^1.0.0-beta.8"
   },
