@@ -8,15 +8,16 @@ import { spawn } from "node:child_process";
 // ── Configuration ────────────────────────────────────────────────────────────
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 horas
 
-// Fontes de regras YARA — lista de fallback (tentamos em ordem)
+// Fontes de regras YARA — lista de fallback
 const YARA_SOURCES = [
   "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Eicar.yar",
-  "https://raw.githubusercontent.com/Yara-Rules/rules/master/Malware/MALW_YARA_RULES/MALW_Gen_Common.yar",
+  "https://raw.githubusercontent.com/Yara-Rules/rules/master/packers/packer_compiler_signatures.yar",
+  "https://raw.githubusercontent.com/Yara-Rules/rules/master/crypto/crypto_signatures.yar",
+  "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Ransomware_Generic.yar"
 ];
 
-// Hash feed — repositório próprio ou fonte pública
-const HASH_FEED_URL =
-  "https://raw.githubusercontent.com/CyberSafe-Labs/definitions/main/hashes/default.json";
+// MalwareBazaar API endpoint
+const HASH_FEED_URL = "https://mb-api.abuse.ch/api/v1/";
 
 export interface UpdateResult {
   yaraUpdated: boolean;
@@ -144,7 +145,7 @@ export class DefinitionUpdater {
     for (const url of YARA_SOURCES) {
       try {
         const content = await this.downloadText(url);
-        // Validação: regras YARA devem conter "rule " 
+        // Validação: regras YARA devem conter "rule "
         if (!content.includes("rule ") || content.includes("<!DOCTYPE html>")) {
           throw new Error("Conteúdo baixado não parece ser YARA válido.");
         }
@@ -160,6 +161,16 @@ export class DefinitionUpdater {
 
   // ── Private: ClamAV ────────────────────────────────────────────────────────
 
+  public static activeProcesses = new Set<import("child_process").ChildProcess>();
+
+  public static dispose() {
+    console.log(`[Updater] Terminando ${this.activeProcesses.size} processos de update pendentes...`);
+    for (const p of this.activeProcesses) {
+      try { p.kill('SIGKILL'); } catch {}
+    }
+    this.activeProcesses.clear();
+  }
+
   private updateClamAV(): Promise<void> {
     return new Promise((resolve, reject) => {
       const clamDbDir = path.join(this.definitionsDir, "clamav");
@@ -170,6 +181,7 @@ export class DefinitionUpdater {
         windowsHide: true,
         timeout: 120_000, // 2 min timeout
       });
+      DefinitionUpdater.activeProcesses.add(child);
 
       let stderr = "";
       child.stderr?.on("data", (chunk) => {
@@ -177,10 +189,12 @@ export class DefinitionUpdater {
       });
 
       child.on("error", (err) => {
+        DefinitionUpdater.activeProcesses.delete(child);
         reject(new Error(`freshclam não encontrado ou falhou: ${err.message}`));
       });
 
       child.on("close", (code) => {
+        DefinitionUpdater.activeProcesses.delete(child);
         if (code === 0) resolve();
         else reject(new Error(`freshclam exit code ${code}: ${stderr.trim()}`));
       });
@@ -192,17 +206,26 @@ export class DefinitionUpdater {
   private async updateHashFeed(): Promise<void> {
     await fsPromises.mkdir(path.dirname(this.hashesPath), { recursive: true });
 
-    const content = await this.downloadText(HASH_FEED_URL);
+    // Download from MalwareBazaar API (requires POST)
+    const content = await this.downloadMalwareBazaar();
 
-    // Validação: deve ser JSON array
+    let remoteFeeds: any[] = [];
     try {
       const parsed = JSON.parse(content);
-      if (!Array.isArray(parsed)) throw new Error("Hash feed não é um array JSON.");
+      if (parsed.query_status === "ok" && Array.isArray(parsed.data)) {
+         remoteFeeds = parsed.data.map((item: any) => ({
+             sha256: item.sha256_hash,
+             family: item.signature || "Unknown",
+             severity: "critical",
+             source: "malwarebazaar"
+         }));
+      } else {
+         throw new Error("Formato do MalwareBazaar não reconhecido.");
+      }
     } catch {
-      throw new Error("Hash feed baixado é inválido (não é JSON array).");
+      throw new Error("Falha ao parsear resposta do MalwareBazaar.");
     }
 
-    // Merge com hashes locais existentes para não perder entradas built-in
     let existing: any[] = [];
     try {
       const raw = await fsPromises.readFile(this.hashesPath, "utf-8");
@@ -211,8 +234,30 @@ export class DefinitionUpdater {
       // Arquivo não existe ou é inválido
     }
 
-    const merged = this.mergeHashFeeds(existing, JSON.parse(content));
+    const merged = this.mergeHashFeeds(existing, remoteFeeds);
     await fsPromises.writeFile(this.hashesPath, JSON.stringify(merged, null, 2), "utf-8");
+  }
+
+  private downloadMalwareBazaar(): Promise<string> {
+    return new Promise((resolve, reject) => {
+      const data = "query=get_recent&selector=time";
+      const req = https.request(HASH_FEED_URL, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/x-www-form-urlencoded',
+          'Content-Length': Buffer.byteLength(data)
+        },
+        timeout: 30000
+      }, (res) => {
+        let body = "";
+        res.on("data", chunk => body += chunk);
+        res.on("end", () => resolve(body));
+      });
+      req.on("error", reject);
+      req.on("timeout", () => { req.destroy(); reject(new Error("Timeout MalwareBazaar")); });
+      req.write(data);
+      req.end();
+    });
   }
 
   private mergeHashFeeds(local: any[], remote: any[]): any[] {

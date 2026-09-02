@@ -290,7 +290,7 @@ app.get("/api/stream", (req, res) => {
 
   // Optional session tracking
   const sessionId = req.query.sessionId as string || Math.random().toString(36).substring(7);
-  
+
   const client: SseClient = { id: sessionId, res };
   sseClients.push(client);
 
@@ -442,7 +442,7 @@ app.post("/api/file-scan", upload.single("file"), async (req, res) => {
       const entries = zip.getEntries().filter((entry) => !entry.isDirectory);
       for (const entry of entries) {
         let analysis = analyzeDownloadFilename(entry.entryName);
-        
+
         // ── Advanced Heuristics: Magic Number Detection ──
         // Check if the file has an MZ header (4D 5A) indicating an executable,
         // even if the filename doesn't have a dangerous extension.
@@ -530,6 +530,23 @@ app.get("/api/training-score", async (_req, res) => {
   }
 });
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`CyberSafe API listening on http://localhost:${port}`);
 });
+
+function gracefulShutdown(signal: string) {
+  console.log(`[API] Received ${signal}, shutting down...`);
+  server.close(() => {
+    console.log("[API] Server closed.");
+    process.exit(0);
+  });
+
+  // Force close after 2s if still hanging
+  setTimeout(() => {
+    console.log("[API] Forcing exit after timeout.");
+    process.exit(0);
+  }, 2000);
+}
+
+process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));

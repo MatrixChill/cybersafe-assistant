@@ -23,6 +23,10 @@ export class ServiceClient {
     await this.openSocket();
   }
 
+  get isConnected() {
+    return this.socket !== null && !this.socket.destroyed;
+  }
+
   onEvent(listener: (event: SecurityEvent) => void) {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
@@ -97,6 +101,18 @@ export class ServiceClient {
           pending.reject(new Error(message.error ?? "Service request failed"));
         }
       }
+    }
+  }
+
+  async requestShutdown() {
+    await this.request("service.shutdown", undefined).catch(() => {});
+    this.disconnect();
+  }
+
+  disconnect() {
+    if (this.socket) {
+      this.socket.destroy();
+      this.socket = null;
     }
   }
 }

@@ -1,4 +1,4 @@
-export const PIPE_NAME = "\\\\.\\pipe\\cybersafe-protection-v1";
+export const PIPE_NAME = "\\\\.\\pipe\\cybersafe-protection-dev-v2";
 export const DEFAULT_THRESHOLDS = {
     safeMax: 40,
     monitorMax: 70,

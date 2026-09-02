@@ -9,6 +9,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getQuarantineFiles: () => ipcRenderer.invoke("service:get-quarantine"),
   clearThreatEvents: () => ipcRenderer.invoke("service:clear-events"),
   scanFile: (filePath: string) => ipcRenderer.invoke("service:scan-artifact", filePath),
+  scanFullSystem: () => ipcRenderer.invoke("service:scan-full-system"),
   killProcessTree: (pid: number) => ipcRenderer.invoke("service:kill-process-tree", pid),
   analyzeProcess: (pid: number) => ipcRenderer.invoke("service:analyze-process", pid),
   getHardwareSnapshot: () => ipcRenderer.invoke("service:get-hardware"),
@@ -19,9 +20,22 @@ contextBridge.exposeInMainWorld("electronAPI", {
   allowPublisher: (publisher: string) => ipcRenderer.invoke("service:allow-publisher", publisher),
   runRestrictedAnalysis: (filePath: string) => ipcRenderer.invoke("service:run-restricted-analysis", filePath),
   updateDefinitions: () => ipcRenderer.invoke("service:update-definitions"),
+  startScan: (type: string, targetPath?: string) => ipcRenderer.invoke("service:start-scan", type, targetPath),
+  cancelScan: (id: string) => ipcRenderer.invoke("service:cancel-scan", id),
+  threatAction: (id: string, action: string) => ipcRenderer.invoke("service:threat-action", id, action),
   openFileDialog: () => ipcRenderer.invoke("dialog:open-file"),
   onSecurityEvent: (callback: (event: any) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: any) => callback(value);
+    ipcRenderer.on("service:event", listener);
+    return () => ipcRenderer.removeListener("service:event", listener);
+  },
+  onScanProgress: (callback: (scanState: any) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, value: any) => {
+      // Filter for scan.progress events only
+      if (value?.type === "scan.progress" && value?.data) {
+        callback(value.data);
+      }
+    };
     ipcRenderer.on("service:event", listener);
     return () => ipcRenderer.removeListener("service:event", listener);
   },

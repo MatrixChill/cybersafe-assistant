@@ -1,11 +1,11 @@
-import { 
-  Shield, 
-  LayoutDashboard, 
-  AlertTriangle, 
-  FileSearch, 
-  Activity, 
-  Zap, 
-  ChevronLeft, 
+import {
+  Shield,
+  LayoutDashboard,
+  AlertTriangle,
+  FileSearch,
+  Activity,
+  Zap,
+  ChevronLeft,
   ChevronRight,
   Sun,
   Moon,
@@ -14,13 +14,14 @@ import {
   FileBarChart,
   Sparkles,
   ListTodo,
+  Monitor,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import type { AuthUser } from "../contexts/AuthContext"
 import { canAccess, FEATURES, type FeatureKey } from "../lib/featureControl"
 
-export type Page = "dashboard" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager";
+export type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager";
 export type ThemeMode = "dark" | "light";
 export type AccentMode = "blue" | "purple" | "pink";
 
@@ -39,6 +40,7 @@ interface SidebarProps {
 
 const navItems: { id: Page; label: string; icon: typeof LayoutDashboard; feature: FeatureKey; proOnly: boolean }[] = [
   { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
+  { id: "pccenter", label: "PC Center", icon: Monitor, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
   { id: "threats", label: "Ameaças", icon: AlertTriangle, feature: FEATURES.THREATS, proOnly: false },
   { id: "scanner", label: "File Scanner", icon: FileSearch, feature: FEATURES.SCANNER, proOnly: false },
   { id: "taskmanager", label: "Task Manager", icon: ListTodo, feature: FEATURES.MONITOR_BASIC, proOnly: false },
@@ -47,12 +49,12 @@ const navItems: { id: Page; label: string; icon: typeof LayoutDashboard; feature
   { id: "reports", label: "Relatórios", icon: FileBarChart, feature: FEATURES.REPORTS, proOnly: true },
 ];
 
-export default function Sidebar({ 
-  activePage, 
-  onNavigate, 
-  theme, 
-  onThemeChange, 
-  accent, 
+export default function Sidebar({
+  activePage,
+  onNavigate,
+  theme,
+  onThemeChange,
+  accent,
   onAccentChange,
   user,
   onLogout,
@@ -64,7 +66,7 @@ export default function Sidebar({
   const visibleNavItems = navItems.filter((item) => canAccess(item.feature, accountType, plan));
 
   return (
-    <aside 
+    <aside
       className={cn(
         "bg-sidebar border-r border-sidebar-border flex flex-col transition-all duration-300 relative z-50",
         collapsed ? "w-20" : "w-64"
@@ -72,7 +74,7 @@ export default function Sidebar({
     >
       {/* Decorative top line */}
       <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent" />
-      
+
       {/* Logo Section */}
       <div className="p-6 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
@@ -103,15 +105,15 @@ export default function Sidebar({
         {visibleNavItems.map((item) => {
           const Icon = item.icon
           const isActive = activePage === item.id
-          
+
           return (
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
               className={cn(
                 "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group relative overflow-hidden",
-                isActive 
-                  ? "bg-primary/10 text-primary cyber-border" 
+                isActive
+                  ? "bg-primary/10 text-primary cyber-border"
                   : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
               )}
             >
@@ -119,12 +121,12 @@ export default function Sidebar({
               {isActive && (
                 <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r-full shadow-[0_0_10px_var(--primary)]" />
               )}
-              
+
               <Icon className={cn(
                 "w-5 h-5 shrink-0 transition-all",
                 isActive && "cyber-glow-text"
               )} />
-              
+
               {!collapsed && (
                 <>
                   <span className="font-medium text-sm truncate">{item.label}</span>
@@ -150,10 +152,10 @@ export default function Sidebar({
       {/* Theme & Accent Controls */}
       <div className={cn("p-4 space-y-3 border-t border-sidebar-border", collapsed && "items-center")}>
         {!collapsed && <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-2">Settings</div>}
-        
+
         <div className="flex flex-col gap-2">
             {/* Theme Toggle */}
-            <button 
+            <button
                 onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
                 className="flex items-center gap-3 px-4 py-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-all group"
                 title={collapsed ? (theme === 'dark' ? "Modo Claro" : "Modo Escuro") : ""}
@@ -202,7 +204,7 @@ export default function Sidebar({
                     user.plan === "premium" && "sidebar-user-type-pro",
                     user.plan === "pro" && "text-cyber-cyan"
                   )}>
-                    {user.plan === "premium" ? (user.type === "business" ? "Business Premium" : "Personal Premium") : 
+                    {user.plan === "premium" ? (user.type === "business" ? "Business Premium" : "Personal Premium") :
                      user.plan === "pro" ? (user.type === "business" ? "Business Pro" : "Personal Pro") : "Free"}
                   </span>
                 </div>

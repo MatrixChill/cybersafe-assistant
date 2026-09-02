@@ -1,10 +1,13 @@
 import * as fs from "node:fs";
 import * as path from "node:path";
 
+import * as os from "node:os";
+
 // ── BOOT SURVIVAL LOG ────────────────────────────────────────────────────────
-const DEBUG_LOG = "C:\\ProgramData\\CyberSafe\\boot-debug.log";
+const BASE_DIR = path.join(os.homedir(), ".cybersafe-service");
+const DEBUG_LOG = path.join(BASE_DIR, "boot-debug.log");
 try {
-  fs.mkdirSync("C:\\ProgramData\\CyberSafe", { recursive: true });
+  fs.mkdirSync(BASE_DIR, { recursive: true });
   fs.appendFileSync(DEBUG_LOG, `\n\n[${new Date().toISOString()}] BOOT INICIADO EM: ${process.cwd()}\n`, "utf-8");
 } catch (e) {
   // Ignorar falha inicial se não tiver permissão
@@ -18,7 +21,7 @@ import { DefinitionUpdater } from "./updater.js";
 // Quando rodando como serviço Windows (SYSTEM), não há UI nem console.
 // Capturamos erros fatais para log e tentamos manter o processo vivo.
 
-const LOG_DIR = "C:\\ProgramData\\CyberSafe";
+const LOG_DIR = BASE_DIR;
 fs.mkdirSync(LOG_DIR, { recursive: true });
 
 function logToFile(level: string, message: string, error?: unknown) {
@@ -48,7 +51,6 @@ process.on("unhandledRejection", (reason) => {
 // ── Service Bootstrap ────────────────────────────────────────────────────────
 
 const service = new ProtectionEngineService();
-const updater = new DefinitionUpdater(path.join(process.cwd(), "definitions"));
 
 async function main() {
   logToFile("INFO", "Service starting...");
@@ -59,15 +61,10 @@ async function main() {
     console.log("[Service] Init complete. Starting pipe server...");
     await service.startPipeServer();
     console.log("[Service] Pipe server started!");
-    logToFile("INFO", "Service fully initialized. Pipe server listening.");
+    logToFile("INFO", "Service fully initialized. Pipe server listening. Protection remains OFF until monitor.start is called.");
 
     // Sinaliza para o processo pai (Electron em dev) que está pronto
     process.send?.({ type: "service-ready" });
-
-    // ── Pilar 4: Inicia o scheduler de atualizações ──
-    updater.startScheduler();
-    logToFile("INFO", "Definition updater scheduler started.");
-
   } catch (err) {
     logToFile("CRITICAL", "Fatal error during startup", err as Error);
     console.error("[Service] Fatal error during startup:", err);
@@ -82,10 +79,11 @@ void main();
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
     logToFile("INFO", `Received ${signal}, shutting down...`);
-    updater.stopScheduler();
-    void service.dispose().finally(() => {
-      logToFile("INFO", "Service stopped.");
-      process.exit(0);
+    void service.stopProtection().finally(() => {
+      void service.dispose().finally(() => {
+        logToFile("INFO", "Service stopped.");
+        process.exit(0);
+      });
     });
   });
 }

@@ -19,13 +19,18 @@ import {
   scoreToStatus,
   ExclusionManager,
 } from "@cybersafe/core";
-import {
-  NativeWindowsWatcher,
+import { NativeWindowsWatcher,
   ProcessMonitor,
   snapshotConnections,
   terminateProcessTree,
   type FileObservation,
+  EtwConsumer,
+  WfpFilter,
+  AmsiProvider
 } from "@cybersafe/native-windows";
+import { NativeEngineBridge } from "./native-engine-bridge.js";
+import { DefinitionUpdater } from "./updater.js";
+import { ScanManager } from "./scan-manager.js";
 import type {
   AnalysisResult,
   ConnectionSnapshot,
@@ -71,10 +76,16 @@ export class ProtectionEngineService {
   private readonly quarantine = new QuarantineManager(this.baseDir);
   private readonly watcher = new NativeWindowsWatcher();
   private readonly processMonitor = new ProcessMonitor();
+  private readonly etwConsumer = new EtwConsumer();
+  private readonly wfpFilter = new WfpFilter();
+  private readonly amsiProvider = new AmsiProvider();
   private readonly clients = new Set<net.Socket>();
   private readonly vt = new VirusTotalClient(process.env.VIRUSTOTAL_API_KEY);
   private readonly hardware = new HardwareHealthEngine();
   private readonly exclusions = new ExclusionManager();
+  private readonly scanManager = new ScanManager(this);
+  private readonly historyPath = path.join(this.baseDir, "history.jsonl");
+  private readonly updater = new DefinitionUpdater(this.definitionsDir);
 
   private server: net.Server | null = null;
   private events: SecurityEvent[] = [];
@@ -85,6 +96,9 @@ export class ProtectionEngineService {
   private blockedPaths = new Set<string>();
   private definitionsUpdatedAt = "";
   private networkTimer: NodeJS.Timeout | null = null;
+  private readonly recentScans = new Map<string, number>();
+  private protectionState = false;
+  private protectionTransition: Promise<{ ok: boolean; protectionEnabled: boolean }> | null = null;
 
   async init() {
     await fs.mkdir(this.baseDir, { recursive: true });
@@ -96,22 +110,100 @@ export class ProtectionEngineService {
 
     this.bindEventBus();
     this.bindWatchers();
-    await this.watcher.start();
-    await this.processMonitor.start();
-    this.processes = await this.processMonitor.list();
-    await this.refreshConnections();
-    
-    // Initial hardware snapshot
-    await this.hardware.getSnapshot();
+    this.protectionState = false;
+  }
 
-    this.networkTimer = setInterval(() => {
-      void this.refreshConnections();
-      void this.hardware.getSnapshot().then((snapshot) => {
-        if (snapshot.stressAlerts.length > 0) {
-          // You could fire events here for high stress, but for now we just keep the snapshot updated
+  async startProtection(): Promise<{ ok: boolean; protectionEnabled: boolean }> {
+    if (this.protectionState) {
+      return { ok: true, protectionEnabled: true };
+    }
+
+    if (this.protectionTransition) {
+      return await this.protectionTransition;
+    }
+
+    this.protectionTransition = (async () => {
+      let started = true;
+
+      for (const [label, action] of [
+        ["watcher", () => this.watcher.start()],
+        ["processMonitor", () => this.processMonitor.start()],
+        ["etwConsumer", () => this.etwConsumer.start()],
+        ["wfpFilter", () => this.wfpFilter.start()],
+        ["amsiProvider", () => this.amsiProvider.start()],
+      ] as const) {
+        try {
+          await action();
+        } catch (error) {
+          started = false;
+          console.error(`[Service] Failed to start ${label}:`, error);
         }
-      });
-    }, 3_000); // 3 seconds poll for hardware & network
+      }
+
+      if (!started) {
+        await this.stopProtection().catch(() => undefined);
+        return { ok: false, protectionEnabled: false };
+      }
+
+      this.protectionState = true;
+      this.updater.startScheduler();
+
+      Promise.all([
+        this.processMonitor.list().then((p) => {
+          this.processes = p;
+          return this.hardware.getSnapshot(this.processes);
+        }),
+        this.refreshConnections(),
+      ]).catch((err) => console.error("[Service] Initial background snapshots failed:", err));
+
+      if (!this.networkTimer) {
+        this.networkTimer = setInterval(() => {
+          void this.refreshConnections();
+          void this.hardware.getSnapshot(this.processes).then((snapshot) => {
+            if (snapshot.alerts.length > 0) {
+              // You could fire events here for high stress, but for now we just keep the snapshot updated
+            }
+          });
+        }, 3_000);
+      }
+
+      return { ok: true, protectionEnabled: true };
+    })();
+
+    try {
+      const result = await this.protectionTransition;
+      return result;
+    } finally {
+      this.protectionTransition = null;
+    }
+  }
+
+  async stopProtection(): Promise<{ ok: boolean; protectionEnabled: boolean }> {
+    if (!this.protectionState && !this.networkTimer && !this.protectionTransition) {
+      return { ok: true, protectionEnabled: false };
+    }
+
+    if (this.protectionTransition) {
+      await this.protectionTransition.catch(() => undefined);
+    }
+
+    this.protectionState = false;
+    this.updater.stopScheduler();
+
+    if (this.networkTimer) {
+      clearInterval(this.networkTimer);
+      this.networkTimer = null;
+    }
+
+    await Promise.allSettled([
+      this.watcher.stop(),
+      this.processMonitor.stop(),
+      this.etwConsumer.stop(),
+      this.wfpFilter.stop(),
+      this.amsiProvider.stop(),
+    ]);
+
+    return { ok: true, protectionEnabled: false };
   }
 
   private bindEventBus() {
@@ -182,10 +274,11 @@ export class ProtectionEngineService {
   private bindWatchers() {
     this.watcher.on("file.created", (event: FileObservation) => {
       this.eventBus.publish("file.created", "low", `New file observed: ${event.path}`, event);
-      void this.scanArtifact(event.path, "service");
+      void this.handleFileObservation(event.path);
     });
     this.watcher.on("file.modified", (event: FileObservation) => {
       this.eventBus.publish("file.modified", "low", `Modified file observed: ${event.path}`, event);
+      void this.handleFileObservation(event.path);
     });
     this.watcher.on("registry.persistence.changed", (event: any) => {
       this.eventBus.publish("persistence.detected", "high", "Registry persistence changed", event);
@@ -202,6 +295,32 @@ export class ProtectionEngineService {
     this.processMonitor.on("process.exited", (processInfo: ProcessSnapshot) => {
       this.processes = this.processes.filter((entry) => entry.pid !== processInfo.pid);
     });
+
+    this.amsiProvider.on("script.blocked", (info: any) => {
+      this.eventBus.publish("process.blocked", "high", `Blocked malicious script execution (${info.appName})`, info);
+    });
+  }
+
+  private async handleFileObservation(filePath: string) {
+    const now = Date.now();
+    const lastScan = this.recentScans.get(filePath);
+
+    // Evita analisar o mesmo ficheiro em menos de 10 segundos
+    if (lastScan && now - lastScan < 10000) {
+      return;
+    }
+    this.recentScans.set(filePath, now);
+
+    // Limpar cache antiga para evitar memory leak (limpa a cada 50 scans, apenas entradas velhas)
+    if (this.recentScans.size > 1000) {
+      for (const [key, timestamp] of this.recentScans.entries()) {
+        if (now - timestamp > 60000) {
+          this.recentScans.delete(key);
+        }
+      }
+    }
+
+    void this.scanArtifact(filePath, "service");
   }
 
   private async handleProcessStart(processInfo: ProcessSnapshot) {
@@ -234,6 +353,15 @@ export class ProtectionEngineService {
       return;
     }
 
+    // 2.5 Auto-proteção contra kill
+    if (processInfo.name.toLowerCase() === "taskkill.exe" || processInfo.name.toLowerCase() === "sc.exe") {
+       if (processInfo.commandLine.toLowerCase().includes("cybersafe")) {
+          await terminateProcessTree(processInfo.pid);
+          this.eventBus.publish("process.blocked", "critical", `Blocked attempt to kill CyberSafe Service`, processInfo);
+          return;
+       }
+    }
+
     // 3. Signature Check (Hash/YARA)
     if (processInfo.path) {
       const analysis = await this.scanArtifact(processInfo.path, "service");
@@ -249,18 +377,50 @@ export class ProtectionEngineService {
   }
 
   async dispose() {
-    await this.watcher.stop();
-    await this.processMonitor.stop();
-    if (this.networkTimer) clearInterval(this.networkTimer);
+    this.protectionState = false;
+    this.updater.stopScheduler();
+    if (this.networkTimer) {
+      clearInterval(this.networkTimer);
+      this.networkTimer = null;
+    }
+
+    await Promise.allSettled([
+      this.watcher.stop(),
+      this.processMonitor.stop(),
+      this.etwConsumer.stop(),
+      this.wfpFilter.stop(),
+      this.amsiProvider.stop(),
+    ]);
+
     if (this.server) {
-      this.server.close();
+      for (const client of this.clients) {
+        client.destroy();
+      }
+      this.clients.clear();
+
+      await new Promise<void>((resolve) => {
+        this.server?.close(() => resolve());
+      }).catch(() => undefined);
       this.server = null;
     }
   }
 
+  async shutdown() {
+    console.log("[Service] Recebido pedido de encerramento do Electron.");
+    await this.stopProtection();
+    await this.dispose();
+    NativeEngineBridge.dispose();
+    DefinitionUpdater.dispose();
+
+    // Fecha a própria aplicação NodeJS
+    setTimeout(() => {
+       process.exit(0);
+    }, 500);
+  }
+
   getProtectionState(): ProtectionState {
     const recentThreats = this.threats.slice(0, 10);
-    const maxRisk = recentThreats.length > 0 
+    const maxRisk = recentThreats.length > 0
       ? Math.max(...recentThreats.map(t => t.riskScore))
       : 0;
 
@@ -288,6 +448,10 @@ export class ProtectionEngineService {
     };
   }
 
+  public getEventBus() {
+    return this.eventBus;
+  }
+
   async scanArtifact(filePath: string, source: ThreatEvent["source"]): Promise<ServiceResponseMap["scan.artifact"]> {
     try {
       // Gatekeeper: Check exclusions first
@@ -313,19 +477,30 @@ export class ProtectionEngineService {
       }
 
       const analysis = await this.analyzer.analyze(filePath);
-      
+      const nativeScan = await NativeEngineBridge.scan(filePath);
+
       // Consult VT if enabled
       let vtResult = null;
       let finalRiskScore = analysis.riskScore;
       let finalSeverity = analysis.severity;
-      
+
+      if (nativeScan) {
+        if (nativeScan.score > finalRiskScore) {
+          finalRiskScore = nativeScan.score;
+        }
+        if (nativeScan.reasons.length > 0) {
+          analysis.rulesTriggered = Array.from(new Set([...analysis.rulesTriggered, ...nativeScan.reasons])) as import("@cybersafe/shared-types").HeuristicRuleId[];
+          analysis.factors.push({ id: "native-scan", category: "heuristic", label: `Native scan: ${nativeScan.level}`, weight: nativeScan.score });
+        }
+      }
+
       if (this.vt.isEnabled() && analysis.sha256) {
         vtResult = await this.vt.scanHash(analysis.sha256);
         if (vtResult && vtResult.positives > 0) {
           // If VT detects it, boost the risk score
-          const vtBoost = Math.min(40, vtResult.positives * 5); 
+          const vtBoost = Math.min(40, vtResult.positives * 5);
           finalRiskScore = Math.min(100, finalRiskScore + vtBoost);
-          
+
           if (finalRiskScore > DEFAULT_SETTINGS.thresholds.alertMax) finalSeverity = "critical";
           else if (finalRiskScore > DEFAULT_SETTINGS.thresholds.monitorMax) finalSeverity = "high";
         }
@@ -346,7 +521,7 @@ export class ProtectionEngineService {
         filePath,
         summary: analysis.factors.map((factor) => factor.label).join(", ") + (vtResult && vtResult.positives > 0 ? ` (+${vtResult.positives} VT detections)` : ""),
       };
-      
+
       if (finalSeverity === "high" || finalSeverity === "critical") {
         this.threats = [threat, ...this.threats].slice(0, 500);
       }
@@ -356,10 +531,17 @@ export class ProtectionEngineService {
         this.blockedPaths.add(filePath.toLowerCase());
         const quarantineEntry = await this.quarantine.quarantine({ ...analysis, riskScore: finalRiskScore });
         this.eventBus.publish("quarantine.added", "critical", `Quarantined ${analysis.fileName}`, quarantineEntry ?? analysis);
+
+        // Em Fase 2, também bloqueamos a conexão do domínio suspeito com WFP
+        if (vtResult && vtResult.positives > 10) {
+           // Simulação: Bloquear IP (aqui não temos o IP, mas poderíamos extrair das conexões ativas)
+           // await this.wfpFilter.blockIp("10.0.0.99");
+        }
       }
 
       if (finalSeverity !== "low") {
          this.eventBus.publish("threat.detected", finalSeverity, `Threat detected in ${analysis.fileName}`, threat);
+         void this.logHistory({ type: "threat.detected", threat, timestamp: new Date().toISOString() });
       }
 
       // Log VT result to Action log
@@ -407,7 +589,7 @@ export class ProtectionEngineService {
     }
 
     const isCritical = pid <= 100 || ["svchost.exe", "explorer.exe", "csrss.exe", "lsass.exe", "wininit.exe"].includes(processInfo.name.toLowerCase());
-    
+
     let recommendation: "safe" | "suspicious" | "dangerous" = "safe";
     if (fileScan && fileScan.overallSeverity === "critical") recommendation = "dangerous";
     else if (fileScan && fileScan.overallSeverity === "high") recommendation = "suspicious";
@@ -426,6 +608,40 @@ export class ProtectionEngineService {
 
   async runRestrictedAnalysis(filePath: string) {
     return this.analyzer.analyze(filePath);
+  }
+
+  async runFullSystemScan() {
+    this.eventBus.publish("scan.progress", "low", "Starting full system scan...", { progress: 0 });
+
+    const pathsToScan = [
+      path.join(os.homedir(), "Downloads"),
+      path.join(os.homedir(), "Desktop"),
+      process.env.TEMP || "C:\\Temp"
+    ];
+
+    let totalScanned = 0;
+
+    for (const scanPath of pathsToScan) {
+      try {
+        const entries = await fs.readdir(scanPath, { withFileTypes: true });
+        for (const entry of entries) {
+          if (entry.isFile()) {
+             const fullPath = path.join(scanPath, entry.name);
+             await this.scanArtifact(fullPath, "system-scanner");
+             totalScanned++;
+
+             // Publish progress every 10 files
+             if (totalScanned % 10 === 0) {
+                this.eventBus.publish("scan.progress", "low", `Scanned ${totalScanned} files...`, { progress: totalScanned });
+             }
+          }
+        }
+      } catch (err) {
+        console.warn(`[FullScan] Failed to read directory ${scanPath}:`, err);
+      }
+    }
+
+    this.eventBus.publish("scan.progress", "low", `Full system scan completed. Scanned ${totalScanned} files.`, { progress: 100, done: true });
   }
 
   async allowHash(sha256: string) {
@@ -460,8 +676,6 @@ export class ProtectionEngineService {
 
   async updateDefinitions() {
     try {
-      // Importar o updater e forçar download agora
-      const { DefinitionUpdater } = await import("./updater.js");
       const updater = new DefinitionUpdater(this.definitionsDir);
       const result = await updater.checkAndUpdate(true);
 
@@ -483,10 +697,10 @@ export class ProtectionEngineService {
 
   async killProcess(pid: number) {
     const processInfo = this.processes.find(p => p.pid === pid);
-    
+
     // Protect critical system processes
     const isCritical = pid <= 100 || (processInfo && ["svchost.exe", "explorer.exe", "csrss.exe", "lsass.exe", "wininit.exe"].includes(processInfo.name.toLowerCase()));
-    
+
     if (isCritical) {
        console.warn(`[Service] Blocked attempt to kill critical process PID: ${pid}`);
        return { success: false, error: "Cannot terminate critical system process" };
@@ -505,6 +719,22 @@ export class ProtectionEngineService {
     this.events = [];
     this.threats = [];
     return { success: true };
+  }
+
+  public emitScanProgress(scanState: any) {
+    // Emit scan.progress event to all connected IPC clients
+    this.broadcast({
+      type: "event",
+      event: {
+        id: `scan-progress-${scanState.id}`,
+        type: "scan.progress",
+        timestamp: new Date().toISOString(),
+        sequence: Date.now(),
+        severity: "low",
+        summary: `Scan ${scanState.status}: ${scanState.filesScanned} files, ${scanState.threatsFound} threats`,
+        data: scanState,
+      },
+    });
   }
 
   private broadcast(message: unknown) {
@@ -590,10 +820,13 @@ export class ProtectionEngineService {
         return this.clearEvents();
       case "scan.artifact":
         return this.scanArtifact((payload as { path: string }).path, "dashboard");
+      case "scan.fullSystem":
+        this.runFullSystemScan();
+        return { success: true };
       case "monitor.start":
-        return { success: true };
+        return this.startProtection();
       case "monitor.stop":
-        return { success: true };
+        return this.stopProtection();
       case "process.killTree":
         return this.killProcess((payload as { pid: number }).pid);
       case "quarantine.restore":
@@ -612,15 +845,67 @@ export class ProtectionEngineService {
       case "analysis.restricted":
         return this.runRestrictedAnalysis((payload as { path: string }).path);
       case "hardware.snapshot":
-        return this.hardware.getLastSnapshot() || await this.hardware.getSnapshot();
+        return this.hardware.getLastSnapshot() || await this.hardware.getSnapshot(this.processes);
       case "process.analyze":
         return this.analyzeProcess((payload as { pid: number }).pid);
       case "exclusions.get":
         return this.exclusions.getConfig();
       case "exclusions.update":
         return this.exclusions.updateConfig(payload as any);
+      case "scan.start": {
+        const { type, targetPath } = payload as any;
+        const id = await this.scanManager.startScan(type, targetPath);
+        return { id, success: true };
+      }
+      case "scan.cancel": {
+        const { id } = payload as any;
+        this.scanManager.cancelScan(id);
+        return { success: true };
+      }
+      case "threat.action": {
+        const { id, action } = payload as any;
+        let success = false;
+
+        if (action === "restore") {
+          success = await this.quarantine.restore(id);
+          if (success) void this.logHistory({ type: "threat.restored", id, timestamp: new Date().toISOString() });
+        } else if (action === "delete") {
+          success = await this.quarantine.delete(id);
+          if (success) void this.logHistory({ type: "threat.deleted", id, timestamp: new Date().toISOString() });
+        } else if (action === "quarantine") {
+           // For a manual quarantine, we'd need the threat event.
+           // We can look it up in this.threats
+           const threat = this.threats.find(t => t.url === `file://${id}` || t.filePath === id);
+           if (threat && threat.filePath) {
+              const analysis = {
+                artifactPath: threat.filePath,
+                fileName: path.basename(threat.filePath),
+                sha256: "", // We might not have it in the threat obj directly if not saved
+                verdict: "suspicious",
+                riskScore: threat.riskScore
+              } as any;
+
+              const entry = await this.quarantine.quarantine(analysis);
+              success = !!entry;
+              if (success) void this.logHistory({ type: "threat.quarantined_manual", id, timestamp: new Date().toISOString() });
+           }
+        }
+
+        return { success };
+      }
+      case "service.shutdown":
+        void this.shutdown();
+        return { success: true };
       default:
         throw new Error(`Unsupported method: ${String(method)}`);
+    }
+  }
+
+  private async logHistory(record: any) {
+    try {
+      await fs.appendFile(this.historyPath, JSON.stringify(record) + "\n", "utf-8");
+    } catch {
+      // Ignore
     }
   }
 }

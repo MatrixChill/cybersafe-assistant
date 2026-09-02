@@ -1,5 +1,8 @@
 import { EventEmitter } from "node:events";
 import type { ConnectionSnapshot, ProcessSnapshot } from "@cybersafe/shared-types";
+export * from "./wfp-filter.js";
+export * from "./amsi-provider.js";
+export * from "./etw-consumer.js";
 export interface FileObservation {
     kind: "file.created" | "file.modified" | "file.renamed";
     path: string;
@@ -22,7 +25,13 @@ export declare class NativeWindowsWatcher extends EventEmitter {
     private watcher;
     private registryTimer;
     private lastRegistrySnapshot;
+    private validatedPaths;
     getDefaultPaths(): string[];
+    /**
+     * Validates and filters paths to only include those that are accessible.
+     * Logs detailed information about paths that fail validation.
+     */
+    private validateAndFilterPaths;
     start(paths?: string[]): Promise<void>;
     private captureRegistrySnapshot;
     stop(): Promise<void>;

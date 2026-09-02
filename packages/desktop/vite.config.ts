@@ -14,7 +14,7 @@ export default defineConfig({
             minify: false,
             outDir: 'dist',
             rollupOptions: {
-              external: ['electron', 'node:net', 'node:path', 'node:url', 'node:child_process'],
+              external: ['electron', 'node:net', 'node:path', 'node:url', 'node:child_process', '@cybersafe/core', '@cybersafe/shared-types'],
               output: {
                 format: 'esm'
               }

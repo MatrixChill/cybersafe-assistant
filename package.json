@@ -9,8 +9,9 @@
     "dev:api": "npm run dev -w api",
     "dev:desktop": "npm run dev -w @cybersafe/desktop",
     "dev:service": "npm run dev -w @cybersafe/service",
-    "dev": "concurrently \"npm run dev:service\" \"npm run dev:api\" \"npm run dev:app\" \"npm run dev:desktop\"",
+    "dev": "concurrently --kill-others \"npm run dev:service\" \"npm run dev:api\" \"npm run dev:app\" \"npm run dev:desktop\"",
     "build:all": "npm run build --workspaces",
+    "build:native": "cmake -S packages/native-engine -B packages/native-engine/build && cmake --build packages/native-engine/build --config Release",
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces"
   },

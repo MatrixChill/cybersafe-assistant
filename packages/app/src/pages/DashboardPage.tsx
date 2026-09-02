@@ -1,4 +1,4 @@
-import { Shield, AlertTriangle, Download, Activity, CheckCircle2, Clock, Cpu, HardDrive, Wifi } from "lucide-react";
+import { Shield, AlertTriangle, Download, Activity, CheckCircle2, Clock, Cpu, HardDrive, Wifi, Search, Play, FolderSearch } from "lucide-react";
 import { useEffect, useState } from "react";
 import type { DashboardSummary, HardwareSnapshot } from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
@@ -120,9 +120,9 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <MetricBar label="CPU" subValue={hardware?.cpu.model.split(" ")[0]} value={hardware?.cpu.usage || 0} icon={Cpu} alert={hardware?.stressAlerts.find((a: string) => a.includes("CPU"))} />
-        <MetricBar label="Memória" subValue={`${hardware?.ram.usedGb || 0} / ${hardware?.ram.totalGb || 0} GB`} value={hardware?.ram.usagePercent || 0} icon={HardDrive} alert={hardware?.stressAlerts.find((a: string) => a.includes("Memória"))} />
-        <MetricBar label="Disco" subValue={`${hardware?.disk.usedGb || 0} / ${hardware?.disk.totalGb || 0} GB`} value={hardware?.disk.usagePercent || 0} icon={HardDrive} alert={hardware?.stressAlerts.find((a: string) => a.includes("Disco"))} />
+        <MetricBar label="CPU" subValue={hardware?.cpu.model.split(" ")[0]} value={hardware?.cpu.usage || 0} icon={Cpu} alert={hardware?.alerts.find((a) => a.category === "cpu")?.title} />
+        <MetricBar label="Memória" subValue={`${hardware?.ram.usedGb || 0} / ${hardware?.ram.totalGb || 0} GB`} value={hardware?.ram.usagePercent || 0} icon={HardDrive} alert={hardware?.alerts.find((a) => a.category === "ram")?.title} />
+        <MetricBar label="Disco" subValue={`${hardware?.disk.usedGb || 0} / ${hardware?.disk.totalGb || 0} GB`} value={hardware?.disk.usagePercent || 0} icon={HardDrive} alert={hardware?.alerts.find((a) => a.category === "disk")?.title} />
         <MetricBar label="Rede" subValue={`${hardware ? (hardware.network.rxSec / 1024 / 1024).toFixed(1) : 0} MB/s`} value={Math.min(100, (hardware?.network.rxSec || 0) / 1024 / 100)} icon={Wifi} />
       </div>
 
@@ -207,6 +207,62 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
             )}
           </div>
         </div>
+      </div>
+
+      <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
+        <button
+          onClick={async () => {
+            if (window.electronAPI) {
+              const res = await window.electronAPI.startScan("quick");
+              if (res.success) alert("Quick scan iniciado! ID: " + res.id);
+            }
+          }}
+          className="cyber-border rounded-xl p-6 flex flex-col items-center justify-center gap-4 hover:bg-white/5 transition-colors group">
+          <div className="w-12 h-12 rounded-full bg-cyber-cyan/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <Search className="w-6 h-6 text-cyber-cyan" />
+          </div>
+          <div className="text-center">
+            <h3 className="font-mono font-semibold text-foreground">Quick Scan</h3>
+            <p className="text-xs text-muted-foreground mt-1">Verifica áreas críticas e memória</p>
+          </div>
+        </button>
+
+        <button
+          onClick={async () => {
+            if (window.electronAPI) {
+              const res = await window.electronAPI.startScan("full");
+              if (res.success) alert("Full scan iniciado! ID: " + res.id);
+            }
+          }}
+          className="cyber-border rounded-xl p-6 flex flex-col items-center justify-center gap-4 hover:bg-white/5 transition-colors group">
+          <div className="w-12 h-12 rounded-full bg-cyber-yellow/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <Play className="w-6 h-6 text-cyber-yellow" />
+          </div>
+          <div className="text-center">
+            <h3 className="font-mono font-semibold text-foreground">Full Scan</h3>
+            <p className="text-xs text-muted-foreground mt-1">Verifica todo o sistema (demorado)</p>
+          </div>
+        </button>
+
+        <button
+          onClick={async () => {
+            if (window.electronAPI) {
+              const path = await window.electronAPI.openFileDialog();
+              if (path) {
+                const res = await window.electronAPI.startScan("custom", path);
+                if (res.success) alert("Custom scan iniciado em " + path);
+              }
+            }
+          }}
+          className="cyber-border rounded-xl p-6 flex flex-col items-center justify-center gap-4 hover:bg-white/5 transition-colors group">
+          <div className="w-12 h-12 rounded-full bg-primary/10 flex items-center justify-center group-hover:scale-110 transition-transform">
+            <FolderSearch className="w-6 h-6 text-primary" />
+          </div>
+          <div className="text-center">
+            <h3 className="font-mono font-semibold text-foreground">Custom Scan</h3>
+            <p className="text-xs text-muted-foreground mt-1">Escolha uma pasta específica</p>
+          </div>
+        </button>
       </div>
 
       <div className="cyber-border rounded-xl p-6">
@@ -294,7 +350,7 @@ function MetricBar({ label, value, subValue, icon: Icon, alert }: MetricBarProps
            {subValue}
         </div>
       </div>
-      
+
       <div className="mt-3">
         <div className="h-2 bg-secondary rounded-full overflow-hidden">
           <div className={`h-full ${getColor(value)} transition-all duration-500 progress-glow`} style={{ width: `${value}%` }} />

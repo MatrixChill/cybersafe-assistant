@@ -78,51 +78,59 @@ function createSplashScreen() {
   splashWindow.loadFile(splashPath);
 }
 
-import { exec } from "node:child_process";
-import { promisify } from "node:util";
+import { spawn, type ChildProcess } from "node:child_process";
 
-const execAsync = promisify(exec);
 let isServiceRunning = false;
+let serviceProcess: ChildProcess | null = null;
 
-async function checkServiceStatusLegacy(): Promise<'RUNNING' | 'STOPPED' | 'UNKNOWN'> {
-  try {
-    const { stdout } = await execAsync(
-      'powershell -NoProfile -Command "Get-Service -Name \'CyberSafe Engine\' -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Status"',
-      { windowsHide: true, timeout: 5000 }
-    );
-    if (stdout.trim() === 'Running') return 'RUNNING';
-    if (stdout.trim() === 'Stopped') return 'STOPPED';
-    return 'UNKNOWN';
-  } catch (error) {
-    console.error('Falha ao ler status do serviço:', error);
-    return 'UNKNOWN';
+function startServiceProcess() {
+  if (!app.isPackaged) {
+    console.log("[Electron] Modo dev: serviço assumido via concurrently");
+    return;
   }
+
+  const serviceEntry = path.join(process.resourcesPath, "app", "packages", "service", "dist", "index.js");
+
+  console.log("[Electron] Iniciando serviço embutido:", serviceEntry);
+  serviceProcess = spawn(process.execPath, [serviceEntry], {
+    stdio: ["ignore", "pipe", "pipe"],
+    windowsHide: true,
+  });
+
+  serviceProcess.on("exit", (code) => {
+    console.log(`[Electron] Processo do Serviço encerrou com código: ${code}`);
+    serviceProcess = null;
+  });
+
+  serviceProcess.on("error", (err) => {
+    console.error("[Electron] Falha ao iniciar processo do serviço:", err);
+  });
 }
 
 async function updateServiceStatus() {
-  const status = await checkServiceStatusLegacy();
+  const status = client.isConnected ? 'RUNNING' : 'STOPPED';
   const wasRunning = isServiceRunning;
   isServiceRunning = status === 'RUNNING';
-  
+
   // Atualiza apenas se houve mudança de status ou na primeira execução
   updateTrayMenu();
-  
+
   if (tray) {
     try {
       const activeIconPath = path.join(__dirname, "assets", "tray-icon-active.png");
       const warningIconPath = path.join(__dirname, "assets", "tray-icon-warning.png");
       const defaultIconPath = path.join(__dirname, "assets", "icon.png");
-      
+
       // Usa fs para checar se as imagens específicas existem, senão faz fallback pro icon.png padrão
       const fs = require("node:fs");
       let iconPathToUse = defaultIconPath;
-      
+
       if (isServiceRunning && fs.existsSync(activeIconPath)) {
         iconPathToUse = activeIconPath;
       } else if (!isServiceRunning && fs.existsSync(warningIconPath)) {
         iconPathToUse = warningIconPath;
       }
-      
+
       tray.setImage(nativeImage.createFromPath(iconPathToUse));
     } catch (e) {
       console.error("Erro ao atualizar icone", e);
@@ -130,28 +138,37 @@ async function updateServiceStatus() {
   }
 }
 
+async function setProtectionEnabled(enabled: boolean): Promise<boolean> {
+  const result = await (enabled ? client.request("monitor.start", undefined) : client.request("monitor.stop", undefined)).catch(() => ({ ok: false, protectionEnabled: !enabled }));
+
+  const protectionEnabled = typeof result === "object" && result && "protectionEnabled" in result
+    ? Boolean((result as { protectionEnabled?: boolean }).protectionEnabled)
+    : Boolean((result as { ok?: boolean }).ok);
+
+  return enabled ? protectionEnabled : !protectionEnabled;
+}
+
 function updateTrayMenu() {
   if (!tray) return;
   const statusLabel = isServiceRunning ? "🔵 Status: ATIVO" : "⚠️ Status: PARADO (Serviço Inativo)";
-  
+
   tray.setToolTip(isServiceRunning ? "CyberSafe: Serviço Ativo (Motor funcionando)" : "CyberSafe: Serviço Parado (clique para iniciar)");
-  
+
   tray.setContextMenu(Menu.buildFromTemplate([
     { label: statusLabel, enabled: false },
     { type: "separator" },
     { label: "Abrir Painel de Controle", click: () => mainWindow?.show() },
     {
-      label: "Iniciar Motor (Admin)",
-      visible: !isServiceRunning,
-      click: () => {
-        // Tenta iniciar o serviço se estiver parado
-        exec('powershell -Command "Start-Process sc.exe -ArgumentList \'start\", \"\"CyberSafe Engine\"\"\' -Verb RunAs"');
-      }
-    },
-    {
       label: "Sair",
-      click: () => {
+      click: async () => {
         isQuitting = true;
+        tray?.setToolTip("Encerrando CyberSafe...");
+
+        console.log("[Electron] Enviando comando de shutdown ao serviço...");
+        await client.requestShutdown();
+
+        // Em produção, serviceProcess deve morrer pelo exit(0)
+        // O app.quit() encerra o Electron e qualquer processo filho remanescente.
         app.quit();
       },
     },
@@ -162,9 +179,9 @@ function createTray() {
   const iconPath = path.join(__dirname, "assets", "icon.png");
   const icon = nativeImage.createFromPath(iconPath);
   tray = new Tray(icon);
-  
+
   updateTrayMenu();
-  
+
   // Poll service status every 5 seconds
   setInterval(updateServiceStatus, 5000);
   updateServiceStatus();
@@ -202,6 +219,7 @@ function registerIpc() {
   ipcMain.handle("service:get-quarantine", () => client.request("quarantine.list", undefined));
   ipcMain.handle("service:clear-events", () => client.request("events.clear", undefined));
   ipcMain.handle("service:scan-artifact", (_event, filePath: string) => client.request("scan.artifact", { path: filePath }));
+  ipcMain.handle("service:scan-full-system", () => client.request("scan.fullSystem", undefined));
   ipcMain.handle("service:kill-process-tree", (_event, pid: number) => client.request("process.killTree", { pid }));
   ipcMain.handle("service:analyze-process", (_event, pid: number) => client.request("process.analyze", { pid }));
   ipcMain.handle("service:get-hardware", () => client.request("hardware.snapshot", undefined));
@@ -214,6 +232,12 @@ function registerIpc() {
   ipcMain.handle("service:run-restricted-analysis", (_event, filePath: string) =>
     client.request("analysis.restricted", { path: filePath }));
   ipcMain.handle("service:update-definitions", () => client.request("definitions.update", undefined));
+  ipcMain.handle("service:start-scan", (_event, type: string, targetPath?: string) =>
+    client.request("scan.start", { type, targetPath } as any));
+  ipcMain.handle("service:cancel-scan", (_event, id: string) =>
+    client.request("scan.cancel", { id } as any));
+  ipcMain.handle("service:threat-action", (_event, id: string, action: string) =>
+    client.request("threat.action", { id, action } as any));
 
   ipcMain.handle("dialog:open-file", async () => {
     const result = await dialog.showOpenDialog({
@@ -231,42 +255,57 @@ function configureAutoStart() {
   if (process.platform !== "win32") return;
 
   app.setLoginItemSettings({
-    openAtLogin: true,
+    openAtLogin: false, // FASE 1.1: Auto-start desativado por padrão
     path: process.execPath,
     args: app.isPackaged ? ["--hidden"] : [path.resolve(process.argv[1]), "--hidden"],
   });
 }
 
-app.whenReady().then(async () => {
-  // Splash só aparece se não for boot silencioso
-  if (!launchHidden) {
-    createSplashScreen();
-  }
+const gotTheLock = app.requestSingleInstanceLock();
 
-  createWindow();
-  registerIpc();
-  configureAutoStart();
-  createTray();
-
-  try {
-    await client.connect();
-    wireRealtimeEvents();
-
-    // Fecha splash após conexão bem-sucedida
-    if (splashWindow) {
-      setTimeout(() => {
-        splashWindow?.close();
-        splashWindow = null;
-      }, 1000);
+if (!gotTheLock) {
+  app.quit();
+} else {
+  app.on("second-instance", () => {
+    if (mainWindow) {
+      if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
+      mainWindow.focus();
     }
-  } catch (error) {
-    console.error("Failed to connect to service:", error);
-    splashWindow?.close();
-    splashWindow = null;
-    dialog.showErrorBox(
-      "Service Connection Failed",
-      `Failed to start or connect to the CyberSafe background service. Underlying error:\n${error}`
-    );
-    app.quit();
-  }
-});
+  });
+
+  app.whenReady().then(async () => {
+    // Splash só aparece se não for boot silencioso
+    if (!launchHidden) {
+      createSplashScreen();
+    }
+
+    startServiceProcess();
+    createWindow();
+    registerIpc();
+    configureAutoStart();
+    createTray();
+
+    try {
+      await client.connect();
+      wireRealtimeEvents();
+
+      // Fecha splash após conexão bem-sucedida
+      if (splashWindow) {
+        setTimeout(() => {
+          splashWindow?.close();
+          splashWindow = null;
+        }, 1000);
+      }
+    } catch (error) {
+      console.error("Failed to connect to service:", error);
+      splashWindow?.close();
+      splashWindow = null;
+      dialog.showErrorBox(
+        "Service Connection Failed",
+        `Failed to start or connect to the CyberSafe background service. Underlying error:\n${error}`
+      );
+      app.quit();
+    }
+  });
+}

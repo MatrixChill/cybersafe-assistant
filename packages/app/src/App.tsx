@@ -18,6 +18,7 @@ import FileScannerPage from "./pages/FileScannerPage";
 import MonitorPage from "./pages/MonitorPage";
 import SimulatorPage from "./pages/SimulatorPage";
 import TaskManagerPage from "./pages/TaskManagerPage";
+import PCCenterPage from "./pages/PCCenterPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import AIAssistant from "./components/AIAssistant";
@@ -176,9 +177,10 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     if (!window.electronAPI) return;
-    
-    // Poll hardware every 3 seconds
+
+    // Poll hardware every 3 seconds only if window is visible
     const interval = setInterval(async () => {
+      if (document.visibilityState !== 'visible') return;
       try {
         const snap = await window.electronAPI.getHardwareSnapshot();
         setHardware(snap);
@@ -186,9 +188,11 @@ function AuthenticatedApp() {
         console.error("Hardware fetch err", e);
       }
     }, 3000);
-    
+
     // Initial fetch
-    window.electronAPI.getHardwareSnapshot().then(setHardware).catch(() => {});
+    if (document.visibilityState === 'visible') {
+      window.electronAPI.getHardwareSnapshot().then(setHardware).catch(() => {});
+    }
 
     return () => clearInterval(interval);
   }, []);
@@ -212,6 +216,8 @@ function AuthenticatedApp() {
     switch (page) {
       case "dashboard":
         return <DashboardPage dashboard={dashboard} isLoading={isLoading} hardware={hardware} />;
+      case "pccenter":
+        return <PCCenterPage hardware={hardware} />;
       case "threats":
         return <ThreatsPage events={threats} onClear={handleClear} isClearing={isClearing} />;
       case "scanner":

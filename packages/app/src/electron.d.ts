@@ -7,6 +7,7 @@ import type {
   SecurityEvent,
   ThreatEvent,
   FileScanResponse,
+  ScanState,
 } from "@cybersafe/shared-types";
 
 export interface ElectronAPI {
@@ -27,8 +28,12 @@ export interface ElectronAPI {
   allowPublisher: (publisher: string) => Promise<{ success: boolean }>;
   runRestrictedAnalysis: (filePath: string) => Promise<AnalysisResult | null>;
   updateDefinitions: () => Promise<{ success: boolean; updatedAt: string }>;
+  startScan: (type: string, targetPath?: string) => Promise<{ id: string; success: boolean }>;
+  cancelScan: (id: string) => Promise<{ success: boolean }>;
+  threatAction: (id: string, action: string) => Promise<{ success: boolean }>;
   openFileDialog: () => Promise<string | null>;
   onSecurityEvent: (callback: (event: SecurityEvent) => void) => () => void;
+  onScanProgress: (callback: (scanState: ScanState) => void) => () => void;
 }
 
 declare global {

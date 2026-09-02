@@ -126,6 +126,32 @@ export interface ThreatEvent {
     processName?: string;
     summary?: string;
 }
+export type ScanType = "quick" | "full" | "custom";
+export type ScanStatus = "idle" | "queued" | "running" | "completed" | "cancelled" | "failed";
+export interface ScanState {
+    id: string;
+    type: ScanType;
+    status: ScanStatus;
+    progress: number;
+    filesScanned: number;
+    threatsFound: number;
+    startTime?: string;
+    endTime?: string;
+    targetPath?: string;
+    error?: string;
+}
+export type ThreatStatus = "detected" | "quarantined" | "ignored" | "failed" | "restored" | "deleted";
+export interface ThreatRecord {
+    id: string;
+    filePath: string;
+    fileName: string;
+    threatName: string;
+    severity: Severity;
+    detectionType: string;
+    detectedAt: string;
+    action: ThreatAction;
+    status: ThreatStatus;
+}
 export interface Alert {
     id: string;
     title: string;
@@ -212,6 +238,7 @@ export interface ServiceCommandMap {
     "scan.artifact": {
         path: string;
     };
+    "scan.fullSystem": undefined;
     "monitor.start": {
         paths?: string[];
     } | undefined;
@@ -244,6 +271,18 @@ export interface ServiceCommandMap {
     "hardware.snapshot": undefined;
     "exclusions.get": undefined;
     "exclusions.update": Partial<ExclusionConfig>;
+    "scan.start": {
+        type: ScanType;
+        targetPath?: string;
+    };
+    "scan.cancel": {
+        id: string;
+    };
+    "threat.action": {
+        id: string;
+        action: "quarantine" | "restore" | "delete";
+    };
+    "service.shutdown": undefined;
 }
 export interface ServiceResponseMap {
     "protection.getState": ProtectionState;
@@ -256,6 +295,9 @@ export interface ServiceResponseMap {
         success: boolean;
     };
     "scan.artifact": FileScanResponse | null;
+    "scan.fullSystem": {
+        success: boolean;
+    };
     "monitor.start": {
         success: boolean;
     };
@@ -288,6 +330,19 @@ export interface ServiceResponseMap {
     "exclusions.update": {
         success: boolean;
     };
+    "scan.start": {
+        id: string;
+        success: boolean;
+    };
+    "scan.cancel": {
+        success: boolean;
+    };
+    "threat.action": {
+        success: boolean;
+    };
+    "service.shutdown": {
+        success: boolean;
+    };
 }
 export interface VirusTotalEngine {
     name: string;
@@ -304,6 +359,14 @@ export interface VirusTotalResult {
     permalink: string;
     reputation: number;
     cached: boolean;
+}
+export interface HardwareAlert {
+    severity: "low" | "medium" | "high" | "critical";
+    category: "cpu" | "ram" | "disk" | "gpu" | "network" | "system";
+    title: string;
+    description: string;
+    process?: ProcessSnapshot;
+    recommendation: string;
 }
 export interface HardwareSnapshot {
     cpu: {
@@ -335,8 +398,23 @@ export interface HardwareSnapshot {
         isCharging: boolean;
         timeRemaining: number | null;
     };
+    gpu: {
+        usagePercent: number | null;
+        vramTotalMb: number | null;
+        vramUsedMb: number | null;
+        temperature: number | null;
+        model: string;
+    } | null;
+    system: {
+        uptime: number;
+        platform: string;
+        osVersion: string;
+        hostname: string;
+    };
+    topProcessesByCpu: ProcessSnapshot[];
+    topProcessesByRam: ProcessSnapshot[];
     stressScore: number;
-    stressAlerts: string[];
+    alerts: HardwareAlert[];
     timestamp: string;
 }
 export interface ProcessAnalysisResult {
