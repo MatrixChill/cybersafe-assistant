@@ -22,6 +22,7 @@ export interface ElectronAPI {
   killProcessTree: (pid: number) => Promise<{ success: boolean }>;
   analyzeProcess: (pid: number) => Promise<import("@cybersafe/shared-types").ProcessAnalysisResult | null>;
   getHardwareSnapshot: () => Promise<import("@cybersafe/shared-types").HardwareSnapshot>;
+  getWindowsHealth: () => Promise<import("@cybersafe/shared-types").WindowsHealthSnapshot>;
   restoreQuarantine: (id: string, trustAfterRestore?: boolean) => Promise<{ success: boolean }>;
   deleteQuarantine: (id: string) => Promise<{ success: boolean }>;
   allowHash: (sha256: string) => Promise<{ success: boolean }>;

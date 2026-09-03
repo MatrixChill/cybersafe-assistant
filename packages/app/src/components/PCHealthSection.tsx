@@ -1,0 +1,298 @@
+import { useState, useEffect } from "react";
+import {
+  ShieldCheck,
+  ShieldAlert,
+  ShieldQuestion,
+  Cpu,
+  MemoryStick,
+  HardDrive,
+  Server,
+  Wifi,
+  Flame,
+  AlertTriangle,
+  RefreshCw,
+  CheckCircle2,
+} from "lucide-react";
+import { cn } from "@/lib/utils";
+import type { WindowsHealthSnapshot, WindowsHealthStatus } from "@cybersafe/shared-types";
+
+function statusMeta(status: WindowsHealthStatus) {
+  switch (status) {
+    case "good":
+      return { label: "BOM", color: "text-cyber-green", bg: "bg-cyber-green/10", border: "border-cyber-green/30", Icon: ShieldCheck };
+    case "attention":
+      return { label: "ATENÇÃO", color: "text-cyber-yellow", bg: "bg-cyber-yellow/10", border: "border-cyber-yellow/30", Icon: ShieldAlert };
+    case "critical":
+      return { label: "CRÍTICO", color: "text-cyber-red", bg: "bg-cyber-red/10", border: "border-cyber-red/30", Icon: ShieldAlert };
+    default:
+      return { label: "DESCONHECIDO", color: "text-muted-foreground", bg: "bg-white/5", border: "border-white/10", Icon: ShieldQuestion };
+  }
+}
+
+function MetricTile({ icon: Icon, label, value, sub, color }: {
+  icon: typeof Cpu;
+  label: string;
+  value: string;
+  sub?: string;
+  color?: string;
+}) {
+  return (
+    <div className="bg-black/20 border border-white/5 rounded-lg p-4 flex flex-col gap-1">
+      <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider">
+        <Icon className="w-4 h-4 text-primary" />
+        {label}
+      </div>
+      <span className={cn("text-2xl font-mono font-bold", color || "text-foreground")}>{value}</span>
+      {sub && <span className="text-xs text-muted-foreground font-mono">{sub}</span>}
+    </div>
+  );
+}
+
+function ProcessTable({ processes, title, coloredBy }: {
+  processes: WindowsHealthSnapshot["topProcessesByCpu"];
+  title: string;
+  coloredBy: "cpu" | "ram";
+}) {
+  return (
+    <div className="bg-card cyber-border rounded-xl p-6">
+      <div className="flex items-center gap-2 mb-4">
+        <Cpu className="w-5 h-5 text-primary" />
+        <h3 className="text-lg font-semibold">Top Processos ({title})</h3>
+      </div>
+      {processes.length === 0 ? (
+        <p className="text-sm text-muted-foreground font-mono">Nenhum processo disponível</p>
+      ) : (
+        <div className="overflow-x-auto">
+          <table className="w-full text-sm text-left">
+            <thead className="text-xs text-muted-foreground uppercase bg-secondary/50">
+              <tr>
+                <th className="px-3 py-2 rounded-tl-lg">Nome</th>
+                <th className="px-3 py-2">PID</th>
+                <th className="px-3 py-2 rounded-tr-lg">{coloredBy === "cpu" ? "CPU %" : "RAM (MB)"}</th>
+              </tr>
+            </thead>
+            <tbody>
+              {processes.map((p) => {
+                const val = coloredBy === "cpu" ? p.cpuPercent : p.memoryMb;
+                const hi = coloredBy === "cpu" ? p.cpuPercent > 50 : p.memoryMb > 2000;
+                return (
+                  <tr key={p.pid} className="border-b border-white/5 last:border-0">
+                    <td className="px-3 py-2 font-mono truncate max-w-[160px]" title={p.path || p.name}>{p.name}</td>
+                    <td className="px-3 py-2 font-mono text-muted-foreground">{p.pid}</td>
+                    <td className={cn("px-3 py-2 font-mono font-bold", hi ? "text-cyber-red" : "text-foreground")}>
+                      {coloredBy === "cpu" ? `${val.toFixed(1)}%` : `${val.toFixed(0)} MB`}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </div>
+  );
+}
+
+export default function PCHealthSection() {
+  const [health, setHealth] = useState<WindowsHealthSnapshot | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+
+  const fetchHealth = async () => {
+    if (!window.electronAPI) return;
+    setRefreshing(true);
+    try {
+      const snap = await window.electronAPI.getWindowsHealth();
+      setHealth(snap);
+    } catch (e) {
+      console.error("[WindowsHealth] fetch error", e);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
+    }
+  };
+
+  useEffect(() => {
+    void fetchHealth();
+    const interval = setInterval(() => {
+      if (document.visibilityState === "visible") void fetchHealth();
+    }, 8000);
+    return () => clearInterval(interval);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  if (loading && !health) {
+    return (
+      <div className="w-full h-40 animate-pulse bg-card cyber-border rounded-xl flex items-center justify-center">
+        <span className="text-sm text-muted-foreground font-mono">A recolher dados de saúde do Windows...</span>
+      </div>
+    );
+  }
+
+  if (!health) {
+    return (
+      <div className="w-full bg-card cyber-border rounded-xl p-6 flex flex-col items-center justify-center gap-3 text-center">
+        <Flame className="w-10 h-10 text-muted-foreground opacity-30" />
+        <p className="text-sm text-muted-foreground font-mono">Indisponível. O serviço Windows pode não estar ativo.</p>
+        <button
+          onClick={() => void fetchHealth()}
+          className="px-4 py-2 text-sm font-mono bg-primary/10 text-primary hover:bg-primary/20 rounded-lg"
+        >
+          Tentar novamente
+        </button>
+      </div>
+    );
+  }
+
+  const meta = statusMeta(health.overallStatus);
+  const StatusIcon = meta.Icon;
+  const topDisk = [...health.disks].sort((a, b) => b.usagePercent - a.usagePercent)[0];
+
+  return (
+    <section className="space-y-6">
+      <div className="flex items-center justify-between">
+        <h2 className="text-lg font-semibold flex items-center gap-2">
+          <ShieldCheck className="w-5 h-5 text-primary" />
+          Saúde e Segurança do PC
+        </h2>
+        <button
+          onClick={() => void fetchHealth()}
+          disabled={refreshing}
+          className="flex items-center gap-2 px-3 py-1.5 text-xs font-mono rounded bg-secondary/50 text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          <RefreshCw className={cn("w-3.5 h-3.5", refreshing && "animate-spin")} />
+          Atualizar
+        </button>
+      </div>
+
+      <div className={cn("flex items-center justify-between gap-4 p-6 rounded-xl border bg-card", meta.border)}>
+        <div className="flex items-center gap-4">
+          <div className={cn("p-4 rounded-full", meta.bg)}>
+            <StatusIcon className={cn("w-8 h-8", meta.color)} />
+          </div>
+          <div>
+            <span className={cn("text-2xl font-bold", meta.color)}>{meta.label}</span>
+            <span className="block text-sm text-muted-foreground">
+              {health.system.osName} · {health.system.osVersion || "desconhecido"}
+            </span>
+            {health.errors.length > 0 && (
+              <span className="block text-xs text-muted-foreground mt-1">
+                {health.errors.length} fonte(s) indisponível(is) (pode exigir privilégio)
+              </span>
+            )}
+          </div>
+        </div>
+        <div className="text-right">
+          <span className="text-xs text-muted-foreground uppercase tracking-wider block">Score</span>
+          <span className={cn("text-4xl font-mono font-bold", meta.color)}>{health.score}</span>
+        </div>
+      </div>
+
+      {/* Métricas principais */}
+      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+        <MetricTile
+          icon={MemoryStick}
+          label="RAM"
+          value={health.system.available ? `${health.system.ramUsagePercent}%` : "—"}
+          sub={health.system.available ? `${health.system.availableRamGb.toFixed(1)} / ${health.system.totalRamGb.toFixed(1)} GB livres` : "indisponível"}
+          color={health.system.ramUsagePercent >= 90 ? "text-cyber-red" : health.system.ramUsagePercent >= 75 ? "text-cyber-yellow" : "text-cyber-green"}
+        />
+        <MetricTile
+          icon={HardDrive}
+          label="Disco principal"
+          value={topDisk ? `${topDisk.usagePercent}%` : "—"}
+          sub={topDisk ? `${topDisk.freeGb.toFixed(1)} GB livres` : "indisponível"}
+          color={topDisk && topDisk.usagePercent >= 95 ? "text-cyber-red" : topDisk && topDisk.usagePercent >= 85 ? "text-cyber-yellow" : "text-cyber-green"}
+        />
+        <MetricTile
+          icon={Server}
+          label="Serviços"
+          value={`${health.services.filter((s) => s.running).length}/${health.services.length}`}
+          sub="ativos / total"
+        />
+        <MetricTile
+          icon={Wifi}
+          label="Firewall"
+          value={health.firewall.available ? (health.firewall.enabled ? "Ativo" : "Desligado") : "—"}
+          sub={health.firewall.available ? health.firewall.profiles.map((p) => `${p.name}:${p.enabled ? "on" : "off"}`).join(" · ") : "indisponível"}
+          color={!health.firewall.available ? undefined : health.firewall.enabled ? "text-cyber-green" : "text-cyber-red"}
+        />
+      </div>
+
+      {/* Recomendações */}
+      {health.recommendations.length > 0 && (
+        <div className="space-y-3">
+          <h3 className="text-base font-semibold flex items-center gap-2">
+            <AlertTriangle className="w-5 h-5 text-cyber-yellow" />
+            Recomendações Locais
+          </h3>
+          <div className="grid gap-3">
+            {health.recommendations.map((rec) => {
+              const isCritical = rec.severity === "high";
+              return (
+                <div key={rec.id} className={cn(
+                  "p-4 rounded-xl border flex flex-col md:flex-row gap-3",
+                  isCritical ? "bg-cyber-red/10 border-cyber-red/30" : "bg-cyber-yellow/10 border-cyber-yellow/30",
+                )}>
+                  <div className="flex-shrink-0 mt-0.5">
+                    {isCritical
+                      ? <ShieldAlert className="w-5 h-5 text-cyber-red" />
+                      : <AlertTriangle className="w-5 h-5 text-cyber-yellow" />}
+                  </div>
+                  <div className="flex-grow">
+                    <h4 className={cn("text-sm font-semibold", isCritical ? "text-cyber-red" : "text-cyber-yellow")}>{rec.title}</h4>
+                    <p className="text-sm text-muted-foreground mt-1">{rec.description}</p>
+                    <p className="text-sm text-foreground/80 mt-2 flex items-start gap-2">
+                      <CheckCircle2 className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
+                      <span>{rec.suggestion}</span>
+                    </p>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
+      {/* Conexões de rede */}
+      {health.connections.length > 0 && (
+        <div className="bg-card cyber-border rounded-xl p-6">
+          <div className="flex items-center gap-2 mb-4">
+            <Wifi className="w-5 h-5 text-primary" />
+            <h3 className="text-lg font-semibold">Conexões de Rede Ativas</h3>
+          </div>
+          <div className="overflow-x-auto max-h-64 overflow-y-auto">
+            <table className="w-full text-sm text-left">
+              <thead className="text-xs text-muted-foreground uppercase bg-secondary/50 sticky top-0">
+                <tr>
+                  <th className="px-3 py-2 rounded-tl-lg">Processo</th>
+                  <th className="px-3 py-2">Local</th>
+                  <th className="px-3 py-2">Remoto</th>
+                  <th className="px-3 py-2 rounded-tr-lg">Estado</th>
+                </tr>
+              </thead>
+              <tbody>
+                {health.connections.map((c, i) => (
+                  <tr key={i} className="border-b border-white/5 last:border-0">
+                    <td className="px-3 py-2 font-mono truncate max-w-[140px]">
+                      {c.owningProcessName || c.owningProcessPid || "—"}
+                    </td>
+                    <td className="px-3 py-2 font-mono text-muted-foreground">{c.localAddress}:{c.localPort}</td>
+                    <td className="px-3 py-2 font-mono text-muted-foreground">{c.remoteAddress}:{c.remotePort}</td>
+                    <td className="px-3 py-2 font-mono">{c.state}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
+      {/* Top processos */}
+      <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+        <ProcessTable processes={health.topProcessesByCpu} title="CPU" coloredBy="cpu" />
+        <ProcessTable processes={health.topProcessesByRam} title="RAM" coloredBy="ram" />
+      </div>
+    </section>
+  );
+}

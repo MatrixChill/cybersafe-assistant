@@ -223,6 +223,7 @@ function registerIpc() {
   ipcMain.handle("service:kill-process-tree", (_event, pid: number) => client.request("process.killTree", { pid }));
   ipcMain.handle("service:analyze-process", (_event, pid: number) => client.request("process.analyze", { pid }));
   ipcMain.handle("service:get-hardware", () => client.request("hardware.snapshot", undefined));
+  ipcMain.handle("service:get-windows-health", () => client.request("windows.healthSnapshot", undefined));
   ipcMain.handle("service:restore-quarantine", (_event, id: string, trustAfterRestore = false) =>
     client.request("quarantine.restore", { id, trustAfterRestore }));
   ipcMain.handle("service:delete-quarantine", (_event, id: string) => client.request("quarantine.delete", { id }));

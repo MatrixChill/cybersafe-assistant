@@ -23,6 +23,7 @@ import { NativeWindowsWatcher,
   ProcessMonitor,
   snapshotConnections,
   terminateProcessTree,
+  WindowsHealthEngine,
   type FileObservation,
   EtwConsumer,
   WfpFilter,
@@ -82,6 +83,7 @@ export class ProtectionEngineService {
   private readonly clients = new Set<net.Socket>();
   private readonly vt = new VirusTotalClient(process.env.VIRUSTOTAL_API_KEY);
   private readonly hardware = new HardwareHealthEngine();
+  private readonly windowsHealth = new WindowsHealthEngine();
   private readonly exclusions = new ExclusionManager();
   private readonly scanManager = new ScanManager(this);
   private readonly historyPath = path.join(this.baseDir, "history.jsonl");
@@ -390,6 +392,7 @@ export class ProtectionEngineService {
       this.etwConsumer.stop(),
       this.wfpFilter.stop(),
       this.amsiProvider.stop(),
+      this.windowsHealth.dispose(),
     ]);
 
     if (this.server) {
@@ -846,6 +849,8 @@ export class ProtectionEngineService {
         return this.runRestrictedAnalysis((payload as { path: string }).path);
       case "hardware.snapshot":
         return this.hardware.getLastSnapshot() || await this.hardware.getSnapshot(this.processes);
+      case "windows.healthSnapshot":
+        return this.windowsHealth.getCached();
       case "process.analyze":
         return this.analyzeProcess((payload as { pid: number }).pid);
       case "exclusions.get":

@@ -320,6 +320,7 @@ export interface ServiceCommandMap {
   "definitions.update": { source?: string } | undefined;
   "analysis.restricted": { path: string };
   "hardware.snapshot": undefined;
+  "windows.healthSnapshot": undefined;
   "exclusions.get": undefined;
   "exclusions.update": Partial<ExclusionConfig>;
   "scan.start": { type: ScanType; targetPath?: string };
@@ -349,6 +350,7 @@ export interface ServiceResponseMap {
   "definitions.update": { success: boolean; updatedAt: string };
   "analysis.restricted": AnalysisResult | null;
   "hardware.snapshot": HardwareSnapshot;
+  "windows.healthSnapshot": WindowsHealthSnapshot;
   "exclusions.get": ExclusionConfig;
   "exclusions.update": { success: boolean };
   "scan.start": { id: string; success: boolean };
@@ -375,6 +377,100 @@ export interface VirusTotalResult {
   permalink: string;
   reputation: number;
   cached: boolean;
+}
+
+// ── Windows / PowerShell Health (READ-ONLY) ──
+// Dados reais recolhidos de forma segura via PowerShell/CIM.
+// Todas as operações são read-only; nenhum comando arbitrário é aceite.
+
+export type WindowsHealthStatus = "good" | "attention" | "critical" | "unknown";
+
+export interface WindowsSystemInfo {
+  osName: string;
+  osVersion: string;
+  osBuild: string;
+  manufacturer: string;
+  model: string;
+  architecture: string;
+  totalRamGb: number;
+  availableRamGb: number;
+  ramUsagePercent: number;
+  available: boolean;
+}
+
+export interface WindowsTopProcess {
+  pid: number;
+  name: string;
+  cpuPercent: number;
+  memoryMb: number;
+  path: string;
+  user: string;
+}
+
+export interface WindowsServiceInfo {
+  name: string;
+  displayName: string;
+  status: string;
+  startType: string;
+  running: boolean;
+}
+
+export interface WindowsTcpConnection {
+  localAddress: string;
+  localPort: number;
+  remoteAddress: string;
+  remotePort: number;
+  state: string;
+  owningProcessPid: number | null;
+  owningProcessName: string | null;
+}
+
+export interface WindowsUserInfo {
+  name: string;
+  fullName: string;
+  enabled: boolean;
+  local: boolean;
+}
+
+export interface WindowsDiskInfo {
+  deviceId: string;
+  volumeName: string;
+  sizeGb: number;
+  freeGb: number;
+  usedGb: number;
+  usagePercent: number;
+  fileSystem: string;
+}
+
+export interface WindowsFirewallState {
+  enabled: boolean;
+  profiles: { name: string; enabled: boolean }[];
+  available: boolean;
+}
+
+export interface WindowsHealthRecommendation {
+  id: string;
+  severity: "low" | "medium" | "high";
+  status: WindowsHealthStatus;
+  title: string;
+  description: string;
+  suggestion: string;
+}
+
+export interface WindowsHealthSnapshot {
+  system: WindowsSystemInfo;
+  topProcessesByCpu: WindowsTopProcess[];
+  topProcessesByRam: WindowsTopProcess[];
+  services: WindowsServiceInfo[];
+  connections: WindowsTcpConnection[];
+  users: WindowsUserInfo[];
+  disks: WindowsDiskInfo[];
+  firewall: WindowsFirewallState;
+  overallStatus: WindowsHealthStatus;
+  score: number;
+  recommendations: WindowsHealthRecommendation[];
+  collectedAt: string;
+  errors: string[];
 }
 
 // ── Hardware Monitoring ──
@@ -404,6 +500,27 @@ export interface HardwareSnapshot {
 }
 
 // ── Process Analysis ──
+
+/**
+ * Contrato base (foundation) para o futuro Task Manager (READ-ONLY hoje).
+ * Garante que os dados de processo possam fornecer, quando permitido:
+ * PID, nome, CPU, memória, caminho, utilizador e reputação/estado.
+ * `ProcessSnapshot` (já usado pelo TaskManagerPage existente) e `WindowsTopProcess`
+ * fornecem estes campos; este tipo documenta a superfície mínima que o Task
+ * Manager consumirá no futuro.
+ */
+export interface TaskProcessEntry {
+  pid: number;
+  name: string;
+  cpuPercent: number;
+  memoryMb: number;
+  path?: string;
+  user?: string;
+  /** Reputação: estado/veredito futuro (ex.: motor de reputação local). */
+  reputation?: "trusted" | "neutral" | "untrusted";
+  /** Estado futuro (ex.: "running" | "suspended"), quando disponível. */
+  state?: string;
+}
 
 export interface ProcessAnalysisResult {
   process: ProcessSnapshot;

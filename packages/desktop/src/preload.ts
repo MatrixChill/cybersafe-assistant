@@ -13,6 +13,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   killProcessTree: (pid: number) => ipcRenderer.invoke("service:kill-process-tree", pid),
   analyzeProcess: (pid: number) => ipcRenderer.invoke("service:analyze-process", pid),
   getHardwareSnapshot: () => ipcRenderer.invoke("service:get-hardware"),
+  getWindowsHealth: () => ipcRenderer.invoke("service:get-windows-health"),
   restoreQuarantine: (id: string, trustAfterRestore?: boolean) =>
     ipcRenderer.invoke("service:restore-quarantine", id, trustAfterRestore),
   deleteQuarantine: (id: string) => ipcRenderer.invoke("service:delete-quarantine", id),

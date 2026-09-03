@@ -10,6 +10,7 @@ import type { ConnectionSnapshot, ProcessSnapshot } from "@cybersafe/shared-type
 export * from "./wfp-filter.js";
 export * from "./amsi-provider.js";
 export * from "./etw-consumer.js";
+export * from "./powershell.js";
 
 export interface FileObservation {
   kind: "file.created" | "file.modified" | "file.renamed";

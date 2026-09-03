@@ -20,6 +20,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { HardwareSnapshot } from "@cybersafe/shared-types";
+import PCHealthSection from "@/components/PCHealthSection";
 
 interface PCCenterPageProps {
   hardware: HardwareSnapshot | null;
@@ -631,6 +632,9 @@ export default function PCCenterPage({ hardware }: PCCenterPageProps) {
       ) : (
         <AdvancedView hardware={hardware} />
       )}
+
+      {/* Saúde e Segurança do PC (camada PowerShell Windows, read-only) */}
+      <PCHealthSection />
     </div>
   );
 }
