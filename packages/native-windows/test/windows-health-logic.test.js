@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import {
+  buildHealthAlerts,
   buildRecommendations,
   buildWindowsHealthSnapshot,
   computeScore,
@@ -87,4 +88,59 @@ test("buildWindowsHealthSnapshot composes status, score and recommendations", ()
   assert.equal(snap.score, 100);
   assert.deepEqual(snap.errors, ["cmdlet unavailable"]);
   assert.equal(snap.collectedAt, "2025-01-01T00:00:00.000Z");
+});
+
+test("buildHealthAlerts returns empty array for no recommendations", () => {
+  const alerts = buildHealthAlerts([]);
+  assert.equal(alerts.length, 0);
+});
+
+test("buildHealthAlerts maps high severity to critical", () => {
+  const recs = [{ id: "ram-high", severity: "high", status: "critical", title: "Memória RAM crítica", description: "RAM a 92%", suggestion: "Feche aplicações" }];
+  const alerts = buildHealthAlerts(recs);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].severity, "critical");
+  assert.equal(alerts[0].title, "Memória RAM crítica");
+  assert.equal(alerts[0].category, "Memória");
+});
+
+test("buildHealthAlerts maps medium severity to warning", () => {
+  const recs = [{ id: "disk-attention", severity: "medium", status: "attention", title: "Espaço em disco baixo", description: "Disco a 87%", suggestion: "Limpe ficheiros" }];
+  const alerts = buildHealthAlerts(recs);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].severity, "warning");
+  assert.equal(alerts[0].category, "Armazenamento");
+});
+
+test("buildHealthAlerts maps low severity to info", () => {
+  const recs = [{ id: "unknown-id", severity: "low", status: "good", title: "Info", description: "Detalhe", suggestion: "Nenhuma" }];
+  const alerts = buildHealthAlerts(recs);
+  assert.equal(alerts.length, 1);
+  assert.equal(alerts[0].severity, "info");
+  assert.equal(alerts[0].category, "Geral");
+});
+
+test("buildHealthAlerts assigns correct categories", () => {
+  const recs = [
+    { id: "firewall-disabled", severity: "high", status: "critical", title: "Firewall", description: "Desligado", suggestion: "Ative" },
+    { id: "service-down", severity: "high", status: "attention", title: "Serviço", description: "Indisponível", suggestion: "Verifique" },
+    { id: "many-cpu-processes", severity: "medium", status: "attention", title: "CPU", description: "Muitos", suggestion: "Feche" },
+  ];
+  const alerts = buildHealthAlerts(recs);
+  assert.equal(alerts[0].category, "Segurança");
+  assert.equal(alerts[1].category, "Serviços");
+  assert.equal(alerts[2].category, "CPU");
+});
+
+test("buildHealthAlerts handles multiple recommendations", () => {
+  const input = makeInput({
+    system: { ...makeInput().system, ramUsagePercent: 92 },
+    disks: [{ deviceId: "C:", volumeName: "SSD", sizeGb: 500, freeGb: 10, usagePercent: 98 }],
+    firewall: { available: true, enabled: false, profiles: [{ name: "Domain", enabled: false }] },
+  });
+  const recs = buildRecommendations(input);
+  const alerts = buildHealthAlerts(recs);
+  assert.ok(alerts.length >= 3);
+  const severities = alerts.map((a) => a.severity);
+  assert.ok(severities.includes("critical"));
 });

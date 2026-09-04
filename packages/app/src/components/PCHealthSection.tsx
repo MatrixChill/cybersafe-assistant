@@ -12,9 +12,13 @@ import {
   AlertTriangle,
   RefreshCw,
   CheckCircle2,
+  Info,
+  CircleAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WindowsHealthSnapshot, WindowsHealthStatus } from "@cybersafe/shared-types";
+import { buildHealthAlerts } from "@cybersafe/shared-types";
+import type { HealthAlert, HealthAlertSeverity } from "@cybersafe/shared-types";
 
 function statusMeta(status: WindowsHealthStatus) {
   switch (status) {
@@ -27,6 +31,69 @@ function statusMeta(status: WindowsHealthStatus) {
     default:
       return { label: "DESCONHECIDO", color: "text-muted-foreground", bg: "bg-white/5", border: "border-white/10", Icon: ShieldQuestion };
   }
+}
+
+function alertMeta(severity: HealthAlertSeverity) {
+  switch (severity) {
+    case "critical":
+      return { color: "text-cyber-red", bg: "bg-cyber-red/10", border: "border-cyber-red/30", Icon: CircleAlert };
+    case "warning":
+      return { color: "text-cyber-yellow", bg: "bg-cyber-yellow/10", border: "border-cyber-yellow/30", Icon: AlertTriangle };
+    default:
+      return { color: "text-cyber-cyan", bg: "bg-cyber-cyan/10", border: "border-cyber-cyan/30", Icon: Info };
+  }
+}
+
+function HealthAlertsSection({ alerts }: { alerts: HealthAlert[] }) {
+  if (alerts.length === 0) {
+    return (
+      <div className="bg-card cyber-border rounded-xl p-6">
+        <div className="flex items-center gap-2 mb-4">
+          <ShieldCheck className="w-5 h-5 text-cyber-green" />
+          <h3 className="text-lg font-semibold">Alertas do Sistema</h3>
+        </div>
+        <div className="flex items-center gap-3 p-4 rounded-lg bg-cyber-green/10 border border-cyber-green/30">
+          <CheckCircle2 className="w-5 h-5 text-cyber-green flex-shrink-0" />
+          <p className="text-sm text-cyber-green font-mono">Nenhum alerta importante detetado.</p>
+        </div>
+      </div>
+    );
+  }
+
+  const sorted = [...alerts].sort((a, b) => {
+    const order: Record<HealthAlertSeverity, number> = { critical: 0, warning: 1, info: 2 };
+    return order[a.severity] - order[b.severity];
+  });
+
+  return (
+    <div className="bg-card cyber-border rounded-xl p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-2">
+          <AlertTriangle className="w-5 h-5 text-cyber-yellow" />
+          <h3 className="text-lg font-semibold">Alertas do Sistema</h3>
+        </div>
+        <span className="text-xs text-muted-foreground font-mono">{alerts.length} alerta(s)</span>
+      </div>
+      <div className="space-y-2">
+        {sorted.map((alert, i) => {
+          const meta = alertMeta(alert.severity);
+          const Icon = meta.Icon;
+          return (
+            <div key={i} className={cn("p-3 rounded-lg border flex items-start gap-3", meta.bg, meta.border)}>
+              <Icon className={cn("w-4 h-4 mt-0.5 flex-shrink-0", meta.color)} />
+              <div className="flex-grow min-w-0">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <span className={cn("text-sm font-semibold", meta.color)}>{alert.title}</span>
+                  <span className="text-xs text-muted-foreground font-mono px-1.5 py-0.5 rounded bg-secondary/50">{alert.category}</span>
+                </div>
+                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{alert.description}</p>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
 }
 
 function MetricTile({ icon: Icon, label, value, sub, color }: {
@@ -218,6 +285,9 @@ export default function PCHealthSection() {
           color={!health.firewall.available ? undefined : health.firewall.enabled ? "text-cyber-green" : "text-cyber-red"}
         />
       </div>
+
+      {/* Alertas do Sistema */}
+      <HealthAlertsSection alerts={buildHealthAlerts(health.recommendations)} />
 
       {/* Recomendações */}
       {health.recommendations.length > 0 && (

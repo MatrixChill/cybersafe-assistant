@@ -473,6 +473,43 @@ export interface WindowsHealthSnapshot {
   errors: string[];
 }
 
+// ── Health Alerts (derived from WindowsHealthRecommendation[]) ──
+
+export type HealthAlertSeverity = "info" | "warning" | "critical";
+
+export interface HealthAlert {
+  severity: HealthAlertSeverity;
+  title: string;
+  description: string;
+  category: string;
+}
+
+const HEALTH_ALERT_CATEGORY: Record<string, string> = {
+  "ram-high": "Memória",
+  "ram-attention": "Memória",
+  "disk-critical": "Armazenamento",
+  "disk-attention": "Armazenamento",
+  "firewall-disabled": "Segurança",
+  "many-cpu-processes": "CPU",
+  "service-down": "Serviços",
+};
+
+const HEALTH_ALERT_SEVERITY: Record<string, HealthAlertSeverity> = {
+  high: "critical",
+  medium: "warning",
+  low: "info",
+};
+
+/** Converte recomendações já calculadas em alertas compactos para a UI. */
+export function buildHealthAlerts(recommendations: WindowsHealthRecommendation[]): HealthAlert[] {
+  return recommendations.map((rec) => ({
+    severity: HEALTH_ALERT_SEVERITY[rec.severity] ?? "info",
+    title: rec.title,
+    description: rec.description,
+    category: HEALTH_ALERT_CATEGORY[rec.id] ?? "Geral",
+  }));
+}
+
 // ── Hardware Monitoring ──
 
 export interface HardwareAlert {

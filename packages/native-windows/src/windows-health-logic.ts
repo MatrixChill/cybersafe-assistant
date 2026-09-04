@@ -29,6 +29,11 @@ export interface WindowsHealthInput {
   firewall: WindowsFirewallState;
 }
 
+// ── Health Alerts ──
+// Reutiliza a lógica partilhada em @cybersafe/shared-types.
+export { buildHealthAlerts } from "@cybersafe/shared-types";
+export type { HealthAlert, HealthAlertSeverity } from "@cybersafe/shared-types";
+
 export function overallStatus(recommendations: WindowsHealthRecommendation[]): WindowsHealthStatus {
   if (recommendations.some((r) => r.status === "critical")) return "critical";
   if (recommendations.some((r) => r.status === "attention")) return "attention";
