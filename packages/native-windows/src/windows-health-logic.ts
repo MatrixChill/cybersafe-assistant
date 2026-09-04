@@ -9,6 +9,7 @@ import type {
   WindowsTcpConnection,
   WindowsTopProcess,
 } from "@cybersafe/shared-types";
+import { IMPORTANT_WINDOWS_SERVICES } from "@cybersafe/shared-types";
 
 /**
  * Lógica pura (determinística) de saúde/recomendações do Windows.
@@ -31,7 +32,7 @@ export interface WindowsHealthInput {
 
 // ── Health Alerts ──
 // Reutiliza a lógica partilhada em @cybersafe/shared-types.
-export { buildHealthAlerts } from "@cybersafe/shared-types";
+export { buildHealthAlerts, buildHealthAlertEvidence, buildHealthAlertsFromSnapshot } from "@cybersafe/shared-types";
 export type { HealthAlert, HealthAlertSeverity } from "@cybersafe/shared-types";
 
 export function overallStatus(recommendations: WindowsHealthRecommendation[]): WindowsHealthStatus {
@@ -126,8 +127,7 @@ export function buildRecommendations(input: WindowsHealthInput): WindowsHealthRe
   }
 
   // Serviço importante indisponível
-  const criticalServices = ["Spooler", "WinDefend", "wuauserv", "mpssvc", "LanmanServer"];
-  const unavailable = input.services.filter((s) => criticalServices.includes(s.name) && !s.running);
+  const unavailable = input.services.filter((s) => IMPORTANT_WINDOWS_SERVICES.includes(s.name) && !s.running);
   if (unavailable.length > 0) {
     recommendations.push({
       id: "service-down",

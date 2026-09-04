@@ -482,6 +482,10 @@ export interface HealthAlert {
   title: string;
   description: string;
   category: string;
+  /** Evidências observadas (valores atuais) que fundamentam o alerta, quando disponíveis. */
+  evidence: string[];
+  /** Ação recomendada — apenas consultiva, nunca executada automaticamente. */
+  recommendedAction: string;
 }
 
 const HEALTH_ALERT_CATEGORY: Record<string, string> = {
@@ -500,6 +504,8 @@ const HEALTH_ALERT_SEVERITY: Record<string, HealthAlertSeverity> = {
   low: "info",
 };
 
+export const IMPORTANT_WINDOWS_SERVICES = ["Spooler", "WinDefend", "wuauserv", "mpssvc", "LanmanServer"];
+
 /** Converte recomendações já calculadas em alertas compactos para a UI. */
 export function buildHealthAlerts(recommendations: WindowsHealthRecommendation[]): HealthAlert[] {
   return recommendations.map((rec) => ({
@@ -507,6 +513,94 @@ export function buildHealthAlerts(recommendations: WindowsHealthRecommendation[]
     title: rec.title,
     description: rec.description,
     category: HEALTH_ALERT_CATEGORY[rec.id] ?? "Geral",
+    evidence: [],
+    recommendedAction: rec.suggestion,
+  }));
+}
+
+function formatGb(value: number): string {
+  return value.toFixed(1);
+}
+
+function ramEvidence(snapshot: WindowsHealthSnapshot): string[] {
+  const lines: string[] = [];
+  if (snapshot.system.available) {
+    lines.push(`Utilização atual da RAM: ${snapshot.system.ramUsagePercent}%`);
+    lines.push(`${formatGb(snapshot.system.availableRamGb)} GB livres de ${formatGb(snapshot.system.totalRamGb)} GB`);
+  }
+  const top = snapshot.topProcessesByRam[0];
+  if (top) {
+    lines.push(`Maior consumidor: ${top.name} (PID ${top.pid}) — ${Math.round(top.memoryMb)} MB`);
+  }
+  return lines;
+}
+
+function diskEvidence(snapshot: WindowsHealthSnapshot): string[] {
+  const top = [...snapshot.disks].sort((a, b) => b.usagePercent - a.usagePercent)[0];
+  if (!top) return [];
+  const lines = [`Disco afetado: ${top.deviceId}${top.volumeName ? ` (${top.volumeName})` : ""}`];
+  lines.push(`Utilizado: ${top.usagePercent}%`);
+  lines.push(`${formatGb(top.freeGb)} GB livres de ${formatGb(top.sizeGb)} GB`);
+  if (top.fileSystem) {
+    lines.push(`Sistema de ficheiros: ${top.fileSystem}`);
+  }
+  return lines;
+}
+
+function firewallEvidence(snapshot: WindowsHealthSnapshot): string[] {
+  const { firewall } = snapshot;
+  if (!firewall.available) {
+    return ["Estado do firewall indisponível nesta recolha"];
+  }
+  const lines = [`Firewall do Windows: ${firewall.enabled ? "Ativado" : "Desativado"}`];
+  if (firewall.profiles.length > 0) {
+    lines.push(...firewall.profiles.map((p) => `Perfil ${p.name}: ${p.enabled ? "Ativado" : "Desativado"}`));
+  } else {
+    lines.push("Nenhum perfil de firewall relatado");
+  }
+  return lines;
+}
+
+function cpuProcessEvidence(snapshot: WindowsHealthSnapshot): string[] {
+  const heavy = snapshot.topProcessesByCpu.filter((p) => p.cpuPercent > 50);
+  if (heavy.length === 0) return [];
+  return heavy.map((p) => `${p.name} (PID ${p.pid}) — ${p.cpuPercent.toFixed(1)}% CPU, ${Math.round(p.memoryMb)} MB`);
+}
+
+function serviceEvidence(snapshot: WindowsHealthSnapshot): string[] {
+  const down = snapshot.services.filter((s) => IMPORTANT_WINDOWS_SERVICES.includes(s.name) && !s.running);
+  return down.map((s) => `${s.displayName || s.name}: ${s.status || "parado"}`);
+}
+
+/** Evidências observadas para um alerta, derivadas apenas do payload de saúde existente. */
+export function buildHealthAlertEvidence(id: string, snapshot: WindowsHealthSnapshot): string[] {
+  switch (id) {
+    case "ram-high":
+    case "ram-attention":
+      return ramEvidence(snapshot);
+    case "disk-critical":
+    case "disk-attention":
+      return diskEvidence(snapshot);
+    case "firewall-disabled":
+      return firewallEvidence(snapshot);
+    case "many-cpu-processes":
+      return cpuProcessEvidence(snapshot);
+    case "service-down":
+      return serviceEvidence(snapshot);
+    default:
+      return [];
+  }
+}
+
+/** Converte as recomendações do snapshot em alertas enriquecidos com evidências e ação recomendada. */
+export function buildHealthAlertsFromSnapshot(snapshot: WindowsHealthSnapshot): HealthAlert[] {
+  return snapshot.recommendations.map((rec) => ({
+    severity: HEALTH_ALERT_SEVERITY[rec.severity] ?? "info",
+    title: rec.title,
+    description: rec.description,
+    category: HEALTH_ALERT_CATEGORY[rec.id] ?? "Geral",
+    evidence: buildHealthAlertEvidence(rec.id, snapshot),
+    recommendedAction: rec.suggestion,
   }));
 }
 

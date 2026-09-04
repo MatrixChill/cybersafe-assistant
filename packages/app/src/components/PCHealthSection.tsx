@@ -17,7 +17,7 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import type { WindowsHealthSnapshot, WindowsHealthStatus } from "@cybersafe/shared-types";
-import { buildHealthAlerts } from "@cybersafe/shared-types";
+import { buildHealthAlertsFromSnapshot } from "@cybersafe/shared-types";
 import type { HealthAlert, HealthAlertSeverity } from "@cybersafe/shared-types";
 
 function statusMeta(status: WindowsHealthStatus) {
@@ -79,14 +79,38 @@ function HealthAlertsSection({ alerts }: { alerts: HealthAlert[] }) {
           const meta = alertMeta(alert.severity);
           const Icon = meta.Icon;
           return (
-            <div key={i} className={cn("p-3 rounded-lg border flex items-start gap-3", meta.bg, meta.border)}>
-              <Icon className={cn("w-4 h-4 mt-0.5 flex-shrink-0", meta.color)} />
-              <div className="flex-grow min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className={cn("text-sm font-semibold", meta.color)}>{alert.title}</span>
-                  <span className="text-xs text-muted-foreground font-mono px-1.5 py-0.5 rounded bg-secondary/50">{alert.category}</span>
+            <div key={i} className={cn("p-3 rounded-lg border", meta.bg, meta.border)}>
+              <div className="flex items-start gap-3">
+                <Icon className={cn("w-4 h-4 mt-0.5 flex-shrink-0", meta.color)} />
+                <div className="flex-grow min-w-0">
+                  <div className="flex items-center gap-2 flex-wrap">
+                    <span className={cn("text-sm font-semibold", meta.color)}>{alert.title}</span>
+                    <span className="text-xs text-muted-foreground font-mono px-1.5 py-0.5 rounded bg-secondary/50">{alert.category}</span>
+                  </div>
+                  <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{alert.description}</p>
+                  <div className="mt-2 flex items-start gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-primary" />
+                    <p className="text-xs text-foreground/80 leading-relaxed">
+                      <span className="font-semibold text-foreground">Ação recomendada: </span>
+                      {alert.recommendedAction}
+                    </p>
+                  </div>
+                  {alert.evidence.length > 0 && (
+                    <details className="mt-2">
+                      <summary className="cursor-pointer text-xs font-mono text-muted-foreground hover:text-foreground transition-colors select-none">
+                        Ver evidências
+                      </summary>
+                      <ul className="mt-1.5 space-y-1 px-1">
+                        {alert.evidence.map((line, j) => (
+                          <li key={j} className="text-xs text-muted-foreground font-mono flex items-start gap-2">
+                            <span className={cn("mt-1.5 inline-block w-1 h-1 rounded-full flex-shrink-0", meta.color)} />
+                            {line}
+                          </li>
+                        ))}
+                      </ul>
+                    </details>
+                  )}
                 </div>
-                <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{alert.description}</p>
               </div>
             </div>
           );
@@ -287,7 +311,7 @@ export default function PCHealthSection() {
       </div>
 
       {/* Alertas do Sistema */}
-      <HealthAlertsSection alerts={buildHealthAlerts(health.recommendations)} />
+      <HealthAlertsSection alerts={buildHealthAlertsFromSnapshot(health)} />
 
       {/* Recomendações */}
       {health.recommendations.length > 0 && (
