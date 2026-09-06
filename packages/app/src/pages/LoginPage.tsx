@@ -1,7 +1,8 @@
 import { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { Shield, Mail, Lock, Eye, EyeOff, Loader2, ArrowRight } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, Loader2, ArrowRight } from "lucide-react";
 import { motion } from "framer-motion";
+import { BrandLogo } from "../components/BrandLogo";
 
 interface LoginPageProps {
   onSwitchToRegister: () => void;
@@ -52,7 +53,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
             className="auth-logo"
           >
             <div className="auth-logo-icon">
-              <Shield className="w-8 h-8 text-primary" />
+              <BrandLogo size="md" />
               <div className="auth-logo-pulse" />
             </div>
           </motion.div>
@@ -176,7 +177,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
         transition={{ delay: 0.8 }}
         className="auth-branding"
       >
-        <Shield className="w-3.5 h-3.5 text-primary/50" />
+        <BrandLogo size="sm" />
         <span>Protected by CyberSafe Security</span>
       </motion.div>
     </div>

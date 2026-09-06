@@ -1,5 +1,6 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, Tray, nativeImage } from "electron";
 import path from "node:path";
+import fs from "node:fs";
 import { fileURLToPath } from "node:url";
 import { ServiceClient } from "./service-client.js";
 import type { SecurityEvent } from "@cybersafe/shared-types";
@@ -13,6 +14,41 @@ const client = new ServiceClient();
 const notificationHistory = new Map<string, number>();
 const DEBOUNCE_TIME = 15000; // 15 segundos de silêncio para o mesmo arquivo
 
+// Preferência de ícones: logo da marca (se existir) > ícone padrão.
+function assetsPath(...segments: string[]): string {
+  return path.join(__dirname, "assets", ...segments);
+}
+
+function resolveIconPath(): string {
+  const candidates = [
+    assetsPath("cybersafe-logo.png"),
+    assetsPath("icon.png"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return candidates[candidates.length - 1];
+}
+
+// Em dev, copia o logo da marca (na raiz do repo) para dist/assets se existir.
+function syncBrandingAssets() {
+  if (app.isPackaged) return;
+  try {
+    const repoRoot = path.resolve(app.getAppPath(), "..", "..");
+    const brandingDir = path.join(repoRoot, "assets", "branding");
+    if (!fs.existsSync(brandingDir)) return;
+    fs.mkdirSync(assetsPath(), { recursive: true });
+    for (const file of fs.readdirSync(brandingDir)) {
+      if (file.toLowerCase().endsWith(".png")) {
+        fs.copyFileSync(path.join(brandingDir, file), assetsPath(file));
+        console.log("[Electron] Logo da marca aplicado:", file);
+      }
+    }
+  } catch (error) {
+    console.error("[Electron] Falha ao sincronizar branding:", error);
+  }
+}
+
 // Detecta se foi lançado via auto-start (boot do Windows) para iniciar escondido na tray
 const launchHidden = process.argv.includes("--hidden");
 
@@ -21,6 +57,7 @@ function createWindow() {
     width: 1200,
     height: 820,
     backgroundColor: "#090b12",
+    icon: resolveIconPath(),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -117,21 +154,21 @@ async function updateServiceStatus() {
 
   if (tray) {
     try {
-      const activeIconPath = path.join(__dirname, "assets", "tray-icon-active.png");
-      const warningIconPath = path.join(__dirname, "assets", "tray-icon-warning.png");
-      const defaultIconPath = path.join(__dirname, "assets", "icon.png");
+      const defaultIconPath = resolveIconPath();
 
-      // Usa fs para checar se as imagens específicas existem, senão faz fallback pro icon.png padrão
-      const fs = require("node:fs");
+      // Usa fs para checar se as imagens específicas existem, senão faz fallback pro ícone padrão
       let iconPathToUse = defaultIconPath;
 
-      if (isServiceRunning && fs.existsSync(activeIconPath)) {
-        iconPathToUse = activeIconPath;
-      } else if (!isServiceRunning && fs.existsSync(warningIconPath)) {
-        iconPathToUse = warningIconPath;
+      if (isServiceRunning && fs.existsSync(assetsPath("tray-icon-active.png"))) {
+        iconPathToUse = assetsPath("tray-icon-active.png");
+      } else if (!isServiceRunning && fs.existsSync(assetsPath("tray-icon-warning.png"))) {
+        iconPathToUse = assetsPath("tray-icon-warning.png");
       }
 
-      tray.setImage(nativeImage.createFromPath(iconPathToUse));
+      const image = nativeImage.createFromPath(iconPathToUse);
+      if (!image.isEmpty()) {
+        tray.setImage(image.resize({ width: 16, height: 16 }));
+      }
     } catch (e) {
       console.error("Erro ao atualizar icone", e);
     }
@@ -176,9 +213,8 @@ function updateTrayMenu() {
 }
 
 function createTray() {
-  const iconPath = path.join(__dirname, "assets", "icon.png");
-  const icon = nativeImage.createFromPath(iconPath);
-  tray = new Tray(icon);
+  const image = nativeImage.createFromPath(resolveIconPath());
+  tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image.resize({ width: 16, height: 16 }));
 
   updateTrayMenu();
 
@@ -282,6 +318,7 @@ if (!gotTheLock) {
     }
 
     startServiceProcess();
+    syncBrandingAssets();
     createWindow();
     registerIpc();
     configureAutoStart();

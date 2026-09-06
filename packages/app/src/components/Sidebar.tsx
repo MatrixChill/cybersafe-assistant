@@ -1,5 +1,4 @@
 import {
-  Shield,
   LayoutDashboard,
   AlertTriangle,
   FileSearch,
@@ -20,6 +19,7 @@ import { cn } from "@/lib/utils"
 import { useState } from "react"
 import type { AuthUser } from "../contexts/AuthContext"
 import { canAccess, FEATURES, type FeatureKey } from "../lib/featureControl"
+import { BrandLogo } from "./BrandLogo"
 
 export type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager";
 export type ThemeMode = "dark" | "light";
@@ -80,7 +80,7 @@ export default function Sidebar({
         <div className="flex items-center gap-3">
           <div className="relative shrink-0">
             <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center cyber-border">
-              <Shield className="w-6 h-6 text-primary cyber-glow-text" />
+              <BrandLogo size="sm" />
             </div>
             {/* Pulse indicator */}
             <div className="absolute -top-1 -right-1 w-3 h-3 bg-cyber-green rounded-full cyber-pulse">

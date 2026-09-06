@@ -4,6 +4,8 @@
   "version": "0.1.1",
   "description": "CyberSafe Assistant monorepo",
   "scripts": {
+    "branding": "node scripts/sync-branding.mjs",
+    "predev": "node scripts/sync-branding.mjs",
     "core:build": "npm run build -w @cybersafe/core",
     "dev:app": "npm run dev -w @cybersafe/app",
     "dev:api": "npm run dev -w api",

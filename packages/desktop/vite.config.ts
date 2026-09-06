@@ -2,6 +2,24 @@ import { defineConfig } from 'vite';
 import electron from 'vite-plugin-electron';
 import renderer from 'vite-plugin-electron-renderer';
 import path from 'path';
+import { cpSync, existsSync } from 'node:fs';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+// Electron loads tray/splash assets from dist/assets at runtime, but Vite only
+// emits bundled JS — so copy static assets from src/assets into dist/assets
+// on every build (fixes the invisible tray icon in dev).
+function copyAssets() {
+  return {
+    name: 'cybersafe-copy-assets',
+    writeBundle() {
+      const src = path.resolve(__dirname, 'src', 'assets');
+      const dst = path.resolve(__dirname, 'dist', 'assets');
+      if (existsSync(src)) cpSync(src, dst, { recursive: true });
+    },
+  };
+}
 
 export default defineConfig({
   plugins: [
@@ -19,7 +37,8 @@ export default defineConfig({
                 format: 'esm'
               }
             }
-          }
+          },
+          plugins: [copyAssets()]
         }
       },
       {
