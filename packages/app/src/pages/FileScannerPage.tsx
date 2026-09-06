@@ -1,7 +1,8 @@
-import { FileSearch, Upload, File, Loader2, ShieldAlert, Zap, Folder, X } from "lucide-react"
+import { FileSearch, Upload, File, ShieldAlert, Zap, Folder, X } from "lucide-react"
 import { useState, useCallback, useRef, useEffect } from "react"
 import { cn } from "@/lib/utils"
 import type { ScanState } from "@cybersafe/shared-types"
+import { MatrixAvatar } from "../components/MatrixAvatar"
 
 export default function FileScannerPage() {
   const [isDragging, setIsDragging] = useState(false)
@@ -219,7 +220,7 @@ export default function FileScannerPage() {
         <div className="cyber-border rounded-xl p-6 bg-gradient-to-br from-primary/5 to-transparent">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
-              <Loader2 className="w-5 h-5 text-primary animate-spin" />
+              <MatrixAvatar mood="defender" size="sm" />
               <div>
                 <h3 className="font-mono font-semibold text-foreground">Scan em Andamento</h3>
                 <p className="text-xs text-muted-foreground">{scanProgress.type === "quick" ? "ANÁLISE RÁPIDA" : scanProgress.type === "full" ? "ANÁLISE COMPLETA" : "ANÁLISE PERSONALIZADA"}</p>
@@ -330,13 +331,39 @@ export default function FileScannerPage() {
             </div>
             <div className="bg-black/20 rounded-lg p-4 border border-white/5 text-center">
               <div className="text-xs text-muted-foreground uppercase mb-2">Limpos</div>
-              <div className="text-3xl font-mono font-bold text-cyber-green">{scanProgress.filesScanned - scanProgress.threatsFound}</div>
+              <div className="text-3xl font-mono font-bold text-cyber-green">
+                {scanProgress.status === "cancelled" ? "—" : scanProgress.filesScanned - scanProgress.threatsFound}
+              </div>
             </div>
             <div className="bg-black/20 rounded-lg p-4 border border-white/5 text-center">
               <div className="text-xs text-muted-foreground uppercase mb-2">Ameaças</div>
               <div className="text-3xl font-mono font-bold text-cyber-red">{scanProgress.threatsFound}</div>
             </div>
           </div>
+
+          {scanProgress.status === "cancelled" && (
+            <div className="text-center text-sm font-mono text-cyber-yellow mb-4">
+              {scanProgress.filesScanned} ficheiros analisados antes do cancelamento.
+            </div>
+          )}
+
+          {/* Matrix feedback */}
+          {scanProgress.status === "completed" && scanProgress.threatsFound === 0 && (
+            <div className="flex items-center gap-4 mb-4 p-4 rounded-xl bg-cyber-green/5 border border-cyber-green/20">
+              <MatrixAvatar mood="success" size="sm" />
+              <p className="text-sm text-muted-foreground font-sans">
+                <span className="font-mono text-cyber-green font-bold">Sem ameaças</span> — nada de suspeito entre os {scanProgress.filesScanned} ficheiros analisados. Continua a contar comigo.
+              </p>
+            </div>
+          )}
+          {scanProgress.status === "completed" && scanProgress.threatsFound > 0 && (
+            <div className="flex items-center gap-4 mb-4 p-4 rounded-xl bg-cyber-red/5 border border-cyber-red/20">
+              <MatrixAvatar mood="alert" size="sm" />
+              <p className="text-sm text-muted-foreground font-sans">
+                <span className="font-mono text-cyber-red font-bold">{scanProgress.threatsFound} ameaça(s)</span> detetadas. Revisa os alertas na página <span className="font-mono text-primary">Ameaças</span>.
+              </p>
+            </div>
+          )}
 
           {/* Duration */}
           {scanProgress.startTime && scanProgress.endTime && (

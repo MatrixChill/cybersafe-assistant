@@ -84,33 +84,41 @@ export class HardwareHealthEngine {
     return cpuInfo.cores ?? cpuInfo.logicalCores ?? 0;
   }
 
-  /** Try to detect GPU with fallbacks */
+  /** Try to detect the most relevant GPU (multi-GPU aware). */
   private async detectGpu(): Promise<any> {
     try {
-      // First try: graphics() which returns controllers
       const graphics = await si.graphics().catch(() => null);
-      if (graphics?.controllers && graphics.controllers.length > 0) {
-        const gpu = graphics.controllers[0];
-        return {
-          usagePercent: gpu.utilizationGpu ?? null,
-          vramTotalMb: gpu.vram ?? null,
-          vramUsedMb: null,
-          temperature: gpu.temperatureGpu ?? null,
-          model: gpu.model ?? "Unknown",
-        };
+      const controllers = graphics?.controllers ?? [];
+      if (controllers.length === 0) {
+        return { model: "Não disponível neste sistema", available: false };
       }
 
-      // Second try: osInfo sometimes has GPU info
-      const osInfo = await si.osInfo().catch(() => null);
-      if (osInfo?.distro && osInfo.distro.includes("NVIDIA")) {
-        return { model: "NVIDIA GPU (detected)" };
-      }
+      const mapController = (gpu: any) => ({
+        usagePercent: gpu.utilizationGpu ?? null,
+        vramTotalMb: gpu.vram ?? null,
+        vramUsedMb: gpu.memoryUsed ?? null,
+        temperature: gpu.temperatureGpu ?? null,
+        model: gpu.model?.trim() ? gpu.model : "Dispositivo gráfico",
+        available: true,
+      });
 
-      // No GPU detected
-      return null;
+      const normalized = controllers.map(mapController);
+
+      // Preferência: GPU dedicada (NVIDIA/AMD discrete) quando presente, senão a primeira.
+      const dedicated = normalized.find((g: any) =>
+        /nvidia|geforce|quadro|rtx|radeon rx|radeon vega|rx |gtx|arc|iris|amd/i.test(g.model || "")
+      );
+      const chosen = dedicated || normalized[0];
+
+      // Em sistemas sem GPU reportada como utilizável (ex.: virtualizada), sinaliza corretamente.
+      return {
+        ...chosen,
+        gpus: normalized,
+        available: true,
+      };
     } catch (err) {
       console.error("[Hardware] GPU detection error", err);
-      return null;
+      return { model: "Não disponível neste sistema", available: false };
     }
   }
 
