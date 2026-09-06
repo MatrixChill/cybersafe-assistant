@@ -28,6 +28,11 @@ export default function TaskManagerPage({ processes }: TaskManagerPageProps) {
     setAnalyzingPid(pid);
     setAnalysisResult(null);
     try {
+      if (!window.electronAPI) {
+        alert("Análise de processos indisponível: execute a app a partir do ambiente de trabalho.");
+        setAnalyzingPid(null);
+        return;
+      }
       const result = await window.electronAPI.analyzeProcess(pid);
       setAnalysisResult(result);
     } catch (e) {
@@ -41,6 +46,12 @@ export default function TaskManagerPage({ processes }: TaskManagerPageProps) {
     if (!killingPid) return;
     setIsKilling(true);
     try {
+      if (!window.electronAPI) {
+        alert("Gestão de processos indisponível: execute a app a partir do ambiente de trabalho.");
+        setIsKilling(false);
+        setKillingPid(null);
+        return;
+      }
       const result = await window.electronAPI.killProcessTree(killingPid);
       if (!result.success) {
         alert("Falha ao terminar processo. Pode ser um serviço protegido do sistema.");

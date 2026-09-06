@@ -38,15 +38,16 @@ export default function FileScannerPage() {
 
         // Add log entry for status changes
         if (state.status === "completed" || state.status === "cancelled" || state.status === "failed") {
-          setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Scan ${state.status}: ${state.filesScanned}/${state.progress}% - ${state.threatsFound} threats`])
+          const statusLabel = state.status === "completed" ? "concluída" : state.status === "cancelled" ? "cancelada" : "falhada";
+          setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Análise ${statusLabel}: ${state.filesScanned}/${state.progress}% - ${state.threatsFound} ameaças`])
         } else if (state.filesScanned % 50 === 0) {
           // Log every 50 files to avoid spam
-          setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Scanned ${state.filesScanned} files (${state.progress}%) - ${state.threatsFound} threats`])
+          setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Analisados ${state.filesScanned} ficheiros (${state.progress}%) - ${state.threatsFound} ameaças`])
         }
       }
     })
 
-    scanUnsubscribeRef.current = unsubscribe
+    scanUnsubscribeRef.current = unsubscribe ?? null
     return () => {
       unsubscribe?.()
     }
@@ -101,6 +102,10 @@ export default function FileScannerPage() {
     if (!selectedFile) return
     setError("")
     setScanLog([])
+    if (!window.electronAPI) {
+      setError("Análise de ficheiros indisponível: execute a app a partir do ambiente de trabalho.")
+      return
+    }
 
     try {
       const data = await window.electronAPI.scanFile(selectedFile.path)
@@ -118,6 +123,10 @@ export default function FileScannerPage() {
     setError("")
     setScanLog([])
     setScanProgress(null)
+    if (!window.electronAPI) {
+      setError("Análise rápida indisponível: execute a app a partir do ambiente de trabalho.")
+      return
+    }
 
     try {
       const result = await window.electronAPI.startScan("quick")
@@ -134,6 +143,10 @@ export default function FileScannerPage() {
     setError("")
     setScanLog([])
     setScanProgress(null)
+    if (!window.electronAPI) {
+      setError("Análise completa indisponível: execute a app a partir do ambiente de trabalho.")
+      return
+    }
 
     try {
       const result = await window.electronAPI.startScan("full")
@@ -152,6 +165,10 @@ export default function FileScannerPage() {
     setError("")
     setScanLog([])
     setScanProgress(null)
+    if (!window.electronAPI) {
+      setError("Análise personalizada indisponível: execute a app a partir do ambiente de trabalho.")
+      return
+    }
 
     try {
       const result = await window.electronAPI.startScan("custom", selectedFile.path)
@@ -166,6 +183,7 @@ export default function FileScannerPage() {
 
   const cancelScan = async () => {
     if (!activeScanId) return
+    if (!window.electronAPI) return
     try {
       await window.electronAPI.cancelScan(activeScanId)
       setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Scan cancelado pelo usuário`])
@@ -204,7 +222,7 @@ export default function FileScannerPage() {
               <Loader2 className="w-5 h-5 text-primary animate-spin" />
               <div>
                 <h3 className="font-mono font-semibold text-foreground">Scan em Andamento</h3>
-                <p className="text-xs text-muted-foreground">{scanProgress.type.toUpperCase()} SCAN</p>
+                <p className="text-xs text-muted-foreground">{scanProgress.type === "quick" ? "ANÁLISE RÁPIDA" : scanProgress.type === "full" ? "ANÁLISE COMPLETA" : "ANÁLISE PERSONALIZADA"}</p>
               </div>
             </div>
             <button
@@ -277,8 +295,16 @@ export default function FileScannerPage() {
         )}>
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h3 className="font-mono font-semibold text-foreground">Scan Concluído</h3>
-              <p className="text-xs text-muted-foreground">{scanProgress.type.toUpperCase()} SCAN</p>
+              <h3 className={cn("font-mono font-semibold", scanProgress.status === "completed" ? "text-cyber-green" : scanProgress.status === "cancelled" ? "text-cyber-yellow" : "text-cyber-red")}>
+                {scanProgress.status === "completed"
+                  ? "Análise Concluída"
+                  : scanProgress.status === "cancelled"
+                    ? "Análise Cancelada"
+                    : "Análise Falhada"}
+              </h3>
+              <p className="text-xs text-muted-foreground">
+                {scanProgress.type === "quick" ? "ANÁLISE RÁPIDA" : scanProgress.type === "full" ? "ANÁLISE COMPLETA" : "ANÁLISE PERSONALIZADA"}
+              </p>
             </div>
             <span className={cn(
               "px-3 py-1.5 rounded-lg text-xs font-mono uppercase border",
@@ -288,7 +314,11 @@ export default function FileScannerPage() {
                   ? "bg-cyber-yellow/10 text-cyber-yellow border-cyber-yellow/30"
                   : "bg-cyber-red/10 text-cyber-red border-cyber-red/30"
             )}>
-              {scanProgress.status.toUpperCase()}
+              {scanProgress.status === "completed"
+                ? "Concluída"
+                : scanProgress.status === "cancelled"
+                  ? "Cancelada"
+                  : "Falhada"}
             </span>
           </div>
 

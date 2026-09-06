@@ -190,7 +190,11 @@ export default function PCHealthSection() {
   const [refreshing, setRefreshing] = useState(false);
 
   const fetchHealth = async () => {
-    if (!window.electronAPI) return;
+    if (!window.electronAPI) {
+      setLoading(false);
+      setRefreshing(false);
+      return;
+    }
     setRefreshing(true);
     try {
       const snap = await window.electronAPI.getWindowsHealth();

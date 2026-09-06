@@ -178,13 +178,14 @@ function AuthenticatedApp() {
   }, [fetchSnapshot]);
 
   useEffect(() => {
-    if (!window.electronAPI) return;
+    const api = window.electronAPI;
+    if (!api) return;
 
     // Poll hardware every 10 seconds only if window is visible
     const interval = setInterval(async () => {
       if (document.visibilityState !== 'visible') return;
       try {
-        const snap = await window.electronAPI.getHardwareSnapshot();
+        const snap = await api.getHardwareSnapshot();
         setHardware(snap);
       } catch (e) {
         console.error("Hardware fetch err", e);
@@ -193,7 +194,7 @@ function AuthenticatedApp() {
 
     // Initial fetch
     if (document.visibilityState === 'visible') {
-      window.electronAPI.getHardwareSnapshot().then(setHardware).catch(() => {});
+      api.getHardwareSnapshot().then(setHardware).catch(() => {});
     }
 
     return () => clearInterval(interval);
@@ -202,7 +203,9 @@ function AuthenticatedApp() {
   async function handleClear() {
     setIsClearing(true);
     try {
-      await window.electronAPI.clearThreatEvents();
+      if (window.electronAPI) {
+        await window.electronAPI.clearThreatEvents();
+      }
       await fetchSnapshot();
     } finally {
       setIsClearing(false);
