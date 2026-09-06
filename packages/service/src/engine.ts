@@ -752,6 +752,12 @@ export class ProtectionEngineService {
       this.clients.add(socket);
       let buffer = "";
 
+      // Auto-ativa a proteção quando a primeira UI/desktop se liga ao serviço,
+      // para que processos, ligações e monitorização fiquem ativos de imediato.
+      void this.startProtection().catch((err) =>
+        console.error("[Service] Falha ao auto-iniciar proteção:", err),
+      );
+
       socket.on("data", async (chunk) => {
         buffer += chunk.toString();
         const decoded = decodeMessages(buffer);
