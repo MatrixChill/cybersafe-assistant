@@ -1,16 +1,13 @@
 import { useState, useEffect, useRef } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { Bot, X, Send, Wand2, Sparkles, Shield, Lock, Bug, Mail } from "lucide-react"
+import { X, Send, Wand2, Sparkles, Shield, Lock, Bug, Mail } from "lucide-react"
 import { cn } from "@/lib/utils"
+import { MatrixAvatar } from "./MatrixAvatar"
 
 interface Message {
   role: "user" | "assistant"
   content: string
 }
-
-// Knowledge base removed
-
-// Knowledge base hardcoded was removed. Now using real AI endpoints.
 
 const QUICK_SUGGESTIONS = [
   { label: "Estado", icon: Shield },
@@ -19,7 +16,7 @@ const QUICK_SUGGESTIONS = [
   { label: "Malware", icon: Bug },
 ]
 
-// Offline fallback knowledge base for when the AI API is unavailable
+// Knowledge base offline (fallback quando a API de IA está indisponível).
 const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
   {
     keywords: ["phishing", "email falso", "email suspeito", "link falso"],
@@ -31,7 +28,7 @@ const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
   },
   {
     keywords: ["malware", "virus", "trojan", "ransomware", "worm"],
-    answer: "**Malware** é software malicioso. Tipos comuns:\n\n- **Trojan**: finge ser legítimo para enganar\n- **Ransomware**: criptografa seus arquivos e exige resgate\n- **Spyware**: espi suas atividades\n- **Worm**: propaga-se sozinho pela rede\n\n**Proteção:** Mantenha antivirus atualizado, não baixe software de fontes desconhecidas, e use o **File Scanner** do CyberSafe para analisar arquivos suspeitos."
+    answer: "**Malware** é software malicioso. Tipos comuns:\n\n- **Trojan**: finge ser legítimo para enganar\n- **Ransomware**: criptografa seus arquivos e exige resgate\n- **Spyware**: espi suas atividades\n- **Worm**: propaga-se sozinho pela rede\n\n**Proteção:** Mantenha antivírus atualizado, não baixe software de fontes desconhecidas, e use o **File Scanner** do CyberSafe para analisar arquivos suspeitos."
   },
   {
     keywords: ["vpn", "privacidade", "rede privada"],
@@ -47,11 +44,47 @@ const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
   },
   {
     keywords: ["wifi", "rede", "segurança", "conexão"],
-    answer: "**Segurança em redes WiFi:**\n\n- Use **WPA3** ou no mínimo WPA2 (nunca WEP)\n- Evite redes públicas sem VPN\n- Desconheça **sharing** de arquivos e impressoras\n- Mantenha o **firewall** ativo (verifique no PC Center)\n- Monitore dispositivos conectados pelo **Monitor** do CyberSafe"
+    answer: "**Segurança em redes WiFi:**\n\n- Use **WPA3** ou no mínimo WPA2 (nunca WEP)\n- Evite redes públicas sem VPN\n- Desative **sharing** de arquivos e impressoras\n- Mantenha o **firewall** ativo (verifique no PC Center)\n- Monitore dispositivos conectados pelo **Monitor** do CyberSafe"
   },
   {
     keywords: ["atualização", "update", "patch", "sistema operativo"],
     answer: "**Manter o sistema atualizado** é crucial para segurança:\n\n- Ative **atualizações automáticas** do Windows\n- Atualize navegadores e plugins regularmente\n- Atualize também apps como Java, Adobe, etc.\n- Atualizações corrigem falhas que malwares exploram\n\nVerifique o status do seu sistema no **PC Center** → Windows Health!"
+  },
+  {
+    keywords: ["firewall", "cortafuegos"],
+    answer: "O **Firewall** controla o tráfego que entra e sai do seu PC:\n\n- Bloqueia conexões não autorizadas vindas da internet\n- Permite definir regras por aplicação\n- No Windows, active o **Firewall do Windows Defender**\n\nNo CyberSafe, o **Monitor** mostra as conexões ativas em tempo real. Se vir uma conexão suspeita, pode bloquear o processo associado."
+  },
+  {
+    keywords: ["ransomware", "resgate", "criptografar"],
+    answer: "**Ransomware** é um malware que **criptografa seus ficheiros** e exige resgate para os libertar.\n\n**Como se proteger:**\n\n- **Backups regulares** (regra 3-2-1: 3 cópias, 2 mídias, 1 offsite)\n- Não abra anexos suspeitos\n- Mantenha o sistema e apps atualizados\n- Active a **Proteção de Pasta** do Windows contra acessos não autorizados\n\nSe for vítima: **não pague o resgate** — não há garantia de recuperação e financia o crime."
+  },
+  {
+    keywords: ["backup", "cópia", "copia", "cópia de segurança", "restaurar"],
+    answer: "**Backup** é a sua rede de segurança digital:\n\n- Faça **backups automáticos** em disco externo ou cloud\n- Prefira os **3-2-1**: 3 cópias, 2 tipos de mídia, 1 fora de casa\n- Teste a **restauração** periodicamente (um backup que não restaura não serve)\n- Keep backups **desligados** após o processo para proteger contra ransomware\n\nUm bom backup protege contra malware, falhas de disco e erros humanos."
+  },
+  {
+    keywords: ["adware", "popup", "pop-ups", "publicidade", "spyware"],
+    answer: "**Adware/Spyware** é software que exibe publicidade intrusiva e pode rastrear a sua atividade:\n\n- Instale apenas software dos **sites oficiais**\n- Evite instalar \"acompanhantes\" durante instalações (burlançois)\n- Use um **bloqueador de anúncios** em navegadores\n- Limpe extensões desconhecidas do navegador\n\nO **File Scanner** do CyberSafe pode analisar ficheiros suspeitos antes de os abrir."
+  },
+  {
+    keywords: ["engenharia social", "social engineering", "manipulação", "golpe"],
+    answer: "**Engenharia social** é a arte de manipular pessoas para obter acesso ou informação:\n\n- **Pretexto**: criam uma história falsa para convencer\n- **Baiting**: prometem algo em troca de dados\n- **Tailgating**: seguem alguém para áreas restritas\n- **Oferta irresistível**: prémios, urgência, medo\n\n**Defesa:** desconfie de contacto não solicitado, verifique por outros canais, e nunca forneça senhas ou códigos por telefone/email."
+  },
+  {
+    keywords: ["cookies", "rastreadores", "tracking", "privacidade navegador"],
+    answer: "**Cookies e rastreamento:**\n\n- **Cookies funcionais** são necessários (login, carrinho)\n- **Cookies de rastreio** seguem o seu comportamento entre sites\n- Use modo **privado/incógnito** quando não quiser histórico\n- Instale extensões como **Privacy Badger** ou **uBlock Origin**\n- No navegador, bloqueie cookies de **terceiros**\n\nA privacidade também passa pelo **Monitor** do CyberSafe, que lhe mostra as conexões que o seu PC faz."
+  },
+  {
+    keywords: ["keylogger", "registrador de teclas", "teclas"],
+    answer: "**Keylogger** grava tudo o que digita — senhas, cartões, mensagens:\n\n- Instala-se via malware, email phishing ou software pirata\n- **Sinais:** comportamento lento, entradas de teclado estranhas\n\n**Proteção:**\n\n- Use **gestor de senhas** e autopreenchimento (evita digitar em sites falsos)\n- Ative **2FA** — mesmo com senha roubada, a conta fica protegida\n- Faça análises regulares com o **File Scanner** do CyberSafe\n- Mantenha o sistema atualizado"
+  },
+  {
+    keywords: ["ota", "atualização over the air", "atualização de firmware"],
+    answer: "**Atualizações (OTA/Over-the-Air)** são essenciais:\n\n- Corrigem **vulnerabilidades conhecidas** exploradas por atacantes\n- Sem atualizações, o PC fica exposto mesmo com antivírus\n\n**Boas práticas:**\n\n- Active **atualizações automáticas** do Windows\n- Reinicie o PC após instalar updates\n- Verifique o **histórico de atualizações** no **PC Center** → Windows Health\n\nUm sistema desatualizado é o principal vetor de infeção em 2025+."
+  },
+  {
+    keywords: ["oi", "olá", "ola", "hello", "bom dia", "boa tarde", "boa noite", "tudo bem", "quem és", "quem e", "quem es"],
+    answer: "Olá! Sou o **Matrix**, o assistente virtual do **CyberSafe**.\n\nPosso ajudar-te com **phishing, malware, senhas, privacidade, backups, ransomware** e muito mais sobre segurança digital. Pergunta o que quiseres!"
   },
 ]
 
@@ -71,10 +104,11 @@ export default function AIAssistant() {
   const [messages, setMessages] = useState<Message[]>([
     {
       role: "assistant",
-      content: "Olá! Sou o **CyberSafe AI Assistant**. Pergunte-me sobre segurança digital — phishing, malware, senhas, VPN, ou como usar qualquer funcionalidade do CyberSafe!",
+      content: "Olá! Sou o **Matrix**, o teu assistente de segurança do CyberSafe. Pergunta-me sobre phishing, malware, senhas, privacidade ou como usar qualquer funcionalidade!",
     },
   ])
   const [isTyping, setIsTyping] = useState(false)
+  const [mode, setMode] = useState<"online" | "local">("local")
   const scrollRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -88,7 +122,7 @@ export default function AIAssistant() {
 
     const userMsg = text.trim()
     setInput("")
-    
+
     const userMessage: Message = { role: "user", content: userMsg }
     const newMessages = [...messages, userMessage]
     setMessages(newMessages)
@@ -101,21 +135,23 @@ export default function AIAssistant() {
         body: JSON.stringify({ messages: newMessages.map(m => ({ role: m.role, content: m.content })) })
       })
       const data = await response.json()
-      
+
       if (!response.ok) {
         throw new Error(data.message || "Erro na API de IA")
       }
-      
+
+      setMode("online")
       setMessages((prev) => [...prev, { role: "assistant", content: data.response }])
     } catch (error) {
       console.error(error)
-      // Offline fallback: try to answer from the local knowledge base
+      // Offline fallback: tenta responder pela base de conhecimento local.
       const offlineAnswer = offlineReply(userMsg)
       if (offlineAnswer) {
         setMessages((prev) => [...prev, { role: "assistant", content: offlineAnswer }])
       } else {
-        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Estou temporariamente indisponível. Tenta novamente mais tarde ou consulta as dicas na aba **Dashboard**." }])
+        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Estou temporariamente **offline**. Não encontrei uma resposta local para essa pergunta. Tenta novamente mais tarde, ou consulta as dicas na aba **Dashboard**." }])
       }
+      setMode("local")
     } finally {
       setIsTyping(false)
     }
@@ -152,13 +188,14 @@ export default function AIAssistant() {
             {/* Header */}
             <div className="p-4 border-b border-primary/20 bg-primary/5 flex items-center justify-between">
               <div className="flex items-center gap-3">
-                <div className="w-8 h-8 rounded-full bg-primary/20 border border-primary/40 flex items-center justify-center relative">
-                  <Bot className="w-5 h-5 text-primary" />
-                  <div className="absolute -top-0.5 -right-0.5 w-2.5 h-2.5 bg-cyber-green rounded-full border-2 border-card cyber-pulse" />
-                </div>
+                <MatrixAvatar mood="avatar" size="sm" rounded />
                 <div>
-                  <h3 className="text-xs font-bold font-mono text-primary uppercase tracking-widest">CyberSafe AI</h3>
-                  <p className="text-[9px] text-muted-foreground font-mono uppercase tracking-tighter">18 tópicos • Online / Offline</p>
+                  <h3 className="text-xs font-bold font-mono text-primary uppercase tracking-widest">Matrix</h3>
+                  <p className="text-[9px] text-muted-foreground font-mono uppercase tracking-tighter">
+                    {mode === "online"
+                      ? "MODO ONLINE"
+                      : "MODO LOCAL"}
+                  </p>
                 </div>
               </div>
               <button
@@ -232,7 +269,7 @@ export default function AIAssistant() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                  placeholder="Pergunte sobre segurança..."
+                  placeholder="Pergunta sobre segurança..."
                   className="w-full bg-background/50 border border-primary/30 rounded-xl pl-4 pr-10 py-2.5 text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
                 />
                 <button
@@ -254,15 +291,16 @@ export default function AIAssistant() {
         whileTap={{ scale: 0.95 }}
         onClick={() => setIsOpen(!isOpen)}
         className={cn(
-          "w-14 h-14 rounded-full flex items-center justify-center shadow-2xl relative transition-all duration-500",
+          "w-14 h-14 rounded-full flex items-center justify-center shadow-2xl relative transition-all duration-500 overflow-hidden",
           isOpen ? "bg-card cyber-border rotate-90" : "bg-primary shadow-primary/30"
         )}
+        aria-label="Abrir assistente Matrix"
       >
         {isOpen ? (
           <X className="w-6 h-6 text-primary" />
         ) : (
           <>
-            <Bot className="w-8 h-8 text-primary-foreground" />
+            <MatrixAvatar mood="avatar" size="sm" rounded className="w-full h-full" />
             <div className="absolute -top-1 -right-1 w-5 h-5 bg-cyber-green rounded-full border-2 border-white flex items-center justify-center text-[10px] font-bold text-white shadow-lg">
               <Sparkles className="w-3 h-3" />
             </div>
