@@ -20,6 +20,7 @@ import SimulatorPage from "./pages/SimulatorPage";
 import TaskManagerPage from "./pages/TaskManagerPage";
 import PCCenterPage from "./pages/PCCenterPage";
 import ReportsPage from "./pages/ReportsPage";
+import OtimizarPage from "./pages/OtimizarPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import AIAssistant from "./components/AIAssistant";
@@ -229,6 +230,8 @@ function AuthenticatedApp() {
         return <MonitorPage events={events} processes={processes} connections={connections} protection={protection} quarantine={quarantine} />;
       case "simulator":
         return <SimulatorPage />;
+      case "otimizar":
+        return <OtimizarPage hardware={hardware} />;
       case "reports":
         if (!canAccess(FEATURES.REPORTS, accountType, plan)) {
           return <DashboardPage dashboard={dashboard} isLoading={isLoading} hardware={hardware} />;

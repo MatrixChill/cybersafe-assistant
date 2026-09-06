@@ -14,6 +14,7 @@ import {
   Sparkles,
   ListTodo,
   Monitor,
+  Wrench,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
@@ -21,7 +22,7 @@ import type { AuthUser } from "../contexts/AuthContext"
 import { canAccess, FEATURES, type FeatureKey } from "../lib/featureControl"
 import { BrandLogo } from "./BrandLogo"
 
-export type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager";
+export type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager" | "otimizar";
 export type ThemeMode = "dark" | "light";
 export type AccentMode = "blue" | "purple" | "pink";
 
@@ -46,6 +47,7 @@ const navItems: { id: Page; label: string; icon: typeof LayoutDashboard; feature
   { id: "taskmanager", label: "Task Manager", icon: ListTodo, feature: FEATURES.MONITOR_BASIC, proOnly: false },
   { id: "monitor", label: "Monitor", icon: Activity, feature: FEATURES.MONITOR_BASIC, proOnly: false },
   { id: "simulator", label: "Simulador", icon: Zap, feature: FEATURES.SIMULATOR, proOnly: false },
+  { id: "otimizar", label: "Otimizar", icon: Wrench, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
   { id: "reports", label: "Relatórios", icon: FileBarChart, feature: FEATURES.REPORTS, proOnly: true },
 ];
 

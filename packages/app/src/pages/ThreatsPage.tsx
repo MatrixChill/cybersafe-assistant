@@ -12,6 +12,7 @@ interface ThreatsPageProps {
 export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPageProps) {
   const [searchQuery, setSearchQuery] = useState("")
   const [filterSeverity, setFilterSeverity] = useState("all")
+  const [showConfirmClear, setShowConfirmClear] = useState(false)
 
   const filteredThreats = events.filter(threat => {
     const matchesSearch = threat.domain.toLowerCase().includes(searchQuery.toLowerCase()) || 
@@ -64,7 +65,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
             <span className="text-sm font-mono text-foreground font-bold">{events.length}</span>
           </div>
           <button 
-            onClick={onClear}
+            onClick={() => setShowConfirmClear(true)}
             disabled={isClearing || events.length === 0}
             className="flex items-center gap-2 px-4 py-2 bg-destructive/10 border border-destructive/30 text-destructive font-mono text-xs rounded-lg hover:bg-destructive/20 transition-all disabled:opacity-50"
           >
@@ -223,6 +224,42 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
           </div>
         </div>
       </div>
+
+      {/* Clear Confirmation Modal */}
+      {showConfirmClear && (
+        <div className="fixed inset-0 z-[90] flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm">
+          <div className="w-full max-w-sm cyber-border border-destructive/40 bg-card rounded-2xl shadow-lg p-6 relative overflow-hidden">
+            <div className="flex items-center gap-4">
+              <div className="w-12 h-12 rounded-xl bg-destructive/15 border border-destructive/30 flex items-center justify-center flex-shrink-0">
+                <AlertTriangle className="w-6 h-6 text-destructive" />
+              </div>
+              <div>
+                <h2 className="text-sm font-bold font-mono text-foreground uppercase tracking-wide">
+                  Limpar Logs?
+                </h2>
+                <p className="text-xs text-muted-foreground mt-1">
+                  Esta ação irá apagar permanentemente o histórico de {events.length} ameaça(s) registadas.
+                </p>
+              </div>
+            </div>
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => setShowConfirmClear(false)}
+                className="flex-1 px-4 py-2.5 text-xs font-mono font-bold text-muted-foreground bg-secondary border border-border rounded-lg hover:text-foreground transition-all"
+              >
+                Cancelar
+              </button>
+              <button
+                onClick={() => { setShowConfirmClear(false); onClear() }}
+                disabled={isClearing}
+                className="flex-1 px-4 py-2.5 text-xs font-mono font-bold text-white bg-destructive rounded-lg hover:bg-destructive/80 transition-all disabled:opacity-50"
+              >
+                {isClearing ? "A LIMPAR..." : "Sim, Limpar"}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }
