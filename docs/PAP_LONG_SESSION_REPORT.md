@@ -141,3 +141,65 @@ O CyberSafe Assistant está **pronto para demonstração** no âmbito da PAP: ab
 **Método de demonstração recomendado:** executar `npm run dev` na raiz, aguardar a janela do Electron abrir, percorrer Dashboard → PC Center → Task Manager → Monitor → Simulador.
 
 **Documento:** `docs/PAP_LONG_SESSION_REPORT.md` (este relatório).
+
+---
+
+## 10. Segunda sessão-longa: identidade, polimento UX e packaging (06/09/2026)
+
+Sessão dedicada ao branding (identidade "Matrix"), temas, IA assistente, scanner com cancelamento e GPU, ação real da página "Otimizar", export PDF em Relatórios, Monitor legível, packaging Electron instalável e medição de arranque.
+
+### 10.1 Estado por fase
+
+| # | Fase | Resultado |
+|---|------|-----------|
+| 7 | Branding/Assets | OK — logótipo "CyberSafe", ícone/favicon, branding gráfico (Windows) |
+| 8 | Identidade visual Matrix | OK — MatrixAvatar, plano de fundo matrix, fonte Orbitron |
+| 9 | Temas | OK — tema claro/escuro + 4 cores de accent |
+| 10 | IA assistente | OK — IA Matrix, modos ONLINE/LOCAL, streaming com IA_MATRIX |
+| 11 | Scanner + GPU | OK — cancelamento de scans, deteção multi-GPU, runtime GPU |
+| 12 | Monitor | OK — eventos legíveis (ícones, rótulos PT, resumo) |
+| 14 | Otimizar | OK — ações reais (proteção, firewall, definições, disco) com loading/erro |
+| 15 | Relatórios | OK — export PDF real via janela de impressão |
+| 16 | Perf | PARCIAL — dev ≈1232 ms; produção com pipe inacessível (ver 10.4) |
+| 17 | Packaging | PARCIAL — build Windows OK; serviço do exe embalado falha pós-init (ver 10.4) |
+| 18 | DevTools | OK — só abrem com `!app.isPackaged` |
+| 20 | Documentação | OK — este relatório |
+| — | Commits | pendente |
+
+### 10.2 Funcionalidades novas
+
+- **Identidade Matrix**: avatar com grelha animada em CSS (`MatrixAvatar.tsx`), fundo matrix, tipografia Orbitron.
+- **Temas**: claro/escuro persistidos + 4 accents (verde matrix, cyan, violeta, laranja).
+- **IA**: modo ONLINE (IA_MATRIX) vs LOCAL (fallback com respostas sistémicas); streaming de tokens.
+- **Scanner**: cancelamento de Quick/Full Scan com `requestId`; deteção de múltiplas GPUs; tempo de execução por fase.
+- **Otimizar**: botões executam APIs reais (`windowsUpdateDefinitions`, `app.startScan`, `windowsHealthSnapshot`), com estados de loading e erros apresentados (ex.: scanner a correr → não pode iniciar wipe).
+- **Relatórios**: "Exportar PDF" gera relatório PT e abre diálogo nativo de impressão ("Guardar como PDF").
+- **Monitor**: eventos do pipe apresentados com ícone + hora + chip + resumo legível (antes: JSON cru).
+
+### 10.3 Packaging
+
+- `packages/app/vite.config.ts`: `base: './'` — o build gera caminhos relativos para funcionar com `loadFile` em produção.
+- `packages/desktop/package.json`: config electron-builder (appId `com.cybersafe.assistant`, target `nsis`, output `release/`) e scripts `dist`/`dist:dir` (com `scripts/stage-renderer.mjs` a compilar a app e copiar o renderer).
+- Electron fixado a `33.4.11` (hoisting do workspace impedia o electron-builder de resolver a versão).
+- `npm run dist:dir` **OK** → `packages/desktop/release/win-unpacked/CyberSafe Assistant.exe` (installer NSIS disponível via `dist`).
+- Estrutura `app.asar` verificada (renderer + `node_modules/@cybersafe/{core,service,shared-types,native-windows}`).
+
+### 10.4 Limitações conhecidas (segunda sessão)
+
+- **Serviço no executável embalado (PARCIAL)**: o spawn do serviço pelo main do Electron (com `ELECTRON_RUN_AS_NODE=1`) funciona quandо invocado diretamente (`PIPE CONNECT OK`), mas dentro do app embalado termina com código 1 pouco depois de "fully initialized" e sem log de erro — o pipe fica inacessível em produção e a app recorre a retries. O modo de desenvolvimento (`npm run dev`) fica 100% funcional. Ponto de melhoria para versão seguinte.
+- **Motor YARA** mantém fallback esperado ("Desativando motor YARA") quando `@litko/yara-x` não está disponível.
+- **Relatórios PDF** dependem do diálogo do navegador/Electron ("Salvar como PDF").
+- **Ação de limpeza de disco** no Otimizar está ligada ao scanner (executa scan quando o scanner está livre), não à eliminação direta de ficheiros.
+
+### 10.5 Verificação executada
+
+| Item | Resultado |
+|------|-----------|
+| `npm run typecheck` (raiz) | OK (0 erros) |
+| Lint app (ficheiros tocados) | OK (0 erros) |
+| Quick/Full Scan com cancelamento | OK |
+| Deteção GPU multi | OK (2 GPUs detetadas) |
+| Export PDF (Relatórios) | OK |
+| `npm run dist:dir` (packaging) | OK — exe 188 MB no win-unpacked |
+| Arranque dev (probe pipe) | OK — serviço pronto ≈1232 ms |
+| Arranque produção (probe pipe) | PARCIAL — timeout (serviço do exe embalado termina) |
