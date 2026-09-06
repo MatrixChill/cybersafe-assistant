@@ -11,6 +11,14 @@ interface ReportsPageProps {
 
 type SeverityFilter = "all" | "low" | "medium" | "high" | "critical";
 
+const severityLabel: Record<string, string> = {
+  all: "Todas",
+  critical: "Crítica",
+  high: "Alta",
+  medium: "Média",
+  low: "Baixa",
+};
+
 export default function ReportsPage({ events, threats, quarantine }: ReportsPageProps) {
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
   const [showExportToast, setShowExportToast] = useState(false);
@@ -66,7 +74,7 @@ export default function ReportsPage({ events, threats, quarantine }: ReportsPage
         {[
           { label: "Eventos Totais", value: stats.totalEvents, icon: Activity, color: "text-primary" },
           { label: "Ameaças", value: stats.totalThreats, icon: AlertTriangle, color: stats.totalThreats > 0 ? "text-cyber-yellow" : "text-cyber-green" },
-          { label: "High + Critical", value: stats.highCritical, icon: AlertTriangle, color: stats.highCritical > 0 ? "text-cyber-red" : "text-cyber-green" },
+          { label: "Alta + Crítica", value: stats.highCritical, icon: AlertTriangle, color: stats.highCritical > 0 ? "text-cyber-red" : "text-cyber-green" },
           { label: "Em Quarentena", value: stats.quarantined, icon: Shield, color: "text-cyber-cyan" },
           { label: "Fontes Ativas", value: stats.sources.length, icon: ArrowUpRight, color: "text-primary" },
         ].map(({ label, value, icon: Icon, color }) => (
@@ -95,7 +103,7 @@ export default function ReportsPage({ events, threats, quarantine }: ReportsPage
                 : "bg-secondary/50 text-muted-foreground border-white/5 hover:bg-white/5"
             )}
           >
-            {f === "all" ? "Todas" : f.toUpperCase()}
+            {severityLabel[f as SeverityFilter] ?? f.toUpperCase()}
           </button>
         ))}
         <span className="text-xs text-muted-foreground font-mono ml-auto">
@@ -131,7 +139,7 @@ export default function ReportsPage({ events, threats, quarantine }: ReportsPage
                   </div>
                   <div className="col-span-2">
                     <span className={cn("text-[10px] font-mono uppercase px-2 py-1 rounded border", severityColor(threat.severity))}>
-                      {threat.severity}
+                      {severityLabel[threat.severity] ?? threat.severity}
                     </span>
                   </div>
                   <div className="col-span-3 text-xs font-mono text-foreground truncate">{threat.domain || threat.source}</div>

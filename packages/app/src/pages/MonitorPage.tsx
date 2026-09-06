@@ -24,10 +24,10 @@ export default function MonitorPage({ events, processes, connections, protection
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold font-mono tracking-tight">
-            Protection <span className="text-primary">Monitor</span>
+            Monitor de <span className="text-primary">Proteção</span>
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Telemetria em tempo real do service e do event bus
+            Telemetria em tempo real do serviço e do barramento de eventos
           </p>
         </div>
 
@@ -94,7 +94,7 @@ export default function MonitorPage({ events, processes, connections, protection
                 <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">PID</th>
                 <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">CPU</th>
                 <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">Memória</th>
-                <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">Trust</th>
+                <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">Confiança</th>
               </tr>
             </thead>
             <tbody>
@@ -116,9 +116,9 @@ export default function MonitorPage({ events, processes, connections, protection
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-mono font-semibold text-foreground flex items-center gap-2">
             <Globe className="w-4 h-4 text-primary" />
-            Network Containment Layer
+            Camada de Contenção de Rede
           </h3>
-          <span className="text-xs font-mono text-muted-foreground">Basic containment only</span>
+          <span className="text-xs font-mono text-muted-foreground">Contenção básica apenas</span>
         </div>
 
         <div className="space-y-2">

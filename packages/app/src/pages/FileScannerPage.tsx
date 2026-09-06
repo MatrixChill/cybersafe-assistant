@@ -123,7 +123,7 @@ export default function FileScannerPage() {
       const result = await window.electronAPI.startScan("quick")
       if (result.success) {
         setActiveScanId(result.id)
-        setScanLog([`[${new Date().toLocaleTimeString()}] Quick Scan iniciado (Downloads, Desktop, Documents, Startup)`])
+        setScanLog([`[${new Date().toLocaleTimeString()}] Análise rápida iniciada (Downloads, Ambiente de Trabalho, Documentos, Arranque)`])
       }
     } catch (err: any) {
       setError("Erro ao iniciar scan: " + err.message)
@@ -139,7 +139,7 @@ export default function FileScannerPage() {
       const result = await window.electronAPI.startScan("full")
       if (result.success) {
         setActiveScanId(result.id)
-        setScanLog([`[${new Date().toLocaleTimeString()}] Full System Scan iniciado (diretório HOME + ProgramData)`])
+        setScanLog([`[${new Date().toLocaleTimeString()}] Análise completa iniciada (diretório HOME + ProgramData)`])
       }
     } catch (err: any) {
       setError("Erro ao iniciar scan: " + err.message)
@@ -157,7 +157,7 @@ export default function FileScannerPage() {
       const result = await window.electronAPI.startScan("custom", selectedFile.path)
       if (result.success) {
         setActiveScanId(result.id)
-        setScanLog([`[${new Date().toLocaleTimeString()}] Custom Scan iniciado para: ${selectedFile.path}`])
+        setScanLog([`[${new Date().toLocaleTimeString()}] Análise personalizada iniciada para: ${selectedFile.path}`])
       }
     } catch (err: any) {
       setError("Erro ao iniciar scan: " + err.message)
@@ -189,10 +189,10 @@ export default function FileScannerPage() {
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold font-mono tracking-tight">
-          File <span className="text-primary">Scanner</span>
+          Scanner de <span className="text-primary">Ficheiros</span>
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Análise real-time de arquivos com progresso em tempo real
+          Análise de arquivos com progresso em tempo real
         </p>
       </div>
 
@@ -384,13 +384,13 @@ export default function FileScannerPage() {
                     onClick={(e) => { e.stopPropagation(); startQuickScan(); }}
                     className="px-6 py-2.5 bg-cyber-cyan/20 text-cyber-cyan border border-cyber-cyan/50 font-mono text-sm rounded-lg hover:bg-cyber-cyan/30 transition-all cyber-glow"
                   >
-                    Quick Scan
+                    Análise Rápida
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); startFullScan(); }}
                     className="px-6 py-2.5 bg-cyber-magenta/20 text-cyber-magenta border border-cyber-magenta/50 font-mono text-sm rounded-lg hover:bg-cyber-magenta/30 transition-all cyber-glow"
                   >
-                    Full Scan
+                    Análise Completa
                   </button>
                 </>
               ) : (
@@ -399,13 +399,13 @@ export default function FileScannerPage() {
                     onClick={(e) => { e.stopPropagation(); startScan(); }}
                     className="px-6 py-2.5 bg-primary text-primary-foreground font-mono text-sm rounded-lg hover:bg-primary/90 transition-all cyber-glow"
                   >
-                    Scan Arquivo
+                    Analisar Arquivo
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); startCustomScan(); }}
                     className="px-6 py-2.5 bg-cyber-cyan/20 text-cyber-cyan border border-cyber-cyan/50 font-mono text-sm rounded-lg hover:bg-cyber-cyan/30 transition-all"
                   >
-                    Scan Pasta Recursivo
+                    Analisar Pasta
                   </button>
                   <button
                     onClick={(e) => { e.stopPropagation(); clear(); }}

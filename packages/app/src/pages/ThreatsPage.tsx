@@ -62,8 +62,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
         <div className="flex items-center gap-3">
           <div className="flex items-center gap-2 px-4 py-2 bg-secondary rounded-lg">
             <span className="text-sm font-mono text-muted-foreground">Total:</span>
-            <span className="text-sm font-mono text-foreground font-bold">{events.length}</span>
-          </div>
+            <span className="text-sm font-mono text-foreground font-bold">{events.length}</span>          </div>
           <button 
             onClick={() => setShowConfirmClear(true)}
             disabled={isClearing || events.length === 0}
@@ -133,7 +132,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
                     
                     <div className="flex items-center gap-3 mt-3">
                       <span className={`px-2 py-1 rounded text-xs font-mono border ${getSeverityColor(threat.severity)}`}>
-                        {threat.severity.toUpperCase()}
+                        {threat.severity === "critical" ? "Crítica" : threat.severity === "high" ? "Alta" : threat.severity === "medium" ? "Média" : "Baixa"}
                       </span>
                       {threat.rulesTriggered.map(rule => (
                         <span key={rule} className="px-2 py-1 rounded text-xs font-mono bg-secondary text-muted-foreground">
@@ -142,7 +141,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
                       ))}
                       {threat.rulesTriggered.length === 0 && (
                           <span className="px-2 py-1 rounded text-xs font-mono bg-cyber-green/5 text-cyber-green border border-cyber-green/20">
-                            Procedural Pass
+                            Aprovação Procedural
                           </span>
                       )}
                     </div>
@@ -151,7 +150,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
                 
                 <div className="flex flex-col items-end gap-2">
                   <div className="flex items-center gap-2 font-mono text-xs">
-                    <span className="text-muted-foreground">Confidence:</span>
+                    <span className="text-muted-foreground">Confiança:</span>
                     <span className="text-foreground font-bold">{Math.round(threat.confidence * 100)}%</span>
                   </div>
                   <div className="flex items-center gap-1 text-xs text-muted-foreground font-mono">
@@ -184,7 +183,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
             {events.length}
           </div>
           <div className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
-            Total Threats
+            Ameaças Totais
           </div>
         </div>
 
@@ -208,7 +207,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
             {events.filter(e => e.source === 'extension').length}
           </div>
           <div className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
-            Web Origins
+            Origens Web
           </div>
         </div>
 
@@ -220,7 +219,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
             {events.filter(e => e.source === 'dashboard' || e.source === 'download-monitor').length}
           </div>
           <div className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
-            Local Origins
+            Origens Locais
           </div>
         </div>
       </div>

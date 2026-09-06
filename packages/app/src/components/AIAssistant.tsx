@@ -13,7 +13,7 @@ interface Message {
 // Knowledge base hardcoded was removed. Now using real AI endpoints.
 
 const QUICK_SUGGESTIONS = [
-  { label: "Status", icon: Shield },
+  { label: "Estado", icon: Shield },
   { label: "Phishing", icon: Mail },
   { label: "Senhas", icon: Lock },
   { label: "Malware", icon: Bug },
@@ -103,7 +103,7 @@ export default function AIAssistant() {
       const data = await response.json()
       
       if (!response.ok) {
-        throw new Error(data.message || "Error na API IA")
+        throw new Error(data.message || "Erro na API de IA")
       }
       
       setMessages((prev) => [...prev, { role: "assistant", content: data.response }])

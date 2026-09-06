@@ -59,7 +59,7 @@ export default function TaskManagerPage({ processes }: TaskManagerPageProps) {
       <div className="flex items-center justify-between shrink-0">
         <div>
           <h1 className="text-2xl font-bold font-mono tracking-tight">
-            Task <span className="text-primary">Manager</span>
+            Gestor de <span className="text-primary">Tarefas</span>
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
             Gestão avançada de processos e análise em tempo real
@@ -189,7 +189,9 @@ export default function TaskManagerPage({ processes }: TaskManagerPageProps) {
                   {analysisResult.recommendation === "dangerous" && <AlertTriangle className="w-4 h-4" />}
                   {analysisResult.recommendation === "suspicious" && <AlertCircle className="w-4 h-4" />}
                   {analysisResult.recommendation === "safe" && <Shield className="w-4 h-4" />}
-                  {analysisResult.recommendation}
+                  {analysisResult.recommendation === "dangerous" ? "Perigoso"
+                    : analysisResult.recommendation === "suspicious" ? "Suspeito"
+                      : "Seguro"}
                 </div>
               </div>
 
@@ -202,7 +204,7 @@ export default function TaskManagerPage({ processes }: TaskManagerPageProps) {
                         <span className={analysisResult.fileScan.overallSeverity === "low" ? "text-cyber-green" : "text-cyber-red"}>{analysisResult.fileScan.overallSeverity.toUpperCase()}</span>
                      </div>
                      <div className="flex justify-between items-center text-sm font-mono">
-                        <span className="text-muted-foreground">Risk Score</span>
+                        <span className="text-muted-foreground">Pontuação de Risco</span>
                         <span>{analysisResult.fileScan.riskScore}/100</span>
                      </div>
                      {analysisResult.fileScan.rulesTriggered.length > 0 && (

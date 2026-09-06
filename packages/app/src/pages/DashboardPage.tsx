@@ -32,7 +32,7 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
     return (
       <div className="p-8 h-full flex flex-col items-center justify-center font-mono text-primary animate-pulse space-y-4">
         <Shield className="w-12 h-12" />
-        <span className="tracking-[0.3em]">SYNCING_PROTECTION_STATE...</span>
+        <span className="tracking-[0.3em]">A Sincronizar Estado de Proteção...</span>
       </div>
     );
   }
@@ -42,10 +42,10 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold font-mono tracking-tight">
-            System <span className="text-primary">Status</span>
+            Status do <span className="text-primary">Sistema</span>
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Telemetria real do service de protecao
+            Telemetria real do serviço de proteção
           </p>
         </div>
 
@@ -69,8 +69,8 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
                   : "text-cyber-red",
             )}>
               {dashboard.systemStatus === "safe" ? "Sistema Protegido"
-                : dashboard.systemStatus === "attention" ? "Atencao Necessaria"
-                  : "Protecao Degradada"}
+                : dashboard.systemStatus === "attention" ? "Atenção Necessária"
+                  : "Proteção Degradada"}
             </span>
           </div>
         </div>
@@ -80,7 +80,7 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
         <div className="lg:col-span-1 cyber-border rounded-xl p-6 relative overflow-hidden group">
           <div className="absolute inset-0 bg-gradient-to-br from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="text-xs font-mono text-muted-foreground uppercase tracking-wider mb-4">
-            Protection Score
+            Pontuação de Proteção
           </div>
           <div className="flex items-center justify-center">
             <div className="relative w-32 h-32">
@@ -107,15 +107,15 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
               <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-4xl font-bold font-mono text-foreground">{displayScore}</span>
                 <span className={cn("text-xs font-mono uppercase tracking-wider", isAtRisk ? "text-cyber-red" : "text-cyber-green")}>
-                  {isAtRisk ? "At Risk" : "Healthy"}
+                  {isAtRisk ? "Em Risco" : "Protegido"}
                 </span>
               </div>
             </div>
           </div>
         </div>
 
-        <StatCard label="Eventos" value={dashboard.totalEvents.toString()} description="Eventos de seguranca persistidos" icon={Activity} color="cyan" />
-        <StatCard label="Ameacas Severas" value={dashboard.highSeverityEvents.toString()} description="High + Critical" icon={AlertTriangle} color={dashboard.highSeverityEvents > 0 ? "red" : "green"} />
+        <StatCard label="Eventos" value={dashboard.totalEvents.toString()} description="Eventos de segurança persistidos" icon={Activity} color="cyan" />
+        <StatCard label="Ameaças Severas" value={dashboard.highSeverityEvents.toString()} description="Alta + Crítica" icon={AlertTriangle} color={dashboard.highSeverityEvents > 0 ? "red" : "green"} />
         <StatCard label="Risco de Downloads" value={dashboard.downloadRisk.toUpperCase()} description="Baseado em eventos reais" icon={Download} color={dashboard.downloadRisk === "low" ? "green" : dashboard.downloadRisk === "medium" ? "yellow" : "red"} isText />
       </div>
 
@@ -171,9 +171,9 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
           <div className="flex items-center justify-between mb-6">
             <h3 className="font-mono font-semibold text-foreground flex items-center gap-2">
               <Shield className="w-4 h-4 text-primary" />
-              Ameacas Recentes
+              Ameaças Recentes
             </h3>
-            <button className="text-xs font-mono text-primary hover:text-primary/80 transition-colors">Feed real</button>
+            <button className="text-xs font-mono text-primary hover:text-primary/80 transition-colors">Feed em tempo real</button>
           </div>
 
           <div className="space-y-3">
@@ -182,8 +182,8 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
                 <div className="w-16 h-16 rounded-full bg-primary/10 border border-primary/30 flex items-center justify-center mb-4">
                   <Shield className="w-8 h-8 text-primary" />
                 </div>
-                <p className="text-muted-foreground text-sm">Nenhuma ameaca detetada ainda.</p>
-                <p className="text-primary text-sm font-mono mt-1">Motor em observacao</p>
+                <p className="text-muted-foreground text-sm">Nenhuma ameaça detetada ainda.</p>
+                <p className="text-primary text-sm font-mono mt-1">Motor em observação</p>
               </div>
             ) : (
               dashboard.recentThreats.slice(0, 4).map((threat, index) => (
@@ -220,7 +220,7 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
           onClick={async () => {
             if (window.electronAPI) {
               const res = await window.electronAPI.startScan("quick");
-              if (res.success) alert("Quick scan iniciado! ID: " + res.id);
+              if (res.success) alert("Análise rápida iniciada! ID: " + res.id);
             }
           }}
           className="cyber-border rounded-xl p-6 flex flex-col items-center justify-center gap-4 hover:bg-white/5 transition-colors group">
@@ -228,7 +228,7 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
             <Search className="w-6 h-6 text-cyber-cyan" />
           </div>
           <div className="text-center">
-            <h3 className="font-mono font-semibold text-foreground">Quick Scan</h3>
+            <h3 className="font-mono font-semibold text-foreground">Análise Rápida</h3>
             <p className="text-xs text-muted-foreground mt-1">Verifica áreas críticas e memória</p>
           </div>
         </button>
@@ -237,7 +237,7 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
           onClick={async () => {
             if (window.electronAPI) {
               const res = await window.electronAPI.startScan("full");
-              if (res.success) alert("Full scan iniciado! ID: " + res.id);
+              if (res.success) alert("Análise completa iniciada! ID: " + res.id);
             }
           }}
           className="cyber-border rounded-xl p-6 flex flex-col items-center justify-center gap-4 hover:bg-white/5 transition-colors group">
@@ -245,7 +245,7 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
             <Play className="w-6 h-6 text-cyber-yellow" />
           </div>
           <div className="text-center">
-            <h3 className="font-mono font-semibold text-foreground">Full Scan</h3>
+            <h3 className="font-mono font-semibold text-foreground">Análise Completa</h3>
             <p className="text-xs text-muted-foreground mt-1">Verifica todo o sistema (demorado)</p>
           </div>
         </button>
@@ -256,7 +256,7 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
               const path = await window.electronAPI.openFileDialog();
               if (path) {
                 const res = await window.electronAPI.startScan("custom", path);
-                if (res.success) alert("Custom scan iniciado em " + path);
+                if (res.success) alert("Análise personalizada iniciada em " + path);
               }
             }
           }}
@@ -265,7 +265,7 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
             <FolderSearch className="w-6 h-6 text-primary" />
           </div>
           <div className="text-center">
-            <h3 className="font-mono font-semibold text-foreground">Custom Scan</h3>
+            <h3 className="font-mono font-semibold text-foreground">Análise Personalizada</h3>
             <p className="text-xs text-muted-foreground mt-1">Escolha uma pasta específica</p>
           </div>
         </button>
@@ -278,18 +278,18 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
               <Shield className="w-6 h-6 text-primary" />
             </div>
             <div>
-              <h3 className="font-mono font-semibold text-foreground">Protecao Residente</h3>
+              <h3 className="font-mono font-semibold text-foreground">Proteção Residente</h3>
               <div className="flex items-center gap-2 mt-1">
                 <Clock className="w-3 h-3 text-muted-foreground" />
                 <span className="text-xs text-muted-foreground">
-                  Definitions: {dashboard.engineHealth?.definitionsUpdatedAt ? new Date(dashboard.engineHealth.definitionsUpdatedAt).toLocaleString() : "desconhecido"}
+                  Definições: {dashboard.engineHealth?.definitionsUpdatedAt ? new Date(dashboard.engineHealth.definitionsUpdatedAt).toLocaleString() : "desconhecido"}
                 </span>
               </div>
             </div>
           </div>
 
           <button className="px-6 py-3 bg-primary text-primary-foreground font-mono text-sm rounded-lg hover:bg-primary/90 transition-all cyber-glow">
-            Service Online
+            Serviço Online
           </button>
         </div>
       </div>

@@ -40,12 +40,12 @@ interface SidebarProps {
 }
 
 const navItems: { id: Page; label: string; icon: typeof LayoutDashboard; feature: FeatureKey; proOnly: boolean }[] = [
-  { id: "dashboard", label: "Dashboard", icon: LayoutDashboard, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
+  { id: "dashboard", label: "Painel", icon: LayoutDashboard, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
   { id: "pccenter", label: "PC Center", icon: Monitor, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
   { id: "threats", label: "Ameaças", icon: AlertTriangle, feature: FEATURES.THREATS, proOnly: false },
-  { id: "scanner", label: "File Scanner", icon: FileSearch, feature: FEATURES.SCANNER, proOnly: false },
-  { id: "taskmanager", label: "Task Manager", icon: ListTodo, feature: FEATURES.MONITOR_BASIC, proOnly: false },
-  { id: "monitor", label: "Monitor", icon: Activity, feature: FEATURES.MONITOR_BASIC, proOnly: false },
+  { id: "scanner", label: "Scanner de Ficheiros", icon: FileSearch, feature: FEATURES.SCANNER, proOnly: false },
+  { id: "taskmanager", label: "Gestor de Tarefas", icon: ListTodo, feature: FEATURES.MONITOR_BASIC, proOnly: false },
+  { id: "monitor", label: "Monitor de Rede", icon: Activity, feature: FEATURES.MONITOR_BASIC, proOnly: false },
   { id: "simulator", label: "Simulador", icon: Zap, feature: FEATURES.SIMULATOR, proOnly: false },
   { id: "otimizar", label: "Otimizar", icon: Wrench, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
   { id: "reports", label: "Relatórios", icon: FileBarChart, feature: FEATURES.REPORTS, proOnly: true },
@@ -95,7 +95,7 @@ export default function Sidebar({
                 CYBER<span className="text-primary">SAFE</span>
               </span>
               <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-mono truncate">
-                Security Assistant
+                Assistente de Segurança
               </span>
             </div>
           )}
@@ -153,7 +153,7 @@ export default function Sidebar({
 
       {/* Theme & Accent Controls */}
       <div className={cn("p-4 space-y-3 border-t border-sidebar-border", collapsed && "items-center")}>
-        {!collapsed && <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-2">Settings</div>}
+        {!collapsed && <div className="text-[10px] uppercase tracking-wider text-muted-foreground font-semibold px-2">Definições</div>}
 
         <div className="flex flex-col gap-2">
             {/* Theme Toggle */}

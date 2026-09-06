@@ -110,7 +110,7 @@ function AuthenticatedApp() {
 
   const fetchSnapshot = useCallback(async () => {
     if (!window.electronAPI) {
-      setError("Motor de protecao indisponivel.");
+      setError("Motor de proteção indisponível.");
       setIsLoading(false);
       return;
     }
@@ -134,7 +134,7 @@ function AuthenticatedApp() {
       setError("");
     } catch (err) {
       console.error(err);
-      setError("Falha ao sincronizar com o service.");
+      setError("Falha ao sincronizar com o serviço.");
     } finally {
       setIsLoading(false);
     }
