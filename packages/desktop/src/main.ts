@@ -14,13 +14,17 @@ const client = new ServiceClient();
 const notificationHistory = new Map<string, number>();
 const DEBOUNCE_TIME = 15000; // 15 segundos de silêncio para o mesmo arquivo
 
-// Preferência de ícones: logo da marca (se existir) > ícone padrão.
+// Preferência de ícones: CS Shield (símbolo oficial compacto) > logo > padrão.
 function assetsPath(...segments: string[]): string {
   return path.join(__dirname, "assets", ...segments);
 }
 
-function resolveIconPath(): string {
+function resolveTrayIconPath(): string {
   const candidates = [
+    // Versão simplificada desenhada para tamanhos minúsculos (16/32)
+    assetsPath("icons", "cybersafe-shield-cs-simple-32.png"),
+    assetsPath("icons", "cybersafe-shield-cs-32.png"),
+    assetsPath("icons", "cybersafe-shield-cs-16.png"),
     assetsPath("cybersafe-logo.png"),
     assetsPath("icon.png"),
   ];
@@ -30,7 +34,21 @@ function resolveIconPath(): string {
   return candidates[candidates.length - 1];
 }
 
-// Em dev, copia o logo da marca (na raiz do repo) para dist/assets se existir.
+function resolveWindowIconPath(): string {
+  const candidates = [
+    assetsPath("icon.ico"),
+    assetsPath("icons", "cybersafe-shield-cs-256.png"),
+    assetsPath("icons", "cybersafe-shield-cs-128.png"),
+    assetsPath("cybersafe-logo.png"),
+    assetsPath("icon.png"),
+  ];
+  for (const candidate of candidates) {
+    if (fs.existsSync(candidate)) return candidate;
+  }
+  return candidates[candidates.length - 1];
+}
+
+// Em dev, copia o branding da marca (na raiz do repo) para dist/assets se existir.
 function syncBrandingAssets() {
   if (app.isPackaged) return;
   try {
@@ -38,11 +56,29 @@ function syncBrandingAssets() {
     const brandingDir = path.join(repoRoot, "assets", "branding");
     if (!fs.existsSync(brandingDir)) return;
     fs.mkdirSync(assetsPath(), { recursive: true });
-    for (const file of fs.readdirSync(brandingDir)) {
-      if (file.toLowerCase().endsWith(".png")) {
-        fs.copyFileSync(path.join(brandingDir, file), assetsPath(file));
-        console.log("[Electron] Logo da marca aplicado:", file);
+
+    const copyPngTree = (srcDir: string, dstDir: string) => {
+      for (const root of fs.readdirSync(srcDir)) {
+        const srcEntry = path.join(srcDir, root);
+        const stat = fs.statSync(srcEntry);
+        if (stat.isDirectory()) {
+          copyPngTree(srcEntry, path.join(dstDir, root));
+        } else if (path.extname(srcEntry).toLowerCase() === ".png") {
+          fs.mkdirSync(dstDir, { recursive: true });
+          fs.copyFileSync(srcEntry, path.join(dstDir, path.basename(srcEntry)));
+        }
       }
+    };
+
+    // Sincroniza os assets otimizados (icons/ e matrix/) quando presentes.
+    const optimizedDir = path.join(brandingDir, "optimized");
+    if (fs.existsSync(optimizedDir)) {
+      copyPngTree(optimizedDir, assetsPath());
+    }
+    for (const file of fs.readdirSync(brandingDir)) {
+      if (!file.toLowerCase().endsWith(".png")) continue;
+      fs.copyFileSync(path.join(brandingDir, file), assetsPath(file));
+      console.log("[Electron] Logo da marca aplicado:", file);
     }
   } catch (error) {
     console.error("[Electron] Falha ao sincronizar branding:", error);
@@ -57,7 +93,7 @@ function createWindow() {
     width: 1200,
     height: 820,
     backgroundColor: "#090b12",
-    icon: resolveIconPath(),
+    icon: resolveWindowIconPath(),
     show: false,
     webPreferences: {
       preload: path.join(__dirname, "preload.cjs"),
@@ -126,12 +162,13 @@ function startServiceProcess() {
     return;
   }
 
-  const serviceEntry = path.join(process.resourcesPath, "app", "packages", "service", "dist", "index.js");
+  const serviceEntry = path.join(process.resourcesPath, "app", "node_modules", "@cybersafe", "service", "dist", "index.js");
 
   console.log("[Electron] Iniciando serviço embutido:", serviceEntry);
   serviceProcess = spawn(process.execPath, [serviceEntry], {
     stdio: ["ignore", "pipe", "pipe"],
     windowsHide: true,
+    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
   });
 
   serviceProcess.on("exit", (code) => {
@@ -154,7 +191,7 @@ async function updateServiceStatus() {
 
   if (tray) {
     try {
-      const defaultIconPath = resolveIconPath();
+      const defaultIconPath = resolveTrayIconPath();
 
       // Usa fs para checar se as imagens específicas existem, senão faz fallback pro ícone padrão
       let iconPathToUse = defaultIconPath;
@@ -213,7 +250,7 @@ function updateTrayMenu() {
 }
 
 function createTray() {
-  const image = nativeImage.createFromPath(resolveIconPath());
+  const image = nativeImage.createFromPath(resolveTrayIconPath());
   tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image.resize({ width: 16, height: 16 }));
 
   updateTrayMenu();

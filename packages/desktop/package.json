@@ -2,13 +2,47 @@
   "name": "@cybersafe/desktop",
   "version": "0.1.1",
   "private": true,
+  "description": "CyberSafe Assistant desktop shell",
+  "author": "CyberSafe Team",
   "main": "dist/main.js",
   "type": "module",
   "scripts": {
     "dev": "concurrently -k \"vite build --watch\" \"wait-on dist/main.js && electron .\"",
     "build": "vite build",
     "start": "electron .",
+    "dist": "electron-builder --win",
+    "dist:dir": "electron-builder --win dir",
+    "predist": "node ../../scripts/stage-renderer.mjs",
+    "predist:dir": "node ../../scripts/stage-renderer.mjs",
     "typecheck": "node -e \"console.log('desktop typecheck delegated to app/core workspaces')\""
+  },
+  "build": {
+    "appId": "com.cybersafe.assistant",
+    "productName": "CyberSafe Assistant",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json"
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "src/assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true
+    },
+    "artifactName": "${productName}-${version}-setup.${ext}"
   },
   "dependencies": {
     "@cybersafe/core": "0.1.1",
@@ -17,7 +51,7 @@
   },
   "devDependencies": {
     "@types/node": "^24.12.0",
-    "electron": "^33.0.0",
+    "electron": "33.4.11",
     "electron-builder": "^25.0.0",
     "typescript": "^5.9.3",
     "vite": "^8.0.1",

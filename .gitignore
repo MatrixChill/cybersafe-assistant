@@ -5,6 +5,7 @@ build/
 *.log
 packages/*/dist/
 packages/*/node_modules/
+packages/*/release/
 
 # Environment variables
 .env
