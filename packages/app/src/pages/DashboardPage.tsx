@@ -120,11 +120,17 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
       </div>
 
       <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
-        <MetricBar label="CPU" subValue={hardware?.cpu.model.split(" ")[0]} value={hardware?.cpu.usage || 0} icon={Cpu} alert={hardware?.alerts.find((a) => a.category === "cpu")?.title} />
+        <MetricBar label="CPU" subValue={hardware?.cpu.model || "—"} value={hardware?.cpu.usage || 0} icon={Cpu} alert={hardware?.alerts.find((a) => a.category === "cpu")?.title} />
         <MetricBar label="Memória" subValue={`${hardware?.ram.usedGb || 0} / ${hardware?.ram.totalGb || 0} GB`} value={hardware?.ram.usagePercent || 0} icon={HardDrive} alert={hardware?.alerts.find((a) => a.category === "ram")?.title} />
         <MetricBar label="Disco" subValue={`${hardware?.disk.usedGb || 0} / ${hardware?.disk.totalGb || 0} GB`} value={hardware?.disk.usagePercent || 0} icon={HardDrive} alert={hardware?.alerts.find((a) => a.category === "disk")?.title} />
         <MetricBar label="Rede" subValue={hardware ? formatThroughput(hardware.network.rxSec) : "—"} value={Math.min(100, (hardware?.network.rxSec || 0) / 1024 / 100)} icon={Wifi} />
       </div>
+      {hardware?.gpu && (
+        <div className="grid grid-cols-1 lg:grid-cols-4 gap-6">
+          <MetricBar label="GPU" subValue={hardware.gpu.model || "—"} value={hardware.gpu.usagePercent ?? 0} icon={Cpu} alert={hardware?.alerts.find((a) => a.category === "gpu")?.title} />
+          <MetricBar label="GPU VRAM" subValue={hardware.gpu.vramTotalMb ? `${(hardware.gpu.vramUsedMb ?? 0) / 1024} / ${(hardware.gpu.vramTotalMb / 1024).toFixed(1)} GB` : "—"} value={hardware.gpu.vramTotalMb && hardware.gpu.vramUsedMb ? (hardware.gpu.vramUsedMb / hardware.gpu.vramTotalMb) * 100 : 0} icon={Cpu} />
+        </div>
+      )}
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
         <div className="cyber-border rounded-xl p-6">

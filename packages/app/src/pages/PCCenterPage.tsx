@@ -44,7 +44,7 @@ function getUsageBgColor(percent: number): string {
   return "bg-cyber-red";
 }
 
-function CircularGauge({ value, size = 100, label }: { value: number; size?: number; label?: string }) {
+function CircularGauge({ value, size = 100, label, showFallback }: { value: number; size?: number; label?: string; showFallback?: boolean }) {
   const strokeWidth = 10;
   const radius = (size - strokeWidth) / 2;
   const circumference = radius * 2 * Math.PI;
@@ -73,7 +73,9 @@ function CircularGauge({ value, size = 100, label }: { value: number; size?: num
         />
       </svg>
       <div className="absolute flex flex-col items-center justify-center">
-        <span className={cn("text-xl font-bold font-mono", colorClass)}>{Math.round(value)}%</span>
+        <span className={cn("text-xl font-bold font-mono", showFallback ? "text-muted-foreground" : colorClass)}>
+          {showFallback ? "—" : `${Math.round(value)}%`}
+        </span>
         {label && <span className="text-xs text-muted-foreground uppercase tracking-wider mt-1">{label}</span>}
       </div>
     </div>
@@ -331,7 +333,7 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
             </div>
           ) : (
             <div className="flex items-center justify-between">
-              <CircularGauge value={hardware.gpu.usagePercent || 0} label="Uso" />
+              <CircularGauge value={hardware.gpu.usagePercent ?? 0} label={hardware.gpu.usagePercent != null ? "Uso" : "N/A"} showFallback={hardware.gpu.usagePercent == null} />
               <div className="flex flex-col gap-3 text-right">
                 <div>
                   <span className="text-xs text-muted-foreground uppercase block">Modelo</span>
@@ -340,9 +342,9 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
                   </span>
                 </div>
                 <div>
-                  <span className="text-xs text-muted-foreground uppercase block">VRAM (Uso / Total)</span>
+                  <span className="text-xs text-muted-foreground uppercase block">VRAM</span>
                   <span className="text-sm font-medium font-mono">
-                    {hardware.gpu.vramUsedMb ? (hardware.gpu.vramUsedMb / 1024).toFixed(1) : "?"} / {hardware.gpu.vramTotalMb ? (hardware.gpu.vramTotalMb / 1024).toFixed(1) : "?"} GB
+                    {hardware.gpu.vramUsedMb != null ? `${(hardware.gpu.vramUsedMb / 1024).toFixed(1)} / ` : ""}{hardware.gpu.vramTotalMb ? `${(hardware.gpu.vramTotalMb / 1024).toFixed(1)} GB` : "—"}
                   </span>
                 </div>
                 <div>
