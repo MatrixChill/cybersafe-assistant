@@ -19,6 +19,15 @@ export class VirusTotalClient {
     this.enabled = this.apiKey.length > 0;
   }
 
+  private pruneCache() {
+    const MAX = 1000;
+    while (this.cache.size > MAX) {
+      const oldest = this.cache.keys().next().value;
+      if (oldest !== undefined) this.cache.delete(oldest);
+      else break;
+    }
+  }
+
   isEnabled(): boolean {
     return this.enabled;
   }
@@ -70,6 +79,7 @@ export class VirusTotalClient {
           cached: false,
         };
         this.cache.set(normalizedHash, { result: cleanResult, cachedAt: Date.now() });
+        this.pruneCache();
         return cleanResult;
       }
 
@@ -125,6 +135,7 @@ export class VirusTotalClient {
       };
 
       this.cache.set(normalizedHash, { result: vtResult, cachedAt: Date.now() });
+      this.pruneCache();
       return vtResult;
     } catch (error) {
       console.error("[VirusTotal] Request failed:", error);

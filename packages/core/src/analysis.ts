@@ -73,15 +73,13 @@ export class MalwareAnalyzer {
     // Scan completo com YARA
     const yaraMatches = await this.deps.yara.scanFile(artifactPath);
     
-    // Scan com ClamAV
+    // Scan with ClamAV — async to avoid blocking the event loop
     let clamavDetected = false;
     try {
-      const { execSync } = await import("node:child_process");
-      // Timeout de 10 segundos para não travar a interface
-      execSync(`clamscan --no-summary "${artifactPath}"`, { 
-        stdio: "ignore", 
-        timeout: 10000 
-      });
+      const { exec: execCb } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execAsync = promisify(execCb);
+      await execAsync(`clamscan --no-summary "${artifactPath}"`, { timeout: 10000 });
     } catch (error: any) {
       if (error.status === 1) {
         clamavDetected = true;

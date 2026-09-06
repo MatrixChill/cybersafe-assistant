@@ -207,7 +207,7 @@ export default function PCHealthSection() {
     void fetchHealth();
     const interval = setInterval(() => {
       if (document.visibilityState === "visible") void fetchHealth();
-    }, 8000);
+    }, 12_000);
     return () => clearInterval(interval);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);

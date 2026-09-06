@@ -98,6 +98,7 @@ export class ProtectionEngineService {
   private blockedPaths = new Set<string>();
   private definitionsUpdatedAt = "";
   private networkTimer: NodeJS.Timeout | null = null;
+  private networkInFlight = false;
   private readonly recentScans = new Map<string, number>();
   private protectionState = false;
   private protectionTransition: Promise<{ ok: boolean; protectionEnabled: boolean }> | null = null;
@@ -160,13 +161,15 @@ export class ProtectionEngineService {
 
       if (!this.networkTimer) {
         this.networkTimer = setInterval(() => {
-          void this.refreshConnections();
-          void this.hardware.getSnapshot(this.processes).then((snapshot) => {
-            if (snapshot.alerts.length > 0) {
-              // You could fire events here for high stress, but for now we just keep the snapshot updated
-            }
+          if (this.networkInFlight) return;
+          this.networkInFlight = true;
+          Promise.allSettled([
+            this.refreshConnections(),
+            this.hardware.getSnapshot(this.processes),
+          ]).finally(() => {
+            this.networkInFlight = false;
           });
-        }, 3_000);
+        }, 10_000);
       }
 
       return { ok: true, protectionEnabled: true };
@@ -275,10 +278,12 @@ export class ProtectionEngineService {
 
   private bindWatchers() {
     this.watcher.on("file.created", (event: FileObservation) => {
+      if (this.exclusions.isExcluded(event.path)) return;
       this.eventBus.publish("file.created", "low", `New file observed: ${event.path}`, event);
       void this.handleFileObservation(event.path);
     });
     this.watcher.on("file.modified", (event: FileObservation) => {
+      if (this.exclusions.isExcluded(event.path)) return;
       this.eventBus.publish("file.modified", "low", `Modified file observed: ${event.path}`, event);
       void this.handleFileObservation(event.path);
     });
@@ -532,6 +537,14 @@ export class ProtectionEngineService {
       if (analysis.recommendedAction === "quarantined" || finalSeverity === "critical") {
         this.blockedHashes.add(analysis.sha256);
         this.blockedPaths.add(filePath.toLowerCase());
+        if (this.blockedHashes.size > 10_000) {
+          const firstHash = this.blockedHashes.values().next().value;
+          if (firstHash !== undefined) this.blockedHashes.delete(firstHash);
+        }
+        if (this.blockedPaths.size > 10_000) {
+          const firstPath = this.blockedPaths.values().next().value;
+          if (firstPath !== undefined) this.blockedPaths.delete(firstPath);
+        }
         const quarantineEntry = await this.quarantine.quarantine({ ...analysis, riskScore: finalRiskScore });
         this.eventBus.publish("quarantine.added", "critical", `Quarantined ${analysis.fileName}`, quarantineEntry ?? analysis);
 

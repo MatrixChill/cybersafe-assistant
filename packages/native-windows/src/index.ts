@@ -112,6 +112,11 @@ export class NativeWindowsWatcher extends EventEmitter {
       );
     }
 
+    // Excludes os.tmpdir from scanning to avoid extreme churn in Temp
+    // (browsers/installers constantly create .tmp files). Keeps watching
+    // persistence-heavy paths without the CPU cost of a temp temp dir.
+    const tmpDir = os.tmpdir();
+
     this.watcher = chokidar.watch(this.validatedPaths, {
       persistent: true,
       ignoreInitial: true,
@@ -120,10 +125,13 @@ export class NativeWindowsWatcher extends EventEmitter {
         /node_modules/, // ignore node_modules
         /\.log$/, // ignore log files
         /cybersafe-assistant[\/\\]logs/, // specific ignore for app logs
+        // Event-driven native watching (no 100ms polling); large files only
+        // considered "finished" after 3s of no writes.
+        (p: string) => p.startsWith(tmpDir),
       ],
       awaitWriteFinish: {
-        stabilityThreshold: 750,
-        pollInterval: 100,
+        stabilityThreshold: 3000,
+        pollInterval: 2000,
       },
     });
 
@@ -158,19 +166,27 @@ export class NativeWindowsWatcher extends EventEmitter {
     await this.captureRegistrySnapshot();
     this.registryTimer = setInterval(() => {
       void this.captureRegistrySnapshot();
-    }, 5_000);
+    }, 30_000);
   }
 
+  private registryInFlight = false;
+
   private async captureRegistrySnapshot() {
-    const snapshot = await readRegistryRunKeys();
-    if (this.lastRegistrySnapshot && this.lastRegistrySnapshot !== snapshot) {
-      this.emit("registry.persistence.changed", {
-        kind: "registry.persistence.changed",
-        path: "HKCU/HKLM Run keys",
-        observedAt: new Date().toISOString(),
-      });
+    if (this.registryInFlight) return;
+    this.registryInFlight = true;
+    try {
+      const snapshot = await readRegistryRunKeys();
+      if (this.lastRegistrySnapshot && this.lastRegistrySnapshot !== snapshot) {
+        this.emit("registry.persistence.changed", {
+          kind: "registry.persistence.changed",
+          path: "HKCU/HKLM Run keys",
+          observedAt: new Date().toISOString(),
+        });
+      }
+      this.lastRegistrySnapshot = snapshot;
+    } finally {
+      this.registryInFlight = false;
     }
-    this.lastRegistrySnapshot = snapshot;
   }
 
   async stop() {
@@ -190,12 +206,13 @@ export class NativeWindowsWatcher extends EventEmitter {
 export class ProcessMonitor extends EventEmitter {
   private timer: NodeJS.Timeout | null = null;
   private previous = new Map<number, ProcessSnapshot>();
+  private pollInFlight = false;
 
   async start() {
     await this.poll();
     this.timer = setInterval(() => {
       void this.poll();
-    }, 3_000);
+    }, 10_000);
   }
 
   async stop() {
@@ -210,21 +227,27 @@ export class ProcessMonitor extends EventEmitter {
   }
 
   private async poll() {
-    const current = await snapshotProcesses();
+    if (this.pollInFlight) return;
+    this.pollInFlight = true;
+    try {
+      const current = await snapshotProcesses();
 
-    for (const [pid, processInfo] of current.entries()) {
-      if (!this.previous.has(pid)) {
-        this.emit("process.started", processInfo);
+      for (const [pid, processInfo] of current.entries()) {
+        if (!this.previous.has(pid)) {
+          this.emit("process.started", processInfo);
+        }
       }
-    }
 
-    for (const [pid, processInfo] of this.previous.entries()) {
-      if (!current.has(pid)) {
-        this.emit("process.exited", processInfo);
+      for (const [pid, processInfo] of this.previous.entries()) {
+        if (!current.has(pid)) {
+          this.emit("process.exited", processInfo);
+        }
       }
-    }
 
-    this.previous = current;
+      this.previous = current;
+    } finally {
+      this.pollInFlight = false;
+    }
   }
 }
 

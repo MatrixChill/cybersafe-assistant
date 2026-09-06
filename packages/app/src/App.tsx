@@ -178,7 +178,7 @@ function AuthenticatedApp() {
   useEffect(() => {
     if (!window.electronAPI) return;
 
-    // Poll hardware every 3 seconds only if window is visible
+    // Poll hardware every 10 seconds only if window is visible
     const interval = setInterval(async () => {
       if (document.visibilityState !== 'visible') return;
       try {
@@ -187,7 +187,7 @@ function AuthenticatedApp() {
       } catch (e) {
         console.error("Hardware fetch err", e);
       }
-    }, 3000);
+    }, 10_000);
 
     // Initial fetch
     if (document.visibilityState === 'visible') {
