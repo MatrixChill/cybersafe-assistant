@@ -2,6 +2,7 @@ import { Shield, AlertTriangle, Download, Activity, CheckCircle2, Clock, Cpu, Ha
 import { useEffect, useState } from "react";
 import type { DashboardSummary, HardwareSnapshot } from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
+import { MatrixAvatar } from "../components/MatrixAvatar";
 
 interface DashboardPageProps {
   dashboard: DashboardSummary;
@@ -39,6 +40,29 @@ export default function DashboardPage({ dashboard, isLoading, hardware }: Dashbo
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in slide-in-from-bottom-4 duration-700">
+      {/* Banner Matrix */}
+      <div className="cyber-border rounded-xl p-5 flex items-center gap-5 relative overflow-hidden">
+        <div className="absolute inset-0 bg-gradient-to-r from-primary/10 via-transparent to-transparent pointer-events-none" />
+        <MatrixAvatar mood={isAtRisk ? "alert" : "safe"} size="lg" data-mood={isAtRisk ? "alert" : "safe"} />
+        <div className="flex-1 min-w-0">
+          <h2 className="font-mono font-bold text-foreground">Matrix <span className="text-primary text-xs">ONLINE</span></h2>
+          <p className="text-sm text-muted-foreground mt-1 leading-relaxed">
+            {isAtRisk
+              ? "Detetei um estado de risco elevado. Revisa os alertas recentes e executa uma análise completa."
+              : "Tudo calmo por aqui. Continuo a vigiar o teu sistema 24/7. Shell:"}
+              {" "}<span className="font-mono text-cyber-green">$ watch && protect</span>
+          </p>
+          <div className="flex flex-wrap gap-2 mt-3">
+            <span className="text-[10px] font-mono px-2 py-1 rounded bg-cyber-green/10 border border-cyber-green/30 text-cyber-green">
+              Proteção residente ativa
+            </span>
+            <span className="text-[10px] font-mono px-2 py-1 rounded bg-primary/10 border border-primary/30 text-primary">
+              Definições atualizadas
+            </span>
+          </div>
+        </div>
+      </div>
+
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold font-mono tracking-tight">

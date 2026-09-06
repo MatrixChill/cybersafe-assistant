@@ -2,6 +2,7 @@ import { Shield, ExternalLink, CheckCircle2, XCircle, Trophy, RotateCcw, ArrowRi
 import { useState, useEffect } from "react"
 import { TRAINING_SCENARIOS, type TrainingScenario } from "@cybersafe/shared-types"
 import { cn } from "@/lib/utils"
+import { MatrixAvatar } from "../components/MatrixAvatar"
 
 type Answer = "safe" | "dangerous" | null
 
@@ -92,7 +93,15 @@ export default function SimulatorPage() {
         {/* Hero Card */}
         <div className="cyber-border rounded-xl p-8 text-center relative overflow-hidden">
           <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-cyber-cyan/5 pointer-events-none" />
-          
+
+          {/* Matrix guide */}
+          <div className="flex items-center gap-4 text-left mb-6 p-4 rounded-xl bg-black/20 border border-white/5">
+            <MatrixAvatar mood="guide" size="sm" />
+            <p className="text-xs text-muted-foreground leading-relaxed">
+              <span className="font-mono text-primary font-bold">Matrix</span>: "Vou treinar contigo! Lembra-te: desconfia de domínios estranhos, falta de HTTPS e pedidos urgentes de login. Boa sorte!"
+            </p>
+          </div>
+
           <div className="w-20 h-20 rounded-2xl bg-primary/10 border border-primary/30 flex items-center justify-center mx-auto mb-6">
             <Target className="w-10 h-10 text-primary" />
           </div>
