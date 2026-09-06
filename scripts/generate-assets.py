@@ -32,6 +32,11 @@ DESKTOP_ASSETS = REPO / "packages" / "desktop" / "src" / "assets"
 ICON_SIZES = [16, 20, 24, 32, 48, 64, 96, 128, 256]
 MATRIX_SIZES = [48, 96, 128, 192]
 
+# Moods retrato (corpo inteiro) que precisam de crop "bust" quadrado para
+# avatares circulares/pequenos. avatar/mini ja sao quadrados (rosto).
+BUST_IMAGES = {"matrix-safe", "matrix-guide", "matrix-alert",
+               "matrix-success", "matrix-happy", "matrix-defender"}
+
 MAGIC = "CS"  # simplificacao do escudo
 
 def save_optimized(img: Image.Image, dest: Path, size: int):
@@ -39,6 +44,18 @@ def save_optimized(img: Image.Image, dest: Path, size: int):
     img = img.resize((size, size), Image.LANCZOS)
     # converte para optimizar (mantem RGBA para transparencia)
     img.save(dest, "PNG", optimize=True)
+
+
+def bust_crop(img: Image.Image) -> Image.Image:
+    """Crop quadrado do topo (cabeça + ombros) para retratos de corpo inteiro."""
+    w, h = img.size
+    side = min(w, h)
+    top = 0
+    if side > h:
+        # raro: mais largo que alto — centra horizontalmente
+        left = (w - side) // 2
+        return img.crop((left, top, left + side, top + side))
+    return img.crop((0, top, side, top + side))
 
 
 def simplify_icon(src: Path, dest: Path, size: int):
@@ -83,6 +100,17 @@ def main():
             new_size = (max(1, round(w * ratio)), max(1, round(h * ratio)))
             resized = base.resize(new_size, Image.LANCZOS)
             resized.save(matrix_dir / f"{name}-{size}.png", "PNG", optimize=True)
+
+    # 3b. Matrix — variante "bust" (rosto + ombros) quadrada para avatares pequenos
+    for name in sorted(BUST_IMAGES):
+        src = MATRIX_SRC / f"{name}.png"
+        if not src.exists():
+            continue
+        base = Image.open(src).convert("RGBA")
+        bust = bust_crop(base)
+        matrix_dir = OUT / "matrix"
+        for size in MATRIX_SIZES:
+            save_optimized(bust, matrix_dir / f"{name}-bust-{size}.png", size)
 
     # 4. Gera icone .ico multi-tamanho para a janela/taskbar Windows
     ico_src = OUT / "icons" / "cybersafe-shield-cs-256.png"

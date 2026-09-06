@@ -3,14 +3,15 @@ import { useState } from "react";
 
 type Mood = "safe" | "guide" | "alert" | "success" | "happy" | "defender" | "avatar" | "mini";
 
-// Retratos oficiais do Matrix com base na situação.
+// Retratos oficiais da Matrix (variante "bust" — rosto e ombros — para avatares
+// pequenos/redondos; avatar/mini já são quadrados focados no rosto).
 const MOOD_ASSET: Record<Mood, string> = {
-  safe: "/branding/matrix/matrix-safe-96.png",
-  guide: "/branding/matrix/matrix-guide-96.png",
-  alert: "/branding/matrix/matrix-alert-96.png",
-  success: "/branding/matrix/matrix-success-96.png",
-  happy: "/branding/matrix/matrix-happy-96.png",
-  defender: "/branding/matrix/matrix-defender-96.png",
+  safe: "/branding/matrix/matrix-safe-bust-96.png",
+  guide: "/branding/matrix/matrix-guide-bust-96.png",
+  alert: "/branding/matrix/matrix-alert-bust-96.png",
+  success: "/branding/matrix/matrix-success-bust-96.png",
+  happy: "/branding/matrix/matrix-happy-bust-96.png",
+  defender: "/branding/matrix/matrix-defender-bust-96.png",
   avatar: "/branding/matrix/matrix-avatar-96.png",
   mini: "/branding/matrix/matrix-mini-96.png",
 };

@@ -1,6 +1,6 @@
-import { useState, useEffect, useRef } from "react"
+import { useState, useEffect, useRef, useCallback, useMemo } from "react"
 import { motion, AnimatePresence } from "framer-motion"
-import { X, Send, Wand2, Sparkles, Shield, Lock, Bug, Mail } from "lucide-react"
+import { X, Send, Sparkles, MessageSquare, StopCircle, RefreshCw } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { MatrixAvatar } from "./MatrixAvatar"
 
@@ -9,173 +9,555 @@ interface Message {
   content: string
 }
 
-const QUICK_SUGGESTIONS = [
-  { label: "Estado", icon: Shield },
-  { label: "Phishing", icon: Mail },
-  { label: "Senhas", icon: Lock },
-  { label: "Malware", icon: Bug },
-]
+type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager" | "otimizar"
 
-// Knowledge base offline (fallback quando a API de IA está indisponível).
+interface AIAssistantProps {
+  currentPage?: Page
+  context?: string
+}
+
+const API_BASE = (window as unknown as { __CYBERSAFE_API_BASE__?: string }).__CYBERSAFE_API_BASE__ || "http://localhost:4000"
+const MAX_HISTORY = 16
+const STREAM_TIMEOUT_MS = 90_000
+const MAX_RETRIES = 2
+
+const PAGE_LABELS: Record<Page, string> = {
+  dashboard: "Dashboard",
+  pccenter: "PC Center",
+  threats: "Ameaças",
+  scanner: "Scanner de Ficheiros",
+  monitor: "Monitor",
+  simulator: "Simulador de Phishing",
+  reports: "Relatórios",
+  taskmanager: "Task Manager",
+  otimizar: "Otimizar",
+}
+
+// Guardas locais para não depender do provider nos fallbacks cruciais.
+const OFF_TOPIC_KEYWORDS = [
+  "lasanha", "receita", "bolo", "cozinhar", "futebol", "campeonato", "jogo do", "golo",
+  "história para", "redação", "poema", "música", "filme", "novela", "série", "receita",
+  "temperatura do clima", "previsão do tempo", "polit", "eleição", "celebridade",
+]
+const DANGEROUS_KEYWORDS = [
+  "criar malware", "fazer malware", "escrever malware", "ransomware que", "roubar credenciais",
+  "phishing funcional", "invadir", "hackear o", "hackear o meu", "persistência maliciosa",
+  "evadir antivírus", "bypass de segurança", "desativar o antivírus", "crackar", "cracking",
+  "destruir dados", "apagar tudo o", "exploit", "exploração ofensiva", "keylogger",
+]
+const SECRET_PATTERN = /(?:senha|password|passwd|palavra[- ]?passe|token|api[ -]?key|chave)\s*[:=]\s*\S+/i
+
+// Sugestões por página (a mais relevante em primeiro).
+const SUGGESTIONS: Record<Page, { label: string }[]> = {
+  dashboard: [
+    { label: "Meu PC está seguro?" },
+    { label: "Explica meu índice de proteção" },
+    { label: "O que é phishing?" },
+    { label: "Como melhorar minha segurança?" },
+  ],
+  pccenter: [
+    { label: "Meu disco está em 86% — devo me preocupar?" },
+    { label: "O que significa meu índice de saúde?" },
+    { label: "Como libertar espaço em disco?" },
+    { label: "O firewall está ativo?" },
+  ],
+  threats: [
+    { label: "O que significa esta ameaça?" },
+    { label: "Devo apagar todos os eventos?" },
+    { label: "Como funciona a quarentena?" },
+    { label: "O que é um falso positivo?" },
+  ],
+  scanner: [
+    { label: "O que é o Quick Scan?" },
+    { label: "Este ficheiro pode ser perigoso?" },
+    { label: "Como funciona a análise de ficheiros?" },
+    { label: "O que devo fazer após o scan?" },
+  ],
+  monitor: [
+    { label: "O que significa esta conexão?" },
+    { label: "Como ler estes eventos?" },
+    { label: "O que é a proteção residente?" },
+    { label: "Devo bloquear este processo?" },
+  ],
+  simulator: [
+    { label: "Por que este link é phishing?" },
+    { label: "Como identificar emails falsos?" },
+    { label: "Dá-me uma dica para o Simulador" },
+    { label: "O que é engenharia social?" },
+  ],
+  reports: [
+    { label: "Como exportar um relatório PDF?" },
+    { label: "O que inclui o relatório?" },
+    { label: "Como ler o score de proteção?" },
+    { label: "O que são eventos de segurança?" },
+  ],
+  taskmanager: [
+    { label: "Usei bastante CPU/RAM — é normal?" },
+    { label: "Como identificar processo suspeito?" },
+    { label: "O que fazer se um processo usa 100% CPU?" },
+    { label: "Como monitorizar processos?" },
+  ],
+  otimizar: [
+    { label: "O que devo otimizar primeiro?" },
+    { label: "Por que meu PC está lento?" },
+    { label: "Discos e temporários — o que posso apagar?" },
+    { label: "Como melhorar o desempenho?" },
+  ],
+}
+
+const DEFAULT_SUGGESTIONS = SUGGESTIONS.dashboard
+
+// Base de conhecimento local (FALLBACK educativo — preservada e alinhada à persona feminina).
 const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
   {
-    keywords: ["phishing", "email falso", "email suspeito", "link falso"],
-    answer: "**Phishing** é uma técnica onde atacantes enviam emails ou mensagens falsas para roubar dados pessoais. Para se proteger:\n\n- **Nunca clique** em links de emails pedindo dados sensíveis\n- Verifique sempre o remetente real (não apenas o nome exibido)\n- Acesse sites diretamente pelo navegador, não por links de emails\n- Desconfie de urgência excessiva ou ameaças no email\n\nSe suspeitas de phishing, use o **Simulador** do CyberSafe para praticar a identificação!"
+    keywords: ["phishing", "email falso", "email suspeito", "link falso", "este link"],
+    answer: "**Phishing** é uma técnica onde atacantes enviam emails ou mensagens falsas para roubar dados. Para te proteger:\n\n- **Nunca cliques** em links de emails a pedir dados sensíveis\n- Verifica o remetente real (não apenas o nome exibido)\n- Acede a sites diretamente pelo navegador, não por links de emails\n- Desconfia de urgência excessiva ou ameaças\n\nSe suspeitares, usa o **Simulador** do CyberSafe para praticar a identificação!"
   },
   {
-    keywords: ["senha", "password", "forte", "fraca", "segura"],
-    answer: "**Senhas fortes** são a primeira linha de defesa. Recomendações:\n\n- **12+ caracteres** com letras, números e símbolos\n- Evite palavras do dicionário, datas ou nomes conhecidos\n- Use uma **frase-passe** (ex: `Cafe#Frio2024!`)\n- Ative **2FA (autenticação em 2 passos)** sempre que possível\n- Use um **gestor de senhas** (Bitwarden, 1Password)\n\nTeste suas senhas no jogo **Fortaleza de Senhas** do CyberSafe!"
-  },
-  {
-    keywords: ["malware", "virus", "trojan", "ransomware", "worm"],
-    answer: "**Malware** é software malicioso. Tipos comuns:\n\n- **Trojan**: finge ser legítimo para enganar\n- **Ransomware**: criptografa seus arquivos e exige resgate\n- **Spyware**: espi suas atividades\n- **Worm**: propaga-se sozinho pela rede\n\n**Proteção:** Mantenha antivírus atualizado, não baixe software de fontes desconhecidas, e use o **File Scanner** do CyberSafe para analisar arquivos suspeitos."
-  },
-  {
-    keywords: ["vpn", "privacidade", "rede privada"],
-    answer: "**VPN (Virtual Private Network)** criptografa sua conexão e oculta seu IP. Benefícios:\n\n- Protege em **redes públicas** (WiFi de cafés, aeroportos)\n- Impede que seu provedor de internet monitore seu tráfego\n- Permite acesso a conteúdo restrito por região\n\n**Limitações:** VPN não protege contra phishing, malware ou más práticas online. É apenas uma camada extra de segurança."
-  },
-  {
-    keywords: ["2fa", "autenticação", "dois fatores", "mfa"],
-    answer: "**2FA (Autenticação em 2 Passos)** adiciona uma segunda camada além da senha:\n\n- **App authenticator** (Google Authenticator, Authy) — mais seguro\n- **SMS** — melhor que nada, mas suscetível a SIM swap\n- **Hardware key** (YubiKey) — máxima segurança\n\n**Ative 2FA em:** email, redes sociais, banco, e qualquer conta importante!"
-  },
-  {
-    keywords: ["cybersafe", "como usar", "funcionalidade", "ajuda"],
-    answer: "**CyberSafe Assistant** é um sistema completo de cibersegurança. Funcionalidades:\n\n- **Dashboard**: visão geral do sistema e alertas\n- **PC Center**: análise detalhada de hardware\n- **Ameaças**: histórico de eventos detectados\n- **File Scanner**: análise de arquivos com heurísticas\n- **Task Manager**: monitorar processos\n- **Monitor**: conexões de rede e proteção\n- **Simulador**: exercícios práticos de phishing\n- **Relatórios**: resumo consolidado de segurança\n\nExplore todas as páginas pelo menu lateral!"
-  },
-  {
-    keywords: ["wifi", "rede", "segurança", "conexão"],
-    answer: "**Segurança em redes WiFi:**\n\n- Use **WPA3** ou no mínimo WPA2 (nunca WEP)\n- Evite redes públicas sem VPN\n- Desative **sharing** de arquivos e impressoras\n- Mantenha o **firewall** ativo (verifique no PC Center)\n- Monitore dispositivos conectados pelo **Monitor** do CyberSafe"
-  },
-  {
-    keywords: ["atualização", "update", "patch", "sistema operativo"],
-    answer: "**Manter o sistema atualizado** é crucial para segurança:\n\n- Ative **atualizações automáticas** do Windows\n- Atualize navegadores e plugins regularmente\n- Atualize também apps como Java, Adobe, etc.\n- Atualizações corrigem falhas que malwares exploram\n\nVerifique o status do seu sistema no **PC Center** → Windows Health!"
-  },
-  {
-    keywords: ["firewall", "cortafuegos"],
-    answer: "O **Firewall** controla o tráfego que entra e sai do seu PC:\n\n- Bloqueia conexões não autorizadas vindas da internet\n- Permite definir regras por aplicação\n- No Windows, active o **Firewall do Windows Defender**\n\nNo CyberSafe, o **Monitor** mostra as conexões ativas em tempo real. Se vir uma conexão suspeita, pode bloquear o processo associado."
+    keywords: ["senha", "password", "forte", "fraca", "segura", "123456"],
+    answer: "**Senhas fortes** são a primeira linha de defesa:\n\n- **12+ caracteres** com letras, números e símbolos\n- Evita palavras do dicionário, datas ou nomes conhecidos\n- Usa uma **frase-passe** (ex.: `Cafe#Frio2026!`)\n- Ativa **2FA** sempre que possível\n- Usa um **gestor de senhas** (Bitwarden, 1Password)\n\nPior, usar `123456` é deixar a chave de casa debaixo do tapete 😅 Não vale a pena o risco."
   },
   {
     keywords: ["ransomware", "resgate", "criptografar"],
-    answer: "**Ransomware** é um malware que **criptografa seus ficheiros** e exige resgate para os libertar.\n\n**Como se proteger:**\n\n- **Backups regulares** (regra 3-2-1: 3 cópias, 2 mídias, 1 offsite)\n- Não abra anexos suspeitos\n- Mantenha o sistema e apps atualizados\n- Active a **Proteção de Pasta** do Windows contra acessos não autorizados\n\nSe for vítima: **não pague o resgate** — não há garantia de recuperação e financia o crime."
+    answer: "**Ransomware** é malware que **criptografa os teus ficheiros** e exige resgate.\n\n**Como te proteger:**\n\n- **Backups regulares** (regra 3-2-1: 3 cópias, 2 mídias, 1 offsite)\n- Não abras anexos suspeitos\n- Mantém o sistema e apps atualizados\n- Ativa a **Proteção de Pasta** do Windows\n\nSe for vítima: **não pagues o resgate** — não há garantia de recuperação e financia o crime."
   },
   {
-    keywords: ["backup", "cópia", "copia", "cópia de segurança", "restaurar"],
-    answer: "**Backup** é a sua rede de segurança digital:\n\n- Faça **backups automáticos** em disco externo ou cloud\n- Prefira os **3-2-1**: 3 cópias, 2 tipos de mídia, 1 fora de casa\n- Teste a **restauração** periodicamente (um backup que não restaura não serve)\n- Keep backups **desligados** após o processo para proteger contra ransomware\n\nUm bom backup protege contra malware, falhas de disco e erros humanos."
+    keywords: ["2fa", "autenticação", "dois fatores", "mfa"],
+    answer: "**2FA (Autenticação em 2 Passos)** adiciona uma segunda camada além da senha.\n\n- **App authenticator** (Google Authenticator, Authy) — mais seguro\n- **SMS** — melhor que nada, mas suscetível a SIM swap\n- **Hardware key** (YubiKey) — máxima segurança\n\nPrecisas? Tecnicamente ninguém te obriga 😌 Mas se a senha vazar, o 2FA é o segurança da porta a dizer: 'hoje não, querido'."
   },
   {
-    keywords: ["adware", "popup", "pop-ups", "publicidade", "spyware"],
-    answer: "**Adware/Spyware** é software que exibe publicidade intrusiva e pode rastrear a sua atividade:\n\n- Instale apenas software dos **sites oficiais**\n- Evite instalar \"acompanhantes\" durante instalações (burlançois)\n- Use um **bloqueador de anúncios** em navegadores\n- Limpe extensões desconhecidas do navegador\n\nO **File Scanner** do CyberSafe pode analisar ficheiros suspeitos antes de os abrir."
+    keywords: ["firewall", "rede", "wifi", "conexão", "vpn"],
+    answer: "**Firewall e redes:**\n\n- Use **WPA3** ou no mínimo WPA2 (nunca WEP)\n- Evita redes públicas sem VPN\n- Desativa **sharing** de ficheiros e impressoras\n- Mantém o **firewall** ativo (verifica no PC Center)\n- Monitora as conexões no **Monitor** do CyberSafe\n\nA VPN criptografa a conexão, mas atenção à limitação: ela **não** protege contra phishing, malware ou más práticas — é só mais uma camada."
   },
   {
-    keywords: ["engenharia social", "social engineering", "manipulação", "golpe"],
-    answer: "**Engenharia social** é a arte de manipular pessoas para obter acesso ou informação:\n\n- **Pretexto**: criam uma história falsa para convencer\n- **Baiting**: prometem algo em troca de dados\n- **Tailgating**: seguem alguém para áreas restritas\n- **Oferta irresistível**: prémios, urgência, medo\n\n**Defesa:** desconfie de contacto não solicitado, verifique por outros canais, e nunca forneça senhas ou códigos por telefone/email."
+    keywords: ["cybersafe", "como usar", "funcionalidade", "ajuda", "quick scan", "scan"],
+    answer: "**CyberSafe Assistant** funciona assim:\n\n- **Dashboard**: visão geral do sistema e alertas\n- **PC Center**: análise de hardware e saúde do Windows\n- **Ameaças**: histórico de eventos detectados\n- **Scanner de Ficheiros**: análise com heurísticas (Quick/Full/Custom)\n- **Task Manager**: monitorar processos\n- **Monitor**: conexões de rede e proteção\n- **Simulador**: exercícios práticos de phishing\n- **Otimizar**: recomendações de desempenho\n- **Relatórios**: resumo de segurança\n\nO **Quick Scan** analisa locais críticos rapidamente; o **Full Scan** varre o disco inteiro, demorando mais. Explora tudo no menu lateral!"
   },
   {
-    keywords: ["cookies", "rastreadores", "tracking", "privacidade navegador"],
-    answer: "**Cookies e rastreamento:**\n\n- **Cookies funcionais** são necessários (login, carrinho)\n- **Cookies de rastreio** seguem o seu comportamento entre sites\n- Use modo **privado/incógnito** quando não quiser histórico\n- Instale extensões como **Privacy Badger** ou **uBlock Origin**\n- No navegador, bloqueie cookies de **terceiros**\n\nA privacidade também passa pelo **Monitor** do CyberSafe, que lhe mostra as conexões que o seu PC faz."
+    keywords: ["disco", "espaço", "lento", "desempenho", "86%", "temporários"],
+    answer: "**Disco cheio / PC lento:**\n\nUm disco a **86%** não é emergência, mas já está a pedir socorro 😅 Vale:\n\n- Libertar **ficheiros temporários** e de cache\n- Mover ficheiros grandes para um disco externo/cloud\n- Executar **Otimizar** no CyberSafe\n- Ver quais programas ocupam espaço em **Task Manager**\n\nAcima de 90% começa a afetar o desempenho do Windows."
   },
   {
-    keywords: ["keylogger", "registrador de teclas", "teclas"],
-    answer: "**Keylogger** grava tudo o que digita — senhas, cartões, mensagens:\n\n- Instala-se via malware, email phishing ou software pirata\n- **Sinais:** comportamento lento, entradas de teclado estranhas\n\n**Proteção:**\n\n- Use **gestor de senhas** e autopreenchimento (evita digitar em sites falsos)\n- Ative **2FA** — mesmo com senha roubada, a conta fica protegida\n- Faça análises regulares com o **File Scanner** do CyberSafe\n- Mantenha o sistema atualizado"
+    keywords: ["backup", "cópia", "certificar"],
+    answer: "Backup é a tua rede de segurança:\n\n- Prefere a regra **3-2-1**: 3 cópias, 2 tipos de mídia, 1 fora de casa\n- Testa a **restauração** periodicamente — um backup que não restaura não serve\n- Mantém backups **desligados** depois do processo, para proteger contra ransomware\n\nProtege contra malware, falhas de disco e erros humanos."
   },
   {
-    keywords: ["ota", "atualização over the air", "atualização de firmware"],
-    answer: "**Atualizações (OTA/Over-the-Air)** são essenciais:\n\n- Corrigem **vulnerabilidades conhecidas** exploradas por atacantes\n- Sem atualizações, o PC fica exposto mesmo com antivírus\n\n**Boas práticas:**\n\n- Active **atualizações automáticas** do Windows\n- Reinicie o PC após instalar updates\n- Verifique o **histórico de atualizações** no **PC Center** → Windows Health\n\nUm sistema desatualizado é o principal vetor de infeção em 2025+."
+    keywords: ["malware", "trojan", "spyware", "worm", "adware", "virus", "vírus"],
+    answer: "Malware é software malicioso: **Trojan** finge ser legítimo, **Ransomware** criptografa ficheiros, **Spyware** espreita a atividade, **Worm** propaga-se sozinho, **Adware** mostra publicidade intrusiva.\n\nMantém o antivírus atualizado, só baixa software de fontes oficiais e usa o **Scanner de Ficheiros** do CyberSafe para analisar ficheiros suspeitos."
   },
   {
-    keywords: ["oi", "olá", "ola", "hello", "bom dia", "boa tarde", "boa noite", "tudo bem", "quem és", "quem e", "quem es"],
-    answer: "Olá! Sou o **Matrix**, o assistente virtual do **CyberSafe**.\n\nPosso ajudar-te com **phishing, malware, senhas, privacidade, backups, ransomware** e muito mais sobre segurança digital. Pergunta o que quiseres!"
+    keywords: ["engenharia social", "social engineering", "golpe", "manipulação"],
+    answer: "**Engenharia social** é manipular pessoas para obter acesso ou informações:\n\n- **Pretexto**: história falsa para convencer\n- **Baiting**: prometem algo em troca de dados\n- **Tailgating**: seguem alguém para áreas restritas\n- **Oferta irresistível**: prémios, urgência, medo\n\nDefende-te desconfiando do contacto não solicitado, verificando por outros canais e nunca fornecendo senhas ou códigos por telefone/email."
+  },
+  {
+    keywords: ["oi", "olá", "ola", "hello", "bom dia", "boa tarde", "boa noite", "tudo bem", "quem és", "quem é", "quem es", "quem e"],
+    answer: "Sou a **Matrix**, a assistente de IA do **CyberSafe** 🛡️\n\nPosso ajudar-te com **phishing, malware, senhas, privacidade, backups, ransomware** e a entender o teu painel. Pergunta o que quiseres!"
   },
 ]
 
-function offlineReply(input: string): string | null {
-  const lower = input.toLowerCase()
-  for (const entry of OFFLINE_KB) {
-    if (entry.keywords.some(kw => lower.includes(kw))) {
-      return entry.answer
-    }
-  }
-  return null
+// Fallback OT para fora-de-tema (variado, para não repetir sempre).
+const OFF_TOPIC_REPLIES = [
+  "Eu protejo os teus ficheiros — e a tua lasanha, não 😅🛡️ Pergunta-me algo sobre segurança digital, o teu PC ou o CyberSafe.",
+  "Se eu começar a prever isso, daqui a pouco estou a analisar a vida alheia em vez de malware 😂 Fica comigo na cibersegurança.",
+  "Posso proteger a tua redação contra perderes o ficheiro… escrevê-la já foge do meu turno 😅 Manda uma questão sobre segurança ou CyberSafe.",
+  "O meu domínio é cibersegurança, não campeonatos 😌 Isso deixava o antivírus com ciúmes. Pergunta-me sobre o teu PC?",
+]
+
+// Fallback para pedidos perigosos (recurso defensivo, nunca as instruções).
+const DANGER_REPLIES = [
+  "Essa já entrou na zona 'a Matrix não quer receber visita da polícia' 😅 Posso mostrar como **detetar, bloquear ou estudar** esse ataque de forma segura.",
+  "Isso é linha ofensiva, e eu sou a guardiã do teu PC, não uma arma 😌 Posso ajudar-te a **defender** — detetar, prevenir e analisar na horizontal.",
+  "Não entro aí, mas posso ajudar-te a estudar **deteção e mitigação** num laboratório seguro. Proteger > atacar, sempre.",
+]
+
+function pickRandom(arr: string[]): string {
+  return arr[Math.floor(Math.random() * arr.length)]
 }
 
-export default function AIAssistant() {
-  const [isOpen, setIsOpen] = useState(false)
-  const [input, setInput] = useState("")
-  const [messages, setMessages] = useState<Message[]>([
-    {
-      role: "assistant",
-      content: "Olá! Sou o **Matrix**, o teu assistente de segurança do CyberSafe. Pergunta-me sobre phishing, malware, senhas, privacidade ou como usar qualquer funcionalidade!",
+function offlineReply(input: string, page: Page): { content: string; isOffTopic?: boolean; isDanger?: boolean } {
+  const lower = input.toLowerCase()
+
+  if (SECRET_PATTERN.test(input)) {
+    return {
+      content: "⚠️ **Atenção**: parece que colaste uma credencial (senha/chave). **Nunca** partilhes senhas, tokens ou chaves API no chat — nem comigo. \n\nSe foi acidente, **revoga essa credencial** (troca a senha / regenera a chave) e usa um **gestor de senhas**. Nenhum serviço legítimo te pede credenciais por chat.",
+    }
+  }
+
+  if (DANGEROUS_KEYWORDS.some((kw) => lower.includes(kw))) {
+    return { content: pickRandom(DANGER_REPLIES), isDanger: true }
+  }
+
+  if (OFF_TOPIC_KEYWORDS.some((kw) => lower.includes(kw))) {
+    return { content: pickRandom(OFF_TOPIC_REPLIES), isOffTopic: true }
+  }
+
+  for (const entry of OFFLINE_KB) {
+    if (entry.keywords.some((kw) => lower.includes(kw))) {
+      return { content: entry.answer }
+    }
+  }
+
+  // Fallback educacional com indicação de página — nunca repete a mesma coisa literal.
+  const pageMap: Partial<Record<Page, string>> = {
+    scanner: "Pergunta-me o que é o Quick Scan ou como analisar um ficheiro suspeito.",
+    pccenter: "Pergunta-me sobre o índice de saúde, disco ou firewall.",
+    monitor: "Pergunta-me o que significa uma conexão ou evento no Monitor.",
+    simulator: "Pergunta-me como identificar emails de phishing.",
+    otimizar: "Pergunta-me sobre desempenho e disco.",
+    taskmanager: "Pergunta-me sobre processos e CPU/RAM.",
+  }
+  const hint = pageMap[page]
+  return {
+    content: `Estou em **modo local** (a ligação ao fornecedor de IA não está disponível), então notei que não tenho uma resposta pronta para isso. Posso tentar de novo, ou foca-te na segurança — ${hint || "por exemplo, o que é phishing ou como criar senhas fortes."}`,
+  }
+}
+
+// Markdown simples (negrito, itálico, links e listas).
+function renderRich(text: string) {
+  const blocks = text.split("\n\n")
+  return blocks.map((block, bi) => {
+    // lista
+    if (/^\s*(?:[-*]|\d+\.)\s+/m.test(block)) {
+      const rows = block.trim().split("\n").map((line) => {
+        const isUl = /^\s*[-*]\s+/.test(line)
+        const content = line.replace(/^\s*(?:[-*]|\d+\.)\s+/, "")
+        return { isUl, content: renderInline(content) }
+      })
+      const isUl = rows[0]?.isUl
+      return (
+        <div key={bi} className={cn("flex flex-col gap-1")}>
+          {rows.map((r, i) => (
+            <div key={i} className="flex gap-1.5">
+              <span className="text-primary shrink-0">{isUl ? "•" : `${i + 1}.`}</span>
+              <span className="min-w-0">{r.content}</span>
+            </div>
+          ))}
+        </div>
+      )
+    }
+    return <div key={bi} className="min-h-2">{renderInline(block)}</div>
+  })
+}
+
+function renderInline(text: string) {
+  const parts = text.split(/(\*\*.*?\*\*|\*.*?\*|`.*?`)/g)
+  return parts.map((part, i) => {
+    if (part.startsWith("**") && part.endsWith("**")) {
+      return <strong key={i} className="text-foreground">{part.slice(2, -2)}</strong>
+    }
+    if (part.startsWith("*") && part.endsWith("*") && part.length > 2) {
+      return <em key={i} className="text-muted-foreground italic">{part.slice(1, -1)}</em>
+    }
+    if (part.startsWith("`") && part.endsWith("`") && part.length > 2) {
+      return <code key={i} className="px-1 rounded bg-black/30 font-mono text-cyber-green text-[11px]">{part.slice(1, -1)}</code>
+    }
+    return <span key={i}>{part}</span>
+  })
+}
+
+function fetcher(base: string, path: "/api/ai/status" | "/api/ai/chat") {
+  const full = `${base}${path}`
+  return {
+    status: async (): Promise<{ enabled: boolean; provider?: string; model?: string } | null> => {
+      try {
+        const r = await fetch(full, { signal: AbortSignal.timeout(4000) })
+        if (!r.ok) return null
+        return await r.json()
+      } catch {
+        return null
+      }
     },
-  ])
-  const [isTyping, setIsTyping] = useState(false)
+  }
+}
+
+export default function AIAssistant({ currentPage = "dashboard", context = "" }: AIAssistantProps) {
+  const isOpenRef = useRef(false)
+  const [isOpen, setIsOpenState] = useState(false)
+  const [showLabel, setShowLabel] = useState(true)
+  const [input, setInput] = useState("")
+  const [messages, setMessages] = useState<Message[]>([])
+  const [phase, setPhase] = useState<"idle" | "thinking" | "streaming" | "cancelling" | "error" | "rate_limited">("idle")
   const [mode, setMode] = useState<"online" | "local">("local")
   const scrollRef = useRef<HTMLDivElement>(null)
+  const abortRef = useRef<AbortController | null>(null)
+  const localUntilRef = useRef(0)
+  const [streamed, setStreamed] = useState("")
+  const streamedRef = useRef("")
+
+  const suggestions = useMemo(() => SUGGESTIONS[currentPage] || DEFAULT_SUGGESTIONS, [currentPage])
+
+  const setUpOpenState = useCallback((v: boolean) => {
+    isOpenRef.current = v
+    setIsOpenState(v)
+  }, [])
+
+  // Abertura: primeira mensagem + sonda online/offline.
+  useEffect(() => {
+    if (isOpen && messages.length === 0) {
+      let cancelled = false
+      fetcher(API_BASE, "/api/ai/status").status().then((s) => {
+        if (cancelled) return
+        if (s?.enabled) {
+          setMode("online")
+        } else {
+          setMode("local")
+          localUntilRef.current = Date.now() + 30000
+        }
+        setMessages([
+          {
+            role: "assistant",
+            content:
+              "Olá! Sou a **Matrix**, a assistente de IA do CyberSafe. 🛡️\n\nPosso ajudar-te a entender o estado do teu PC, identificar riscos e explicar cibersegurança sem aquele idioma alienígena dos técnicos.\n\nO que queres saber?",
+          },
+        ])
+      })
+      return () => {
+        cancelled = true
+      }
+    }
+  }, [isOpen, messages.length])
 
   useEffect(() => {
     if (scrollRef.current) {
       scrollRef.current.scrollTop = scrollRef.current.scrollHeight
     }
-  }, [messages, isTyping])
+  }, [messages, phase, streamed])
 
-  const processMessage = async (text: string) => {
-    if (!text.trim()) return
+  // Auto-recolhe o rótulo do launcher após uns segundos.
+  useEffect(() => {
+    const t = setTimeout(() => setShowLabel(false), 6000)
+    return () => clearTimeout(t)
+  }, [isOpen])
 
-    const userMsg = text.trim()
-    setInput("")
-
-    const userMessage: Message = { role: "user", content: userMsg }
-    const newMessages = [...messages, userMessage]
-    setMessages(newMessages)
-    setIsTyping(true)
-
-    try {
-      const response = await fetch("http://localhost:4000/api/ai/chat", {
+  const sendToServer = useCallback(
+    async (history: Message[], signal: AbortSignal, stream: boolean, onFirstDelta?: () => void): Promise<{ ok: boolean; content?: string; code?: string; message?: string }> => {
+      const payload = {
+        messages: history.map((m) => ({ role: m.role, content: m.content })),
+        context,
+        page: PAGE_LABELS[currentPage],
+        stream,
+      }
+      if (stream) {
+        // Guarda de tempo limite no cliente: aborta se nenhum dado chegar.
+        const watchdog = new AbortController()
+        const onUserAbort = () => watchdog.abort()
+        if (signal.aborted) watchdog.abort()
+        else signal.addEventListener("abort", onUserAbort, { once: true })
+        const timedOut = { current: false }
+        const timer = setTimeout(() => {
+          timedOut.current = true
+          watchdog.abort()
+        }, STREAM_TIMEOUT_MS)
+        const settle = () => {
+          clearTimeout(timer)
+          signal.removeEventListener("abort", onUserAbort)
+        }
+        try {
+          const res = await fetch(`${API_BASE}/api/ai/chat`, {
+            method: "POST",
+            headers: { "Content-Type": "application/json" },
+            body: JSON.stringify(payload),
+            signal: watchdog.signal,
+          })
+          if (!res.ok) {
+            let code: string | undefined
+            let message = "Erro do serviço de IA."
+            try {
+              const j = await res.json()
+              code = j.code
+              message = j.message || message
+            } catch { /* ignore */ }
+            settle()
+            return { ok: false, code, message }
+          }
+          const reader = res.body?.getReader()
+          if (!reader) {
+            settle()
+            return { ok: false, message: "Streaming indisponível no cliente." }
+          }
+          const decoder = new TextDecoder()
+          let buffer = ""
+          let content = ""
+          streamedRef.current = ""
+          let started = false
+          while (true) {
+            const { done, value } = await reader.read()
+            if (done) break
+            buffer += decoder.decode(value, { stream: true })
+            const events = buffer.split("\n\n")
+            buffer = events.pop() || ""
+            for (const evt of events) {
+              const line = evt.trim()
+              if (!line.startsWith("data:")) continue
+              try {
+                const obj = JSON.parse(line.replace(/^data:\s*/, ""))
+                if (obj.delta) {
+                  if (!started) {
+                    started = true
+                    onFirstDelta?.()
+                  }
+                  content += obj.delta
+                  streamedRef.current += obj.delta
+                  setStreamed(streamedRef.current)
+                } else if (obj.error) {
+                  settle()
+                  return { ok: false, code: obj.error, message: obj.message }
+                } else if (obj.done) {
+                  // fim normal
+                }
+              } catch { /* ignore */ }
+            }
+          }
+          settle()
+          if (timedOut.current) return { ok: false, message: "Tempo limite excedido. Tenta de novo." }
+          return { ok: true, content }
+        } catch (err) {
+          settle()
+          if (signal.aborted) throw err
+          if (timedOut.current) return { ok: false, message: "Tempo limite excedido. Tenta de novo." }
+          throw err
+        }
+      }
+      const res = await fetch(`${API_BASE}/api/ai/chat`, {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ messages: newMessages.map(m => ({ role: m.role, content: m.content })) })
+        body: JSON.stringify(payload),
+        signal,
       })
-      const data = await response.json()
+      if (!res.ok) {
+        let code: string | undefined
+        let message = "Erro do serviço de IA."
+        try {
+          const j = await res.json()
+          code = j.code
+          message = j.message || message
+        } catch { /* ignore */ }
+        return { ok: false, code, message }
+      }
+      const j = await res.json()
+      return { ok: true, content: j.response }
+    },
+    [context, currentPage],
+  )
 
-      if (!response.ok) {
-        throw new Error(data.message || "Erro na API de IA")
+  const processMessage = useCallback(
+    async (text: string, isRetry = false) => {
+      const trimmed = text.trim()
+      if (!trimmed || phase === "thinking" || phase === "streaming") return
+
+      const userMessage: Message = { role: "user", content: trimmed }
+      const nextMessages = [...messages, userMessage]
+      setMessages(nextMessages)
+      setInput("")
+      setStreamed("")
+      streamedRef.current = ""
+
+      // Limite de histórico — envia apenas as últimas N mensagens.
+      const payloadHistory = nextMessages.slice(-MAX_HISTORY)
+
+      setPhase("thinking")
+      const controller = new AbortController()
+      abortRef.current = controller
+      const localReply = offlineReply(trimmed, currentPage)
+
+      // Se foi um pedido perigoso ou fora do tema, responde localmente (nunca ao provider).
+      if (localReply.isDanger) {
+        setPhase("idle")
+        setMessages((prev) => [...prev, { role: "assistant", content: localReply.content }])
+        return
+      }
+      if (localReply.isOffTopic) {
+        setPhase("idle")
+        setMessages((prev) => [...prev, { role: "assistant", content: localReply.content }])
+        return
       }
 
-      setMode("online")
-      setMessages((prev) => [...prev, { role: "assistant", content: data.response }])
-    } catch (error) {
-      console.error(error)
-      // Offline fallback: tenta responder pela base de conhecimento local.
-      const offlineAnswer = offlineReply(userMsg)
-      if (offlineAnswer) {
-        setMessages((prev) => [...prev, { role: "assistant", content: offlineAnswer }])
-      } else {
-        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Estou temporariamente **offline**. Não encontrei uma resposta local para essa pergunta. Tenta novamente mais tarde, ou consulta as dicas na aba **Dashboard**." }])
+      // Em modo local (cooldown), não martelar o provider — responde da base local.
+      if (mode === "local" && Date.now() < localUntilRef.current) {
+        setPhase("idle")
+        setMessages((prev) => [...prev, { role: "assistant", content: localReply.content }])
+        return
       }
+
+      let attempts = 0
+      const maxAttempts = isRetry ? Math.min(2, MAX_RETRIES) : MAX_RETRIES
+
+      while (attempts <= maxAttempts) {
+        if (controller.signal.aborted) break
+        try {
+          const result = await sendToServer(payloadHistory, controller.signal, true, () => setPhase("streaming"))
+          if (controller.signal.aborted) {
+            setPhase("idle")
+            return
+          }
+          if (result.ok && typeof result.content !== "undefined") {
+            const content = result.content
+            setMode("online")
+            setPhase("idle")
+            setMessages((prev) => [...prev, { role: "assistant", content }])
+            return
+          }
+          if (result.code === "rate_limited") {
+            setPhase("rate_limited")
+            setMessages((prev) => [...prev, { role: "assistant", content: "🔥 Cheguei ao limite de pedidos por enquanto. Aguarda uns segundos e tenta de novo — estou aqui." }])
+            return
+          }
+          if (result.code === "no_provider" || result.code === "auth") {
+            // Provider indisponível → fallback local (com cooldown).
+            setMode("local")
+            localUntilRef.current = Date.now() + 30000
+            setPhase("idle")
+            setMessages((prev) => [...prev, { role: "assistant", content: localReply.content }])
+            return
+          }
+          // Erro transitório → retry limitado.
+          setPhase("thinking")
+        } catch (err) {
+          if (err instanceof Error && err.name === "AbortError") {
+            setPhase("idle")
+            return
+          }
+          // network error → retry
+          setPhase("thinking")
+        }
+        attempts++
+      }
+
+      // Esgotou retries → fallback local.
       setMode("local")
-    } finally {
-      setIsTyping(false)
-    }
-  }
+      localUntilRef.current = Date.now() + 30000
+      setPhase("idle")
+      setMessages((prev) => [...prev, { role: "assistant", content: localReply.content }])
+    },
+    [messages, phase, currentPage, sendToServer, mode],
+  )
 
   const handleSend = () => {
     processMessage(input)
   }
 
-  // Simple markdown → JSX: makes **bold** and line breaks work
-  const renderMarkdown = (text: string) => {
-    return text.split("\n").map((line, i) => {
-      const parts = line.split(/(\*\*.*?\*\*)/g).map((part, j) => {
-        if (part.startsWith("**") && part.endsWith("**")) {
-          return <strong key={j} className="text-foreground">{part.slice(2, -2)}</strong>
-        }
-        return <span key={j}>{part}</span>
-      })
-      return <div key={i} className={line === "" ? "h-2" : ""}>{parts}</div>
-    })
+  const handleSuggestion = (label: string) => {
+    processMessage(label)
   }
 
+  const handleStop = () => {
+    abortRef.current?.abort()
+    setPhase("idle")
+  }
+
+  const handleRetry = () => {
+    const last = messages[messages.length - 1]
+    if (last?.role === "user") {
+      processMessage(last.content, true)
+    }
+  }
+
+  const canCancel = phase === "thinking" || phase === "streaming"
+  const showThinking = phase === "thinking" || phase === "streaming"
+
+  // Launcher: avatar + rótulo "Matrix AI", recolhe depois.
   return (
-    <div className="fixed bottom-6 left-6 z-[100]">
+    <div className="fixed bottom-6 left-6 z-[100] flex flex-col items-start gap-3">
       {/* Chat Window */}
       <AnimatePresence>
         {isOpen && (
@@ -183,7 +565,7 @@ export default function AIAssistant() {
             initial={{ opacity: 0, y: 20, scale: 0.9, x: -20 }}
             animate={{ opacity: 1, y: 0, scale: 1, x: 0 }}
             exit={{ opacity: 0, y: 20, scale: 0.9, x: -20 }}
-            className="mb-4 w-[380px] h-[540px] border border-primary/30 rounded-2xl bg-card/80 backdrop-blur-xl shadow-2xl flex flex-col overflow-hidden cyber-border"
+            className="mb-1 w-[400px] max-h-[560px] h-[540px] border border-primary/30 rounded-2xl bg-card/80 backdrop-blur-xl shadow-2xl flex flex-col overflow-hidden cyber-border"
           >
             {/* Header */}
             <div className="p-4 border-b border-primary/20 bg-primary/5 flex items-center justify-between">
@@ -192,16 +574,17 @@ export default function AIAssistant() {
                 <div>
                   <h3 className="text-xs font-bold font-mono text-primary uppercase tracking-widest">Matrix</h3>
                   <p className="text-[9px] text-muted-foreground font-mono uppercase tracking-tighter">
-                    {mode === "online"
-                      ? "MODO ONLINE"
-                      : "MODO LOCAL"}
+                    Assistente de IA do CyberSafe ·{" "}
+                    <span className={mode === "online" ? "text-cyber-green" : "text-cyber-yellow"}>
+                      {mode === "online" ? "ONLINE" : "MODO LOCAL"}
+                    </span>
                   </p>
                 </div>
               </div>
               <button
-                onClick={() => setIsOpen(false)}
+                onClick={() => setUpOpenState(false)}
                 className="p-1 hover:bg-white/10 rounded transition-colors"
-                aria-label="Close Assistant"
+                aria-label="Fechar assistente"
               >
                 <X className="w-4 h-4 text-muted-foreground" />
               </button>
@@ -217,10 +600,7 @@ export default function AIAssistant() {
                   key={i}
                   initial={{ opacity: 0, x: msg.role === "user" ? 10 : -10 }}
                   animate={{ opacity: 1, x: 0 }}
-                  className={cn(
-                    "flex max-w-[88%]",
-                    msg.role === "user" ? "ml-auto" : "mr-auto"
-                  )}
+                  className={cn("flex max-w-[92%]", msg.role === "user" ? "ml-auto" : "mr-auto")}
                 >
                   <div
                     className={cn(
@@ -230,34 +610,47 @@ export default function AIAssistant() {
                         : "bg-secondary/80 border border-white/5 backdrop-blur-md rounded-tl-none text-muted-foreground"
                     )}
                   >
-                    {msg.role === "assistant" ? renderMarkdown(msg.content) : msg.content}
+                    {msg.role === "assistant" ? renderRich(msg.content) : msg.content}
                   </div>
                 </motion.div>
               ))}
-              {isTyping && (
-                <div className="flex items-center gap-2 p-2 bg-secondary/30 border border-white/5 rounded-full w-fit animate-pulse">
-                  <Wand2 className="w-3 h-3 text-primary animate-spin" />
-                  <span className="text-[9px] font-mono uppercase text-muted-foreground tracking-widest">Analisando...</span>
+
+              {showThinking && (
+                <div className="flex items-center gap-2 p-2 bg-secondary/30 border border-white/5 rounded-full w-fit">
+                  <motion.span
+                    animate={{ rotate: 360 }}
+                    transition={{ repeat: Infinity, duration: 1.2, ease: "linear" }}
+                    className="inline-block"
+                  >
+                    <Sparkles className="w-3 h-3 text-primary" />
+                  </motion.span>
+                  <span className="text-[9px] font-mono uppercase text-muted-foreground tracking-widest">
+                    {phase === "streaming" ? "A Matrix está a escrever..." : "A Matrix está a pensar..."}
+                  </span>
+                </div>
+              )}
+              {phase === "streaming" && streamed && (
+                <div className="flex max-w-[92%] mr-auto">
+                  <div className="p-3 rounded-2xl text-xs font-sans leading-relaxed bg-secondary/80 border border-white/5 backdrop-blur-md rounded-tl-none text-muted-foreground">
+                    {renderRich(streamed)}
+                  </div>
                 </div>
               )}
             </div>
 
-            {/* Quick Suggestions */}
-            {messages.length <= 2 && (
+            {/* Quick Suggestions (por página) */}
+            {messages.length <= 2 && phase === "idle" && (
               <div className="px-4 pb-2 flex gap-2 flex-wrap">
-                {QUICK_SUGGESTIONS.map((s) => {
-                  const Icon = s.icon
-                  return (
-                    <button
-                      key={s.label}
-                      onClick={() => processMessage(s.label)}
-                      className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary/50 border border-border/50 text-xs font-mono text-muted-foreground rounded-full hover:bg-primary/10 hover:text-primary hover:border-primary/30 transition-all"
-                    >
-                      <Icon className="w-3 h-3" />
-                      {s.label}
-                    </button>
-                  )
-                })}
+                {suggestions.map((s) => (
+                  <button
+                    key={s.label}
+                    onClick={() => handleSuggestion(s.label)}
+                    className="flex items-center gap-1.5 px-3 py-1.5 bg-secondary/50 border border-border/50 text-[11px] font-mono text-muted-foreground rounded-full hover:bg-primary/10 hover:text-primary hover:border-primary/30 transition-all"
+                  >
+                    <MessageSquare className="w-3 h-3" />
+                    {s.label}
+                  </button>
+                ))}
               </div>
             )}
 
@@ -269,45 +662,75 @@ export default function AIAssistant() {
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => e.key === "Enter" && handleSend()}
-                  placeholder="Pergunta sobre segurança..."
-                  className="w-full bg-background/50 border border-primary/30 rounded-xl pl-4 pr-10 py-2.5 text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
+                  placeholder="Pergunta sobre segurança digital..."
+                  className="w-full bg-background/50 border border-primary/30 rounded-xl pl-4 pr-16 py-2.5 text-xs font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-primary/50 transition-all"
                 />
-                <button
-                  onClick={handleSend}
-                  disabled={!input.trim() || isTyping}
-                  className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-primary text-primary-foreground rounded-lg hover:scale-105 transition-transform disabled:opacity-50 disabled:scale-100"
-                >
-                  <Send className="w-3.5 h-3.5" />
-                </button>
+                {canCancel ? (
+                  <button
+                    onClick={handleStop}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-destructive/20 text-destructive rounded-lg hover:scale-105 transition-transform"
+                    aria-label="Cancelar"
+                  >
+                    <StopCircle className="w-3.5 h-3.5" />
+                  </button>
+                ) : (
+                  <button
+                    onClick={handleSend}
+                    disabled={!input.trim() || phase !== "idle"}
+                    className="absolute right-2 top-1/2 -translate-y-1/2 p-1.5 bg-primary text-primary-foreground rounded-lg hover:scale-105 transition-transform disabled:opacity-50 disabled:scale-100"
+                    aria-label="Enviar"
+                  >
+                    <Send className="w-3.5 h-3.5" />
+                  </button>
+                )}
               </div>
+              {phase === "error" && (
+                <button onClick={handleRetry} className="mt-2 flex items-center gap-1.5 text-[11px] font-mono text-cyber-yellow hover:text-primary">
+                  <RefreshCw className="w-3 h-3" /> Tentar novamente
+                </button>
+              )}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Trigger Button */}
-      <motion.button
-        whileHover={{ scale: 1.05 }}
-        whileTap={{ scale: 0.95 }}
-        onClick={() => setIsOpen(!isOpen)}
-        className={cn(
-          "w-14 h-14 rounded-full flex items-center justify-center shadow-2xl relative transition-all duration-500 overflow-hidden",
-          isOpen ? "bg-card cyber-border rotate-90" : "bg-primary shadow-primary/30"
+      {/* Launcher: avatar + rótulo "Matrix AI" */}
+      <div className="flex items-center gap-2">
+        {showLabel && !isOpen && (
+          <motion.div
+            initial={{ opacity: 0, x: -8 }}
+            animate={{ opacity: 1, x: 0 }}
+            exit={{ opacity: 0, x: -8 }}
+            className="px-3 py-2 rounded-xl bg-card/90 cyber-border border-primary/30 shadow-lg flex flex-col"
+          >
+            <span className="text-[10px] font-mono font-bold text-primary uppercase tracking-wider">Matrix AI</span>
+            <span className="text-[9px] text-muted-foreground font-mono">Pergunta-me algo</span>
+          </motion.div>
         )}
-        aria-label="Abrir assistente Matrix"
-      >
-        {isOpen ? (
-          <X className="w-6 h-6 text-primary" />
-        ) : (
-          <>
-            <MatrixAvatar mood="avatar" size="sm" rounded className="w-full h-full" />
-            <div className="absolute -top-1 -right-1 w-5 h-5 bg-cyber-green rounded-full border-2 border-white flex items-center justify-center text-[10px] font-bold text-white shadow-lg">
-              <Sparkles className="w-3 h-3" />
-            </div>
-            <div className="absolute inset-0 rounded-full border-2 border-primary/50 animate-ping opacity-30" />
-          </>
-        )}
-      </motion.button>
+        <motion.button
+          whileHover={{ scale: 1.05 }}
+          whileTap={{ scale: 0.95 }}
+          onClick={() => setUpOpenState(!isOpen)}
+          title="Olá! Sou a Matrix 🛡️ Posso ajudar-te com segurança digital e com o CyberSafe."
+          className={cn(
+            "relative w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all duration-500 overflow-hidden group",
+            isOpen ? "bg-card cyber-border rotate-90" : "bg-primary shadow-primary/40"
+          )}
+          aria-label="Abrir assistente Matrix AI"
+        >
+          {isOpen ? (
+            <X className="w-6 h-6 text-primary" />
+          ) : (
+            <>
+              <MatrixAvatar mood="avatar" size="sm" rounded className="w-full h-full" />
+              <div className="absolute -bottom-1 -right-1 w-6 h-6 bg-cyber-green rounded-full border-2 border-card flex items-center justify-center shadow-lg cyber-glow">
+                <Sparkles className="w-3 h-3 text-white" />
+              </div>
+              <div className="absolute inset-0 rounded-full border-2 border-primary/50 animate-ping opacity-30 pointer-events-none" />
+            </>
+          )}
+        </motion.button>
+      </div>
     </div>
   )
 }

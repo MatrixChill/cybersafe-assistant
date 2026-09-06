@@ -1,10 +1,10 @@
 import express from "express";
 import dotenv from "dotenv";
 dotenv.config();
-import OpenAI from "openai";
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import type { DashboardSummary, ThreatEvent, EventStats } from "@cybersafe/shared-types";
+import { chatCompletion, streamChatCompletion, aiEnabled, AI_CONFIG, type AiMessage } from "./ai.js";
 import { analyzeDownloadFilename, calculateDownloadRisk, type FileScanResponse, type FileScanResult } from "@cybersafe/shared-types";
 // ── Severity redefined locally as the Prisma enum is not available ──
 type Severity = "low" | "medium" | "high" | "critical";
@@ -49,24 +49,7 @@ function broadcastEvent(event: ThreatEvent) {
 
 const app = express();
 
-const groqApiKey = process.env.GROQ_API_KEY?.trim();
-const openai = new OpenAI({
-  apiKey: groqApiKey || "missing-groq-key",
-  baseURL: "https://api.groq.com/openai/v1",
-});
-
-/** Persona do assistente no painel do antivírus (Groq / OpenAI-compatible). */
-const CYBERSAFE_AI_SYSTEM_PROMPT = `És o assistente virtual do antivírus CyberSafe. Fala português (Portugal ou Brasil, conforme o utilizador).
-
-Objetivo: ajudar o utilizador a usar o produto e a perceber segurança — ameaças, boas práticas, phishing, passwords, VPN, atualizações, quarentena, scans, falsos positivos, e o que significam alertas do CyberSafe.
-
-Regras:
-- Sê claro, curto e acionável; usa listas quando ajudar.
-- Nunca inventes que o PC está infectado sem contexto; se não souberes, diz o que falta (ex.: resultado do scan, mensagem de erro).
-- Não peças nem repitas chaves API, passwords nem dados pessoais. Se o utilizador colar segredos, avisa para revogar e usar .env.
-- Não dês conselhos ilegais (cracking, evasão de segurança empresarial, malware).
-- Quando falares de risco, distingue "possível" vs "confirmado" e sugere o próximo passo seguro (scan, quarentena, verificação VirusTotal, contactar admin).
-- Podes usar **negrito** em markdown ligeiro; evita respostas enormes (máx. ~4 parágrafos curtos salvo se pedirem detalhe).`;
+/** Persona da Matrix é centralizada em ./ai.ts (persona feminina + escopo + guardas). */
 
 const port = 4000;
 const upload = multer({
@@ -307,39 +290,48 @@ app.get("/health", (_req, res) => {
   res.json({ status: "ok", service: "cybersafe-api" });
 });
 
-// ── AI Chat ──
+// ── AI Chat (streaming + fallback JSON; persona Matrix em ./ai.ts) ──
 app.post("/api/ai/chat", async (req, res) => {
+  const { messages, context, page, stream } = (req.body || {}) as {
+    messages?: AiMessage[];
+    context?: string;
+    page?: string;
+    stream?: boolean;
+  };
+
+  if (stream === true) {
+    try {
+      await streamChatCompletion(res, req, messages || [], context, page);
+    } catch (error) {
+      console.error("[AI] stream error:", error);
+      if (res.writable && !res.writableEnded && !res.headersSent) {
+        res.status(500).json({ message: "Ocorreu um erro ao conectar com o serviço de IA." });
+      }
+    }
+    return;
+  }
+
   try {
-    if (!groqApiKey) {
-      res.status(503).json({
-        message: "IA indisponível: define GROQ_API_KEY no ficheiro .env da API (packages/api) e reinicia o servidor.",
-      });
+    const response = await chatCompletion(messages || [], context, page);
+    res.json({ response, mode: "online" });
+  } catch (error: any) {
+    if (error?.kind === "no_provider") {
+      res.status(503).json({ message: error.message, code: "no_provider" });
       return;
     }
-
-    const { messages } = req.body;
-    if (!messages || !Array.isArray(messages)) {
-      res.status(400).json({ message: "Messages array is required" });
-      return;
-    }
-
-    const systemPrompt = {
-      role: "system" as const,
-      content: CYBERSAFE_AI_SYSTEM_PROMPT,
-    };
-
-    const completion = await openai.chat.completions.create({
-      model: "llama-3.1-8b-instant",
-      messages: [systemPrompt, ...messages],
-      temperature: 0.7,
-      max_tokens: 500,
-    });
-
-    res.json({ response: completion.choices[0].message.content });
-  } catch (error) {
-    console.error("OpenAI API error:", error);
+    console.error("[AI] completion error:", error);
     res.status(500).json({ message: "Ocorreu um erro ao conectar com o serviço de IA." });
   }
+});
+
+// ── Status da IA (sem expor chaves) — permite à app mostrar ONLINE/LOCAL ──
+app.get("/api/ai/status", (_req, res) => {
+  res.json({
+    enabled: aiEnabled,
+    provider: AI_CONFIG.provider,
+    model: AI_CONFIG.model,
+    streaming: true,
+  });
 });
 
 // ── Create event ──

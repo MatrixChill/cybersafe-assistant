@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, useMemo } from "react";
 import type {
   ConnectionSnapshot,
   DashboardSummary,
@@ -216,6 +216,26 @@ function AuthenticatedApp() {
 
   const dashboard = buildDashboard(protection, threats);
 
+  // Contexto sanitizado da Matrix: apenas métricas agregadas, sem caminhos,
+  // emails ou conteúdo de ficheiros (privacidade em primeiro lugar).
+  const matrixContext = useMemo(() => {
+    const parts: string[] = [];
+    if (protection) {
+      parts.push(`Protection score: ${Math.max(0, 100 - protection.stats.riskScore)}`);
+      parts.push(`Protection status: ${protection.status}`);
+      parts.push(`Service running: ${protection.engine.serviceRunning}`);
+      parts.push(`Security events (total): ${protection.stats.totalEvents}`);
+      parts.push(`Quarantined items: ${protection.stats.quarantinedCount}`);
+    }
+    if (hardware) {
+      parts.push(`CPU usage: ${hardware.cpu.usage}%`);
+      parts.push(`RAM usage: ${hardware.ram.usagePercent}%`);
+      parts.push(`Disk usage: ${hardware.disk.usagePercent}%`);
+    }
+    parts.push(`Active threats: ${threats.length}`);
+    return parts.join("\n");
+  }, [protection, hardware, threats]);
+
   function renderPage() {
     const accountType = user?.type || "personal";
     const plan = user?.plan || "free";
@@ -315,7 +335,7 @@ function AuthenticatedApp() {
           </AnimatePresence>
         </div>
       </div>
-      <AIAssistant />
+      <AIAssistant currentPage={page} context={matrixContext} />
     </div>
   );
 }
