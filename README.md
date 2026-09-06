@@ -200,6 +200,7 @@ cybersafe-assistant/
 - Resumo consolidado: [`docs/PLANO-CONSOLIDADO.md`](./docs/PLANO-CONSOLIDADO.md)
 - FAQ para entrega ao professor: [`docs/FAQ-ENTREGA-PROFESSOR.md`](./docs/FAQ-ENTREGA-PROFESSOR.md)
 - Relatório da sessão de preparação da PAP: [`docs/PAP_LONG_SESSION_REPORT.md`](./docs/PAP_LONG_SESSION_REPORT.md)
+- Relatório da sessão de polimento da PAP: [`docs/PAP_POLISH_SESSION_REPORT.md`](./docs/PAP_POLISH_SESSION_REPORT.md)
 - Motor nativo C++: [`packages/native-engine/README.md`](./packages/native-engine/README.md)
 
 ## Licença
