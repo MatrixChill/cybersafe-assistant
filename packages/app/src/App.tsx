@@ -72,7 +72,7 @@ function AuthenticatedApp() {
   const { user, logout } = useAuth();
   const [page, setPage] = useState<Page>("dashboard");
   const [theme, setTheme] = useState<ThemeMode>("dark");
-  const [accent, setAccent] = useState<AccentMode>("blue");
+  const [accent, setAccent] = useState<AccentMode>("cyan");
   const [protection, setProtection] = useState<ProtectionState | null>(null);
   const [threats, setThreats] = useState<ThreatEvent[]>([]);
   const [events, setEvents] = useState<SecurityEvent[]>([]);
@@ -91,8 +91,10 @@ function AuthenticatedApp() {
   const TOAST_AUTO_DISMISS_MS = 10_000;
 
   useEffect(() => {
+    // Migra "blue" gravado antes da introdução dos tokens CYAN/PINK/PURPLE.
+    const rawAccent = String(localStorage.getItem("accent") || "") as AccentMode | "blue";
+    const savedAccent: AccentMode = rawAccent === "blue" ? "cyan" : ((rawAccent as AccentMode) ?? "cyan");
     const savedTheme = (localStorage.getItem("theme") as ThemeMode | null) ?? "dark";
-    const savedAccent = (localStorage.getItem("accent") as AccentMode | null) ?? "blue";
     setTheme(savedTheme);
     setAccent(savedAccent);
   }, []);

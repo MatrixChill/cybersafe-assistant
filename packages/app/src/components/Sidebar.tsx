@@ -24,7 +24,7 @@ import { BrandLogo } from "./BrandLogo"
 
 export type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager" | "otimizar";
 export type ThemeMode = "dark" | "light";
-export type AccentMode = "blue" | "purple" | "pink";
+export type AccentMode = "cyan" | "pink" | "purple";
 
 interface SidebarProps {
   activePage: Page;
@@ -95,7 +95,7 @@ export default function Sidebar({
                 CYBER<span className="text-primary">SAFE</span>
               </span>
               <span className="text-[10px] uppercase tracking-[0.2em] text-muted-foreground font-mono truncate">
-                Assistente de Segurança
+                Security Assistant
               </span>
             </div>
           )}
@@ -171,15 +171,17 @@ export default function Sidebar({
                 <Palette className="w-4 h-4 text-muted-foreground shrink-0" />
                 {!collapsed && (
                     <div className="flex gap-2">
-                        {(['blue', 'purple', 'pink'] as AccentMode[]).map((c) => (
+                        {(['cyan', 'pink', 'purple'] as AccentMode[]).map((c) => (
                             <button
                                 key={c}
                                 onClick={() => onAccentChange(c)}
+                                aria-label={`Tema ${c}`}
+                                title={c}
                                 className={cn(
                                     "w-4 h-4 rounded-full transition-transform hover:scale-125",
-                                    c === 'blue' && "bg-[#00f2ff]",
-                                    c === 'purple' && "bg-[#9d00ff]",
-                                    c === 'pink' && "bg-[#ff007f]",
+                                    c === 'cyan' && "bg-[var(--color-cyber-cyan)]",
+                                    c === 'pink' && "bg-[var(--color-cyber-pink)]",
+                                    c === 'purple' && "bg-[var(--color-cyber-purple)]",
                                     accent === c && "ring-2 ring-white ring-offset-2 ring-offset-background"
                                 )}
                             />
