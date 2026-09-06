@@ -11,6 +11,7 @@ export * from "./wfp-filter.js";
 export * from "./amsi-provider.js";
 export * from "./etw-consumer.js";
 export * from "./powershell.js";
+import { WindowsHealthEngine } from "./powershell.js";
 
 export interface FileObservation {
   kind: "file.created" | "file.modified" | "file.renamed";
@@ -235,30 +236,25 @@ export async function snapshotProcesses(): Promise<Map<number, ProcessSnapshot>>
     const { promisify } = await import("node:util");
     const execAsync = promisify(exec);
 
-    // No Windows, usamos PowerShell para obter a linha de comando completa, já que o wmic está depreciado
-    const { stdout } = await execAsync('powershell -NoProfile -Command "Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine | ConvertTo-Csv -NoTypeInformation"');
-    const lines = stdout.split('\n').filter(line => line.trim() !== "" && line.includes(","));
+    // Saída JSON (a versão CSV anterior partia campos com vírgulas e gerava dados corrompidos).
+    const { stdout } = await execAsync(
+      'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine | ConvertTo-Json -Compress"'
+    );
+    const rows = JSON.parse(stdout.trim());
+    const list = Array.isArray(rows) ? rows : rows && typeof rows === "object" ? [rows] : [];
     const now = new Date().toISOString();
 
-    for (let i = 1; i < lines.length; i++) {
-      // O CSV do PowerShell pode conter aspas, vamos limpá-las
-      const line = lines[i].replace(/"/g, '');
-      const parts = line.split(',');
-      if (parts.length < 3) continue;
-
-      const pid = parseInt(parts[0] || "0");
-      const name = parts[1] || "";
-      const commandLine = parts.slice(2).join(',') || ""; // O comando pode conter vírgulas
-
+    for (const raw of list) {
+      const pid = parseInt(raw.ProcessId, 10);
       if (!Number.isFinite(pid) || pid <= 0) continue;
 
       map.set(pid, {
         pid,
-        ppid: 0, // WMIC csv format here doesn't include parentPid by default
-        name: name || `pid-${pid}`,
-        path: "", // Path is harder to get in this specific wmic format without extra cols
-        commandLine,
-        user: "unknown",
+        ppid: 0,
+        name: String(raw.Name || `pid-${pid}`),
+        path: "",
+        commandLine: String(raw.CommandLine || ""),
+        user: undefined,
         cpu: 0,
         memoryMb: 0,
         startedAt: now,
@@ -267,13 +263,13 @@ export async function snapshotProcesses(): Promise<Map<number, ProcessSnapshot>>
       });
     }
 
-    // Fallback ou complemento com systeminformation para CPU/Memória
+    // Complemento com systeminformation para CPU/Memória
     const siProcesses = await si.processes();
     for (const p of siProcesses.list) {
       const existing = map.get(Number(p.pid));
       if (existing) {
         existing.cpu = Math.round((p.cpu ?? 0) * 10) / 10;
-        existing.memoryMb = Math.round(((p.memRss ?? 0) / 1024));
+        existing.memoryMb = Math.round((p.memRss ?? 0) / 1024);
         existing.path = (p as any).path || existing.path;
         existing.ppid = Number((p as any).parentPid || 0);
         existing.user = p.user || existing.user;
@@ -288,16 +284,45 @@ export async function snapshotProcesses(): Promise<Map<number, ProcessSnapshot>>
 
 export async function snapshotConnections(): Promise<ConnectionSnapshot[]> {
   try {
-    const connections = await si.networkConnections();
-    return connections.slice(0, 200).map((connection: any) => ({
-      processPid: connection.pid,
-      remoteAddress: connection.peeraddress || connection.peeraddr || "unknown",
-      remotePort: connection.peerport,
-      protocol: connection.protocol,
-      state: connection.state,
-      direction: "outbound",
-      observedAt: new Date().toISOString(),
-    }));
+    // No Windows, systeminformation depende do netstat em inglês e falha em locales
+    // como o português. Usa Get-NetTCPConnection (estável em qualquer locale).
+    const engine = new WindowsHealthEngine();
+    const res = await engine.executor.run<Array<{
+      LocalAddress?: string;
+      LocalPort?: number;
+      RemoteAddress?: string;
+      RemotePort?: number;
+      State?: string;
+      OwningProcess?: number;
+    }>>("tcpConnections");
+
+    if (!res.ok || !res.data) return [];
+
+    const seen = new Set<string>();
+    const result: ConnectionSnapshot[] = [];
+    for (const raw of res.data) {
+      const localAddress = String(raw.LocalAddress || "0.0.0.0");
+      const localPort = Number(raw.LocalPort) || 0;
+      const remoteAddress = String(raw.RemoteAddress || "");
+      const remotePort = Number(raw.RemotePort) || 0;
+      const state = String(raw.State || "unknown");
+      const key = `${localAddress}:${localPort}:${remoteAddress}:${remotePort}:${state}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+
+      const isListening = remoteAddress === "" || remoteAddress === "0.0.0.0" || remoteAddress === "::" || state === "Listen";
+      result.push({
+        processPid: (raw.OwningProcess && raw.OwningProcess > 0) ? raw.OwningProcess : undefined,
+        remoteAddress: isListening ? localAddress : remoteAddress,
+        remotePort: isListening ? localPort : remotePort,
+        protocol: "tcp",
+        state,
+        direction: isListening ? "inbound" : "outbound",
+        observedAt: new Date().toISOString(),
+      });
+      if (result.length >= 200) break;
+    }
+    return result;
   } catch {
     return [];
   }
