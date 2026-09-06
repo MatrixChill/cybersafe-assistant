@@ -1,4 +1,4 @@
-import { Activity, Clock, Globe, Shield, Terminal } from "lucide-react";
+import { Activity, AlertTriangle, Clock, Globe, Shield, Terminal, Lock, FileSearch, Download, Info } from "lucide-react";
 import type {
   ConnectionSnapshot,
   ProcessSnapshot,
@@ -14,6 +14,29 @@ interface MonitorPageProps {
   connections: ConnectionSnapshot[];
   protection: ProtectionState | null;
   quarantine: QuarantineEntry[];
+}
+
+// Traduz os tipos de evento para mensagens legíveis por qualquer pessoa.
+const EVENT_LABELS: Record<string, { label: string; icon: typeof Info; tone: "danger" | "warning" | "info" | "ok" }> = {
+  "threat.detected": { label: "Ameaça detetada", icon: AlertTriangle, tone: "danger" },
+  "process.blocked": { label: "Processo bloqueado", icon: Lock, tone: "danger" },
+  "process.killed": { label: "Processo encerrado", icon: Lock, tone: "danger" },
+  "process.started": { label: "Processo iniciado", icon: Activity, tone: "info" },
+  "persistence.detected": { label: "Persistência suspeita", icon: AlertTriangle, tone: "warning" },
+  "artifact.analyzed": { label: "Ficheiro analisado", icon: FileSearch, tone: "info" },
+  "quarantine.added": { label: "Colocado em quarentena", icon: Shield, tone: "warning" },
+  "quarantine.restored": { label: "Recuperado da quarentena", icon: Shield, tone: "ok" },
+  "file.created": { label: "Novo ficheiro", icon: FileSearch, tone: "info" },
+  "file.modified": { label: "Ficheiro modificado", icon: FileSearch, tone: "info" },
+  "scan.progress": { label: "Análise em curso", icon: FileSearch, tone: "info" },
+  "trust.updated": { label: "Confiança atualizada", icon: Shield, tone: "ok" },
+  "engine.health": { label: "Definições atualizadas", icon: Download, tone: "ok" },
+};
+
+function describeEvent(event: SecurityEvent): string {
+  // Usa o resumo original quando existir; caso contrário gera um texto simples.
+  if (event.summary) return event.summary;
+  return event.type.replace(/[._]/g, " ");
 }
 
 export default function MonitorPage({ events, processes, connections, protection, quarantine }: MonitorPageProps) {
@@ -53,25 +76,42 @@ export default function MonitorPage({ events, processes, connections, protection
           </div>
         </div>
         <div className="p-0 flex-1 flex flex-col bg-black/40 font-mono text-[11px] relative">
-          <div className="flex-1 overflow-y-auto p-4 space-y-1 scrollbar-hide">
+          <div className="flex-1 overflow-y-auto p-4 space-y-1.5 scrollbar-hide">
             {latestEvents.length === 0 ? (
               <div className="h-full flex items-center justify-center opacity-20">
                 <span className="animate-pulse italic">Sem telemetria do service</span>
               </div>
             ) : (
-              latestEvents.map((event) => (
-                <div key={event.id} className="flex gap-3 hover:bg-white/5 px-2 py-0.5 rounded transition-colors group">
-                  <span className="text-muted-foreground shrink-0">[{new Date(event.timestamp).toLocaleTimeString()}]</span>
-                  <span className="text-primary font-bold shrink-0">[{event.type.toUpperCase()}]</span>
-                  <span className={cn(
-                    "shrink-0 w-16",
-                    event.severity === "critical" ? "text-cyber-red" : event.severity === "high" ? "text-cyber-yellow" : "text-cyber-cyan",
-                  )}>
-                    {event.severity.toUpperCase()}
-                  </span>
-                  <span className="text-foreground truncate grow">{event.summary}</span>
-                </div>
-              ))
+              latestEvents.map((event) => {
+                const meta = EVENT_LABELS[event.type] ?? {
+                  label: event.type.replace(/[._]/g, " "),
+                  icon: Info,
+                  tone: "info" as const,
+                };
+                const Icon = meta.icon;
+                return (
+                  <div key={event.id} className="flex items-center gap-2.5 hover:bg-white/5 px-2 py-1.5 rounded transition-colors group">
+                    <Icon className={cn(
+                      "w-3.5 h-3.5 shrink-0",
+                      meta.tone === "danger" ? "text-cyber-red"
+                        : meta.tone === "warning" ? "text-cyber-yellow"
+                        : meta.tone === "ok" ? "text-cyber-green"
+                        : "text-cyber-cyan",
+                    )} />
+                    <span className="text-muted-foreground shrink-0">{new Date(event.timestamp).toLocaleTimeString()}</span>
+                    <span className={cn(
+                      "shrink-0 px-1.5 py-0.5 rounded border text-[9px] font-bold uppercase",
+                      meta.tone === "danger" ? "border-cyber-red/40 text-cyber-red"
+                        : meta.tone === "warning" ? "border-cyber-yellow/40 text-cyber-yellow"
+                        : meta.tone === "ok" ? "border-cyber-green/40 text-cyber-green"
+                        : "border-cyber-cyan/40 text-cyber-cyan",
+                    )}>
+                      {meta.label}
+                    </span>
+                    <span className="text-foreground truncate grow">{describeEvent(event)}</span>
+                  </div>
+                );
+              })
             )}
           </div>
         </div>

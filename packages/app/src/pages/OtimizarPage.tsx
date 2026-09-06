@@ -3,12 +3,14 @@ import { motion } from "framer-motion"
 import {
   ShieldCheck, Download, HardDrive, RefreshCw,
   AlertTriangle, CheckCircle, Info, Trash2, Globe,
-  Cpu, Lock, Eye
+  Cpu, Lock, Eye, Loader2
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import type { HardwareSnapshot } from "@cybersafe/shared-types"
 
 type Priority = "high" | "medium" | "low"
+// "action" executa uma operação real; "tip" apenas marca como feita (dica manual).
+type ActionKind = "action" | "tip"
 
 interface Recommendation {
   id: string
@@ -18,6 +20,7 @@ interface Recommendation {
   category: string
   icon: React.ElementType
   action?: string
+  kind: ActionKind
   done?: boolean
 }
 
@@ -34,24 +37,27 @@ const baseRecommendations: Omit<Recommendation, "done">[] = [
     category: "Segurança",
     icon: ShieldCheck,
     action: "Verificar",
+    kind: "action",
   },
   {
     id: "update",
-    title: "Atualizar Windows",
-    description: "Manter o Windows atualizado corrige falhas de segurança exploradas por malwares.",
+    title: "Atualizar Definições de Ameaças",
+    description: "Descarrega as últimas definições de ameaças para detetar malwares recentes.",
     priority: "high",
     category: "Sistema",
     icon: RefreshCw,
     action: "Atualizar",
+    kind: "action",
   },
   {
     id: "disk-cleanup",
-    title: "Limpeza de Disco",
-    description: "Arquivos temporários acumulados ocupam espaço e podem conter resíduos de malware.",
+    title: "Análise Completa do Sistema",
+    description: "Executa uma verificação completa do sistema para detetar ameaças ocultas.",
     priority: "medium",
     category: "Performance",
     icon: HardDrive,
-    action: "Limpar",
+    action: "Iniciar",
+    kind: "action",
   },
   {
     id: "browser-update",
@@ -61,6 +67,7 @@ const baseRecommendations: Omit<Recommendation, "done">[] = [
     category: "Segurança",
     icon: Globe,
     action: "Verificar",
+    kind: "tip",
   },
   {
     id: "passwords",
@@ -70,6 +77,7 @@ const baseRecommendations: Omit<Recommendation, "done">[] = [
     category: "Segurança",
     icon: Lock,
     action: "Gerar",
+    kind: "tip",
   },
   {
     id: "extensions",
@@ -79,6 +87,7 @@ const baseRecommendations: Omit<Recommendation, "done">[] = [
     category: "Segurança",
     icon: Eye,
     action: "Revisar",
+    kind: "tip",
   },
   {
     id: "startup",
@@ -88,6 +97,7 @@ const baseRecommendations: Omit<Recommendation, "done">[] = [
     category: "Performance",
     icon: Cpu,
     action: "Revisar",
+    kind: "tip",
   },
   {
     id: "backup",
@@ -97,24 +107,27 @@ const baseRecommendations: Omit<Recommendation, "done">[] = [
     category: "Dados",
     icon: Download,
     action: "Configurar",
+    kind: "tip",
   },
   {
     id: "scanner-run",
-    title: "Análise Completa do Sistema",
-    description: "Execute uma verificação completa do sistema para detectar possíveis ameaças ocultas.",
+    title: "Atualizar a Base de Dados de Segurança",
+    description: "Verifica e atualiza as definições de ameaças usadas no File Scanner e no monitor.",
     priority: "high",
     category: "Segurança",
     icon: AlertTriangle,
-    action: "Iniciar",
+    action: "Atualizar",
+    kind: "action",
   },
   {
     id: "temp-files",
-    title: "Limpar Ficheiros Temporários",
-    description: "Ficheiros temporários do sistema e navegador podem ser removidos com segurança.",
+    title: "Verificar Saúde do Windows",
+    description: "Consulta o estado das atualizações e da proteção do Windows a partir do serviço.",
     priority: "low",
     category: "Performance",
     icon: Trash2,
-    action: "Limpar",
+    action: "Verificar",
+    kind: "action",
   },
 ]
 
@@ -123,6 +136,8 @@ export default function OtimizarPage({ hardware }: OtimizarPageProps) {
     baseRecommendations.map((r) => ({ ...r, done: false }))
   )
   const [actionMessage, setActionMessage] = useState<string | null>(null)
+  const [busyId, setBusyId] = useState<string | null>(null)
+  const [errorMessage, setErrorMessage] = useState<string | null>(null)
 
   const toggleDone = (id: string) => {
     setRecommendations((prev) =>
@@ -137,12 +152,86 @@ export default function OtimizarPage({ hardware }: OtimizarPageProps) {
   const doneCount = recommendations.filter((r) => r.done).length
   const progressPct = total > 0 ? Math.round((doneCount / total) * 100) : 0
 
-  const handleAction = (id: string) => {
+  const notify = (msg: string, isError = false) => {
+    if (isError) {
+      setErrorMessage(msg)
+      setTimeout(() => setErrorMessage(null), 4000)
+    } else {
+      setActionMessage(msg)
+      setTimeout(() => setActionMessage(null), 4000)
+    }
+  }
+
+  const handleAction = async (id: string) => {
     const r = recommendations.find((r) => r.id === id)
-    if (r) {
+    if (!r || busyId) return
+
+    // Ações manuais: apenas marcar como resolvida após confirmação.
+    if (r.kind === "tip") {
       toggleDone(id)
-      setActionMessage(`"${r.title}" marcado como concluído.`)
-      setTimeout(() => setActionMessage(null), 2500)
+      notify(`"${r.title}" — guarda esta dica antes de continuar.`)
+      return
+    }
+
+    if (!window.electronAPI) {
+      notify("Motor de proteção indisponível — execute a app a partir do ambiente de trabalho.", true)
+      return
+    }
+
+    setBusyId(id)
+    try {
+      switch (id) {
+        case "firewall": {
+          const health = await window.electronAPI.getWindowsHealth()
+          const firewall = health?.firewall
+          if (firewall?.enabled) {
+            toggleDone(id)
+            notify("Firewall do Windows ativo. Nenhuma ação necessária.")
+          } else if (firewall && firewall.enabled === false) {
+            notify("O firewall do Windows está desativado. Ativa-o em Definições → Privacidade e Segurança → Segurança do Windows.", true)
+          } else {
+            notify("Não foi possível consultar o estado do firewall a partir do serviço.", true)
+          }
+          break
+        }
+        case "update":
+        case "scanner-run": {
+          const res = await window.electronAPI.updateDefinitions()
+          if (res?.success) {
+            toggleDone(id)
+            notify("Definições de ameaças atualizadas com sucesso.")
+          } else {
+            notify("Falha ao atualizar definições.", true)
+          }
+          break
+        }
+        case "disk-cleanup": {
+          const res = await window.electronAPI.startScan("full")
+          if (res?.success) {
+            notify("Análise completa iniciada. Acompanha o progresso no Scanner de Ficheiros.")
+          } else {
+            notify("Não foi possível iniciar a análise completa.", true)
+          }
+          break
+        }
+        case "temp-files": {
+          const health = await window.electronAPI.getWindowsHealth()
+          if (health) {
+            toggleDone(id)
+            notify(`Saúde do Windows: ${health.overallStatus} (score ${health.score}). ${health.recommendations.length} recomendação(ões).`)
+          } else {
+            notify("Não foi possível consultar a saúde do Windows.", true)
+          }
+          break
+        }
+        default:
+          toggleDone(id)
+          notify(`"${r.title}" concluído.`)
+      }
+    } catch (err: unknown) {
+      notify("Erro ao executar: " + (err instanceof Error ? err.message : String(err)), true)
+    } finally {
+      setBusyId(null)
     }
   }
 
@@ -188,6 +277,18 @@ export default function OtimizarPage({ hardware }: OtimizarPageProps) {
         >
           <CheckCircle className="w-4 h-4" />
           {actionMessage}
+        </motion.div>
+      )}
+
+      {errorMessage && (
+        <motion.div
+          initial={{ opacity: 0, y: -10 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: -10 }}
+          className="flex items-center gap-2 p-3 rounded-xl bg-cyber-red/10 border border-cyber-red/30 text-cyber-red text-xs font-mono"
+        >
+          <AlertTriangle className="w-4 h-4" />
+          {errorMessage}
         </motion.div>
       )}
 
@@ -270,9 +371,17 @@ export default function OtimizarPage({ hardware }: OtimizarPageProps) {
                 {!rec.done && (
                   <button
                     onClick={() => handleAction(rec.id)}
-                    className="flex-shrink-0 px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-primary bg-primary/10 border border-primary/20 rounded-lg hover:bg-primary/20 transition-all"
+                    disabled={busyId !== null}
+                    className="flex-shrink-0 px-3 py-1.5 text-[10px] font-mono font-bold uppercase tracking-wider text-primary bg-primary/10 border border-primary/20 rounded-lg hover:bg-primary/20 transition-all disabled:opacity-50 flex items-center gap-1"
                   >
-                    {rec.action || "Concluir"}
+                    {busyId === rec.id ? (
+                      <>
+                        <Loader2 className="w-3 h-3 animate-spin" />
+                        A executar...
+                      </>
+                    ) : (
+                      rec.action || "Concluir"
+                    )}
                   </button>
                 )}
               </div>

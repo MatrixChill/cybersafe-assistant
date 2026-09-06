@@ -46,6 +46,67 @@ export default function ReportsPage({ events, threats, quarantine }: ReportsPage
     }
   };
 
+  const exportPdf = () => {
+    // Gera um relatório imprimível e abre o diálogo nativo "Guardar como PDF".
+    const rows = filteredThreats.map((t) => `
+      <tr>
+        <td>${new Date(t.createdAt).toLocaleString("pt-BR")}</td>
+        <td>${t.severity.toUpperCase()}</td>
+        <td>${t.domain || t.source}</td>
+        <td>${t.source}</td>
+        <td>${t.summary}</td>
+      </tr>`).join("");
+
+    const html = `<!doctype html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8" />
+<title>Relatório de Segurança — CyberSafe</title>
+<style>
+  * { box-sizing: border-box; }
+  body { font-family: 'Segoe UI', system-ui, sans-serif; color: #111; margin: 40px; }
+  h1 { font-size: 22px; margin: 0 0 4px; }
+  h2 { font-size: 14px; font-weight: 600; margin: 24px 0 8px; }
+  .sub { font-size: 12px; color: #666; margin-bottom: 24px; }
+  .meta { font-family: monospace; font-size: 11px; color: #555; margin-bottom: 16px; }
+  table { width: 100%; border-collapse: collapse; font-size: 11px; }
+  th { text-align: left; padding: 6px 8px; background: #0ea5b7; color: #fff; font-size: 10px; text-transform: uppercase; letter-spacing: .04em; }
+  td { padding: 6px 8px; border-bottom: 1px solid #ddd; }
+  tr:nth-child(even) td { background: #f7f9fa; }
+  .stat { display: inline-block; margin-right: 24px; font-size: 12px; color: #333; }
+  .stat b { display: block; font-size: 18px; }
+  .footer { margin-top: 32px; font-size: 10px; color: #999; }
+  @media print { body { margin: 16px; } }
+</style>
+</head>
+<body>
+  <h1>CyberSafe — Relatório de Segurança</h1>
+  <div class="sub">Resumo consolidado do estado de proteção do sistema</div>
+  <div class="stat"><b>${stats.totalEvents}</b>Eventos</div>
+  <div class="stat"><b>${stats.totalThreats}</b>Ameaças</div>
+  <div class="stat"><b>${stats.highCritical}</b>Alta + Crítica</div>
+  <div class="stat"><b>${stats.quarantined}</b>Em quarentena</div>
+  <div class="stat"><b>${stats.sources.length}</b>Fontes</div>
+  <div class="meta">Gerado em ${new Date().toLocaleString("pt-BR")} — ${filteredThreats.length} ameaça(s) listada(s)</div>
+  ${stats.totalThreats > 0 ? `
+  <h2>Ameaças Detetadas</h2>
+  <table>
+    <thead><tr><th>Data/Hora</th><th>Severidade</th><th>Tipo</th><th>Fonte</th><th>Resumo</th></tr></thead>
+    <tbody>${rows}</tbody>
+  </table>` : "<p style='font-size:12px;color:#2e7d32;font-weight:600'>Nenhuma ameaça registada no período.</p>"}
+<div class="footer">Documento gerado pela aplicação CyberSafe Assistant. Use como referência, não como auditoria formal.</div>
+</body>
+</html>`;
+
+    const win = window.open("", "_blank", "width=860,height=640");
+    if (!win) return;
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    // Aguarda o layout do documento antes de abrir o diálogo "Guardar como PDF".
+    setTimeout(() => { try { win.print(); } catch { /* janela fechada antes do print */ } }, 400);
+  };
+
   return (
     <div className="p-8 h-full flex flex-col space-y-6 animate-in fade-in duration-500">
       <div className="flex items-center justify-between shrink-0">
@@ -59,6 +120,7 @@ export default function ReportsPage({ events, threats, quarantine }: ReportsPage
         </div>
         <button
           onClick={() => {
+            exportPdf();
             setShowExportToast(true);
             setTimeout(() => setShowExportToast(false), 3000);
           }}
@@ -161,7 +223,7 @@ export default function ReportsPage({ events, threats, quarantine }: ReportsPage
         <div className="fixed bottom-6 right-6 z-[110] animate-in slide-in-from-bottom-4">
           <div className="px-4 py-3 rounded-lg bg-card border border-primary/30 shadow-lg text-sm font-mono text-primary flex items-center gap-2">
             <Download className="w-4 h-4" />
-            Relatório exportado com sucesso (demo)
+            Relatório aberto — guarda como PDF no diálogo impressão
           </div>
         </div>
       )}
