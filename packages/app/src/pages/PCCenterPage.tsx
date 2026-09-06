@@ -102,12 +102,12 @@ function SimpleView({ hardware }: { hardware: HardwareSnapshot }) {
   const isStressed = hardware.stressScore > 75;
   const isWarning = hardware.stressScore > 50 && hardware.stressScore <= 75;
 
-  let statusTitle = "Sistema SaudÃ¡vel";
+  let statusTitle = "Sistema Saudável";
   let statusColor = "text-cyber-green";
   let statusBg = "bg-cyber-green/10";
   let statusBorder = "border-cyber-green/30";
   let StatusIcon = ShieldCheck;
-  let statusMessage = "Os componentes do seu sistema estÃ£o a operar de forma eficiente e dentro dos limites seguros.";
+  let statusMessage = "Os componentes do seu sistema estão a operar de forma eficiente e dentro dos limites seguros.";
 
   if (isStressed) {
     statusTitle = "Sistema em Sobrecarga";
@@ -115,14 +115,14 @@ function SimpleView({ hardware }: { hardware: HardwareSnapshot }) {
     statusBg = "bg-cyber-red/10";
     statusBorder = "border-cyber-red/30";
     StatusIcon = AlertTriangle;
-    statusMessage = "O sistema encontra-se sob stress elevado. Recomendamos fechar aplicaÃ§Ãµes pesadas em segundo plano.";
+    statusMessage = "O sistema encontra-se sob stress elevado. Recomendamos fechar aplicações pesadas em segundo plano.";
   } else if (isWarning) {
-    statusTitle = "AtenÃ§Ã£o NecessÃ¡ria";
+    statusTitle = "Atenção Necessária";
     statusColor = "text-cyber-yellow";
     statusBg = "bg-cyber-yellow/10";
     statusBorder = "border-cyber-yellow/30";
     StatusIcon = AlertTriangle;
-    statusMessage = "Alguns componentes registam utilizaÃ§Ã£o moderadamente alta.";
+    statusMessage = "Alguns componentes registam utilização moderadamente alta.";
   }
 
   return (
@@ -137,7 +137,7 @@ function SimpleView({ hardware }: { hardware: HardwareSnapshot }) {
         <p className="text-muted-foreground max-w-lg mx-auto">{statusMessage}</p>
 
         <div className="mt-8 flex flex-col items-center">
-          <span className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Ãndice de Stress</span>
+          <span className="text-xs text-muted-foreground uppercase tracking-wider mb-2">Índice de Stress</span>
           <div className="flex items-center gap-2">
             <Gauge className={cn("w-6 h-6", getUsageColor(hardware.stressScore))} />
             <span className={cn("text-3xl font-mono font-bold", getUsageColor(hardware.stressScore))}>
@@ -155,12 +155,12 @@ function SimpleView({ hardware }: { hardware: HardwareSnapshot }) {
           <span className={cn("text-2xl font-mono font-bold mb-2", getUsageColor(hardware.cpu.usage))}>
             {Math.round(hardware.cpu.usage)}%
           </span>
-          <span className="text-xs text-muted-foreground">UtilizaÃ§Ã£o atual</span>
+          <span className="text-xs text-muted-foreground">Utilização atual</span>
         </div>
 
         <div className="bg-card cyber-border rounded-xl p-6 flex flex-col items-center text-center group hover:border-primary/50 transition-all">
           <MemoryStick className={cn("w-8 h-8 mb-4", getUsageColor(hardware.ram.usagePercent))} />
-          <h3 className="font-semibold mb-1">MemÃ³ria RAM</h3>
+          <h3 className="font-semibold mb-1">Memória RAM</h3>
           <span className={cn("text-2xl font-mono font-bold mb-2", getUsageColor(hardware.ram.usagePercent))}>
             {Math.round(hardware.ram.usagePercent)}%
           </span>
@@ -189,7 +189,7 @@ function SimpleView({ hardware }: { hardware: HardwareSnapshot }) {
               <span className="text-sm font-mono font-bold text-primary">{formatBytes(hardware.network.txSec)}</span>
             </div>
           </div>
-          <span className="text-xs text-muted-foreground mt-1">TrÃ¡fego atual</span>
+          <span className="text-xs text-muted-foreground mt-1">Tráfego atual</span>
         </div>
       </div>
     </div>
@@ -227,7 +227,7 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
                     <div className="mt-3 flex items-start gap-2 bg-black/20 p-3 rounded-lg border border-white/5">
                       <Zap className="w-4 h-4 text-primary mt-0.5 flex-shrink-0" />
                       <div>
-                        <span className="text-xs font-semibold text-primary uppercase block mb-1">RecomendaÃ§Ã£o</span>
+                        <span className="text-xs font-semibold text-primary uppercase block mb-1">Recomendação</span>
                         <p className="text-sm text-muted-foreground">{alert.recommendation}</p>
                       </div>
                     </div>
@@ -279,7 +279,7 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
                   hardware.cpu.temperature ? getUsageColor(hardware.cpu.temperature) : "text-muted-foreground"
                 )}>
                   <Thermometer className="w-3 h-3" />
-                  {hardware.cpu.temperature ? `${hardware.cpu.temperature}Â°C` : "IndisponÃ­vel"}
+                  {hardware.cpu.temperature ? `${hardware.cpu.temperature}°C` : "Indisponível"}
                 </span>
               </div>
             </div>
@@ -291,7 +291,7 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <MemoryStick className="w-5 h-5 text-primary" />
-            <h2 className="text-lg font-semibold">MemÃ³ria (RAM)</h2>
+            <h2 className="text-lg font-semibold">Memória (RAM)</h2>
           </div>
           <div className="flex items-center justify-between">
             <CircularGauge value={hardware.ram.usagePercent} label="Uso" />
@@ -303,7 +303,7 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
                 </span>
               </div>
               <div>
-                <span className="text-xs text-muted-foreground uppercase block">DisponÃ­vel</span>
+                <span className="text-xs text-muted-foreground uppercase block">Disponível</span>
                 <span className="text-sm font-medium font-mono">
                   {(hardware.ram.totalGb - hardware.ram.usedGb).toFixed(1)} GB
                 </span>
@@ -321,13 +321,13 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <Monitor className="w-5 h-5 text-primary" />
-            <h2 className="text-lg font-semibold">GrÃ¡ficos (GPU)</h2>
+            <h2 className="text-lg font-semibold">Gráficos (GPU)</h2>
           </div>
 
           {!hardware.gpu ? (
             <div className="flex flex-col items-center justify-center h-24 text-muted-foreground">
               <Monitor className="w-8 h-8 mb-2 opacity-20" />
-              <span className="text-sm font-medium">GPU nÃ£o detetada</span>
+              <span className="text-sm font-medium">GPU não detetada</span>
             </div>
           ) : (
             <div className="flex items-center justify-between">
@@ -351,7 +351,7 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
                     hardware.gpu.temperature ? getUsageColor(hardware.gpu.temperature) : "text-muted-foreground"
                   )}>
                     <Thermometer className="w-3 h-3" />
-                    {hardware.gpu.temperature ? `${hardware.gpu.temperature}Â°C` : "IndisponÃ­vel"}
+                    {hardware.gpu.temperature ? `${hardware.gpu.temperature}°C` : "Indisponível"}
                   </span>
                 </div>
               </div>
@@ -603,7 +603,7 @@ export default function PCCenterPage({ hardware }: PCCenterPageProps) {
           </div>
           <div>
             <h1 className="text-2xl font-bold text-foreground">PC Center</h1>
-            <p className="text-sm text-muted-foreground">MonitorizaÃ§Ã£o inteligente do seu sistema</p>
+            <p className="text-sm text-muted-foreground">Monitorização inteligente do seu sistema</p>
           </div>
         </div>
 
@@ -614,7 +614,7 @@ export default function PCCenterPage({ hardware }: PCCenterPageProps) {
               viewMode === "simple" ? "bg-primary text-primary-foreground" : "hover:bg-white/5 text-muted-foreground")}
           >
             <LayoutGrid className="w-4 h-4" />
-            VisÃ£o Simples
+            Visão Simples
           </button>
           <button
             onClick={() => setViewMode("advanced")}
@@ -622,7 +622,7 @@ export default function PCCenterPage({ hardware }: PCCenterPageProps) {
               viewMode === "advanced" ? "bg-primary text-primary-foreground" : "hover:bg-white/5 text-muted-foreground")}
           >
             <Settings className="w-4 h-4" />
-            VisÃ£o AvanÃ§ada
+            Visão Avançada
           </button>
         </div>
       </div>

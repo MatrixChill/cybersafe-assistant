@@ -41,7 +41,7 @@ export default function MonitorPage({ events, processes, connections, protection
       <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
         <MetricCard label="Eventos" value={events.length} />
         <MetricCard label="Processos" value={processes.length} />
-        <MetricCard label="Conexoes" value={connections.length} />
+        <MetricCard label="Conexões" value={connections.length} />
         <MetricCard label="Quarentena" value={quarantine.length} />
       </div>
 
@@ -93,7 +93,7 @@ export default function MonitorPage({ events, processes, connections, protection
                 <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">Processo</th>
                 <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">PID</th>
                 <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">CPU</th>
-                <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">Memoria</th>
+                <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">Memória</th>
                 <th className="text-left py-3 px-4 text-xs font-mono text-muted-foreground uppercase tracking-wider">Trust</th>
               </tr>
             </thead>
@@ -123,7 +123,7 @@ export default function MonitorPage({ events, processes, connections, protection
 
         <div className="space-y-2">
           {connections.length === 0 ? (
-            <div className="text-sm text-muted-foreground">Sem conexoes observadas.</div>
+            <div className="text-sm text-muted-foreground">Sem conexões observadas.</div>
           ) : (
             connections.slice(0, 20).map((connection, index) => (
               <div key={`${connection.remoteAddress}-${index}`} className="p-3 rounded-lg bg-secondary/30 flex items-center justify-between">
