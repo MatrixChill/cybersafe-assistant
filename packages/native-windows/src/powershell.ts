@@ -46,6 +46,9 @@ interface QueryDefinition {
 
 const ENABLED_ON_WINDOWS = process.platform === "win32";
 
+/** Força saída UTF-8 a partir do PowerShell 5.1 (evita mojibake em texto acentuado). */
+const PS_UTF8_PREFIX = "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8;";
+
 // Apenas scripts fixos, escritos pelo CyberSafe. Sem inputs dinâmicos.
 const QUERIES: Record<PowerShellQuery, QueryDefinition> = {
   systemInfo: {
@@ -66,7 +69,7 @@ const QUERIES: Record<PowerShellQuery, QueryDefinition> = {
       "  freeRamBytes = $cs.FreePhysicalMemory * 1KB",
       "  logicalProcessors = $pf",
       "} | ConvertTo-Json -Compress",
-    ].join("; "),
+    ].join("\n"),
   },
   topProcessesByCpu: {
     timeoutMs: 20000,
@@ -88,11 +91,13 @@ const QUERIES: Record<PowerShellQuery, QueryDefinition> = {
       "    Name = $p.Name",
       "    WorkingSet = $p.WorkingSetSize",
       "    ExecutablePath = $p.ExecutablePath",
-      "    User = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $p.ProcessId) | Invoke-CimMethod -MethodName GetOwner -ErrorAction SilentlyContinue).User",
       "    CpuPercent = $cpuPercent",
       "  }",
-      "} | Sort-Object CpuPercent -Descending | Select-Object -First 8 | ConvertTo-Json -Compress",
-    ].join("; "),
+      "} | Sort-Object CpuPercent -Descending | Select-Object -First 8 | ForEach-Object {",
+      "  $_ | Add-Member -NotePropertyName User -NotePropertyValue (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.ProcessId) | Invoke-CimMethod -MethodName GetOwner -ErrorAction SilentlyContinue).User",
+      "  $_",
+      "} | ConvertTo-Json -Compress",
+    ].join("\n"),
   },
   topProcessesByRam: {
     timeoutMs: 15000,
@@ -105,46 +110,48 @@ const QUERIES: Record<PowerShellQuery, QueryDefinition> = {
       "    Name = $p.Name",
       "    WorkingSet = $p.WorkingSetSize",
       "    ExecutablePath = $p.ExecutablePath",
-      "    User = (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $p.ProcessId) | Invoke-CimMethod -MethodName GetOwner -ErrorAction SilentlyContinue).User",
       "    CpuPercent = 0",
       "  }",
-      "} | Sort-Object WorkingSet -Descending | Select-Object -First 8 | ConvertTo-Json -Compress",
-    ].join("; "),
+      "} | Sort-Object WorkingSet -Descending | Select-Object -First 8 | ForEach-Object {",
+      "  $_ | Add-Member -NotePropertyName User -NotePropertyValue (Get-CimInstance Win32_Process -Filter ('ProcessId=' + $_.ProcessId) | Invoke-CimMethod -MethodName GetOwner -ErrorAction SilentlyContinue).User",
+      "  $_",
+      "} | ConvertTo-Json -Compress",
+    ].join("\n"),
   },
   services: {
     timeoutMs: 15000,
     script: [
       "$ErrorActionPreference = 'SilentlyContinue'",
       "Get-CimInstance Win32_Service | Select-Object Name,DisplayName,State,StartMode,ProcessId | ConvertTo-Json -Compress",
-    ].join("; "),
+    ].join("\n"),
   },
   tcpConnections: {
     timeoutMs: 15000,
     script: [
       "$ErrorActionPreference = 'SilentlyContinue'",
       "Get-NetTCPConnection -ErrorAction SilentlyContinue | Select-Object LocalAddress,LocalPort,RemoteAddress,RemotePort,State,OwningProcess | ConvertTo-Json -Compress",
-    ].join("; "),
+    ].join("\n"),
   },
   localUsers: {
     timeoutMs: 15000,
     script: [
       "$ErrorActionPreference = 'SilentlyContinue'",
       "Get-LocalUser -ErrorAction SilentlyContinue | Select-Object Name,FullName,Enabled | ConvertTo-Json -Compress",
-    ].join("; "),
+    ].join("\n"),
   },
   disks: {
     timeoutMs: 15000,
     script: [
       "$ErrorActionPreference = 'SilentlyContinue'",
       "Get-CimInstance Win32_LogicalDisk -Filter \"DriveType=3\" | Select-Object DeviceID,VolumeName,Size,FreeSpace,FileSystem | ConvertTo-Json -Compress",
-    ].join("; "),
+    ].join("\n"),
   },
   firewallProfiles: {
     timeoutMs: 15000,
     script: [
       "$ErrorActionPreference = 'SilentlyContinue'",
       "Get-NetFirewallProfile -ErrorAction SilentlyContinue | Select-Object Name,Enabled | ConvertTo-Json -Compress",
-    ].join("; "),
+    ].join("\n"),
   },
 };
 
@@ -179,7 +186,7 @@ export class PowerShellExecutor {
         "-ExecutionPolicy",
         "Bypass",
         "-Command",
-        def.script,
+        `${PS_UTF8_PREFIX}\n${def.script}`,
       ], { windowsHide: true });
 
       this.running.add(child);
@@ -446,7 +453,8 @@ export class WindowsHealthEngine {
   readonly executor = new PowerShellExecutor();
   private lastSnapshot: WindowsHealthSnapshot | null = null;
   private lastCollectedAt = 0;
-  private readonly ttlMs = 5000;
+  private readonly ttlMs = 30000;
+  private inFlight: Promise<WindowsHealthSnapshot> | null = null;
 
   /**
    * Recolhe um snapshot completo de saúde do Windows (read-only).
@@ -454,6 +462,14 @@ export class WindowsHealthEngine {
    * marcando o campo como indisponível e registando o erro em vez de falhar tudo.
    */
   async getSnapshot(): Promise<WindowsHealthSnapshot> {
+    if (this.inFlight) return this.inFlight;
+    this.inFlight = this.collectSnapshot().finally(() => {
+      this.inFlight = null;
+    });
+    return this.inFlight;
+  }
+
+  private async collectSnapshot(): Promise<WindowsHealthSnapshot> {
     const errors: string[] = [];
 
     const [system, topCpuRaw, topRamRaw, services, tcp, users, disks, firewall] = await Promise.all([
