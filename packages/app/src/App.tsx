@@ -19,6 +19,7 @@ import MonitorPage from "./pages/MonitorPage";
 import SimulatorPage from "./pages/SimulatorPage";
 import TaskManagerPage from "./pages/TaskManagerPage";
 import PCCenterPage from "./pages/PCCenterPage";
+import ReportsPage from "./pages/ReportsPage";
 import LoginPage from "./pages/LoginPage";
 import RegisterPage from "./pages/RegisterPage";
 import AIAssistant from "./components/AIAssistant";
@@ -232,7 +233,7 @@ function AuthenticatedApp() {
         if (!canAccess(FEATURES.REPORTS, accountType, plan)) {
           return <DashboardPage dashboard={dashboard} isLoading={isLoading} hardware={hardware} />;
         }
-        return <div className="p-8">Relatorios avancados em construcao.</div>;
+        return <ReportsPage events={events} threats={threats} quarantine={quarantine} />;
     }
   }
 

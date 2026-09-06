@@ -19,6 +19,52 @@ const QUICK_SUGGESTIONS = [
   { label: "Malware", icon: Bug },
 ]
 
+// Offline fallback knowledge base for when the AI API is unavailable
+const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
+  {
+    keywords: ["phishing", "email falso", "email suspeito", "link falso"],
+    answer: "**Phishing** é uma técnica onde atacantes enviam emails ou mensagens falsas para roubar dados pessoais. Para se proteger:\n\n- **Nunca clique** em links de emails pedindo dados sensíveis\n- Verifique sempre o remetente real (não apenas o nome exibido)\n- Acesse sites diretamente pelo navegador, não por links de emails\n- Desconfie de urgência excessiva ou ameaças no email\n\nSe suspeitas de phishing, use o **Simulador** do CyberSafe para praticar a identificação!"
+  },
+  {
+    keywords: ["senha", "password", "forte", "fraca", "segura"],
+    answer: "**Senhas fortes** são a primeira linha de defesa. Recomendações:\n\n- **12+ caracteres** com letras, números e símbolos\n- Evite palavras do dicionário, datas ou nomes conhecidos\n- Use uma **frase-passe** (ex: `Cafe#Frio2024!`)\n- Ative **2FA (autenticação em 2 passos)** sempre que possível\n- Use um **gestor de senhas** (Bitwarden, 1Password)\n\nTeste suas senhas no jogo **Fortaleza de Senhas** do CyberSafe!"
+  },
+  {
+    keywords: ["malware", "virus", "trojan", "ransomware", "worm"],
+    answer: "**Malware** é software malicioso. Tipos comuns:\n\n- **Trojan**: finge ser legítimo para enganar\n- **Ransomware**: criptografa seus arquivos e exige resgate\n- **Spyware**: espi suas atividades\n- **Worm**: propaga-se sozinho pela rede\n\n**Proteção:** Mantenha antivirus atualizado, não baixe software de fontes desconhecidas, e use o **File Scanner** do CyberSafe para analisar arquivos suspeitos."
+  },
+  {
+    keywords: ["vpn", "privacidade", "rede privada"],
+    answer: "**VPN (Virtual Private Network)** criptografa sua conexão e oculta seu IP. Benefícios:\n\n- Protege em **redes públicas** (WiFi de cafés, aeroportos)\n- Impede que seu provedor de internet monitore seu tráfego\n- Permite acesso a conteúdo restrito por região\n\n**Limitações:** VPN não protege contra phishing, malware ou más práticas online. É apenas uma camada extra de segurança."
+  },
+  {
+    keywords: ["2fa", "autenticação", "dois fatores", "mfa"],
+    answer: "**2FA (Autenticação em 2 Passos)** adiciona uma segunda camada além da senha:\n\n- **App authenticator** (Google Authenticator, Authy) — mais seguro\n- **SMS** — melhor que nada, mas suscetível a SIM swap\n- **Hardware key** (YubiKey) — máxima segurança\n\n**Ative 2FA em:** email, redes sociais, banco, e qualquer conta importante!"
+  },
+  {
+    keywords: ["cybersafe", "como usar", "funcionalidade", "ajuda"],
+    answer: "**CyberSafe Assistant** é um sistema completo de cibersegurança. Funcionalidades:\n\n- **Dashboard**: visão geral do sistema e alertas\n- **PC Center**: análise detalhada de hardware\n- **Ameaças**: histórico de eventos detectados\n- **File Scanner**: análise de arquivos com heurísticas\n- **Task Manager**: monitorar processos\n- **Monitor**: conexões de rede e proteção\n- **Simulador**: exercícios práticos de phishing\n- **Relatórios**: resumo consolidado de segurança\n\nExplore todas as páginas pelo menu lateral!"
+  },
+  {
+    keywords: ["wifi", "rede", "segurança", "conexão"],
+    answer: "**Segurança em redes WiFi:**\n\n- Use **WPA3** ou no mínimo WPA2 (nunca WEP)\n- Evite redes públicas sem VPN\n- Desconheça **sharing** de arquivos e impressoras\n- Mantenha o **firewall** ativo (verifique no PC Center)\n- Monitore dispositivos conectados pelo **Monitor** do CyberSafe"
+  },
+  {
+    keywords: ["atualização", "update", "patch", "sistema operativo"],
+    answer: "**Manter o sistema atualizado** é crucial para segurança:\n\n- Ative **atualizações automáticas** do Windows\n- Atualize navegadores e plugins regularmente\n- Atualize também apps como Java, Adobe, etc.\n- Atualizações corrigem falhas que malwares exploram\n\nVerifique o status do seu sistema no **PC Center** → Windows Health!"
+  },
+]
+
+function offlineReply(input: string): string | null {
+  const lower = input.toLowerCase()
+  for (const entry of OFFLINE_KB) {
+    if (entry.keywords.some(kw => lower.includes(kw))) {
+      return entry.answer
+    }
+  }
+  return null
+}
+
 export default function AIAssistant() {
   const [isOpen, setIsOpen] = useState(false)
   const [input, setInput] = useState("")
@@ -63,7 +109,13 @@ export default function AIAssistant() {
       setMessages((prev) => [...prev, { role: "assistant", content: data.response }])
     } catch (error) {
       console.error(error)
-      setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Estou temporariamente indisponível. Verifica se a API key está configurada no backend ou se o servidor está a correr." }])
+      // Offline fallback: try to answer from the local knowledge base
+      const offlineAnswer = offlineReply(userMsg)
+      if (offlineAnswer) {
+        setMessages((prev) => [...prev, { role: "assistant", content: offlineAnswer }])
+      } else {
+        setMessages((prev) => [...prev, { role: "assistant", content: "⚠️ Estou temporariamente indisponível. Tenta novamente mais tarde ou consulta as dicas na aba **Dashboard**." }])
+      }
     } finally {
       setIsTyping(false)
     }
@@ -106,7 +158,7 @@ export default function AIAssistant() {
                 </div>
                 <div>
                   <h3 className="text-xs font-bold font-mono text-primary uppercase tracking-widest">CyberSafe AI</h3>
-                  <p className="text-[9px] text-muted-foreground font-mono uppercase tracking-tighter">18 tópicos • Online</p>
+                  <p className="text-[9px] text-muted-foreground font-mono uppercase tracking-tighter">18 tópicos • Online / Offline</p>
                 </div>
               </div>
               <button
