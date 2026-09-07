@@ -46,7 +46,7 @@ export class YaraEngine {
       try {
         await fs.mkdir(path.dirname(this.rulesPath), { recursive: true });
         const rawUrl = "https://raw.githubusercontent.com/Yara-Rules/rules/master/Malware/MALW_YARA_RULES/MALW_Gen_Common.yar";
-        await execAsync(`curl -L "${rawUrl}" -o "${this.rulesPath}"`);
+        await execAsync(`curl -L "${rawUrl}" -o "${this.rulesPath}"`, { windowsHide: true });
         
         const content = await fs.readFile(this.rulesPath, "utf-8");
         if (content.includes("<!DOCTYPE html>") || content.includes("<html")) {

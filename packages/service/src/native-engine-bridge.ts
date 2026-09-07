@@ -71,7 +71,7 @@ export class NativeEngineBridge {
     }
 
     return new Promise((resolve) => {
-      const child = spawn(binPath, [filePath]);
+      const child = spawn(binPath, [filePath], { windowsHide: true });
       this.activeProcesses.add(child);
 
       let stdout = '';

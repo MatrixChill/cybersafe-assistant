@@ -65,7 +65,15 @@ async function main() {
 
     // Sinaliza para o processo pai (Electron em dev) que está pronto
     process.send?.({ type: "service-ready" });
-  } catch (err) {
+  } catch (err: any) {
+    // Pipe já está em uso: existe outra instância (possivelmente órfã de um
+    // boot anterior). Não é um erro fatal — saímos limpo (0) e o processo pai
+    // reutiliza o serviço que já está a servir o pipe.
+    if (err?.code === "EADDRINUSE") {
+      logToFile("WARN", "Pipe já em uso. Outra instância do serviço está ativa; encerrando nova instância.");
+      console.log("[Service] Outra instância já ativa no pipe. Encerrando nova instância (0).");
+      process.exit(0);
+    }
     logToFile("CRITICAL", "Fatal error during startup", err as Error);
     console.error("[Service] Fatal error during startup:", err);
     process.exit(1);

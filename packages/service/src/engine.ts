@@ -2,6 +2,7 @@ import * as fs from "node:fs/promises";
 import * as net from "node:net";
 import * as os from "node:os";
 import * as path from "node:path";
+import { fileURLToPath } from "node:url";
 import {
   VirusTotalClient,
   HardwareHealthEngine,
@@ -63,8 +64,8 @@ interface RpcResponse<K extends keyof ServiceResponseMap = keyof ServiceResponse
 
 export class ProtectionEngineService {
   private readonly baseDir = path.join(os.homedir(), ".cybersafe-service");
-  private readonly definitionsDir = path.join(process.cwd(), "definitions");
-  private readonly logsDir = path.join(process.cwd(), "logs");
+  private readonly definitionsDir = path.join(this.baseDir, "definitions");
+  private readonly logsDir = path.join(this.baseDir, "logs");
   private readonly eventBus = new SecurityEventBus({ replayLimit: 500 });
   private readonly signatures = new SignatureDatabase();
   private readonly trust = new TrustEngine();
@@ -106,14 +107,70 @@ export class ProtectionEngineService {
   async init() {
     await fs.mkdir(this.baseDir, { recursive: true });
     await fs.mkdir(this.logsDir, { recursive: true });
+    await this.seedDefinitions();
     await this.quarantine.init();
     await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.json"));
-    await this.yara.load(path.join(this.definitionsDir, "yara", "default.json"));
+    await this.yara.load(path.join(this.definitionsDir, "yara", "default.yar"));
     this.definitionsUpdatedAt = new Date().toISOString();
 
     this.bindEventBus();
     this.bindWatchers();
     this.protectionState = false;
+  }
+
+  /**
+   * Localização das definições empacotadas com a app: junto ao próprio módulo
+   * do serviço (packages/service/definitions em dev, node_modules/@cybersafe/
+   * service/definitions dentro do asar em produção). Independente de process.cwd().
+   */
+  private get bundledDefinitionsDir(): string {
+    const moduleDir = path.dirname(fileURLToPath(import.meta.url));
+    return path.join(moduleDir, "..", "definitions");
+  }
+
+  /**
+   * Copia as definições empacotadas para o diretório de dados do utilizador
+   * (writable) apenas quando em falta, para que os motores nativos (YARA-X)
+   * consigam ler as regras — ficheiros dentro do asar não são "visíveis"
+   * para módulos nativos. Nunca sobrepõe definições já atualizadas.
+   */
+  private async seedDefinitions(): Promise<void> {
+    try {
+      const bundled = this.bundledDefinitionsDir;
+      const subDirs = ["yara", "hashes", "clamav"] as const;
+      for (const sub of subDirs) {
+        const srcDir = path.join(bundled, sub);
+        const dstDir = path.join(this.definitionsDir, sub);
+        let entries: string[] = [];
+        try {
+          entries = await fs.readdir(srcDir);
+        } catch {
+          continue;
+        }
+        await fs.mkdir(dstDir, { recursive: true });
+        for (const entry of entries) {
+          const src = path.join(srcDir, entry);
+          const dst = path.join(dstDir, entry);
+          try {
+            const stat = await fs.stat(src);
+            if (!stat.isFile()) continue;
+          } catch {
+            continue;
+          }
+          let exists = false;
+          try {
+            await fs.access(dst);
+            exists = true;
+          } catch {
+            exists = false;
+          }
+          if (!exists) await fs.copyFile(src, dst);
+        }
+      }
+      console.log("[Service] Definições asseguradas em", this.definitionsDir);
+    } catch (error) {
+      console.warn("[Service] Falha ao garantir definições locais:", error);
+    }
   }
 
   async startProtection(): Promise<{ ok: boolean; protectionEnabled: boolean }> {
@@ -415,15 +472,29 @@ export class ProtectionEngineService {
 
   async shutdown() {
     console.log("[Service] Recebido pedido de encerramento do Electron.");
-    await this.stopProtection();
-    await this.dispose();
+
+    // Deadline máximo para a desmontagem: se algum .stop() de um subsistema
+    // pendurar a promise (ex.: PowerShell a bloquear), não ficamos órfãos —
+    // process.exit() abaixo executa sempre.
+    await Promise.race([
+      (async () => {
+        await this.stopProtection().catch((err) =>
+          console.error("[Service] Falha ao parar proteção:", err),
+        );
+        await this.dispose().catch((err) =>
+          console.error("[Service] Falha ao dispor recursos:", err),
+        );
+      })(),
+      new Promise((resolve) => setTimeout(resolve, 2000)),
+    ]);
+
     NativeEngineBridge.dispose();
     DefinitionUpdater.dispose();
 
     // Fecha a própria aplicação NodeJS
     setTimeout(() => {
        process.exit(0);
-    }, 500);
+    }, 200);
   }
 
   getProtectionState(): ProtectionState {

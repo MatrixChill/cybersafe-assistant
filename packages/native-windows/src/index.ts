@@ -261,7 +261,8 @@ export async function snapshotProcesses(): Promise<Map<number, ProcessSnapshot>>
 
     // Saída JSON (a versão CSV anterior partia campos com vírgulas e gerava dados corrompidos).
     const { stdout } = await execAsync(
-      'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine | ConvertTo-Json -Compress"'
+      'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine | ConvertTo-Json -Compress"',
+      { windowsHide: true }
     );
     const rows = JSON.parse(stdout.trim());
     const list = Array.isArray(rows) ? rows : rows && typeof rows === "object" ? [rows] : [];
