@@ -1,8 +1,10 @@
 import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, Tray, nativeImage } from "electron";
 import path from "node:path";
 import fs from "node:fs";
+import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { ServiceClient } from "./service-client.js";
+import { PIPE_NAME } from "@cybersafe/core";
 import type { SecurityEvent } from "@cybersafe/shared-types";
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -156,28 +158,84 @@ import { spawn, type ChildProcess } from "node:child_process";
 let isServiceRunning = false;
 let serviceProcess: ChildProcess | null = null;
 
-function startServiceProcess() {
+/** Tenta abrir o named pipe do serviço. true = um serviço vivo está a servir. */
+function probePipe(timeoutMs = 1200): Promise<boolean> {
+  return new Promise((resolve) => {
+    let settled = false;
+    const done = (ok: boolean) => {
+      if (settled) return;
+      settled = true;
+      try { socket.destroy(); } catch {}
+      resolve(ok);
+    };
+    const socket = net.createConnection(PIPE_NAME);
+    socket.setTimeout(timeoutMs);
+    socket.on("connect", () => done(true));
+    socket.on("error", () => done(false));
+    socket.on("timeout", () => done(false));
+  });
+}
+
+/** Aguarda o pipe ficar acessível (readiness real) com timeout e pausas. */
+async function waitForPipe(deadlineMs: number): Promise<boolean> {
+  const start = Date.now();
+  while (Date.now() - start < deadlineMs) {
+    if (await probePipe(900)) return true;
+    await new Promise((r) => setTimeout(r, 700));
+  }
+  return probePipe(900);
+}
+
+function startServiceProcess(): Promise<boolean> {
   if (!app.isPackaged) {
     console.log("[Electron] Modo dev: serviço assumido via concurrently");
-    return;
+    return Promise.resolve(true);
   }
 
-  const serviceEntry = path.join(process.resourcesPath, "app", "node_modules", "@cybersafe", "service", "dist", "index.js");
+  // Reutiliza um serviço já ativo (ex.: instância órfã de boot anterior).
+  // Evita duplicar processos e "EADDRINUSE" na próxima instância.
+  return probePipe(1500).then(async (alreadyActive) => {
+    if (alreadyActive) {
+      console.log("[Electron] Serviço já ativo no pipe. Reutilizando.");
+      return true;
+    }
 
-  console.log("[Electron] Iniciando serviço embutido:", serviceEntry);
-  serviceProcess = spawn(process.execPath, [serviceEntry], {
-    stdio: ["ignore", "pipe", "pipe"],
-    windowsHide: true,
-    env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
-  });
+    const serviceEntry = path.join(app.getAppPath(), "node_modules", "@cybersafe", "service", "dist", "index.js");
 
-  serviceProcess.on("exit", (code) => {
-    console.log(`[Electron] Processo do Serviço encerrou com código: ${code}`);
-    serviceProcess = null;
-  });
+    console.log("[Electron] Iniciando serviço embutido:", serviceEntry);
+    serviceProcess = spawn(process.execPath, [serviceEntry], {
+      stdio: ["ignore", "pipe", "pipe", "ipc"],
+      windowsHide: true,
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+    });
 
-  serviceProcess.on("error", (err) => {
-    console.error("[Electron] Falha ao iniciar processo do serviço:", err);
+    let exitedEarly = false;
+    serviceProcess.on("exit", (code) => {
+      exitedEarly = true;
+      console.log(`[Electron] Processo do Serviço encerrou com código: ${code}`);
+      serviceProcess = null;
+    });
+
+    serviceProcess.on("error", (err) => {
+      exitedEarly = true;
+      console.error("[Electron] Falha ao iniciar processo do serviço:", err);
+    });
+
+    // Readiness assíncrono do próprio serviço (além do probe do pipe).
+    serviceProcess.on("message", (msg: any) => {
+      if (msg?.type === "service-ready") {
+        console.log("[Electron] Serviço sinalizou service-ready via IPC.");
+      }
+    });
+
+    const ready = await waitForPipe(25_000);
+    if (!ready) {
+      console.error("[Electron] Serviço não ficou pronto a tempo (pipe inacessível).");
+      if (serviceProcess && !exitedEarly) {
+        try { serviceProcess.kill(); } catch {}
+      }
+    }
+    return ready;
   });
 }
 
@@ -354,12 +412,25 @@ if (!gotTheLock) {
       createSplashScreen();
     }
 
-    startServiceProcess();
     syncBrandingAssets();
     createWindow();
     registerIpc();
     configureAutoStart();
     createTray();
+
+    const serviceOk = await startServiceProcess();
+
+    if (!serviceOk) {
+      console.error("Failed to start/reuse the background service.");
+      splashWindow?.close();
+      splashWindow = null;
+      dialog.showErrorBox(
+        "CyberSafe — Serviço indisponível",
+        "O serviço de proteção em segundo plano não conseguiu iniciar.\nVerifique os logs em %USERPROFILE%\\.cybersafe-service\\error.log."
+      );
+      app.quit();
+      return;
+    }
 
     try {
       await client.connect();
@@ -384,3 +455,25 @@ if (!gotTheLock) {
     }
   });
 }
+
+// Fecha apenas os filhos CyberSafe deste processo (nunca processos alheios).
+let quitCleanupStarted = false;
+app.on("before-quit", (event) => {
+  if (!serviceProcess || !serviceProcess.pid) return;
+  if (quitCleanupStarted) return;
+  quitCleanupStarted = true;
+  event.preventDefault();
+
+  const deadline = Date.now() + 3000;
+  const timer = setInterval(() => {
+    if (Date.now() >= deadline || !serviceProcess || serviceProcess.exitCode !== null) {
+      clearInterval(timer);
+      app.exit(0);
+    }
+  }, 150);
+  setTimeout(() => {
+    try {
+      if (serviceProcess && serviceProcess.exitCode === null) serviceProcess.kill();
+    } catch {}
+  }, 2000);
+});
