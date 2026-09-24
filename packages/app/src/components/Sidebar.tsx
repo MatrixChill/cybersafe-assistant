@@ -15,16 +15,18 @@ import {
   ListTodo,
   Monitor,
   Wrench,
+  Settings2,
+  Network,
 } from "lucide-react"
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import type { AuthUser } from "../contexts/AuthContext"
 import { canAccess, FEATURES, type FeatureKey } from "../lib/featureControl"
 import { BrandLogo } from "./BrandLogo"
+import type { AccentMode, ThemeMode } from "../lib/appearance"
+import { levelMeta, type ProtectionLevel } from "../lib/protectionHealth"
 
-export type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager" | "otimizar";
-export type ThemeMode = "dark" | "light";
-export type AccentMode = "cyan" | "pink" | "purple";
+export type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager" | "otimizar" | "settings" | "business";
 
 interface SidebarProps {
   activePage: Page;
@@ -37,18 +39,21 @@ interface SidebarProps {
   onClose?: () => void;
   user?: AuthUser | null;
   onLogout?: () => void;
+  level?: ProtectionLevel;
 }
 
 const navItems: { id: Page; label: string; icon: typeof LayoutDashboard; feature: FeatureKey; proOnly: boolean }[] = [
   { id: "dashboard", label: "Painel", icon: LayoutDashboard, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
   { id: "pccenter", label: "PC Center", icon: Monitor, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
   { id: "threats", label: "Ameaças", icon: AlertTriangle, feature: FEATURES.THREATS, proOnly: false },
-  { id: "scanner", label: "Scanner de Ficheiros", icon: FileSearch, feature: FEATURES.SCANNER, proOnly: false },
+  { id: "scanner", label: "Análise de Segurança", icon: FileSearch, feature: FEATURES.SCANNER, proOnly: false },
   { id: "taskmanager", label: "Gestor de Tarefas", icon: ListTodo, feature: FEATURES.MONITOR_BASIC, proOnly: false },
   { id: "monitor", label: "Monitor de Rede", icon: Activity, feature: FEATURES.MONITOR_BASIC, proOnly: false },
   { id: "simulator", label: "Simulador", icon: Zap, feature: FEATURES.SIMULATOR, proOnly: false },
   { id: "otimizar", label: "Otimizar", icon: Wrench, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
+  { id: "business", label: "Business Center", icon: Network, feature: FEATURES.BUSINESS_SECURITY_CENTER, proOnly: true },
   { id: "reports", label: "Relatórios", icon: FileBarChart, feature: FEATURES.REPORTS, proOnly: true },
+  { id: "settings", label: "Configurações", icon: Settings2, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
 ];
 
 export default function Sidebar({
@@ -60,10 +65,12 @@ export default function Sidebar({
   onAccentChange,
   user,
   onLogout,
+  level,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
   const accountType = user?.type || "personal";
   const plan = user?.plan || "free";
+  const statusMeta = level ? levelMeta(level) : null;
 
   const visibleNavItems = navItems.filter((item) => canAccess(item.feature, accountType, plan));
 
@@ -132,7 +139,12 @@ export default function Sidebar({
               {!collapsed && (
                 <>
                   <span className="font-medium text-sm truncate">{item.label}</span>
-                  {item.proOnly && (
+                  {item.id === "business" ? (
+                    <span className="nav-pro-badge">
+                      <Network className="w-2.5 h-2.5" />
+                      BUSINESS
+                    </span>
+                  ) : item.proOnly && (
                     <span className="nav-pro-badge">
                       <Sparkles className="w-2.5 h-2.5" />
                       PRO
@@ -171,7 +183,7 @@ export default function Sidebar({
                 <Palette className="w-4 h-4 text-muted-foreground shrink-0" />
                 {!collapsed && (
                     <div className="flex gap-2">
-                        {(['cyan', 'pink', 'purple'] as AccentMode[]).map((c) => (
+                        {(['cyan', 'pink', 'purple', 'red-wine'] as AccentMode[]).map((c) => (
                             <button
                                 key={c}
                                 onClick={() => onAccentChange(c)}
@@ -182,6 +194,7 @@ export default function Sidebar({
                                     c === 'cyan' && "bg-[var(--color-cyber-cyan)]",
                                     c === 'pink' && "bg-[var(--color-cyber-pink)]",
                                     c === 'purple' && "bg-[var(--color-cyber-purple)]",
+                                    c === 'red-wine' && "bg-[#c8324a]",
                                     accent === c && "ring-2 ring-white ring-offset-2 ring-offset-background"
                                 )}
                             />
@@ -225,17 +238,21 @@ export default function Sidebar({
         </div>
       )}
 
-      {/* System Status */}
+      {/* System Status — reflete o ProtectionHealth real, nunca afirma "online" sem motores ativos. */}
       <div className={cn("p-4 border-t border-sidebar-border", collapsed && "px-2")}>
         <div className={cn(
-          "bg-cyber-green/10 border border-cyber-green/30 rounded-lg p-3",
-          collapsed && "p-2"
+          "border rounded-lg p-3",
+          collapsed && "p-2",
+          statusMeta ? statusMeta.chipClass : "bg-cyber-green/10 border-cyber-green/30",
         )}>
           <div className="flex items-center gap-2">
-            <div className="w-2 h-2 bg-cyber-green rounded-full cyber-pulse" />
+            <div className={cn("w-2 h-2 rounded-full cyber-pulse", statusMeta ? statusMeta.dotClass : "bg-cyber-green")} />
             {!collapsed && (
-              <span className="text-xs font-mono text-cyber-green uppercase tracking-wider">
-                Sistema Online
+              <span className={cn(
+                "text-xs font-mono uppercase tracking-wider",
+                statusMeta ? statusMeta.textClass : "text-cyber-green",
+              )}>
+                {statusMeta ? statusMeta.shortLabel : "Sistema Online"}
               </span>
             )}
           </div>

@@ -1,58 +1,444 @@
-import { FileSearch, Upload, File, ShieldAlert, Zap, Folder, X } from "lucide-react"
+import { Upload, File, Folder, ShieldAlert, Zap, X, Clock, Activity, AlertTriangle, RotateCw, Search, Play, FileSearch } from "lucide-react"
 import { useState, useCallback, useRef, useEffect } from "react"
 import { cn } from "@/lib/utils"
-import type { ScanState } from "@cybersafe/shared-types"
+import { isAppShuttingDown, onAppShutdown } from "@/lib/shutdownState"
+import type { ScanState, ScanType } from "@cybersafe/shared-types"
 import { MatrixAvatar } from "../components/MatrixAvatar"
+import {
+  NO_DETECTIONS_NOTE,
+  SCAN_ACTION_CARDS,
+  SCAN_HYDRATING_DETAIL,
+  SCAN_HYDRATING_TITLE,
+  SCAN_RESULT_LABELS,
+  SCAN_STALL_MS,
+  ZIP_CONTENT_NOTE,
+  activeScanDetail,
+  activeScanTitle,
+  buildResultSummary,
+  decideScanEvent,
+  formatEta,
+  isActiveUiStatus,
+  isTerminalScanStatus,
+  isTerminalUiStatus,
+  mergeScanState,
+  normalizeScanState,
+  normalizeScanType,
+  scanEtaSeconds,
+  scanProgressPercent,
+  scanScopeFor,
+  scopeTitle,
+  shouldAcceptScanState,
+  shouldShowHydration,
+  uiStatusForState,
+  type ScanIntentKind,
+  type ScanScope,
+  type ScanUiStatus,
+} from "@/lib/scanSession"
 
-export default function FileScannerPage() {
+const DEV = import.meta.env.DEV
+
+/** Logs de diagnóstico concisos e apenas em desenvolvimento. */
+function devLog(message: string, extra?: unknown) {
+  if (!DEV) return
+  if (extra === undefined) console.debug(`[ScanUI] ${message}`)
+  else console.debug(`[ScanUI] ${message}`, extra)
+}
+
+function logStamp(): string {
+  return `[${new Date().toLocaleTimeString()}]`
+}
+
+function elapsedSeconds(state: ScanState | null): number {
+  if (!state?.startTime) return 0
+  const started = new Date(state.startTime).getTime()
+  if (!Number.isFinite(started)) return 0
+  const end = state.endTime ? new Date(state.endTime).getTime() : Date.now()
+  if (!Number.isFinite(end)) return 0
+  return Math.max(0, Math.floor((end - started) / 1000))
+}
+
+function targetNameOf(state: ScanState | null): string | undefined {
+  if (!state?.targetPath) return undefined
+  const parts = state.targetPath.split(/[/\\]/)
+  return parts[parts.length - 1] || undefined
+}
+
+const ACTION_ICON: Record<ScanIntentKind, typeof Search> = {
+  quick: Search,
+  full: Play,
+  file: File,
+  folder: Folder,
+}
+
+const ACTION_COLOR: Record<ScanIntentKind, string> = {
+  quick: "bg-cyber-cyan/10 text-cyber-cyan border-cyber-cyan/30",
+  full: "bg-cyber-magenta/10 text-cyber-magenta border-cyber-magenta/30",
+  file: "bg-primary/10 text-primary border-primary/30",
+  folder: "bg-primary/10 text-primary border-primary/30",
+}
+
+interface FileScannerPageProps {
+  pendingScan?: { type: string; targetPath?: string } | null;
+  onScanConsumed?: () => void;
+}
+
+export default function FileScannerPage({ pendingScan, onScanConsumed }: FileScannerPageProps) {
   const [isDragging, setIsDragging] = useState(false)
-  const [selectedFile, setSelectedFile] = useState<{ name: string; path: string; size: number } | null>(null)
   const [error, setError] = useState("")
-  const fileInputRef = useRef<HTMLInputElement>(null)
 
-  // Real-time scan tracking
+  const [uiStatus, setUiStatus] = useState<ScanUiStatus>("idle")
   const [activeScanId, setActiveScanId] = useState<string | null>(null)
+  const [scanType, setScanType] = useState<string>("")
   const [scanProgress, setScanProgress] = useState<ScanState | null>(null)
   const [scanLog, setScanLog] = useState<string[]>([])
-  const scanUnsubscribeRef = useRef<(() => void) | null>(null)
+  const [stalled, setStalled] = useState(false)
+  /**
+   * Verdadeiro até a ressincronização (`scan.getActive`) terminar. Enquanto
+   * estiver pendente, a página NÃO pode renderizar o estado idle: ao voltar a
+   * esta secção a meio de uma análise isso criava um flash "idle → ativo".
+   */
+  const [hydrating, setHydrating] = useState(true)
 
-  // Cleanup on unmount
-  useEffect(() => {
-    return () => {
-      if (scanUnsubscribeRef.current) {
-        scanUnsubscribeRef.current()
-      }
+  /** Ref = verdade síncrona usada pelos callbacks (nunca espera por render). */
+  const expectedScanIdRef = useRef<string | null>(null)
+  const activeScanIdRef = useRef<string | null>(null)
+  /** Estado mais recente aplicado — verdade síncrona para monotonicidade. */
+  const scanProgressRef = useRef<ScanState | null>(null)
+  /** O que o utilizador escolheu (usado só até o serviço confirmar o alvo). */
+  const intentRef = useRef<ScanIntentKind | null>(null)
+  /** Eventos que chegam antes da resposta de `startScan` (start → evento → resposta). */
+  const earlyEventsRef = useRef<Map<string, ScanState>>(new Map())
+  /** Última mensagem aceite do motor — base do watchdog. */
+  const lastMessageAtRef = useRef(0)
+  const launchLockRef = useRef(false)
+  const pendingScanConsumedRef = useRef(false)
+  const mountedRef = useRef(true)
+
+  // ── Aplica um estado vindo do motor (evento ou snapshot de ressincronização) ──
+  const applyScanState = useCallback((next: ScanState, source: "event" | "snapshot") => {
+    const current = scanProgressRef.current
+    if (!shouldAcceptScanState(current, next)) {
+      // Estado atrasado (revisão inferior) ou reabertura de um scan terminal:
+      // ignorado para os contadores nunca recuarem.
+      devLog(`ignored stale state expectedRev=${current?.revision ?? "-"} receivedRev=${next.revision ?? "-"} status=${next.status}`)
+      return
+    }
+    const merged = mergeScanState(current, next)
+    scanProgressRef.current = merged
+    lastMessageAtRef.current = Date.now()
+    setStalled(false)
+    setScanProgress(merged)
+
+    const nextStatus = uiStatusForState(merged)
+    setUiStatus(prev => {
+      // Um evento atrasado nunca reabre um scan já terminado.
+      if (isTerminalUiStatus(prev) && !isTerminalUiStatus(nextStatus)) return prev
+      return nextStatus
+    })
+
+    if (isTerminalScanStatus(merged.status)) {
+      const message =
+        merged.status === "completed"
+          ? `Análise concluída: ${merged.filesScanned} ficheiros analisados, ${merged.threatsFound} ameaças`
+          : merged.status === "cancelled"
+            ? `Análise cancelada: ${merged.filesScanned} ficheiros analisados`
+            : `Análise falhada${merged.error ? `: ${merged.error}` : ""}`
+      setScanLog(prev => [...prev, `${logStamp()} ${message}`])
+      return
+    }
+
+    if (source === "snapshot") {
+      devLog("state resynced from snapshot", { id: merged.id, status: merged.status, phase: merged.phase })
     }
   }, [])
 
-  // Listen for scan progress
+  // ── Subscrição global: registada UMA vez, antes de qualquer scan existir ──
   useEffect(() => {
-    if (!activeScanId) return
+    mountedRef.current = true
+    lastMessageAtRef.current = Date.now()
 
-    if (scanUnsubscribeRef.current) {
-      scanUnsubscribeRef.current()
-    }
+    const api = window.electronAPI
+    if (!api) return
 
-    const unsubscribe = window.electronAPI?.onScanProgress((state: ScanState) => {
-      if (state.id === activeScanId) {
-        setScanProgress(state)
-
-        // Add log entry for status changes
-        if (state.status === "completed" || state.status === "cancelled" || state.status === "failed") {
-          const statusLabel = state.status === "completed" ? "concluída" : state.status === "cancelled" ? "cancelada" : "falhada";
-          setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Análise ${statusLabel}: ${state.filesScanned}/${state.progress}% - ${state.threatsFound} ameaças`])
-        } else if (state.filesScanned % 50 === 0) {
-          // Log every 50 files to avoid spam
-          setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Analisados ${state.filesScanned} ficheiros (${state.progress}%) - ${state.threatsFound} ameaças`])
-        }
+    const unsubscribe = api.onScanProgress((raw: unknown) => {
+      const state = normalizeScanState(raw)
+      if (!state) {
+        devLog("ignored malformed event", raw)
+        return
       }
+
+      const decision = decideScanEvent(state, expectedScanIdRef.current)
+      if (decision === "buffer") {
+        const buffer = earlyEventsRef.current
+        buffer.set(state.id, state)
+        if (buffer.size > 4) {
+          const oldest = buffer.keys().next().value
+          if (oldest) buffer.delete(oldest)
+        }
+        devLog(`buffered early event expected=none received=${state.id} status=${state.status} phase=${state.phase}`)
+        return
+      }
+      if (decision === "ignore") {
+        devLog(`ignored event expected=${expectedScanIdRef.current} received=${state.id}`)
+        return
+      }
+
+      devLog(`accepted event id=${state.id} status=${state.status} phase=${state.phase} progress=${state.progress} files=${state.filesScanned}`)
+      applyScanState(state, "event")
     })
 
-    scanUnsubscribeRef.current = unsubscribe ?? null
     return () => {
+      mountedRef.current = false
+      devLog("listener cleanup")
       unsubscribe?.()
     }
-  }, [activeScanId])
+  }, [applyScanState])
+
+  // ── Ressincronização ao montar (voltar à página a meio de um scan) ──
+  useEffect(() => {
+    const api = window.electronAPI
+    if (!api || typeof api.getActiveScan !== "function") {
+      devLog("snapshot API unavailable — resync disabled")
+      // Sem API não há nada a recuperar: mostra o estado inicial de imediato.
+      setHydrating(false)
+      return
+    }
+
+    let cancelled = false
+    void (async () => {
+      try {
+        const snapshot = normalizeScanState(await api.getActiveScan())
+        if (cancelled || !mountedRef.current) return
+        if (!snapshot) {
+          devLog("resync: no active scan")
+          return
+        }
+        if (expectedScanIdRef.current) {
+          devLog("resync skipped: a launch is already in flight")
+          return
+        }
+        if (isTerminalScanStatus(snapshot.status)) return
+
+        devLog(`resync: attached to running scan id=${snapshot.id} phase=${snapshot.phase}`)
+        expectedScanIdRef.current = snapshot.id
+        activeScanIdRef.current = snapshot.id
+        setActiveScanId(snapshot.id)
+        setScanType(snapshot.type)
+        setScanLog([`${logStamp()} Análise em curso retomada do motor`])
+        applyScanState(snapshot, "snapshot")
+      } catch (err) {
+        devLog("resync failed", err)
+      } finally {
+        // Independentemente do resultado, deixa de fazer sentido esconder o
+        // estado inicial — um scan ativo já foi aplicado acima se existisse.
+        if (!cancelled && mountedRef.current) setHydrating(false)
+      }
+    })()
+
+    return () => { cancelled = true }
+  }, [applyScanState])
+
+  // ── Watchdog: fallback de UI, nunca a correção principal ──
+  const handleVerify = useCallback(async () => {
+    const api = window.electronAPI
+    try {
+      const snapshot = normalizeScanState(await api?.getActiveScan?.())
+      if (snapshot && snapshot.id === expectedScanIdRef.current) {
+        applyScanState(snapshot, "snapshot")
+        return
+      }
+      devLog("verify: engine no longer reports this scan", { id: expectedScanIdRef.current })
+      setStalled(false)
+      const engineGoneError = "O motor de análise deixou de responder. Tente novamente."
+      const failedState: ScanState = scanProgressRef.current
+        ? { ...scanProgressRef.current, status: "failed", error: engineGoneError }
+        : {
+            id: expectedScanIdRef.current ?? "unknown",
+            type: normalizeScanType(scanType),
+            status: "failed",
+            progress: 0,
+            filesScanned: 0,
+            threatsFound: 0,
+            error: engineGoneError,
+          }
+      scanProgressRef.current = failedState
+      setScanProgress(failedState)
+      setUiStatus("failed")
+    } catch (err) {
+      devLog("verify failed", err)
+      setStalled(true)
+    }
+  }, [applyScanState, scanType])
+
+  useEffect(() => {
+    if (!isActiveUiStatus(uiStatus)) return
+    const interval = setInterval(() => {
+      // No shutdown o resync deixa de fazer sentido (o serviço já está a sair).
+      if (isAppShuttingDown()) return
+      if (launchLockRef.current) return
+      if (Date.now() - lastMessageAtRef.current < SCAN_STALL_MS) return
+      devLog("watchdog: no messages from engine, attempting resync")
+      void handleVerify()
+    }, 5000)
+    const stopOnShutdown = onAppShutdown(() => clearInterval(interval))
+    return () => {
+      stopOnShutdown()
+      clearInterval(interval)
+    }
+  }, [uiStatus, handleVerify])
+
+  // ── Lançamento de scan (usado por todos os botões e pelo drag&drop) ──
+  const launchScan = useCallback(async (
+    type: string,
+    targetPath: string | undefined,
+    label: string,
+    intent: ScanIntentKind,
+  ) => {
+    if (launchLockRef.current) return
+    const api = window.electronAPI
+    if (!api) {
+      setError("Execute a app a partir do ambiente de trabalho.")
+      return
+    }
+
+    launchLockRef.current = true
+    intentRef.current = intent
+    lastMessageAtRef.current = Date.now()
+    setUiStatus("preparing")
+    setScanType(type)
+    setScanLog([`${logStamp()} ${label}`])
+    setScanProgress(null)
+    scanProgressRef.current = null
+    setError("")
+    setStalled(false)
+    devLog(`launch requested type=${type} intent=${intent} target=${targetPath ?? ""}`)
+
+    try {
+      const result = await api.startScan(type as ScanType, targetPath)
+      if (!mountedRef.current) return
+
+      const id = result?.id
+      if (!result?.success || !id) {
+        devLog("launch rejected", result)
+        setUiStatus("idle")
+        setError(result?.error || "Não foi possível iniciar a análise.")
+        return
+      }
+
+      devLog(`start response id=${id}`)
+      expectedScanIdRef.current = id
+      activeScanIdRef.current = id
+      setActiveScanId(id)
+
+      // O motor pode ter emitido progresso antes desta resposta — aplica-o já.
+      const early = earlyEventsRef.current.get(id)
+      earlyEventsRef.current.clear()
+      if (early) {
+        devLog(`applying buffered event id=${id} phase=${early.phase} targetKind=${early.targetKind}`)
+        applyScanState(early, "event")
+      } else {
+        // Não temos ainda progresso, mas o scan existe: nunca ficar num spinner mudo.
+        setUiStatus("gathering")
+      }
+    } catch (err: any) {
+      if (!mountedRef.current) return
+      devLog("start failed", err)
+      setUiStatus("idle")
+      setError("Erro ao iniciar análise: " + (err?.message ?? String(err)))
+    } finally {
+      launchLockRef.current = false
+    }
+  }, [applyScanState])
+
+  // ── Auto-start a partir do Dashboard (pendingScan consumido exatamente 1×) ──
+  useEffect(() => {
+    if (!pendingScan || pendingScanConsumedRef.current) return
+    pendingScanConsumedRef.current = true
+    onScanConsumed?.()
+    if (pendingScan.type === "custom" && pendingScan.targetPath) {
+      // O Dashboard só envia `custom` a partir do botão de pasta.
+      const name = pendingScan.targetPath.split(/[/\\]/).pop() || pendingScan.targetPath
+      launchScan("custom", pendingScan.targetPath, `Análise da pasta: ${name}`, "folder")
+    } else {
+      const kind: ScanIntentKind = pendingScan.type === "full" ? "full" : "quick"
+      const card = SCAN_ACTION_CARDS.find(c => c.kind === kind)!
+      launchScan(kind, undefined, `${card.title} iniciada`, kind)
+    }
+  }, [pendingScan, launchScan, onScanConsumed])
+
+  // ── Handlers ──
+  const handleQuickScan = useCallback(() => {
+    if (isActiveUiStatus(uiStatus)) return
+    launchScan("quick", undefined, "Análise Rápida do Computador iniciada (Downloads, Desktop, Documentos, Arranque)", "quick")
+  }, [launchScan, uiStatus])
+
+  const handleFullScan = useCallback(() => {
+    if (isActiveUiStatus(uiStatus)) return
+    launchScan("full", undefined, "Análise Profunda do Computador iniciada (diretório do utilizador + ProgramData)", "full")
+  }, [launchScan, uiStatus])
+
+  const handleFileScan = useCallback(async () => {
+    if (isActiveUiStatus(uiStatus)) return
+    if (!window.electronAPI) {
+      setError("Execute a app a partir do ambiente de trabalho.")
+      return
+    }
+    try {
+      const filePath = await window.electronAPI.openFileDialog()
+      if (!filePath) return
+      const name = filePath.split(/[/\\]/).pop() || filePath
+      launchScan("custom", filePath, `Análise do ficheiro: ${name}`, "file")
+    } catch (err: any) {
+      setError("Erro ao abrir diálogo: " + err.message)
+    }
+  }, [launchScan, uiStatus])
+
+  const handleFolderScan = useCallback(async () => {
+    if (isActiveUiStatus(uiStatus)) return
+    if (!window.electronAPI) {
+      setError("Execute a app a partir do ambiente de trabalho.")
+      return
+    }
+    try {
+      const folderPath = await window.electronAPI.openFolderDialog()
+      if (!folderPath) return
+      const name = folderPath.split(/[/\\]/).pop() || folderPath
+      launchScan("custom", folderPath, `Análise da pasta: ${name} (todos os ficheiros dentro da pasta)`, "folder")
+    } catch (err: any) {
+      setError("Erro ao abrir diálogo: " + err.message)
+    }
+  }, [launchScan, uiStatus])
+
+  const handleCancel = useCallback(async () => {
+    const id = activeScanIdRef.current
+    const api = window.electronAPI
+    if (!id || !api) return
+    try {
+      devLog(`cancel requested id=${id}`)
+      await api.cancelScan(id)
+      setScanLog(prev => [...prev, `${logStamp()} Cancelamento pedido ao motor`])
+      // O estado terminal só é assumido quando o backend confirma (evento cancelled).
+    } catch (err: any) {
+      setError("Erro ao cancelar: " + err.message)
+    }
+  }, [])
+
+  const clear = useCallback(() => {
+    devLog("session cleared")
+    setScanLog([])
+    setScanProgress(null)
+    scanProgressRef.current = null
+    setActiveScanId(null)
+    setUiStatus("idle")
+    setHydrating(false)
+    setError("")
+    setStalled(false)
+    expectedScanIdRef.current = null
+    activeScanIdRef.current = null
+    intentRef.current = null
+    earlyEventsRef.current.clear()
+    pendingScanConsumedRef.current = false
+  }, [])
 
   const handleDragOver = useCallback((e: React.DragEvent) => {
     e.preventDefault()
@@ -64,220 +450,201 @@ export default function FileScannerPage() {
     setIsDragging(false)
   }, [])
 
-  const handleDrop = useCallback((e: React.DragEvent) => {
+  const handleDrop = useCallback(async (e: React.DragEvent) => {
     e.preventDefault()
     setIsDragging(false)
+    if (isActiveUiStatus(uiStatus)) return
     const files = e.dataTransfer.files
-    if (files && files.length > 0) {
-      const file = files[0] as any
-      if (file.path) {
-        setSelectedFile({ name: file.name, path: file.path, size: file.size })
-      }
-    }
-  }, [])
-
-  const handleFileSelect = useCallback((e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0] as any
-    if (file && file.path) {
-      setSelectedFile({ name: file.name, path: file.path, size: file.size })
-    }
-  }, [])
-
-  const openFileDialog = async () => {
-    if (!window.electronAPI) {
-      setError("API do Electron não disponível")
+    if (!files || files.length === 0) return
+    const file = files[0]
+    // Electron 32+ removeu `File.path`: o caminho real só existe no preload.
+    const filePath = window.electronAPI?.getPathForFile?.(file) || (file as any).path
+    if (!filePath) {
+      setError("Não foi possível obter o caminho do ficheiro largado.")
       return
     }
-    try {
-      const filePath = await window.electronAPI.openFileDialog()
-      if (filePath) {
-        const name = filePath.split(/[/\\]/).pop() || filePath
-        setSelectedFile({ name, path: filePath, size: 0 })
-      }
-    } catch (err: any) {
-      setError("Erro ao abrir diálogo: " + err.message)
-    }
-  }
+    // Se for uma pasta, o serviço confirma-o e a UI passa a apresentá-la como pasta.
+    launchScan("custom", filePath, `Análise de: ${file.name}`, "file")
+  }, [launchScan, uiStatus])
 
-  const startScan = async () => {
-    if (!selectedFile) return
-    setError("")
-    setScanLog([])
-    if (!window.electronAPI) {
-      setError("Análise de ficheiros indisponível: execute a app a partir do ambiente de trabalho.")
-      return
-    }
+  const isActive = isActiveUiStatus(uiStatus)
+  const isTerminal = isTerminalUiStatus(uiStatus)
 
-    try {
-      const data = await window.electronAPI.scanFile(selectedFile.path)
-      setScanLog([
-        `[${new Date().toLocaleTimeString()}] Arquivo analisado: ${selectedFile.name}`,
-        `Resultado: ${data ? (data.overallSeverity && data.overallSeverity !== "critical" && data.overallSeverity !== "high" ? 'SEGURO' : 'AMEAÇA DETECTADA') : 'ERRO'}`,
-        data ? `Riscos encontrados: ${data.highRiskCount}` : 'Falha ao processar'
-      ])
-    } catch (err: any) {
-      setError("Erro ao processar arquivo: " + err.message)
-    }
-  }
+  const effectiveType = normalizeScanType(scanProgress?.type ?? scanType)
+  const scope: ScanScope = scanScopeFor(
+    { type: effectiveType, targetKind: scanProgress?.targetKind },
+    intentRef.current ?? undefined,
+  )
+  const targetName = targetNameOf(scanProgress)
+  const analysisName = scopeTitle(scope, effectiveType)
 
-  const startQuickScan = async () => {
-    setError("")
-    setScanLog([])
-    setScanProgress(null)
-    if (!window.electronAPI) {
-      setError("Análise rápida indisponível: execute a app a partir do ambiente de trabalho.")
-      return
-    }
-
-    try {
-      const result = await window.electronAPI.startScan("quick")
-      if (result.success) {
-        setActiveScanId(result.id)
-        setScanLog([`[${new Date().toLocaleTimeString()}] Análise rápida iniciada (Downloads, Ambiente de Trabalho, Documentos, Arranque)`])
-      }
-    } catch (err: any) {
-      setError("Erro ao iniciar scan: " + err.message)
-    }
-  }
-
-  const startFullScan = async () => {
-    setError("")
-    setScanLog([])
-    setScanProgress(null)
-    if (!window.electronAPI) {
-      setError("Análise completa indisponível: execute a app a partir do ambiente de trabalho.")
-      return
-    }
-
-    try {
-      const result = await window.electronAPI.startScan("full")
-      if (result.success) {
-        setActiveScanId(result.id)
-        setScanLog([`[${new Date().toLocaleTimeString()}] Análise completa iniciada (diretório HOME + ProgramData)`])
-      }
-    } catch (err: any) {
-      setError("Erro ao iniciar scan: " + err.message)
-    }
-  }
-
-  const startCustomScan = async () => {
-    if (!selectedFile) return
-
-    setError("")
-    setScanLog([])
-    setScanProgress(null)
-    if (!window.electronAPI) {
-      setError("Análise personalizada indisponível: execute a app a partir do ambiente de trabalho.")
-      return
-    }
-
-    try {
-      const result = await window.electronAPI.startScan("custom", selectedFile.path)
-      if (result.success) {
-        setActiveScanId(result.id)
-        setScanLog([`[${new Date().toLocaleTimeString()}] Análise personalizada iniciada para: ${selectedFile.path}`])
-      }
-    } catch (err: any) {
-      setError("Erro ao iniciar scan: " + err.message)
-    }
-  }
-
-  const cancelScan = async () => {
-    if (!activeScanId) return
-    if (!window.electronAPI) return
-    try {
-      await window.electronAPI.cancelScan(activeScanId)
-      setScanLog(prev => [...prev, `[${new Date().toLocaleTimeString()}] Scan cancelado pelo usuário`])
-    } catch (err: any) {
-      setError("Erro ao cancelar scan: " + err.message)
-    }
-  }
-
-  const clear = () => {
-    setSelectedFile(null)
-    setScanLog([])
-    setScanProgress(null)
-    setActiveScanId(null)
-    setError("")
-  }
-
-  const isScanning = !!activeScanId && scanProgress?.status !== "completed" && scanProgress?.status !== "cancelled" && scanProgress?.status !== "failed"
+  const discovered = scanProgress?.filesDiscovered ?? scanProgress?.filesScanned ?? 0
+  const totalCandidates = scanProgress?.filesTotal ?? scanProgress?.filesDiscovered ?? 0
+  const analyzed = scanProgress?.filesScanned ?? 0
+  const analyzedByEngines = scanProgress?.filesAnalyzed ?? scanProgress?.filesScanned ?? 0
+  const currentFile = scanProgress?.currentFile
+  const hasFileActivity = analyzed > 0 || (scanProgress?.progress ?? 0) > 0
+  const progressPercent = scanProgressPercent(scanProgress)
+  const etaLabel = formatEta(scanEtaSeconds(scanProgress))
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in duration-500 overflow-y-auto max-h-[calc(100vh-100px)]">
       {/* Header */}
       <div>
         <h1 className="text-2xl font-bold font-mono tracking-tight">
-          Scanner de <span className="text-primary">Ficheiros</span>
+          Análise de <span className="text-primary">Segurança</span>
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Análise de arquivos com progresso em tempo real
+          Verifica as zonas prioritárias do computador, as suas pastas de forma abrangente, um ficheiro ou uma pasta.
         </p>
       </div>
 
-      {/* Live Scan View */}
-      {isScanning && scanProgress && (
+      {/* ── Watchdog: sem atualizações do motor ──────────────────── */}
+      {stalled && isActive && (
+        <div className="flex items-start gap-3 p-4 rounded-xl border border-cyber-yellow/40 bg-cyber-yellow/5">
+          <AlertTriangle className="w-5 h-5 text-cyber-yellow shrink-0 mt-0.5" />
+          <div className="flex-1">
+            <p className="text-sm font-mono text-foreground">Não foi possível obter atualizações do motor de análise.</p>
+            <p className="text-xs text-muted-foreground mt-1">
+              A análise pode estar bloqueada num ficheiro grande ou o serviço perdeu a ligação.
+            </p>
+          </div>
+          <button
+            onClick={handleVerify}
+            className="px-3 py-2 bg-cyber-yellow/20 text-cyber-yellow border border-cyber-yellow/50 font-mono text-xs rounded-lg hover:bg-cyber-yellow/30 transition-all flex items-center gap-2"
+          >
+            <RotateCw className="w-3.5 h-3.5" />
+            Tentar novamente
+          </button>
+        </div>
+      )}
+
+      {/* ── HIDRATAÇÃO: nunca mostrar idle enquanto o snapshot está pendente ── */}
+      {shouldShowHydration(hydrating, uiStatus) && (
+        <div className="cyber-border rounded-xl p-8 bg-gradient-to-br from-primary/5 to-transparent">
+          <div className="flex items-center gap-3">
+            <MatrixAvatar mood="defender" size="sm" />
+            <div>
+              <h3 className="font-mono font-semibold text-foreground">{SCAN_HYDRATING_TITLE}</h3>
+              <p className="text-xs text-muted-foreground">{SCAN_HYDRATING_DETAIL}</p>
+            </div>
+          </div>
+
+          <div className="mt-6 space-y-3 animate-pulse">
+            <div className="h-2 w-full rounded-full bg-secondary" />
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              {[0, 1, 2, 3].map((i) => (
+                <div key={i} className="h-16 rounded-lg bg-black/20 border border-white/5" />
+              ))}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ── ANÁLISE EM CURSO ─────────────────────────────────────── */}
+      {isActive && (
         <div className="cyber-border rounded-xl p-6 bg-gradient-to-br from-primary/5 to-transparent">
           <div className="flex items-center justify-between mb-6">
             <div className="flex items-center gap-3">
               <MatrixAvatar mood="defender" size="sm" />
               <div>
-                <h3 className="font-mono font-semibold text-foreground">Scan em Andamento</h3>
-                <p className="text-xs text-muted-foreground">{scanProgress.type === "quick" ? "ANÁLISE RÁPIDA" : scanProgress.type === "full" ? "ANÁLISE COMPLETA" : "ANÁLISE PERSONALIZADA"}</p>
+                <h3 className="font-mono font-semibold text-foreground">{activeScanTitle(scope, uiStatus)}</h3>
+                <p className="text-xs text-muted-foreground">{analysisName}</p>
               </div>
             </div>
             <button
-              onClick={cancelScan}
-              className="px-4 py-2 bg-cyber-red/20 text-cyber-red border border-cyber-red/50 font-mono text-xs rounded-lg hover:bg-cyber-red/30 transition-all flex items-center gap-2"
+              onClick={handleCancel}
+              disabled={!activeScanId}
+              className="px-4 py-2 bg-cyber-red/20 text-cyber-red border border-cyber-red/50 font-mono text-xs rounded-lg hover:bg-cyber-red/30 transition-all flex items-center gap-2 disabled:opacity-50"
             >
               <X className="w-4 h-4" />
               Cancelar
             </button>
           </div>
 
-          {/* Progress Bar */}
+          {/* Alvo + o que está a acontecer (todas as fases têm feedback) */}
           <div className="mb-6">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm font-mono text-foreground">Progresso</span>
-              <span className="text-sm font-mono font-bold text-primary">{scanProgress.progress}%</span>
+            <div className="flex items-center justify-between gap-4 mb-2">
+              <span className="text-sm font-mono text-foreground truncate">
+                {scope === "file" && (currentFile || targetName)
+                  ? `Ficheiro: ${currentFile || targetName}`
+                  : scope === "folder" && targetName
+                    ? `Pasta: ${targetName}`
+                    : activeScanTitle(scope, uiStatus)}
+              </span>
+              <span className="text-sm font-mono font-bold text-primary shrink-0">
+                {scope === "computer" && uiStatus === "scanning"
+                  ? progressPercent !== null
+                    ? `${progressPercent}%`
+                    : "a analisar"
+                  : uiStatus === "gathering"
+                    ? `${discovered} ${scope === "file" ? "ficheiro" : "ficheiros"}`
+                    : scope === "file"
+                      ? hasFileActivity ? "100%" : "a verificar"
+                      : uiStatus === "finalizing" ? "a concluir" : "…"}
+              </span>
             </div>
             <div className="w-full h-2 bg-secondary rounded-full overflow-hidden border border-border">
-              <div
-                className="h-full bg-gradient-to-r from-primary to-cyan-500 transition-all duration-300"
-                style={{ width: `${scanProgress.progress}%` }}
-              />
+              {scope === "computer" && uiStatus === "scanning" && progressPercent !== null && progressPercent > 0 ? (
+                <div
+                  className="h-full bg-gradient-to-r from-primary to-cyan-500 transition-all duration-300"
+                  style={{ width: `${progressPercent}%` }}
+                />
+              ) : scope === "file" && hasFileActivity ? (
+                <div className="h-full bg-gradient-to-r from-primary to-cyan-500 w-full" />
+              ) : (
+                <div className="h-full bg-gradient-to-r from-primary/40 to-cyan-500/40 animate-pulse w-full" />
+              )}
             </div>
+            <p className="text-xs text-muted-foreground mt-2">
+              {activeScanDetail(scope, effectiveType, uiStatus, targetName)}
+              {etaLabel ? ` ${etaLabel}.` : ""}
+            </p>
           </div>
 
-          {/* Stats */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
+          {/* Stats — por tipo de alvo, para não mostrar métricas sem sentido */}
+          <div className={cn("grid gap-4 mb-6", scope === "file" ? "grid-cols-2 md:grid-cols-3" : "grid-cols-2 md:grid-cols-4")}>
             <div className="bg-black/20 rounded-lg p-3 border border-white/5">
-              <div className="text-xs text-muted-foreground uppercase mb-1">Arquivos Analisados</div>
-              <div className="text-xl font-mono font-bold text-foreground">{scanProgress.filesScanned}</div>
+              <div className="text-xs text-muted-foreground uppercase mb-1">
+                {scope === "file"
+                  ? "Ficheiro"
+                  : uiStatus === "gathering"
+                    ? "Ficheiros Encontrados"
+                    : "Ficheiros Analisados"}
+              </div>
+              <div className={cn("font-mono font-bold text-foreground", scope === "file" ? "text-sm truncate" : "text-xl")}>
+                {scope === "file"
+                  ? (currentFile || targetName || "—")
+                  : uiStatus === "gathering"
+                    ? discovered
+                    : totalCandidates > 0 ? `${analyzed} / ${totalCandidates}` : analyzed}
+              </div>
             </div>
             <div className="bg-black/20 rounded-lg p-3 border border-white/5">
               <div className="text-xs text-muted-foreground uppercase mb-1">Ameaças Encontradas</div>
-              <div className="text-xl font-mono font-bold text-cyber-red">{scanProgress.threatsFound}</div>
+              <div className="text-xl font-mono font-bold text-cyber-red">{scanProgress?.threatsFound ?? 0}</div>
             </div>
-            <div className="bg-black/20 rounded-lg p-3 border border-white/5">
-              <div className="text-xs text-muted-foreground uppercase mb-1">Status</div>
-              <div className="text-xl font-mono font-bold text-primary capitalize">{scanProgress.status}</div>
-            </div>
+            {scope !== "file" && (
+              <div className="bg-black/20 rounded-lg p-3 border border-white/5">
+                <div className="text-xs text-muted-foreground uppercase mb-1">Velocidade</div>
+                <div className="text-xl font-mono font-bold text-foreground flex items-center gap-1">
+                  <Activity className="w-4 h-4 text-primary" />
+                  {scanProgress?.filesPerSecond ?? 0} f/s
+                </div>
+              </div>
+            )}
             <div className="bg-black/20 rounded-lg p-3 border border-white/5">
               <div className="text-xs text-muted-foreground uppercase mb-1">Tempo Decorrido</div>
-              <div className="text-xl font-mono font-bold text-foreground">
-                {scanProgress.startTime
-                  ? Math.floor(
-                    (new Date().getTime() - new Date(scanProgress.startTime).getTime()) / 1000
-                  )
-                  : 0}s
+              <div className="text-xl font-mono font-bold text-foreground flex items-center gap-1">
+                <Clock className="w-4 h-4 text-primary" />
+                {elapsedSeconds(scanProgress)}s
               </div>
             </div>
           </div>
 
           {/* Scan Log */}
           <div className="bg-black/40 rounded-lg border border-white/5 p-4 max-h-48 overflow-y-auto">
-            <div className="text-xs font-mono space-y-1 text-muted-foreground font-mono">
+            <div className="text-xs font-mono space-y-1 text-muted-foreground">
               {scanLog.map((log, idx) => (
                 <div key={idx}>{log}</div>
               ))}
@@ -286,194 +653,185 @@ export default function FileScannerPage() {
         </div>
       )}
 
-      {/* Scan Completed View */}
-      {!isScanning && scanProgress && (scanProgress.status === "completed" || scanProgress.status === "cancelled" || scanProgress.status === "failed") && (
+      {/* ── RESULTADO FINAL ──────────────────────────────────────── */}
+      {isTerminal && scanProgress && (
         <div className={cn(
           "cyber-border rounded-xl p-6",
-          scanProgress.status === "completed"
+          uiStatus === "completed"
             ? "bg-gradient-to-br from-cyber-green/5 to-transparent"
             : "bg-gradient-to-br from-cyber-red/5 to-transparent"
         )}>
           <div className="flex items-center justify-between mb-6">
             <div>
-              <h3 className={cn("font-mono font-semibold", scanProgress.status === "completed" ? "text-cyber-green" : scanProgress.status === "cancelled" ? "text-cyber-yellow" : "text-cyber-red")}>
-                {scanProgress.status === "completed"
-                  ? "Análise Concluída"
-                  : scanProgress.status === "cancelled"
-                    ? "Análise Cancelada"
-                    : "Análise Falhada"}
+              <h3 className={cn("font-mono font-semibold", uiStatus === "completed" ? "text-cyber-green" : uiStatus === "cancelled" ? "text-cyber-yellow" : "text-cyber-red")}>
+                {uiStatus === "completed" ? "Análise concluída" : uiStatus === "cancelled" ? "Análise cancelada" : "Análise falhada"}
               </h3>
-              <p className="text-xs text-muted-foreground">
-                {scanProgress.type === "quick" ? "ANÁLISE RÁPIDA" : scanProgress.type === "full" ? "ANÁLISE COMPLETA" : "ANÁLISE PERSONALIZADA"}
-              </p>
+              <p className="text-xs text-muted-foreground">{analysisName}</p>
             </div>
             <span className={cn(
               "px-3 py-1.5 rounded-lg text-xs font-mono uppercase border",
-              scanProgress.status === "completed"
+              uiStatus === "completed"
                 ? "bg-cyber-green/10 text-cyber-green border-cyber-green/30"
-                : scanProgress.status === "cancelled"
+                : uiStatus === "cancelled"
                   ? "bg-cyber-yellow/10 text-cyber-yellow border-cyber-yellow/30"
                   : "bg-cyber-red/10 text-cyber-red border-cyber-red/30"
             )}>
-              {scanProgress.status === "completed"
-                ? "Concluída"
-                : scanProgress.status === "cancelled"
-                  ? "Cancelada"
-                  : "Falhada"}
+              {uiStatus === "completed" ? "Concluída" : uiStatus === "cancelled" ? "Cancelada" : "Falhada"}
             </span>
           </div>
 
-          {/* Final Stats */}
-          <div className="grid grid-cols-3 gap-4 mb-6">
+          <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-4">
+            <div className="bg-black/20 rounded-lg p-4 border border-white/5">
+              <div className="text-xs text-muted-foreground uppercase mb-2">{SCAN_RESULT_LABELS.analysisType}</div>
+              <div className="text-sm font-mono font-bold text-foreground">{analysisName}</div>
+            </div>
             <div className="bg-black/20 rounded-lg p-4 border border-white/5 text-center">
-              <div className="text-xs text-muted-foreground uppercase mb-2">Total Analisado</div>
+              <div className="text-xs text-muted-foreground uppercase mb-2">{SCAN_RESULT_LABELS.filesChecked}</div>
               <div className="text-3xl font-mono font-bold text-foreground">{scanProgress.filesScanned}</div>
             </div>
             <div className="bg-black/20 rounded-lg p-4 border border-white/5 text-center">
-              <div className="text-xs text-muted-foreground uppercase mb-2">Limpos</div>
+              <div className="text-xs text-muted-foreground uppercase mb-2">{SCAN_RESULT_LABELS.noThreatsDetected}</div>
               <div className="text-3xl font-mono font-bold text-cyber-green">
-                {scanProgress.status === "cancelled" ? "—" : scanProgress.filesScanned - scanProgress.threatsFound}
+                {uiStatus === "failed" ? "—" : Math.max(0, analyzedByEngines - scanProgress.threatsFound)}
               </div>
+              <div className="text-[10px] text-muted-foreground mt-1">ficheiros sem deteções</div>
             </div>
             <div className="bg-black/20 rounded-lg p-4 border border-white/5 text-center">
-              <div className="text-xs text-muted-foreground uppercase mb-2">Ameaças</div>
+              <div className="text-xs text-muted-foreground uppercase mb-2">{SCAN_RESULT_LABELS.threatsFound}</div>
               <div className="text-3xl font-mono font-bold text-cyber-red">{scanProgress.threatsFound}</div>
             </div>
           </div>
 
-          {scanProgress.status === "cancelled" && (
-            <div className="text-center text-sm font-mono text-cyber-yellow mb-4">
-              {scanProgress.filesScanned} ficheiros analisados antes do cancelamento.
-            </div>
-          )}
-
-          {/* Matrix feedback */}
-          {scanProgress.status === "completed" && scanProgress.threatsFound === 0 && (
-            <div className="flex items-center gap-4 mb-4 p-4 rounded-xl bg-cyber-green/5 border border-cyber-green/20">
+          {/* Frase-resumo explícita */}
+          <div className={cn(
+            "flex items-start gap-4 p-4 rounded-xl mb-4 border",
+            uiStatus === "completed" && scanProgress.threatsFound === 0
+              ? "bg-cyber-green/5 border-cyber-green/20"
+              : uiStatus === "completed"
+                ? "bg-cyber-red/5 border-cyber-red/20"
+                : "bg-black/20 border-white/5"
+          )}>
+            {uiStatus === "completed" && scanProgress.threatsFound === 0 ? (
               <MatrixAvatar mood="success" size="sm" />
-              <p className="text-sm text-muted-foreground font-sans">
-                <span className="font-mono text-cyber-green font-bold">Sem ameaças</span> — nada de suspeito entre os {scanProgress.filesScanned} ficheiros analisados. Continua a contar comigo.
-              </p>
-            </div>
-          )}
-          {scanProgress.status === "completed" && scanProgress.threatsFound > 0 && (
-            <div className="flex items-center gap-4 mb-4 p-4 rounded-xl bg-cyber-red/5 border border-cyber-red/20">
+            ) : uiStatus === "failed" || scanProgress.threatsFound > 0 ? (
               <MatrixAvatar mood="alert" size="sm" />
-              <p className="text-sm text-muted-foreground font-sans">
-                <span className="font-mono text-cyber-red font-bold">{scanProgress.threatsFound} ameaça(s)</span> detetadas. Revisa os alertas na página <span className="font-mono text-primary">Ameaças</span>.
+            ) : (
+              <MatrixAvatar mood="defender" size="sm" />
+            )}
+            <div>
+              <p className="text-sm text-foreground font-sans">
+                {buildResultSummary({
+                  scope,
+                  type: effectiveType,
+                  status: scanProgress.status,
+                  filesScanned: scanProgress.filesScanned,
+                  threatsFound: scanProgress.threatsFound,
+                  filesFailed: scanProgress.filesFailed,
+                  filesAnalyzed: scanProgress.filesAnalyzed,
+                  filesExcluded: scanProgress.filesExcluded,
+                  targetName,
+                  error: scanProgress.error,
+                })}
               </p>
+              {uiStatus === "completed" && scanProgress.threatsFound > 0 && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  Revisa os detalhes na página <span className="font-mono text-primary">Ameaças</span> e coloca os ficheiros em quarentena.
+                </p>
+              )}
+              {uiStatus === "completed" && (
+                <p className="text-xs text-muted-foreground/80 mt-2">{NO_DETECTIONS_NOTE}</p>
+              )}
             </div>
-          )}
+          </div>
 
-          {/* Duration */}
-          {scanProgress.startTime && scanProgress.endTime && (
-            <div className="text-center text-sm font-mono text-muted-foreground mb-6">
-              Tempo total: {Math.floor(
-                (new Date(scanProgress.endTime).getTime() - new Date(scanProgress.startTime).getTime()) /
-                1000
-              )}s
-            </div>
-          )}
+          <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-muted-foreground mb-6">
+            <span>
+              Duração: {elapsedSeconds(scanProgress)}s
+              {scanProgress.startTime && scanProgress.endTime && ` (${
+                new Date(scanProgress.endTime).getTime() - new Date(scanProgress.startTime).getTime() < 1000
+                  ? "menos de 1 segundo"
+                  : `${Math.floor((new Date(scanProgress.endTime).getTime() - new Date(scanProgress.startTime).getTime()) / 1000)} segundos`
+              })`}
+            </span>
+            {(scanProgress.filesFailed ?? 0) > 0 && (
+              <span>{scanProgress.filesFailed} ficheiro(s) não puderam ser analisados.</span>
+            )}
+            {(scanProgress.filesExcluded ?? 0) > 0 && (
+              <span>{scanProgress.filesExcluded} ficheiro(s) ignorados por exclusões.</span>
+            )}
+            {targetName && <span className="truncate">Alvo: {targetName}</span>}
+          </div>
 
           <button
             onClick={clear}
             className="w-full py-3 bg-primary text-primary-foreground font-mono text-sm rounded-lg hover:bg-primary/90 transition-all"
           >
-            Nova Análise
+            Nova análise
           </button>
         </div>
       )}
 
-      {/* Upload Zone */}
-      {!activeScanId && !scanProgress && (
+      {/* ── IDLE: escolher o que analisar (só depois do resync terminar) ── */}
+      {uiStatus === "idle" && !hydrating && (
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
           onDrop={handleDrop}
-          onClick={() => !selectedFile && openFileDialog()}
           className={cn(
-            "cyber-border rounded-xl p-12 transition-all cursor-pointer",
-            isDragging ? "border-primary bg-primary/5 scale-[1.02]" : "hover:border-primary/50"
+            "cyber-border rounded-xl p-8 transition-all",
+            isDragging ? "border-primary bg-primary/5 scale-[1.01]" : "hover:border-primary/50"
           )}
         >
-          <input ref={fileInputRef} type="file" onChange={handleFileSelect} className="hidden" />
-          <div className="flex flex-col items-center justify-center text-center">
+          <div className="flex flex-col items-center text-center mb-6">
             <div className={cn(
-              "w-20 h-20 rounded-2xl flex items-center justify-center mb-6 transition-all border",
+              "w-16 h-16 rounded-2xl flex items-center justify-center mb-4 transition-all border",
               isDragging ? "bg-primary/20 border-primary" : "bg-primary/10 border-primary/30"
             )}>
               {isDragging ? (
-                <Upload className="w-10 h-10 text-primary animate-bounce" />
-              ) : selectedFile ? (
-                <File className="w-10 h-10 text-primary" />
+                <Upload className="w-8 h-8 text-primary animate-bounce" />
               ) : (
-                <FileSearch className="w-10 h-10 text-primary" />
+                <FileSearch className="w-8 h-8 text-primary" />
               )}
             </div>
-
-            <h3 className="text-lg font-mono font-semibold text-foreground mb-2">
-              {selectedFile ? selectedFile.name : isDragging ? "Solte os arquivos aqui" : "Arraste arquivos ou clique para selecionar"}
+            <h3 className="text-lg font-mono font-semibold text-foreground">
+              {isDragging ? "Solte o ficheiro ou a pasta aqui" : "O que pretende analisar?"}
             </h3>
-            <p className="text-sm text-muted-foreground max-w-md">
-              {selectedFile
-                ? `${(selectedFile.size / 1024).toFixed(1)} KB`
-                : "Suportamos todos os tipos de arquivo. Análise local e segura."}
+            <p className="text-sm text-muted-foreground max-w-xl mt-1">
+              Escolha uma das análises abaixo. Também pode arrastar um ficheiro para esta área.
             </p>
-
-            <div className="flex items-center gap-3 mt-6 flex-wrap justify-center">
-              {!selectedFile ? (
-                <>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); openFileDialog(); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-secondary rounded-lg hover:bg-secondary/80 transition-all font-mono text-sm"
-                  >
-                    <File className="w-4 h-4" />
-                    Arquivo
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); openFileDialog(); }}
-                    className="flex items-center gap-2 px-4 py-2 bg-secondary rounded-lg hover:bg-secondary/80 transition-all font-mono text-sm"
-                  >
-                    <Folder className="w-4 h-4" />
-                    Pasta
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); startQuickScan(); }}
-                    className="px-6 py-2.5 bg-cyber-cyan/20 text-cyber-cyan border border-cyber-cyan/50 font-mono text-sm rounded-lg hover:bg-cyber-cyan/30 transition-all cyber-glow"
-                  >
-                    Análise Rápida
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); startFullScan(); }}
-                    className="px-6 py-2.5 bg-cyber-magenta/20 text-cyber-magenta border border-cyber-magenta/50 font-mono text-sm rounded-lg hover:bg-cyber-magenta/30 transition-all cyber-glow"
-                  >
-                    Análise Completa
-                  </button>
-                </>
-              ) : (
-                <>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); startScan(); }}
-                    className="px-6 py-2.5 bg-primary text-primary-foreground font-mono text-sm rounded-lg hover:bg-primary/90 transition-all cyber-glow"
-                  >
-                    Analisar Arquivo
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); startCustomScan(); }}
-                    className="px-6 py-2.5 bg-cyber-cyan/20 text-cyber-cyan border border-cyber-cyan/50 font-mono text-sm rounded-lg hover:bg-cyber-cyan/30 transition-all"
-                  >
-                    Analisar Pasta
-                  </button>
-                  <button
-                    onClick={(e) => { e.stopPropagation(); clear(); }}
-                    className="px-4 py-2.5 bg-secondary text-foreground font-mono text-sm rounded-lg hover:bg-secondary/80 transition-all"
-                  >
-                    Remover
-                  </button>
-                </>
-              )}
-            </div>
           </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {SCAN_ACTION_CARDS.map((card) => {
+              const Icon = ACTION_ICON[card.kind]
+              const onClick = card.kind === "quick"
+                ? handleQuickScan
+                : card.kind === "full"
+                  ? handleFullScan
+                  : card.kind === "file"
+                    ? handleFileScan
+                    : handleFolderScan
+              return (
+                <button
+                  key={card.kind}
+                  onClick={onClick}
+                  className="text-left p-4 rounded-xl border border-border bg-black/20 hover:border-primary/50 hover:bg-primary/5 transition-all group"
+                >
+                  <div className="flex items-start gap-4">
+                    <div className={cn("w-10 h-10 rounded-lg border flex items-center justify-center shrink-0 group-hover:scale-105 transition-transform", ACTION_COLOR[card.kind])}>
+                      <Icon className="w-5 h-5" />
+                    </div>
+                    <div className="min-w-0">
+                      <span className="font-mono text-sm font-semibold text-foreground block">{card.title}</span>
+                      <span className="text-xs text-muted-foreground block mt-1 leading-relaxed">{card.description}</span>
+                    </div>
+                  </div>
+                </button>
+              )
+            })}
+          </div>
+
+          <p className="text-xs text-muted-foreground mt-4 text-center">{ZIP_CONTENT_NOTE}</p>
         </div>
       )}
 
@@ -491,7 +849,7 @@ export default function FileScannerPage() {
             <div>
               <h3 className="font-mono font-semibold text-foreground">Dica de Segurança</h3>
               <p className="text-xs text-muted-foreground mt-1">
-                Analise arquivos baixados de fontes desconhecidas ou executáveis inesperados.
+                Analise ficheiros descarregados de fontes desconhecidas ou executáveis inesperados.
               </p>
             </div>
           </div>
@@ -505,7 +863,7 @@ export default function FileScannerPage() {
             <div>
               <h3 className="font-mono font-semibold text-foreground">Análise em Tempo Real</h3>
               <p className="text-xs text-muted-foreground mt-1">
-                Scanner independente continua mesmo ao trocar de página. ZIPs analisados recursivamente.
+                O motor continua a analisar mesmo que mude de página. Ao voltar a esta secção, o progresso é retomado automaticamente.
               </p>
             </div>
           </div>

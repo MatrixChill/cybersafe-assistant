@@ -17,13 +17,17 @@ import {
   MemoryStick,
   BatteryCharging,
   Zap,
+  ShieldAlert,
+  HelpCircle,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { HardwareSnapshot } from "@cybersafe/shared-types";
+import type { HardwareSnapshot, PcState, PcStateLevel } from "@cybersafe/shared-types";
 import PCHealthSection from "@/components/PCHealthSection";
+import { TEMPERATURE_UNAVAILABLE_HINT, useTemperatureDisplay } from "@/lib/temperature";
 
 interface PCCenterPageProps {
   hardware: HardwareSnapshot | null;
+  pcState?: PcState | null;
 }
 
 function formatBytes(bytes: number): string {
@@ -42,6 +46,61 @@ function getUsageBgColor(percent: number): string {
   if (percent < 60) return "bg-cyber-green";
   if (percent < 85) return "bg-cyber-yellow";
   return "bg-cyber-red";
+}
+
+// A copy/estado de temperatura vive em @/lib/temperature (partilhada com o
+// Dashboard): "A recolher dados..." → "Temperatura indisponível". Nunca 0 °C.
+
+// O veredicto geral vem do PcState (Findings Engine) — a UI não cria uma
+// segunda opinião sobre a saúde do sistema. stressScore continua a mostrado
+// como métrica de telemetria, mas sem decidir o título do estado.
+function overallStatusMeta(overall: PcStateLevel): {
+  title: string;
+  message: string;
+  colorClass: string;
+  bgClass: string;
+  borderClass: string;
+  StatusIcon: any;
+} {
+  switch (overall) {
+    case "good":
+      return {
+        title: "Sistema Saudável",
+        message: "Não encontrámos problemas que exijam atenção neste momento.",
+        colorClass: "text-cyber-green",
+        bgClass: "bg-cyber-green/10",
+        borderClass: "border-cyber-green/30",
+        StatusIcon: ShieldCheck,
+      };
+    case "attention":
+      return {
+        title: "Sistema precisa de atenção",
+        message: "Há componentes do sistema que não estão totalmente saudáveis.",
+        colorClass: "text-cyber-yellow",
+        bgClass: "bg-cyber-yellow/10",
+        borderClass: "border-cyber-yellow/30",
+        StatusIcon: AlertTriangle,
+      };
+    case "critical":
+      return {
+        title: "Problema crítico",
+        message: "Existem problemas que precisam da tua intervenção.",
+        colorClass: "text-cyber-red",
+        bgClass: "bg-cyber-red/10",
+        borderClass: "border-cyber-red/30",
+        StatusIcon: ShieldAlert,
+      };
+    case "unknown":
+    default:
+      return {
+        title: "Estado parcialmente desconhecido",
+        message: "Alguns dados ainda não estão disponíveis por completo.",
+        colorClass: "text-cyber-cyan",
+        bgClass: "bg-cyber-cyan/10",
+        borderClass: "border-cyber-cyan/30",
+        StatusIcon: HelpCircle,
+      };
+  }
 }
 
 function CircularGauge({ value, size = 100, label, showFallback }: { value: number; size?: number; label?: string; showFallback?: boolean }) {
@@ -100,7 +159,7 @@ function LoadingSkeleton() {
 }
 
 
-function SimpleView({ hardware }: { hardware: HardwareSnapshot }) {
+function SimpleView({ hardware, pcState }: { hardware: HardwareSnapshot; pcState?: PcState | null }) {
   const isStressed = hardware.stressScore > 75;
   const isWarning = hardware.stressScore > 50 && hardware.stressScore <= 75;
 
@@ -111,7 +170,15 @@ function SimpleView({ hardware }: { hardware: HardwareSnapshot }) {
   let StatusIcon = ShieldCheck;
   let statusMessage = "Os componentes do seu sistema estão a operar de forma eficiente e dentro dos limites seguros.";
 
-  if (isStressed) {
+  if (pcState && pcState.overall) {
+    const meta = overallStatusMeta(pcState.overall);
+    statusTitle = meta.title;
+    statusColor = meta.colorClass;
+    statusBg = meta.bgClass;
+    statusBorder = meta.borderClass;
+    StatusIcon = meta.StatusIcon;
+    statusMessage = meta.message;
+  } else if (isStressed) {
     statusTitle = "Sistema em Sobrecarga";
     statusColor = "text-cyber-red";
     statusBg = "bg-cyber-red/10";
@@ -146,6 +213,35 @@ function SimpleView({ hardware }: { hardware: HardwareSnapshot }) {
               {hardware.stressScore}/100
             </span>
           </div>
+
+          {/* Stress breakdown */}
+          {hardware.stressContributions && (
+            <div className="mt-4 w-full max-w-xs space-y-2">
+              <div className="text-[10px] text-muted-foreground uppercase tracking-wider text-center mb-1">
+                Contribuições (0–100)
+              </div>
+              {[
+                { label: "CPU", value: hardware.stressContributions.cpu, max: 35 },
+                { label: "RAM", value: hardware.stressContributions.ram, max: 30 },
+                { label: "Temperatura", value: hardware.stressContributions.temperature, max: 25 },
+                { label: "GPU", value: hardware.stressContributions.gpu, max: 0 },
+              ].filter(c => c.max > 0).map((c) => (
+                <div key={c.label} className="flex items-center gap-2 text-xs">
+                  <span className="w-20 text-muted-foreground font-mono">{c.label}</span>
+                  <div className="flex-1 h-1.5 bg-secondary rounded-full overflow-hidden">
+                    <div
+                      className={cn("h-full rounded-full transition-all", getUsageBgColor(c.value > 0 ? (c.value / c.max) * 100 : 0))}
+                      style={{ width: `${c.max > 0 ? (c.value / c.max) * 100 : 0}%` }}
+                    />
+                  </div>
+                  <span className="w-8 text-right font-mono text-muted-foreground">{c.value}</span>
+                </div>
+              ))}
+              <p className="text-[10px] text-muted-foreground text-center mt-2">
+                Stress = carga instantânea (CPU + RAM + Temperatura). Capacidade de disco é tratada separadamente.
+              </p>
+            </div>
+          )}
         </div>
       </div>
 
@@ -198,6 +294,10 @@ function SimpleView({ hardware }: { hardware: HardwareSnapshot }) {
   );
 }
 function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
+  // Hooks antes de qualquer return antecipado.
+  const cpuTemperature = useTemperatureDisplay(hardware?.cpu?.temperature ?? null);
+  const gpuTemperature = useTemperatureDisplay(hardware?.gpu?.temperature ?? null);
+
   if (!hardware) {
     return <LoadingSkeleton />;
   }
@@ -278,10 +378,12 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
               <div>
                 <span className="text-xs text-muted-foreground uppercase block">Temperatura</span>
                 <span className={cn("text-sm font-medium font-mono flex items-center justify-end gap-1",
-                  hardware.cpu.temperature ? getUsageColor(hardware.cpu.temperature) : "text-muted-foreground"
+                  cpuTemperature.value != null ? getUsageColor(cpuTemperature.value) : "text-muted-foreground"
                 )}>
                   <Thermometer className="w-3 h-3" />
-                  {hardware.cpu.temperature ? `${hardware.cpu.temperature}°C` : "Indisponível"}
+                  {cpuTemperature.value != null
+                    ? `${cpuTemperature.value}°C`
+                    : <span title={TEMPERATURE_UNAVAILABLE_HINT} className="cursor-help">{cpuTemperature.text}</span>}
                 </span>
               </div>
             </div>
@@ -350,10 +452,12 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
                 <div>
                   <span className="text-xs text-muted-foreground uppercase block">Temperatura</span>
                   <span className={cn("text-sm font-medium font-mono flex items-center justify-end gap-1",
-                    hardware.gpu.temperature ? getUsageColor(hardware.gpu.temperature) : "text-muted-foreground"
+                    gpuTemperature.value != null ? getUsageColor(gpuTemperature.value) : "text-muted-foreground"
                   )}>
                     <Thermometer className="w-3 h-3" />
-                    {hardware.gpu.temperature ? `${hardware.gpu.temperature}°C` : "Indisponível"}
+                    {gpuTemperature.value != null
+                      ? `${gpuTemperature.value}°C`
+                      : <span title={TEMPERATURE_UNAVAILABLE_HINT} className="cursor-help">{gpuTemperature.text}</span>}
                   </span>
                 </div>
               </div>
@@ -587,8 +691,11 @@ function AdvancedView({ hardware }: { hardware: HardwareSnapshot }) {
 }
 
 
-export default function PCCenterPage({ hardware }: PCCenterPageProps) {
+export default function PCCenterPage({ hardware, pcState }: PCCenterPageProps) {
   const [viewMode, setViewMode] = useState<"simple" | "advanced">("simple");
+  // Hooks antes de qualquer return antecipado.
+  const cpuTemperature = useTemperatureDisplay(hardware?.cpu?.temperature ?? null);
+  const gpuTemperature = useTemperatureDisplay(hardware?.gpu?.temperature ?? null);
 
   if (!hardware) {
     return <LoadingSkeleton />;
@@ -630,10 +737,86 @@ export default function PCCenterPage({ hardware }: PCCenterPageProps) {
       </div>
 
       {viewMode === "simple" ? (
-        <SimpleView hardware={hardware} />
+        <SimpleView hardware={hardware} pcState={pcState} />
       ) : (
         <AdvancedView hardware={hardware} />
       )}
+
+      {/* Temperatures & Sensors */}
+      <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="flex items-center gap-2 mb-6">
+          <Thermometer className="w-5 h-5 text-primary" />
+          <h2 className="text-lg font-semibold">Temperaturas e Sensores</h2>
+        </div>
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-4">
+          <div className="bg-secondary/30 rounded-lg p-4 border border-white/5">
+            <div className="flex items-center gap-2 mb-2">
+              <Cpu className="w-4 h-4 text-primary" />
+              <span className="text-xs text-muted-foreground uppercase font-mono">CPU</span>
+            </div>
+            {cpuTemperature.value != null ? (
+              <>
+                <span className={cn("text-2xl font-mono font-bold", getUsageColor(cpuTemperature.value))}>{cpuTemperature.value}°C</span>
+                <p className="text-xs text-muted-foreground mt-1 font-mono truncate" title={hardware.cpu.model}>{hardware.cpu.model}</p>
+                <p className="text-[10px] text-muted-foreground/60 mt-0.5 font-mono">Sensor térmico ACPI</p>
+              </>
+            ) : (
+              <span className="text-sm font-mono text-muted-foreground" title={TEMPERATURE_UNAVAILABLE_HINT}>{cpuTemperature.text}</span>
+            )}
+          </div>
+
+          {hardware.gpu ? (
+            <div className="bg-secondary/30 rounded-lg p-4 border border-white/5">
+              <div className="flex items-center gap-2 mb-2">
+                <Monitor className="w-4 h-4 text-primary" />
+                <span className="text-xs text-muted-foreground uppercase font-mono">GPU</span>
+              </div>
+              {gpuTemperature.value != null ? (
+                <>
+                  <span className={cn("text-2xl font-mono font-bold", getUsageColor(gpuTemperature.value))}>{gpuTemperature.value}°C</span>
+                  <p className="text-xs text-muted-foreground mt-1 font-mono truncate" title={hardware.gpu.model}>{hardware.gpu.model}</p>
+                  <p
+                    className="text-[10px] text-muted-foreground/60 mt-0.5 font-mono truncate"
+                    title={`${hardware.gpu.temperatureSource ?? "desconhecido"} · ${hardware.gpu.temperatureSensor ?? "GPU Core"}`}
+                  >
+                    {hardware.gpu.temperatureSensor ?? "GPU Core"}
+                    {hardware.gpu.temperatureStatus === "stale" ? " (última leitura)" : ""}
+                  </p>
+                </>
+              ) : (
+                <span className="text-sm font-mono text-muted-foreground" title={TEMPERATURE_UNAVAILABLE_HINT}>{gpuTemperature.text}</span>
+              )}
+            </div>
+          ) : (
+            <div className="bg-secondary/30 rounded-lg p-4 border border-white/5 opacity-50">
+              <div className="flex items-center gap-2 mb-2">
+                <Monitor className="w-4 h-4 text-muted-foreground" />
+                <span className="text-xs text-muted-foreground uppercase font-mono">GPU</span>
+              </div>
+              <span className="text-lg font-mono text-muted-foreground">Não detetada</span>
+            </div>
+          )}
+
+          <div className="bg-secondary/30 rounded-lg p-4 border border-white/5 opacity-50">
+            <div className="flex items-center gap-2 mb-2">
+              <HardDrive className="w-4 h-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground uppercase font-mono">NVMe/SSD</span>
+            </div>
+            <span className="text-lg font-mono text-muted-foreground">—</span>
+            <p className="text-xs text-muted-foreground mt-1">Sensor não disponível</p>
+          </div>
+
+          <div className="bg-secondary/30 rounded-lg p-4 border border-white/5 opacity-50">
+            <div className="flex items-center gap-2 mb-2">
+              <Server className="w-4 h-4 text-muted-foreground" />
+              <span className="text-xs text-muted-foreground uppercase font-mono">Motherboard</span>
+            </div>
+            <span className="text-lg font-mono text-muted-foreground">—</span>
+            <p className="text-xs text-muted-foreground mt-1">Sensor não disponível</p>
+          </div>
+        </div>
+      </div>
 
       {/* Saúde e Segurança do PC (camada PowerShell Windows, read-only) */}
       <PCHealthSection />

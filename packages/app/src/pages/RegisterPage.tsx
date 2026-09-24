@@ -85,11 +85,11 @@ export default function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
 
   const planFeatures = {
     free: {
-      personal: ["Scanner de Ficheiros", "Monitor Básico", "Assistente IA", "Simulador Phishing"],
+      personal: ["Análise de Segurança", "Monitor Básico", "Assistente IA", "Simulador Phishing"],
       business: ["Tudo do Free +", "Gestão de Dispositivos", "Relatórios Simples", "Suporte por Email"]
     },
     pro: {
-      personal: ["Scanner Profundo", "Monitor em Tempo Real", "IA Avançada", "Detecção Comportamental", "Auto-Quarentena", "Todos os Jogos"],
+      personal: ["Análise Profunda do Computador", "Monitor em Tempo Real", "IA Avançada", "Detecção Comportamental", "Auto-Quarentena", "Todos os Jogos"],
       business: ["Tudo do Pro +", "Relatórios Avançados", "Logs Detalhados", "Proteção USB/Startup"]
     },
     premium: {

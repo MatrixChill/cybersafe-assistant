@@ -19,6 +19,7 @@ import { cn } from "@/lib/utils";
 import type { WindowsHealthSnapshot, WindowsHealthStatus } from "@cybersafe/shared-types";
 import { buildHealthAlertsFromSnapshot } from "@cybersafe/shared-types";
 import type { HealthAlert, HealthAlertSeverity } from "@cybersafe/shared-types";
+import { isAppShuttingDown, onAppShutdown, runUnlessShuttingDown } from "@/lib/shutdownState";
 
 function statusMeta(status: WindowsHealthStatus) {
   switch (status) {
@@ -195,11 +196,16 @@ export default function PCHealthSection() {
       setRefreshing(false);
       return;
     }
+    // Encerramento em curso: sem leituras novas ao serviço.
+    if (isAppShuttingDown()) return;
     setRefreshing(true);
     try {
       const snap = await window.electronAPI.getWindowsHealth();
+      if (isAppShuttingDown()) return;
       setHealth(snap);
     } catch (e) {
+      // Cancelamento esperado durante o shutdown; erro real continua a ser logado.
+      if (isAppShuttingDown()) return;
       console.error("[WindowsHealth] fetch error", e);
     } finally {
       setLoading(false);
@@ -210,9 +216,15 @@ export default function PCHealthSection() {
   useEffect(() => {
     void fetchHealth();
     const interval = setInterval(() => {
-      if (document.visibilityState === "visible") void fetchHealth();
+      if (document.visibilityState !== "visible") return;
+      runUnlessShuttingDown(() => { void fetchHealth(); });
     }, 12_000);
-    return () => clearInterval(interval);
+    // O polling pára assim que o utilizador confirma a saída.
+    const stopOnShutdown = onAppShutdown(() => clearInterval(interval));
+    return () => {
+      stopOnShutdown();
+      clearInterval(interval);
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

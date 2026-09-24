@@ -1,19 +1,29 @@
-import { useState } from "react";
+import { useCallback, useState } from "react";
 import { Activity, Shield, Trash2, Cpu, HardDrive, AlertTriangle, AlertCircle, Search, RefreshCw, X } from "lucide-react";
 import type { ProcessSnapshot, ProcessAnalysisResult } from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
+import { KILL_UNAVAILABLE_ERROR, runKillProcess, shouldRefetchAfterKill } from "@/lib/processActions";
 
 interface TaskManagerPageProps {
   processes: ProcessSnapshot[];
+  /**
+   * Refetch autoritativo do snapshot de processos (dono do estado é o App).
+   * Chamado depois de um kill para a lista refletir o serviço, sem remoção otimista.
+   */
+  onRefreshProcesses?: () => Promise<void> | void;
 }
 
-export default function TaskManagerPage({ processes }: TaskManagerPageProps) {
+export default function TaskManagerPage({ processes, onRefreshProcesses }: TaskManagerPageProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState<"cpu" | "mem" | "name">("cpu");
   const [analyzingPid, setAnalyzingPid] = useState<number | null>(null);
   const [analysisResult, setAnalysisResult] = useState<ProcessAnalysisResult | null>(null);
   const [killingPid, setKillingPid] = useState<number | null>(null);
   const [isKilling, setIsKilling] = useState(false);
+  /** Aviso da última tentativa de kill — mostrado fora do overlay (que fecha sempre). */
+  const [killNotice, setKillNotice] = useState<{ message: string; ok: boolean } | null>(null);
+  /** Aviso da última análise de processo — mesmo padrão que o killNotice. */
+  const [analyzeNotice, setAnalyzeNotice] = useState<{ message: string; ok: boolean } | null>(null);
 
   // Filter and sort processes
   const filteredProcesses = processes
@@ -24,42 +34,60 @@ export default function TaskManagerPage({ processes }: TaskManagerPageProps) {
       return a.name.localeCompare(b.name);
     });
 
-  const handleAnalyze = async (pid: number) => {
+const handleAnalyze = async (pid: number) => {
     setAnalyzingPid(pid);
     setAnalysisResult(null);
+    setAnalyzeNotice(null);
     try {
-      if (!window.electronAPI) {
-        alert("Análise de processos indisponível: execute a app a partir do ambiente de trabalho.");
-        setAnalyzingPid(null);
+      const api = window.electronAPI;
+      if (!api) {
+        setAnalyzeNotice({ message: "Análise de processos indisponível: a API do ambiente de trabalho não está disponível.", ok: false });
         return;
       }
-      const result = await window.electronAPI.analyzeProcess(pid);
+      const result = await api.analyzeProcess(pid);
       setAnalysisResult(result);
     } catch (e) {
       console.error(e);
+      setAnalyzeNotice({ message: "Falha ao analisar processo: verifique a ligação ao serviço.", ok: false });
     } finally {
       setAnalyzingPid(null);
     }
   };
 
-  const handleKill = async () => {
-    if (!killingPid) return;
-    setIsKilling(true);
+  /** Refetch autoritativo (ignora falhas: o snapshot seguinte corrige). */
+  const refreshProcesses = useCallback(async () => {
+    if (!onRefreshProcesses) return;
     try {
-      if (!window.electronAPI) {
-        alert("Gestão de processos indisponível: execute a app a partir do ambiente de trabalho.");
-        setIsKilling(false);
-        setKillingPid(null);
-        return;
-      }
-      const result = await window.electronAPI.killProcessTree(killingPid);
-      if (!result.success) {
-        alert("Falha ao terminar processo. Pode ser um serviço protegido do sistema.");
-      }
+      await onRefreshProcesses();
     } catch (e) {
       console.error(e);
-      alert("Erro ao terminar processo.");
+    }
+  }, [onRefreshProcesses]);
+
+  const handleKill = async () => {
+    const pid = killingPid;
+    if (!pid) return;
+
+    const api = window.electronAPI;
+    if (!api) {
+      setKillNotice({ message: KILL_UNAVAILABLE_ERROR, ok: false });
+      setIsKilling(false);
+      setKillingPid(null);
+      return;
+    }
+
+    setIsKilling(true);
+    setKillNotice(null);
+    try {
+      // Com prazo máximo: nunca deixa o overlay preso se a `invoke` não resolver.
+      const outcome = await runKillProcess({ pid, kill: api.killProcessTree });
+
+      if (outcome.message) setKillNotice({ message: outcome.message, ok: outcome.success });
+
+      // Sem remoção otimista: pede o snapshot ao serviço (fonte de verdade).
+      if (shouldRefetchAfterKill(outcome)) await refreshProcesses();
     } finally {
+      // Garantia de fechar o overlay, aconteça o que acontecer.
       setIsKilling(false);
       setKillingPid(null);
     }
@@ -103,6 +131,40 @@ export default function TaskManagerPage({ processes }: TaskManagerPageProps) {
           </div>
         </div>
       </div>
+
+      {killNotice && (
+        <div className={cn(
+          "shrink-0 flex items-start gap-3 rounded-xl border px-4 py-3",
+          killNotice.ok ? "border-cyber-green/40 bg-cyber-green/10" : "border-cyber-red/40 bg-cyber-red/10",
+        )}>
+          <AlertCircle className={cn("w-5 h-5 shrink-0 mt-0.5", killNotice.ok ? "text-cyber-green" : "text-cyber-red")} />
+          <p className="flex-1 text-sm font-mono text-foreground">{killNotice.message}</p>
+          <button
+            onClick={() => setKillNotice(null)}
+            className="text-muted-foreground hover:text-foreground shrink-0"
+            title="Fechar aviso"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
+
+      {analyzeNotice && (
+        <div className={cn(
+          "shrink-0 flex items-start gap-3 rounded-xl border px-4 py-3",
+          analyzeNotice.ok ? "border-cyber-green/40 bg-cyber-green/10" : "border-cyber-red/40 bg-cyber-red/10",
+        )}>
+          <AlertCircle className={cn("w-5 h-5 shrink-0 mt-0.5", analyzeNotice.ok ? "text-cyber-green" : "text-cyber-red")} />
+          <p className="flex-1 text-sm font-mono text-foreground">{analyzeNotice.message}</p>
+          <button
+            onClick={() => setAnalyzeNotice(null)}
+            className="text-muted-foreground hover:text-foreground shrink-0"
+            title="Fechar aviso"
+          >
+            <X className="w-4 h-4" />
+          </button>
+        </div>
+      )}
 
       <div className="cyber-border rounded-xl flex-1 overflow-hidden flex flex-col">
         <div className="grid grid-cols-12 gap-4 items-center p-4 border-b border-border/50 bg-sidebar/50 text-xs font-mono font-semibold text-muted-foreground uppercase tracking-wider shrink-0">
@@ -299,6 +361,11 @@ export default function TaskManagerPage({ processes }: TaskManagerPageProps) {
                 O processo pode estar sendo usado por um programa ativo. Qualquer alteração não guardada será perdida.
               </p>
             </div>
+            {isKilling && (
+              <p className="text-xs font-mono text-muted-foreground">
+                A terminar processo… o aviso fecha automaticamente se o serviço não responder.
+              </p>
+            )}
             <div className="flex gap-3 justify-center">
               <button 
                 disabled={isKilling}

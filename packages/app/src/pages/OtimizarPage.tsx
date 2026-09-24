@@ -51,8 +51,8 @@ const baseRecommendations: Omit<Recommendation, "done">[] = [
   },
   {
     id: "disk-cleanup",
-    title: "Análise Completa do Sistema",
-    description: "Executa uma verificação completa do sistema para detetar ameaças ocultas.",
+    title: "Análise Profunda do Computador",
+    description: "Executa uma verificação mais abrangente e detalhada do sistema para detetar ameaças ocultas.",
     priority: "medium",
     category: "Performance",
     icon: HardDrive,
@@ -112,7 +112,7 @@ const baseRecommendations: Omit<Recommendation, "done">[] = [
   {
     id: "scanner-run",
     title: "Atualizar a Base de Dados de Segurança",
-    description: "Verifica e atualiza as definições de ameaças usadas no File Scanner e no monitor.",
+    description: "Verifica e atualiza as definições de ameaças usadas na Análise de Segurança e no monitor.",
     priority: "high",
     category: "Segurança",
     icon: AlertTriangle,
@@ -208,9 +208,9 @@ export default function OtimizarPage({ hardware }: OtimizarPageProps) {
         case "disk-cleanup": {
           const res = await window.electronAPI.startScan("full")
           if (res?.success) {
-            notify("Análise completa iniciada. Acompanha o progresso no Scanner de Ficheiros.")
+            notify("Análise Profunda do Computador iniciada. Acompanha o progresso em Análise de Segurança.")
           } else {
-            notify("Não foi possível iniciar a análise completa.", true)
+            notify("Não foi possível iniciar a Análise Profunda do Computador. Pode já existir uma análise em curso.", true)
           }
           break
         }

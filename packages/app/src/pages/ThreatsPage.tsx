@@ -42,6 +42,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
     switch (severity) {
       case "critical": return <XCircle className="w-5 h-5 text-cyber-red" />
       case "high": return <AlertCircle className="w-5 h-5 text-cyber-yellow" />
+      case "medium": return <AlertCircle className="w-5 h-5 text-cyber-cyan" />
       default: return <CheckCircle2 className="w-5 h-5 text-cyber-green" />
     }
   }

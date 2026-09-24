@@ -48,6 +48,9 @@ export const FEATURES = {
   BEHAVIORAL_DETECTION: "behavioral_detection",
   AUTO_QUARANTINE: "auto_quarantine",
   
+  // Business Security Center
+  BUSINESS_SECURITY_CENTER: "business_security_center",
+
   // Security (Business only)
   USB_PROTECTION: "usb_protection",
   STARTUP_PROTECTION: "startup_protection",
@@ -129,6 +132,7 @@ const PERSONAL_SPECIFIC_FEATURES: FeatureKey[] = [
 ];
 
 const BUSINESS_SPECIFIC_FEATURES: FeatureKey[] = [
+  FEATURES.BUSINESS_SECURITY_CENTER,
   FEATURES.REPORTS,
   FEATURES.REPORTS_ADVANCED,
   FEATURES.MULTI_DEVICE,
@@ -153,10 +157,6 @@ export function getUserFeatures(accountType: AccountType, plan: PlanType): Featu
     return [...planFeatures, ...accountSpecific];
   }
   return planFeatures;
-}
-
-export function canAccess(feature: FeatureKey, accountType: AccountType, plan: PlanType): boolean {
-  return getUserFeatures(accountType, plan).includes(feature);
 }
 
 export function getUserLimits(_accountType: AccountType, plan: PlanType) {
@@ -194,6 +194,7 @@ export const NAV_FEATURE_MAP: NavFeatureConfig[] = [
   { id: "monitor", requiredFeature: FEATURES.MONITOR_BASIC, proOnly: false },
   { id: "simulator", requiredFeature: FEATURES.SIMULATOR, proOnly: false },
   { id: "reports", requiredFeature: FEATURES.REPORTS, proOnly: true },
+  { id: "business", requiredFeature: FEATURES.BUSINESS_SECURITY_CENTER, proOnly: true },
 ];
 
 export type UserType = AccountType;
@@ -206,14 +207,24 @@ export function getUserFeaturesLegacy(tier: SubscriptionTier): FeatureKey[] {
   return getUserFeatures(accountType, tier);
 }
 
-export function canAccessLegacy(feature: FeatureKey, tier: SubscriptionTier): boolean {
-  return getUserFeaturesLegacy(tier).includes(feature);
-}
-
 export function isProFeature(feature: FeatureKey): boolean {
   return !PLANS.free.features.includes(feature);
 }
 
 export function isBusinessFeature(feature: FeatureKey): boolean {
   return BUSINESS_SPECIFIC_FEATURES.includes(feature);
+}
+
+export function canAccess(feature: FeatureKey, accountType: AccountType, plan: PlanType): boolean {
+  // Business Security Center básico é associado ao ACCOUNT TYPE, não ao plano.
+  // Qualquer conta Business — incluindo o plano free — pode aceder.
+  // Contas Personal não podem aceder, independentemente do plano.
+  if (feature === FEATURES.BUSINESS_SECURITY_CENTER) {
+    return accountType === "business";
+  }
+  return getUserFeatures(accountType, plan).includes(feature);
+}
+
+export function canAccessLegacy(feature: FeatureKey, tier: SubscriptionTier): boolean {
+  return getUserFeaturesLegacy(tier).includes(feature);
 }

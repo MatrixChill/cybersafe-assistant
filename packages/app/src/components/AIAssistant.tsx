@@ -9,7 +9,7 @@ interface Message {
   content: string
 }
 
-type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager" | "otimizar"
+type Page = "dashboard" | "pccenter" | "threats" | "scanner" | "monitor" | "simulator" | "reports" | "taskmanager" | "otimizar" | "settings" | "business"
 
 interface AIAssistantProps {
   currentPage?: Page
@@ -25,12 +25,14 @@ const PAGE_LABELS: Record<Page, string> = {
   dashboard: "Dashboard",
   pccenter: "PC Center",
   threats: "Ameaças",
-  scanner: "Scanner de Ficheiros",
+  scanner: "Análise de Segurança",
   monitor: "Monitor",
   simulator: "Simulador de Phishing",
   reports: "Relatórios",
   taskmanager: "Task Manager",
   otimizar: "Otimizar",
+  settings: "Configurações",
+  business: "Business Center",
 }
 
 // Guardas locais para não depender do provider nos fallbacks cruciais.
@@ -68,7 +70,7 @@ const SUGGESTIONS: Record<Page, { label: string }[]> = {
     { label: "O que é um falso positivo?" },
   ],
   scanner: [
-    { label: "O que é o Quick Scan?" },
+    { label: "O que é a Análise Rápida do Computador?" },
     { label: "Este ficheiro pode ser perigoso?" },
     { label: "Como funciona a análise de ficheiros?" },
     { label: "O que devo fazer após o scan?" },
@@ -103,6 +105,15 @@ const SUGGESTIONS: Record<Page, { label: string }[]> = {
     { label: "Discos e temporários — o que posso apagar?" },
     { label: "Como melhorar o desempenho?" },
   ],
+  settings: [
+    { label: "O que é o tema Matrix Terminal?" },
+    { label: "Como mudo o tema?" },
+  ],
+  business: [
+    { label: "Explica as ligações desta página" },
+    { label: "O que é uma ligação de rede?" },
+    { label: "Como ler o Business Security Center?" },
+  ],
 }
 
 const DEFAULT_SUGGESTIONS = SUGGESTIONS.dashboard
@@ -111,7 +122,7 @@ const DEFAULT_SUGGESTIONS = SUGGESTIONS.dashboard
 const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
   {
     keywords: ["phishing", "email falso", "email suspeito", "link falso", "este link"],
-    answer: "**Phishing** é uma técnica onde atacantes enviam emails ou mensagens falsas para roubar dados. Para te proteger:\n\n- **Nunca cliques** em links de emails a pedir dados sensíveis\n- Verifica o remetente real (não apenas o nome exibido)\n- Acede a sites diretamente pelo navegador, não por links de emails\n- Desconfia de urgência excessiva ou ameaças\n\nSe suspeitares, usa o **Simulador** do CyberSafe para praticar a identificação!"
+    answer: "**Phishing** é uma técnica onde atacantes enviam emails ou mensagens falsas para roubar dados. Para te proteger:\n\n- **Nunca cliques** em links de emails a pedir dados sensíveis\n- Verifica o remetente real (não apenas o nome exibido)\n- Acede a sites diretamente pelo navegador, não por links de emails\n- Desconfia de urgência excessiva ou ameaças\n\nSe suspeitares de um email, não cliques em nada e apaga-o ou marca-o como phishing."
   },
   {
     keywords: ["senha", "password", "forte", "fraca", "segura", "123456"],
@@ -131,7 +142,7 @@ const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
   },
   {
     keywords: ["cybersafe", "como usar", "funcionalidade", "ajuda", "quick scan", "scan"],
-    answer: "**CyberSafe Assistant** funciona assim:\n\n- **Dashboard**: visão geral do sistema e alertas\n- **PC Center**: análise de hardware e saúde do Windows\n- **Ameaças**: histórico de eventos detectados\n- **Scanner de Ficheiros**: análise com heurísticas (Quick/Full/Custom)\n- **Task Manager**: monitorar processos\n- **Monitor**: conexões de rede e proteção\n- **Simulador**: exercícios práticos de phishing\n- **Otimizar**: recomendações de desempenho\n- **Relatórios**: resumo de segurança\n\nO **Quick Scan** analisa locais críticos rapidamente; o **Full Scan** varre o disco inteiro, demorando mais. Explora tudo no menu lateral!"
+    answer: "**CyberSafe Assistant** funciona assim:\n\n- **Dashboard**: visão geral do sistema e alertas\n- **PC Center**: análise de hardware e saúde do Windows\n- **Ameaças**: histórico de eventos detectados\n- **Análise de Segurança**: análise rápida/profunda do computador ou de um ficheiro/pasta\n- **Task Manager**: monitorar processos\n- **Monitor**: conexões de rede e proteção\n- **Simulador**: exercícios práticos de phishing\n- **Otimizar**: recomendações de desempenho\n- **Relatórios**: resumo de segurança\n\nA **Análise Rápida do Computador** verifica as áreas de maior risco; a **Análise Profunda do Computador** percorre o sistema todo e demora mais."
   },
   {
     keywords: ["disco", "espaço", "lento", "desempenho", "86%", "temporários"],
@@ -143,7 +154,7 @@ const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
   },
   {
     keywords: ["malware", "trojan", "spyware", "worm", "adware", "virus", "vírus"],
-    answer: "Malware é software malicioso: **Trojan** finge ser legítimo, **Ransomware** criptografa ficheiros, **Spyware** espreita a atividade, **Worm** propaga-se sozinho, **Adware** mostra publicidade intrusiva.\n\nMantém o antivírus atualizado, só baixa software de fontes oficiais e usa o **Scanner de Ficheiros** do CyberSafe para analisar ficheiros suspeitos."
+    answer: "Malware é software malicioso: **Trojan** finge ser legítimo, **Ransomware** criptografa ficheiros, **Spyware** espreita a atividade, **Worm** propaga-se sozinho, **Adware** mostra publicidade intrusiva.\n\nMantém o antivírus atualizado, só baixa software de fontes oficiais e usa a **Análise de Segurança** do CyberSafe para verificar ficheiros suspeitos."
   },
   {
     keywords: ["engenharia social", "social engineering", "golpe", "manipulação"],
@@ -199,7 +210,7 @@ function offlineReply(input: string, page: Page): { content: string; isOffTopic?
 
   // Fallback educacional com indicação de página — nunca repete a mesma coisa literal.
   const pageMap: Partial<Record<Page, string>> = {
-    scanner: "Pergunta-me o que é o Quick Scan ou como analisar um ficheiro suspeito.",
+    scanner: "Pergunta-me o que é a Análise Rápida do Computador ou como analisar um ficheiro suspeito.",
     pccenter: "Pergunta-me sobre o índice de saúde, disco ou firewall.",
     monitor: "Pergunta-me o que significa uma conexão ou evento no Monitor.",
     simulator: "Pergunta-me como identificar emails de phishing.",
@@ -307,7 +318,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "" }:
           {
             role: "assistant",
             content:
-              "Olá! Sou a **Matrix**, a assistente de IA do CyberSafe. 🛡️\n\nPosso ajudar-te a entender o estado do teu PC, identificar riscos e explicar cibersegurança sem aquele idioma alienígena dos técnicos.\n\nO que queres saber?",
+              "Oi! Tudo bem? Em que posso ajudar?",
           },
         ])
       })

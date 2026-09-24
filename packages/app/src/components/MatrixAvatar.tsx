@@ -1,5 +1,6 @@
 import { cn } from "@/lib/utils";
 import { useState } from "react";
+import { useAppearance } from "@/contexts/AppearanceContext";
 
 type Mood = "safe" | "guide" | "alert" | "success" | "happy" | "defender" | "avatar" | "mini";
 
@@ -25,21 +26,29 @@ interface MatrixAvatarProps {
 
 export function MatrixAvatar({ mood = "safe", size = "md", className, rounded = false }: MatrixAvatarProps) {
   const [hasError, setHasError] = useState(false);
+  const { identity } = useAppearance();
 
   const sizeClasses =
     size === "xl"
-      ? "w-32 h-32"
+      ? "w-28 h-28"
       : size === "lg"
-        ? "w-24 h-24"
+        ? "w-20 h-20"
         : size === "sm"
           ? "w-10 h-10"
           : "w-14 h-14";
 
+  const isMatrixTerminal = identity === "matrix-terminal";
+  const containerRadius = rounded
+    ? "rounded-full"
+    : isMatrixTerminal
+      ? "rounded-md"
+      : "rounded-2xl";
+
   return (
     <div
       className={cn(
-        "relative shrink-0 overflow-hidden flex items-center justify-center bg-primary/5",
-        rounded ? "rounded-full" : "rounded-2xl",
+        "relative shrink-0 overflow-hidden flex items-center justify-center matrix-avatar-wrapper",
+        containerRadius,
         sizeClasses,
         className,
       )}
@@ -53,7 +62,7 @@ export function MatrixAvatar({ mood = "safe", size = "md", className, rounded = 
           draggable={false}
         />
       ) : (
-        <div className="w-full h-full flex items-center justify-center font-mono font-bold text-primary text-xs cyber-glow-text">
+        <div className="w-full h-full flex items-center justify-center font-mono font-bold text-primary text-xs cyber-glow-text bg-primary/5 rounded-inherit">
           {"</>"}
         </div>
       )}
