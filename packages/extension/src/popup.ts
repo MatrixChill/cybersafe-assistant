@@ -1,4 +1,31 @@
-import { analyzeUrlRisk, type ThreatEvent } from "@cybersafe/shared-types";
+import { analyzeUrlRisk } from "@cybersafe/shared-types";
+
+const HEALTH_URL = "http://localhost:4000/health";
+const FETCH_TIMEOUT_MS = 3500;
+
+/** Sonda a API local e mostra o estado real (ONLINE/OFFLINE/ERRO). */
+async function checkApi(el: HTMLElement): Promise<void> {
+  el.textContent = "…";
+  el.className = "value";
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
+  try {
+    const res = await fetch(HEALTH_URL, { signal: controller.signal });
+    if (res.ok) {
+      el.textContent = "ONLINE";
+      el.className = "value api-online";
+    } else {
+      el.textContent = `ERRO ${res.status}`;
+      el.className = "value api-offline";
+    }
+  } catch {
+    el.textContent = "OFFLINE";
+    el.className = "value api-offline";
+  } finally {
+    clearTimeout(timer);
+  }
+}
 
 async function render() {
   const statusEl = document.getElementById("status")!;
@@ -6,6 +33,10 @@ async function render() {
   const severityEl = document.getElementById("severity")!;
   const rulesEl = document.getElementById("rules")!;
   const confidenceEl = document.getElementById("confidence")!;
+  const apiEl = document.getElementById("api")!;
+
+  // Independente da análise de URL — corre em paralelo, sem bloquear.
+  void checkApi(apiEl);
 
   try {
     const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });

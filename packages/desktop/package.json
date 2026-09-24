@@ -12,6 +12,7 @@
     "start": "electron .",
     "dist": "electron-builder --win",
     "dist:dir": "electron-builder --win dir",
+    "test": "node --test test/*.test.mjs",
     "predist": "node ../../scripts/stage-renderer.mjs",
     "predist:dir": "node ../../scripts/stage-renderer.mjs",
     "typecheck": "node -e \"console.log('desktop typecheck delegated to app/core workspaces')\""

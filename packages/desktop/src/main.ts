@@ -4,6 +4,9 @@ import fs from "node:fs";
 import net from "node:net";
 import { fileURLToPath } from "node:url";
 import { ServiceClient } from "./service-client.js";
+import { buildTrayMenuTemplate, type TrayProtectionInfo } from "./tray-menu.js";
+import { createExitConfirmation } from "./exit-confirmation.js";
+import { guardedServiceRequest } from "./ipc-guard.js";
 import { PIPE_NAME } from "@cybersafe/core";
 import type { SecurityEvent } from "@cybersafe/shared-types";
 
@@ -15,6 +18,36 @@ let isQuitting = false;
 const client = new ServiceClient();
 const notificationHistory = new Map<string, number>();
 const DEBOUNCE_TIME = 15000; // 15 segundos de silêncio para o mesmo arquivo
+
+// ── Preferências locais (persistidas em userData/settings.json) ──
+let preferences: { notificationsEnabled: boolean } = { notificationsEnabled: true };
+
+function settingsFilePath(): string {
+  return path.join(app.getPath("userData"), "settings.json");
+}
+
+function loadPreferences() {
+  try {
+    if (fs.existsSync(settingsFilePath())) {
+      const raw = fs.readFileSync(settingsFilePath(), "utf8");
+      const parsed = JSON.parse(raw);
+      if (typeof parsed.notificationsEnabled === "boolean") {
+        preferences.notificationsEnabled = parsed.notificationsEnabled;
+      }
+    }
+  } catch {
+    // Ficheiro inválido não deve impedir o arranque.
+  }
+}
+
+function savePreferences() {
+  try {
+    fs.mkdirSync(path.dirname(settingsFilePath()), { recursive: true });
+    fs.writeFileSync(settingsFilePath(), JSON.stringify(preferences, null, 2), "utf8");
+  } catch {
+    // Falha de escrita não é fatal.
+  }
+}
 
 // Preferência de ícones: CS Shield (símbolo oficial compacto) > logo > padrão.
 function assetsPath(...segments: string[]): string {
@@ -157,6 +190,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 let isServiceRunning = false;
 let serviceProcess: ChildProcess | null = null;
+let statusInterval: ReturnType<typeof setInterval> | null = null;
 
 /** Tenta abrir o named pipe do serviço. true = um serviço vivo está a servir. */
 function probePipe(timeoutMs = 1200): Promise<boolean> {
@@ -240,11 +274,13 @@ function startServiceProcess(): Promise<boolean> {
 }
 
 async function updateServiceStatus() {
+  // Shutdown: a tray deixa de fazer leituras periódicas ao serviço.
+  if (isQuitting) return;
   const status = client.isConnected ? 'RUNNING' : 'STOPPED';
-  const wasRunning = isServiceRunning;
   isServiceRunning = status === 'RUNNING';
 
-  // Atualiza apenas se houve mudança de status ou na primeira execução
+  // Atualiza o menu da tray com o estado real (proteção + contadores).
+  await refreshTrayProtectionInfo();
   updateTrayMenu();
 
   if (tray) {
@@ -280,32 +316,192 @@ async function setProtectionEnabled(enabled: boolean): Promise<boolean> {
   return enabled ? protectionEnabled : !protectionEnabled;
 }
 
+/** Estado da proteção em cache para a tray (atualizado a cada poll de 5s). */
+let trayProtectionInfo: TrayProtectionInfo = {
+  serviceRunning: false,
+  status: null,
+  score: null,
+  threats: null,
+  quarantine: null,
+};
+
+async function refreshTrayProtectionInfo() {
+  // Shutdown: nunca iniciar uma nova leitura ao serviço.
+  if (isQuitting) return;
+  try {
+    const state = await Promise.race([
+      client.request("protection.getState", undefined) as Promise<any>,
+      new Promise((_, reject) => setTimeout(() => reject(new Error("timeout")), 1500)),
+    ]);
+    const riskScore = state?.stats?.riskScore;
+    trayProtectionInfo = {
+      serviceRunning: isServiceRunning,
+      // O estado interno fica aqui (e nos logs) — tray-menu.ts traduz antes de
+      // chegar à UI, por isso o enum nunca é mostrado ao utilizador.
+      status: typeof state?.status === "string" ? state.status : null,
+      score: typeof riskScore === "number" ? Math.max(0, 100 - riskScore) : null,
+      threats: typeof state?.stats?.totalEvents === "number" ? state.stats.totalEvents : null,
+      quarantine: typeof state?.stats?.quarantinedCount === "number" ? state.stats.quarantinedCount : null,
+    };
+  } catch {
+    trayProtectionInfo = {
+      serviceRunning: isServiceRunning,
+      status: null,
+      score: null,
+      threats: null,
+      quarantine: null,
+    };
+  }
+}
+
+/** Encerramento completo: serviço → watcher/motores → Electron. Sem órfãos. */
+async function quitCyberSafe() {
+  // isQuitting = estado de shutdown da app: a partir daqui nem o renderer
+  // (via guarda dos handlers) nem a tray iniciam leituras novas ao serviço.
+  isQuitting = true;
+  if (statusInterval) {
+    clearInterval(statusInterval);
+    statusInterval = null;
+  }
+  tray?.setToolTip("Encerrando CyberSafe...");
+
+  console.log("[Electron] Electron shutdown requested");
+  console.log("[Electron] Enviando comando de shutdown ao serviço...");
+  await client.requestShutdown().catch((err) =>
+    console.error("[Electron] Shutdown request falhou:", err));
+  console.log("[Electron] Ligação ao serviço fechada; a terminar o Electron.");
+
+  // O pedido shutdown já termina watcher/motores/updater no serviço (exit(0))
+  // e o before-quit garante o kill do serviceProcess remanescente.
+  app.quit();
+}
+
 function updateTrayMenu() {
   if (!tray) return;
-  const statusLabel = isServiceRunning ? "🔵 Status: ATIVO" : "⚠️ Status: PARADO (Serviço Inativo)";
 
-  tray.setToolTip(isServiceRunning ? "CyberSafe: Serviço Ativo (Motor funcionando)" : "CyberSafe: Serviço Parado (clique para iniciar)");
+  tray.setToolTip(
+    isServiceRunning
+      ? "CyberSafe: serviço ativo (proteção em tempo real a funcionar)"
+      : "CyberSafe: serviço parado (proteção inativa)",
+  );
 
-  tray.setContextMenu(Menu.buildFromTemplate([
-    { label: statusLabel, enabled: false },
-    { type: "separator" },
-    { label: "Abrir Painel de Controle", click: () => mainWindow?.show() },
+  // Copy + tradução de estados vivem em tray-menu.ts (testável, sem enums crus).
+  const template = buildTrayMenuTemplate(
+    { ...trayProtectionInfo, serviceRunning: isServiceRunning },
     {
-      label: "Sair",
-      click: async () => {
-        isQuitting = true;
-        tray?.setToolTip("Encerrando CyberSafe...");
-
-        console.log("[Electron] Enviando comando de shutdown ao serviço...");
-        await client.requestShutdown();
-
-        // Em produção, serviceProcess deve morrer pelo exit(0)
-        // O app.quit() encerra o Electron e qualquer processo filho remanescente.
-        app.quit();
+      open: () => {
+        if (mainWindow) {
+          mainWindow.show();
+          mainWindow.focus();
+        } else {
+          createWindow();
+        }
+      },
+      // Confirmação integrada (modal CyberSafe) — nunca o diálogo nativo branco.
+      exit: () => {
+        void exitConfirmation.request();
       },
     },
-  ]));
+  );
+
+  tray.setContextMenu(Menu.buildFromTemplate(template as Electron.MenuItemConstructorOptions[]));
 }
+
+// ── Confirmação de saída (modal CyberSafe no renderer) ──
+// O diálogo nativo branco do Windows deixou de ser a UX: o tray pede o modal
+// ao renderer e só depois corre o shutdown JÁ existente (quitCyberSafe).
+let exitConfirmResolve: ((confirmed: boolean) => void) | null = null;
+const EXIT_CONFIRM_TIMEOUT_MS = 30_000;
+
+/** Mostra (ou recria, se tiver sido destruída) a janela principal. */
+function ensureMainWindow(): BrowserWindow | null {
+  if (!mainWindow || mainWindow.isDestroyed()) {
+    mainWindow = null;
+    createWindow();
+  }
+  const win = mainWindow;
+  if (!win || win.isDestroyed()) return null;
+  if (win.isMinimized()) win.restore();
+  if (!win.isVisible()) win.show();
+  win.focus();
+  return win;
+}
+
+/** O renderer consegue desenhar o modal? (janela viva e não crashada) */
+function canAskRenderer(win: BrowserWindow | null): win is BrowserWindow {
+  if (!win || win.isDestroyed()) return false;
+  const contents = win.webContents;
+  if (contents.isDestroyed()) return false;
+  try {
+    return !contents.isCrashed();
+  } catch {
+    return true;
+  }
+}
+
+/** Pergunta ao utilizador no renderer (modal CyberSafe). true = confirmar. */
+function askExitConfirmation(): Promise<boolean> {
+  const win = ensureMainWindow();
+  if (!canAskRenderer(win)) {
+    console.warn("[Electron] Renderer indisponível para o modal de saída — confirmação de último recurso.");
+    return nativeExitFallback();
+  }
+
+  return new Promise<boolean>((resolve) => {
+    exitConfirmResolve = resolve;
+    const send = () => {
+      try {
+        win.webContents.send("app:exit-confirm", true);
+      } catch (error) {
+        console.error("[Electron] Falha ao abrir o modal de saída:", error);
+      }
+    };
+    // Janela recriada: espera o renderer carregar antes de pedir o modal.
+    if (win.webContents.isLoading()) {
+      win.webContents.once("did-finish-load", send);
+    } else {
+      send();
+    }
+  });
+}
+
+/**
+ * Último recurso, usado APENAS quando não há renderer utilizável: sem isto o
+ * utilizador ficaria sem forma de encerrar a aplicação pela tray.
+ */
+async function nativeExitFallback(): Promise<boolean> {
+  const { response } = await dialog.showMessageBox({
+    type: "warning",
+    buttons: ["Cancelar", "Sair"],
+    defaultId: 0,
+    cancelId: 0,
+    title: "Sair do CyberSafe",
+    message: "Sair do CyberSafe?",
+    detail: "A proteção em tempo real será encerrada neste computador.",
+  });
+  return response === 1;
+}
+
+/**
+ * Uma pergunta em curso não se duplica e cancelar nunca encerra. O shutdown
+ * (quitCyberSafe) é chamado no máximo uma vez.
+ */
+const exitConfirmation = createExitConfirmation({
+  ask: askExitConfirmation,
+  onConfirmed: () => quitCyberSafe(),
+  timeoutMs: EXIT_CONFIRM_TIMEOUT_MS,
+  onTimeout: () => {
+    const win = mainWindow;
+    exitConfirmResolve = null;
+    console.warn("[Electron] Sem resposta ao pedido de confirmação de saída — encerramento cancelado.");
+    try {
+      if (win && !win.isDestroyed()) win.webContents.send("app:exit-confirm", false);
+    } catch {
+      // A janela desapareceu entretanto: nada a fazer.
+    }
+  },
+  onError: (error) => console.error("[Electron] Confirmação de saída falhou:", error),
+});
 
 function createTray() {
   const image = nativeImage.createFromPath(resolveTrayIconPath());
@@ -314,15 +510,25 @@ function createTray() {
   updateTrayMenu();
 
   // Poll service status every 5 seconds
-  setInterval(updateServiceStatus, 5000);
+  if (statusInterval) clearInterval(statusInterval);
+  statusInterval = setInterval(updateServiceStatus, 5000);
   updateServiceStatus();
 }
 
 function wireRealtimeEvents() {
   client.onEvent((event: SecurityEvent) => {
+    // Shutdown: nada de eventos para o renderer (que já está a encerrar).
+    if (isQuitting) return;
+    // Per-event logging stays off by default: a scan emits an event every few
+    // files, and logging each one in the main process is pure overhead.
+    if (process.env.CYBERSAFE_DEBUG_SCAN === "1" && event.type === "scan.progress") {
+      const data = (event.data ?? {}) as { id?: string; status?: string; progress?: number; filesScanned?: number; phase?: string };
+      console.log(`[ScanIPC] forward scanId=${data.id ?? "n/a"} status=${data.status} phase=${data.phase} progress=${data.progress} files=${data.filesScanned} at=${new Date().toISOString()}`);
+    }
     mainWindow?.webContents.send("service:event", event);
     // Only show desktop notifications for truly dangerous events
     if (
+      preferences.notificationsEnabled &&
       (event.type === "threat.detected" || event.type === "process.blocked") &&
       (event.severity === "critical" || event.severity === "high")
     ) {
@@ -341,34 +547,70 @@ function wireRealtimeEvents() {
   });
 }
 
+let ipcRegistered = false;
+
 function registerIpc() {
-  ipcMain.handle("service:get-protection-state", () => client.request("protection.getState", undefined));
-  ipcMain.handle("service:get-events", (_event, payload) => client.request("events.list", payload));
-  ipcMain.handle("service:get-threats", () => client.request("threats.list", undefined));
-  ipcMain.handle("service:get-processes", () => client.request("processes.list", undefined));
-  ipcMain.handle("service:get-connections", () => client.request("connections.list", undefined));
-  ipcMain.handle("service:get-quarantine", () => client.request("quarantine.list", undefined));
-  ipcMain.handle("service:clear-events", () => client.request("events.clear", undefined));
-  ipcMain.handle("service:scan-artifact", (_event, filePath: string) => client.request("scan.artifact", { path: filePath }));
-  ipcMain.handle("service:scan-full-system", () => client.request("scan.fullSystem", undefined));
-  ipcMain.handle("service:kill-process-tree", (_event, pid: number) => client.request("process.killTree", { pid }));
-  ipcMain.handle("service:analyze-process", (_event, pid: number) => client.request("process.analyze", { pid }));
-  ipcMain.handle("service:get-hardware", () => client.request("hardware.snapshot", undefined));
-  ipcMain.handle("service:get-windows-health", () => client.request("windows.healthSnapshot", undefined));
-  ipcMain.handle("service:restore-quarantine", (_event, id: string, trustAfterRestore = false) =>
+  // Idempotente: um segundo registo lançaria "Attempted to register a second
+  // handler for '<channel>'" e deixaria o IPC do scanner morto.
+  if (ipcRegistered) return;
+  ipcRegistered = true;
+
+  /**
+   * Canal do renderer contra o serviço, com a guarda de shutdown:
+   * - durante o shutdown não inicia leituras novas (o renderer já parou os
+   *   pollers; isto é a segunda linha de defesa);
+   * - pedidos que estavam em voo quando o pipe foi desligado resolvem em null,
+   *   em vez do ruído "Error occurred in handler ... Service client disconnected";
+   * - em runtime normal os erros reais continuam a propagar para o renderer.
+   */
+  const serviceRequest = (
+    channel: string,
+    handler: (event: Electron.IpcMainInvokeEvent, ...args: any[]) => unknown,
+  ) =>
+    ipcMain.handle(channel, (event, ...args) =>
+      guardedServiceRequest(() => isQuitting, () => Promise.resolve(handler(event, ...args))),
+    );
+
+  serviceRequest("service:get-protection-state", () => client.request("protection.getState", undefined));
+  serviceRequest("service:get-events", (_event, payload) => client.request("events.list", payload));
+  serviceRequest("service:get-threats", () => client.request("threats.list", undefined));
+  serviceRequest("service:get-processes", () => client.request("processes.list", undefined));
+  serviceRequest("service:get-connections", () => client.request("connections.list", undefined));
+  serviceRequest("service:get-quarantine", () => client.request("quarantine.list", undefined));
+  serviceRequest("service:clear-events", () => client.request("events.clear", undefined));
+  serviceRequest("service:scan-artifact", (_event, filePath: string) => client.request("scan.artifact", { path: filePath }));
+  serviceRequest("service:scan-full-system", () => client.request("scan.fullSystem", undefined));
+  serviceRequest("service:kill-process-tree", (_event, pid: number) => client.request("process.killTree", { pid }));
+  serviceRequest("service:analyze-process", (_event, pid: number) => client.request("process.analyze", { pid }));
+  serviceRequest("service:get-hardware", () => client.request("hardware.snapshot", undefined));
+  serviceRequest("service:get-windows-health", () => client.request("windows.healthSnapshot", undefined));
+  serviceRequest("service:get-pcstate", () => client.request("pcstate.get", undefined));
+  serviceRequest("service:restore-quarantine", (_event, id: string, trustAfterRestore = false) =>
     client.request("quarantine.restore", { id, trustAfterRestore }));
-  ipcMain.handle("service:delete-quarantine", (_event, id: string) => client.request("quarantine.delete", { id }));
-  ipcMain.handle("service:allow-hash", (_event, sha256: string) => client.request("trust.allowHash", { sha256 }));
-  ipcMain.handle("service:allow-publisher", (_event, publisher: string) =>
+  serviceRequest("service:delete-quarantine", (_event, id: string) => client.request("quarantine.delete", { id }));
+  serviceRequest("service:allow-hash", (_event, sha256: string) => client.request("trust.allowHash", { sha256 }));
+  serviceRequest("service:allow-publisher", (_event, publisher: string) =>
     client.request("trust.allowPublisher", { publisher }));
-  ipcMain.handle("service:run-restricted-analysis", (_event, filePath: string) =>
+  serviceRequest("service:run-restricted-analysis", (_event, filePath: string) =>
     client.request("analysis.restricted", { path: filePath }));
-  ipcMain.handle("service:update-definitions", () => client.request("definitions.update", undefined));
-  ipcMain.handle("service:start-scan", (_event, type: string, targetPath?: string) =>
-    client.request("scan.start", { type, targetPath } as any));
-  ipcMain.handle("service:cancel-scan", (_event, id: string) =>
+  serviceRequest("service:update-definitions", () => client.request("definitions.update", undefined));
+  serviceRequest("service:start-scan", async (_event, type: string, targetPath?: string) => {
+    console.log(`[ScanIPC] request received type=${type} targetPath=${targetPath ?? ""} at=${new Date().toISOString()}`);
+    try {
+      const result = await client.request("scan.start", { type, targetPath } as any);
+      console.log(`[ScanIPC] forwarded to service -> ok=${result && (result as any).ok !== false} at=${new Date().toISOString()}`);
+      return result;
+    } catch (err: any) {
+      console.error(`[ScanIPC] forwarded to service -> ERROR ${err.message} at=${new Date().toISOString()}`);
+      throw err;
+    }
+  });
+  // Snapshot de ressincronização: a UI pergunta pelo scan ativo ao montar
+  // (voltar à página do Scanner não pode perder o progresso em curso).
+  serviceRequest("service:get-active-scan", () => client.request("scan.getActive", undefined));
+  serviceRequest("service:cancel-scan", (_event, id: string) =>
     client.request("scan.cancel", { id } as any));
-  ipcMain.handle("service:threat-action", (_event, id: string, action: string) =>
+  serviceRequest("service:threat-action", (_event, id: string, action: string) =>
     client.request("threat.action", { id, action } as any));
 
   ipcMain.handle("dialog:open-file", async () => {
@@ -379,6 +621,68 @@ function registerIpc() {
       ],
     });
     return result.canceled ? null : result.filePaths[0];
+  });
+
+  ipcMain.handle("dialog:open-folder", async () => {
+    const result = await dialog.showOpenDialog({
+      properties: ["openDirectory"],
+    });
+    return result.canceled ? null : result.filePaths[0];
+  });
+
+  // ── Confirmação de saída (modal CyberSafe no renderer) ──
+  ipcMain.handle("app:exit-confirm-response", (_event, confirmed: boolean) => {
+    const resolve = exitConfirmResolve;
+    exitConfirmResolve = null;
+    if (resolve) resolve(Boolean(confirmed));
+    return { received: true };
+  });
+
+  // ── Auto-Start IPC ──
+  ipcMain.handle("app:get-auto-start", () => {
+    if (process.platform !== "win32") return { enabled: false, startMinimized: false };
+    const settings = app.getLoginItemSettings();
+    return { enabled: settings.openAtLogin, startMinimized: settings.args?.includes("--hidden") ?? false };
+  });
+
+  ipcMain.handle("app:set-auto-start", (_event, config: { enabled: boolean; startMinimized: boolean }) => {
+    if (process.platform !== "win32") return { success: false };
+    app.setLoginItemSettings({
+      openAtLogin: config.enabled,
+      path: process.execPath,
+      args: config.enabled && config.startMinimized ? ["--hidden"] : [],
+    });
+    return { success: true };
+  });
+
+  // ── Notifications IPC ──
+  ipcMain.handle("app:get-notifications-enabled", () => ({ enabled: preferences.notificationsEnabled }));
+
+  ipcMain.handle("app:set-notifications-enabled", (_event, enabled: boolean) => {
+    preferences.notificationsEnabled = Boolean(enabled);
+    savePreferences();
+    return { enabled: preferences.notificationsEnabled };
+  });
+
+  // ── Report Window IPC ──
+  ipcMain.handle("app:open-report-window", async (_event, html: string) => {
+    const reportWin = new BrowserWindow({
+      width: 860,
+      height: 640,
+      title: "CyberSafe — Relatório de Segurança",
+      icon: resolveWindowIconPath(),
+      webPreferences: {
+        preload: path.join(__dirname, "preload.cjs"),
+        contextIsolation: true,
+        nodeIntegration: false,
+        sandbox: true,
+      },
+      show: false,
+    });
+    reportWin.once("ready-to-show", () => reportWin.show());
+    // data URI com encoding seguro (data:text/html;charset=utf-8)
+    await reportWin.loadURL("data:text/html;charset=utf-8," + encodeURIComponent(html));
+    return { success: true };
   });
 }
 
@@ -407,6 +711,12 @@ if (!gotTheLock) {
   });
 
   app.whenReady().then(async () => {
+    loadPreferences();
+    // Identidade da aplicação no Windows (taskbar/notificações/ateliers).
+    app.setName("CyberSafe");
+    if (process.platform === "win32") {
+      app.setAppUserModelId("com.cybersafe.assistant");
+    }
     // Splash só aparece se não for boot silencioso
     if (!launchHidden) {
       createSplashScreen();
@@ -428,6 +738,8 @@ if (!gotTheLock) {
         "CyberSafe — Serviço indisponível",
         "O serviço de proteção em segundo plano não conseguiu iniciar.\nVerifique os logs em %USERPROFILE%\\.cybersafe-service\\error.log."
       );
+      // Também é um shutdown: o renderer não pode continuar a pedir dados.
+      isQuitting = true;
       app.quit();
       return;
     }
@@ -451,6 +763,7 @@ if (!gotTheLock) {
         "Service Connection Failed",
         `Failed to start or connect to the CyberSafe background service. Underlying error:\n${error}`
       );
+      isQuitting = true;
       app.quit();
     }
   });
@@ -459,6 +772,13 @@ if (!gotTheLock) {
 // Fecha apenas os filhos CyberSafe deste processo (nunca processos alheios).
 let quitCleanupStarted = false;
 app.on("before-quit", (event) => {
+  if (!app.isPackaged) {
+    // Em `npm run dev`, o `concurrently -k` mata os restantes watchers
+    // (tsx/vite) com SIGTERM quando o Electron sai; os scripts npm que se
+    // seguem terminam com code 1. Isso é comportamento esperado do dev
+    // runner, não uma falha do produto — distinguimos no log.
+    console.log("[Electron] EXPECTED DEV SHUTDOWN — encerramento limpo (não é falha).");
+  }
   if (!serviceProcess || !serviceProcess.pid) return;
   if (quitCleanupStarted) return;
   quitCleanupStarted = true;
@@ -471,6 +791,11 @@ app.on("before-quit", (event) => {
       app.exit(0);
     }
   }, 150);
+  // Clear the status polling interval
+  if (statusInterval) {
+    clearInterval(statusInterval);
+    statusInterval = null;
+  }
   setTimeout(() => {
     try {
       if (serviceProcess && serviceProcess.exitCode === null) serviceProcess.kill();

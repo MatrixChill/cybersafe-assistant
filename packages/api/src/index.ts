@@ -4,7 +4,7 @@ dotenv.config();
 import bcrypt from "bcryptjs";
 import jwt from "jsonwebtoken";
 import type { DashboardSummary, ThreatEvent, EventStats } from "@cybersafe/shared-types";
-import { chatCompletion, streamChatCompletion, aiEnabled, AI_CONFIG, type AiMessage } from "./ai.js";
+import { chatCompletion, streamChatCompletion, checkAiAvailability, AI_CONFIG, type AiMessage } from "./ai.js";
 import { analyzeDownloadFilename, calculateDownloadRisk, type FileScanResponse, type FileScanResult } from "@cybersafe/shared-types";
 // ── Severity redefined locally as the Prisma enum is not available ──
 type Severity = "low" | "medium" | "high" | "critical";
@@ -325,9 +325,10 @@ app.post("/api/ai/chat", async (req, res) => {
 });
 
 // ── Status da IA (sem expor chaves) — permite à app mostrar ONLINE/LOCAL ──
-app.get("/api/ai/status", (_req, res) => {
+app.get("/api/ai/status", async (_req, res) => {
+  const reachable = await checkAiAvailability();
   res.json({
-    enabled: aiEnabled,
+    enabled: reachable,
     provider: AI_CONFIG.provider,
     model: AI_CONFIG.model,
     streaming: true,

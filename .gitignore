@@ -27,3 +27,4 @@ Thumbs.db
 # Database
 *.db
 *.sqlite
+.aider*

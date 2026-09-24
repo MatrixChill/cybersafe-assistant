@@ -15,7 +15,11 @@
     "build:all": "npm run build --workspaces",
     "build:native": "cmake -S packages/native-engine -B packages/native-engine/build && cmake --build packages/native-engine/build --config Release",
     "lint": "npm run lint --workspaces",
-    "typecheck": "npm run typecheck --workspaces"
+    "typecheck": "npm run typecheck --workspaces",
+    "memory:report": "node scripts/memory-report.mjs",
+    "drivers:check": "node scripts/check-release-drivers.mjs",
+    "scanner:probe": "node scripts/scanner-runtime-probe.mjs",
+    "scanner:benchmark": "node scripts/scanner-benchmark.mjs"
   },
   "license": "MIT",
   "engines": {
@@ -27,5 +31,8 @@
   "devDependencies": {
     "concurrently": "^9.2.1",
     "wait-on": "^9.0.5"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3"
   }
 }

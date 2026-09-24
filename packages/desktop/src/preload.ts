@@ -1,43 +1,92 @@
-const { contextBridge, ipcRenderer } = require("electron");
+const { contextBridge, ipcRenderer, webUtils } = require("electron");
+
+// ── Guarda de shutdown na própria bridge ────────────────────────────────
+// Depois de o utilizador confirmar "Sair", nenhum pedido de dados novo sai
+// daqui: devolve um cancelamento controlado (null) em vez de chegar ao main
+// já com o ServiceClient desligado ("Service client disconnected" repetido).
+// A resposta da confirmação é a única exceção — sem ela o main não saberia
+// que o utilizador disse "sim".
+let shuttingDown = false;
+const SHUTDOWN_ALLOWED_CHANNELS = new Set(["app:exit-confirm-response"]);
+
+function invoke(channel: string, ...args: any[]) {
+  if (shuttingDown && !SHUTDOWN_ALLOWED_CHANNELS.has(channel)) {
+    return Promise.resolve(null);
+  }
+  return ipcRenderer.invoke(channel, ...args);
+}
 
 contextBridge.exposeInMainWorld("electronAPI", {
-  getProtectionState: () => ipcRenderer.invoke("service:get-protection-state"),
-  getSecurityEvents: (payload?: { limit?: number; cursor?: number }) => ipcRenderer.invoke("service:get-events", payload),
-  getThreatEvents: () => ipcRenderer.invoke("service:get-threats"),
-  getProcesses: () => ipcRenderer.invoke("service:get-processes"),
-  getConnections: () => ipcRenderer.invoke("service:get-connections"),
-  getQuarantineFiles: () => ipcRenderer.invoke("service:get-quarantine"),
-  clearThreatEvents: () => ipcRenderer.invoke("service:clear-events"),
-  scanFile: (filePath: string) => ipcRenderer.invoke("service:scan-artifact", filePath),
-  scanFullSystem: () => ipcRenderer.invoke("service:scan-full-system"),
-  killProcessTree: (pid: number) => ipcRenderer.invoke("service:kill-process-tree", pid),
-  analyzeProcess: (pid: number) => ipcRenderer.invoke("service:analyze-process", pid),
-  getHardwareSnapshot: () => ipcRenderer.invoke("service:get-hardware"),
-  getWindowsHealth: () => ipcRenderer.invoke("service:get-windows-health"),
+  /** Marca o encerramento na bridge (o renderer já parou os pollers). */
+  beginShutdown: () => {
+    shuttingDown = true;
+  },
+  getProtectionState: () => invoke("service:get-protection-state"),
+  getSecurityEvents: (payload?: { limit?: number; cursor?: number }) => invoke("service:get-events", payload),
+  getThreatEvents: () => invoke("service:get-threats"),
+  getProcesses: () => invoke("service:get-processes"),
+  getConnections: () => invoke("service:get-connections"),
+  getQuarantineFiles: () => invoke("service:get-quarantine"),
+  clearThreatEvents: () => invoke("service:clear-events"),
+  scanFile: (filePath: string) => invoke("service:scan-artifact", filePath),
+  scanFullSystem: () => invoke("service:scan-full-system"),
+  killProcessTree: (pid: number) => invoke("service:kill-process-tree", pid),
+  analyzeProcess: (pid: number) => invoke("service:analyze-process", pid),
+  getHardwareSnapshot: () => invoke("service:get-hardware"),
+  getWindowsHealth: () => invoke("service:get-windows-health"),
+  getPCState: () => invoke("service:get-pcstate"),
   restoreQuarantine: (id: string, trustAfterRestore?: boolean) =>
-    ipcRenderer.invoke("service:restore-quarantine", id, trustAfterRestore),
-  deleteQuarantine: (id: string) => ipcRenderer.invoke("service:delete-quarantine", id),
-  allowHash: (sha256: string) => ipcRenderer.invoke("service:allow-hash", sha256),
-  allowPublisher: (publisher: string) => ipcRenderer.invoke("service:allow-publisher", publisher),
-  runRestrictedAnalysis: (filePath: string) => ipcRenderer.invoke("service:run-restricted-analysis", filePath),
-  updateDefinitions: () => ipcRenderer.invoke("service:update-definitions"),
-  startScan: (type: string, targetPath?: string) => ipcRenderer.invoke("service:start-scan", type, targetPath),
-  cancelScan: (id: string) => ipcRenderer.invoke("service:cancel-scan", id),
-  threatAction: (id: string, action: string) => ipcRenderer.invoke("service:threat-action", id, action),
-  openFileDialog: () => ipcRenderer.invoke("dialog:open-file"),
+    invoke("service:restore-quarantine", id, trustAfterRestore),
+  deleteQuarantine: (id: string) => invoke("service:delete-quarantine", id),
+  allowHash: (sha256: string) => invoke("service:allow-hash", sha256),
+  allowPublisher: (publisher: string) => invoke("service:allow-publisher", publisher),
+  runRestrictedAnalysis: (filePath: string) => invoke("service:run-restricted-analysis", filePath),
+  updateDefinitions: () => invoke("service:update-definitions"),
+  startScan: (type: string, targetPath?: string) => invoke("service:start-scan", type, targetPath),
+  // Snapshot do scan ativo (ressincronização após remount/navegação de página).
+  getActiveScan: () => invoke("service:get-active-scan"),
+  cancelScan: (id: string) => invoke("service:cancel-scan", id),
+  threatAction: (id: string, action: string) => invoke("service:threat-action", id, action),
+  openFileDialog: () => invoke("dialog:open-file"),
+  // Electron 32+ removeu `File.path`; o caminho real só existe no preload.
+  getPathForFile: (file: any) => webUtils.getPathForFile(file),
+  openFolderDialog: () => invoke("dialog:open-folder"),
   onSecurityEvent: (callback: (event: any) => void) => {
-    const listener = (_event: Electron.IpcRendererEvent, value: any) => callback(value);
+    const listener = (_event: Electron.IpcRendererEvent, value: any) => {
+      // Durante o encerramento o renderer já não reage a eventos do serviço.
+      if (shuttingDown) return;
+      callback(value);
+    };
     ipcRenderer.on("service:event", listener);
     return () => ipcRenderer.removeListener("service:event", listener);
   },
   onScanProgress: (callback: (scanState: any) => void) => {
     const listener = (_event: Electron.IpcRendererEvent, value: any) => {
       // Filter for scan.progress events only
-      if (value?.type === "scan.progress" && value?.data) {
+      const isScanProgress = value?.type === "scan.progress" && value?.data;
+      if (process.env.CYBERSAFE_DEBUG_SCAN === "1") {
+        console.log(`[ScanPreload] event type=${value?.type} isScanProgress=${isScanProgress} at=${new Date().toISOString()}`, value?.data ? { id: value.data.id, status: value.data.status, progress: value.data.progress } : null);
+      }
+      if (isScanProgress && !shuttingDown) {
         callback(value.data);
       }
     };
     ipcRenderer.on("service:event", listener);
     return () => ipcRenderer.removeListener("service:event", listener);
   },
+  // Confirmação de saída: o main pede o modal CyberSafe e o renderer responde.
+  onExitConfirmRequest: (callback: (open: boolean) => void) => {
+    const listener = (_event: Electron.IpcRendererEvent, open: boolean) => callback(Boolean(open));
+    ipcRenderer.on("app:exit-confirm", listener);
+    return () => ipcRenderer.removeListener("app:exit-confirm", listener);
+  },
+  respondExitConfirm: (confirmed: boolean) =>
+    invoke("app:exit-confirm-response", Boolean(confirmed)),
+  getAutoStart: () => invoke("app:get-auto-start"),
+  setAutoStart: (config: { enabled: boolean; startMinimized: boolean }) =>
+    invoke("app:set-auto-start", config),
+  getNotificationsEnabled: () => invoke("app:get-notifications-enabled"),
+  setNotificationsEnabled: (enabled: boolean) =>
+    invoke("app:set-notifications-enabled", enabled),
+  openReportWindow: (html: string) => invoke("app:open-report-window", html),
 });
