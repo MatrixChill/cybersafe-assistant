@@ -80,6 +80,43 @@ export interface ProcessSnapshot {
   trusted: TrustDecision;
 }
 
+export interface KillProcessResult {
+  ok: boolean;
+  status: "ok" | "not-found" | "timeout" | "failed";
+  pid: number;
+  exitCode?: number;
+  error?: string;
+}
+
+/** Desfecho estruturado de um pedido de terminar processo. */
+export type ProcessKillStatus =
+  | "killed"
+  | "already-exited"
+  | "protected"
+  | "timeout"
+  | "reused"
+  | "failed";
+
+/** Porque é que um alvo de kill foi protegido. */
+export type ProcessKillProtectionReason =
+  | "self"
+  | "ancestor"
+  | "internal"
+  | "system-pid"
+  | "fallback-name";
+
+export interface ProcessKillResult {
+  success: boolean;
+  status: ProcessKillStatus;
+  pid: number;
+  /** Mensagem pronta a apresentar quando `success === false`. */
+  error?: string;
+  /** Motivo quando `status === "protected"`. */
+  protectedReason?: ProcessKillProtectionReason;
+  /** Identidade do alvo capturada antes da tentativa (diagnóstico/PID reuse). */
+  target?: { name?: string; path?: string };
+}
+
 export interface ConnectionSnapshot {
   processPid?: number;
   processName?: string;
@@ -138,6 +175,13 @@ export interface ThreatRecord {
   process?: ProcessSnapshot;
 }
 
+export type EngineSubsystemStatus = "active" | "degraded" | "unavailable" | "error";
+
+export interface EngineSubsystemHealth {
+  status: EngineSubsystemStatus;
+  detail?: string;
+}
+
 export interface EngineHealth {
   serviceRunning: boolean;
   osLayerHealthy: boolean;
@@ -145,6 +189,12 @@ export interface EngineHealth {
   monitoredPaths: string[];
   definitionsUpdatedAt?: string;
   lastEventAt?: string;
+  yara?: EngineSubsystemHealth;
+  hashDb?: EngineSubsystemHealth;
+  clamav?: EngineSubsystemHealth;
+  nativeEngine?: EngineSubsystemHealth;
+  firewall?: EngineSubsystemHealth;
+  anyEngineDegraded?: boolean;
 }
 
 export interface ProtectionStats {
@@ -190,6 +240,7 @@ export interface ThreatEvent {
 
 export type ScanType = "quick" | "full" | "custom";
 export type ScanStatus = "idle" | "queued" | "running" | "completed" | "cancelled" | "failed";
+export type ScanPhase = "preparing" | "gathering" | "scanning" | "finalizing";
 
 export interface ScanState {
   id: string;
@@ -202,6 +253,38 @@ export interface ScanState {
   endTime?: string;
   targetPath?: string;
   error?: string;
+  /** Current scan phase: gathering files or scanning them */
+  phase?: ScanPhase;
+  /** Files discovered so far (gathering phase — before analysis starts) */
+  filesDiscovered?: number;
+  /**
+   * Número REAL de candidatos a analisar, congelado no fim do gathering.
+   * É este o denominador do progresso — nunca o limite máximo de ficheiros
+   * (FULL_SCAN_MAX_FILES é apenas um cap de segurança, não um total real).
+   */
+  filesTotal?: number;
+  /** Ficheiros que passaram pelo pipeline (analisados, excluídos ou falhados) */
+  filesProcessed?: number;
+  /** Ficheiros que chegaram efetivamente aos motores de análise aplicáveis */
+  filesAnalyzed?: number;
+  /** Ficheiros ignorados pela política de exclusões (não passaram por nenhum motor) */
+  filesExcluded?: number;
+  /** Files that could not be analyzed (read/engine errors) */
+  filesFailed?: number;
+  /**
+   * Revisão monotónica deste scan. Cada emissão de estado incrementa-a; o
+   * renderer ignora snapshots/eventos com revisão inferior para que um estado
+   * atrasado nunca faça os contadores recuar.
+   */
+  revision?: number;
+  /** Momento da última atualização deste estado (ISO) */
+  updatedAt?: string;
+  /** Para scans personalizados: o alvo é um ficheiro ou uma pasta (informado pelo serviço) */
+  targetKind?: "file" | "directory";
+  /** Files scanned per second (computed during scanning phase) */
+  filesPerSecond?: number;
+  /** Basename of the file currently being scanned */
+  currentFile?: string;
 }
 
 export type ThreatStatus = "detected" | "quarantined" | "ignored" | "failed" | "restored" | "deleted";
@@ -321,9 +404,12 @@ export interface ServiceCommandMap {
   "analysis.restricted": { path: string };
   "hardware.snapshot": undefined;
   "windows.healthSnapshot": undefined;
+  "pcstate.get": undefined;
   "exclusions.get": undefined;
   "exclusions.update": Partial<ExclusionConfig>;
   "scan.start": { type: ScanType; targetPath?: string };
+  /** Estado da análise ativa (ressincronização da UI após remount/navegação). */
+  "scan.getActive": undefined;
   "scan.cancel": { id: string };
   "threat.action": { id: string; action: "quarantine" | "restore" | "delete" };
   "service.shutdown": undefined;
@@ -341,7 +427,7 @@ export interface ServiceResponseMap {
   "scan.fullSystem": { success: boolean };
   "monitor.start": { success: boolean };
   "monitor.stop": { success: boolean };
-  "process.killTree": { success: boolean };
+  "process.killTree": ProcessKillResult;
   "process.analyze": ProcessAnalysisResult | null;
   "quarantine.restore": { success: boolean };
   "quarantine.delete": { success: boolean };
@@ -351,9 +437,11 @@ export interface ServiceResponseMap {
   "analysis.restricted": AnalysisResult | null;
   "hardware.snapshot": HardwareSnapshot;
   "windows.healthSnapshot": WindowsHealthSnapshot;
+  "pcstate.get": PcState;
   "exclusions.get": ExclusionConfig;
   "exclusions.update": { success: boolean };
-  "scan.start": { id: string; success: boolean };
+  "scan.start": { id: string; success: boolean; error?: string };
+  "scan.getActive": ScanState | null;
   "scan.cancel": { success: boolean };
   "threat.action": { success: boolean };
   "service.shutdown": { success: boolean };
@@ -604,6 +692,67 @@ export function buildHealthAlertsFromSnapshot(snapshot: WindowsHealthSnapshot): 
   }));
 }
 
+// ── PC State / Findings Engine ──
+// Derivado no service, fonte de verdade. A UI nunca recalcula diagnósticos.
+
+export type FindingSeverity = "urgent" | "attention" | "recommended" | "informative";
+
+export type FindingCategory = "security" | "performance" | "privacy" | "system";
+
+export interface FindingEvidence {
+  processName?: string;
+  pid?: number;
+  cpuPercent?: number;
+  memoryPercent?: number;
+  memoryBytes?: number;
+  durationSeconds?: number;
+  engine?: string;
+  engineStatus?: EngineSubsystemStatus | string;
+  diskFreePercent?: number;
+  diskUsagePercent?: number;
+  endpoint?: string;
+  status?: string;
+  /** Linhas de contexto técnico observadas (ex.: descrição da recomendação do Windows). */
+  evidenceLines?: string[];
+}
+
+export interface Finding {
+  id: string;
+  category: FindingCategory;
+  severity: FindingSeverity;
+  title: string;
+  summary: string;
+  source: string;
+  evidence?: FindingEvidence;
+  firstSeen: string;
+  lastSeen: string;
+  actionable: boolean;
+  actionId?: string;
+}
+
+/** Reutiliza os estados já usados pelo Windows health — sem duplicação. */
+export type PcStateLevel = WindowsHealthStatus;
+
+export interface PcStateCounts {
+  urgent: number;
+  attention: number;
+  recommended: number;
+  informative: number;
+}
+
+export interface PcState {
+  overall: PcStateLevel;
+  security: PcStateLevel;
+  performance: PcStateLevel;
+  privacy: PcStateLevel;
+  system: PcStateLevel;
+  findings: Finding[];
+  counts: PcStateCounts;
+  /** Achado mais importante (pré-computado — a UI não ordena). */
+  principalFinding: Finding | null;
+  generatedAt: string;
+}
+
 // ── Hardware Monitoring ──
 
 export interface HardwareAlert {
@@ -616,18 +765,78 @@ export interface HardwareAlert {
 }
 
 export interface HardwareSnapshot {
-  cpu: { usage: number; model: string; cores: number; speed: number; temperature: number | null };
+  cpu: {
+    usage: number;
+    model: string;
+    cores: number;
+    speed: number;
+    temperature: number | null;
+    /** Estado do sensor térmico da CPU (auditado: Ryzen sem MSAcpi expõe "unavailable", nada inventado). */
+    temperatureStatus?: TemperatureStatus;
+  };
   ram: { usagePercent: number; usedGb: number; totalGb: number };
   disk: { usagePercent: number; usedGb: number; totalGb: number; fsType: string };
   network: { rxSec: number; txSec: number; interfaceName: string };
   battery: { hasBattery: boolean; percent: number; isCharging: boolean; timeRemaining: number | null };
-  gpu: { usagePercent: number | null; vramTotalMb: number | null; vramUsedMb: number | null; temperature: number | null; model: string } | null;
+  gpu: {
+    usagePercent: number | null;
+    vramTotalMb: number | null;
+    vramUsedMb: number | null;
+    temperature: number | null;
+    model: string;
+    /** Temperatura principal/core da GPU (igual a `temperature`; explícito para a UI). */
+    coreTemperature?: number | null;
+    /** Temperatura do hotspot (não mostrada como "GPU" sem rótulo). */
+    hotspotTemperature?: number | null;
+    /** Temperatura do Memory Junction (não mostrada como "GPU" sem rótulo). */
+    memoryJunctionTemperature?: number | null;
+    /** Estado do sensor térmico da GPU: uma leitura falhada não apaga um valor ainda recente. */
+    temperatureStatus?: TemperatureStatus;
+    /** Momento da última leitura boa de temperatura (ISO) */
+    temperatureUpdatedAt?: string;
+    /** Provider user-mode que originou a temperatura (ex.: systeminformation, ACPI). */
+    temperatureSource?: string;
+    /** Nome do sensor exato que originou o valor principal (ex.: "GPU Core"). */
+    temperatureSensor?: string;
+    /** GPU escolhida é dedicada (discreta)? Derivado do modelo — nunca `controller[0]` cego. */
+    dedicated?: boolean;
+    /** Todas as GPUs detetadas (a UI pode não mostrar, mas o dado é real). */
+    gpus?: GpuSnapshot[];
+  } | null;
   system: { uptime: number; platform: string; osVersion: string; hostname: string };
   topProcessesByCpu: ProcessSnapshot[];
   topProcessesByRam: ProcessSnapshot[];
   stressScore: number;
+  /** Breakdown of stress score contributions by category */
+  stressContributions?: StressContributions;
   alerts: HardwareAlert[];
   timestamp: string;
+}
+
+/** Contribution of each category to the stress score (0–100 total) */
+export interface StressContributions {
+  cpu: number;
+  ram: number;
+  temperature: number;
+  gpu: number;
+}
+
+/**
+ * Estado de uma leitura de sensor. `stale` significa que a última leitura boa
+ * ainda é recente (dentro do TTL) mas a poll mais recente falhou — o valor
+ * mostrado não desaparece imediatamente.
+ */
+export type TemperatureStatus = "available" | "stale" | "unavailable" | "error";
+
+export interface GpuSnapshot {
+  model: string;
+  usagePercent: number | null;
+  vramTotalMb: number | null;
+  vramUsedMb: number | null;
+  temperature: number | null;
+  temperatureStatus?: TemperatureStatus;
+  temperatureUpdatedAt?: string;
+  dedicated: boolean;
 }
 
 // ── Process Analysis ──
@@ -974,3 +1183,19 @@ export const TRAINING_SCENARIOS: TrainingScenario[] = [
     explanation: "Domínio com palavras suspeitas (bank, urgent, verify), sem HTTPS, padrão clássico de phishing bancário."
   }
 ];
+
+/** Verifica se algum motor de proteção está degradado ou indisponível. */
+export function hasDegradedProtections(engine: EngineHealth): boolean {
+  const engines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall];
+  return engines.some(e => e && (e.status === "degraded" || e.status === "unavailable" || e.status === "error"));
+}
+
+/** Conta motores ativos vs total reportados. */
+export function activeEngineCount(engine: EngineHealth): { active: number; total: number } {
+  const engines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall];
+  const reported = engines.filter(Boolean) as EngineSubsystemHealth[];
+  return {
+    active: reported.filter(e => e.status === "active").length,
+    total: reported.length,
+  };
+}

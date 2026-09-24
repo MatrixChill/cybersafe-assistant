@@ -6,13 +6,8 @@ export interface ExclusionConfig {
 export declare class ExclusionManager {
     private config;
     constructor(config?: Partial<ExclusionConfig>);
-    /**
-     * Verifica se um arquivo deve ser ignorado pela varredura.
-     */
     isExcluded(filePath: string): boolean;
-    /**
-     * Atualiza as exclusões em runtime.
-     */
+    exclusionReason(filePath: string): string | null;
     updateConfig(newConfig: Partial<ExclusionConfig>): void;
     getConfig(): ExclusionConfig;
 }

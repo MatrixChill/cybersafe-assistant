@@ -34,11 +34,60 @@ export interface NativeWindowsWatcherEvents {
   "scheduledtask.changed": (event: PersistenceObservation) => void;
 }
 
+/**
+ * Erros esperados num watcher de filesystem do Windows. Não indicam problema
+ * real: acontecem em junctions/reparse points (Documents\Meus Vídeos), em
+ * pastas temporárias que desaparecem (Temp\WinSAT, __PSScriptPolicyTest_*.ps1)
+ * e em ficheiros cujas permissões mudam a meio. Devem ser tolerados e
+ * deduplicados, nunca spam de stack trace.
+ */
+export function isTransientWatcherError(error: unknown): boolean {
+  const code = (error as NodeJS.ErrnoException | null)?.code;
+  return code === "EPERM" || code === "ENOENT" || code === "EACCES" || code === "EBUSY";
+}
+
+/** Extrai a chave estável (sem números voláteis) para agrupar erros repetidos. */
+export function watcherErrorKey(error: unknown): string {
+  const err = error as NodeJS.ErrnoException | null;
+  const code = err?.code ?? "UNKNOWN";
+  const rawPath = (err?.path as string | undefined) ?? "";
+  // Normaliza prefixos temporários com sufixo aleatório (njhm4xe4, __PSScriptPolicyTest_x.ps1).
+  const normalized = rawPath
+    .replace(/__PSScriptPolicyTest_[^\\/]*/gi, "__PSScriptPolicyTest_*")
+    .replace(/[\\/][a-z0-9]{6,8}(?=[\\/]|$)/gi, "\\*");
+  return `${code}:${normalized}`;
+}
+
+/**
+ * Deduplicação/rate-limit de erros do watcher. Mantém uma linha agregada por
+ * assinatura e reporta quantas ocorrências foram suprimidas.
+ */
+export class WatcherErrorDeduper {
+  private counts = new Map<string, number>();
+  private lastLogged = new Map<string, number>();
+  constructor(private readonly repeatWindowMs = 60_000) {}
+
+  /** Devolve `null` quando o erro deve ser silenciado (já reportado na janela). */
+  record(error: unknown, now = Date.now()): { key: string; suppressed: number } | null {
+    const key = watcherErrorKey(error);
+    const total = (this.counts.get(key) ?? 0) + 1;
+    this.counts.set(key, total);
+    const last = this.lastLogged.get(key);
+    // Primeira ocorrência desta assinatura é sempre reportada.
+    if (last !== undefined && now - last < this.repeatWindowMs) return null;
+    this.lastLogged.set(key, now);
+    const suppressed = total - 1;
+    this.counts.set(key, 0);
+    return { key, suppressed };
+  }
+}
+
 export class NativeWindowsWatcher extends EventEmitter {
   private watcher: FSWatcher | null = null;
   private registryTimer: NodeJS.Timeout | null = null;
   private lastRegistrySnapshot = "";
   private validatedPaths: string[] = [];
+  private errorDeduper = new WatcherErrorDeduper();
 
   getDefaultPaths() {
     const home = os.homedir();
@@ -112,22 +161,29 @@ export class NativeWindowsWatcher extends EventEmitter {
       );
     }
 
-    // Excludes os.tmpdir from scanning to avoid extreme churn in Temp
-    // (browsers/installers constantly create .tmp files). Keeps watching
-    // persistence-heavy paths without the CPU cost of a temp temp dir.
-    const tmpDir = os.tmpdir();
+    // Temp continua a ser monitorizado (é uma área relevante para segurança),
+    // mas toleramos erros transitórios e ignoramos apenas os artefactos
+    // temporários do próprio CyberSafe (evita que o scan reaja a si próprio).
+    const ownTempPattern = /cybersafe-(zip|scanner|temp|probe)/i;
+
+    // Destroy any existing watcher to prevent resource leak
+    if (this.watcher) {
+      await this.watcher.close();
+      this.watcher = null;
+    }
 
     this.watcher = chokidar.watch(this.validatedPaths, {
       persistent: true,
       ignoreInitial: true,
+      // Junctions/reparse points NÃO são seguidos (Documents\Meus Vídeos,
+      // Minhas Imagens, Minhas Músicas) — evita loops e spam de EPERM.
+      followSymlinks: false,
       ignored: [
         /(^|[\/\\])\../, // ignore hidden files
         /node_modules/, // ignore node_modules
         /\.log$/, // ignore log files
         /cybersafe-assistant[\/\\]logs/, // specific ignore for app logs
-        // Event-driven native watching (no 100ms polling); large files only
-        // considered "finished" after 3s of no writes.
-        (p: string) => p.startsWith(tmpDir),
+        ownTempPattern, // ignore own temp artifacts (keep watching Temp otherwise)
       ],
       awaitWriteFinish: {
         stabilityThreshold: 3000,
@@ -135,9 +191,17 @@ export class NativeWindowsWatcher extends EventEmitter {
       },
     });
 
-    // Add error handler to catch any runtime watch errors
+    // Erros de runtime: esperados/transitórios são tolerados + deduplicados;
+    // os inesperados continuam visíveis (uma vez).
     this.watcher.on("error", (error) => {
-      console.error(`[NativeWindowsWatcher] Watch error:`, error);
+      const transient = isTransientWatcherError(error);
+      const record = this.errorDeduper.record(error);
+      if (record) {
+        const suffix = record.suppressed > 0 ? ` (${record.suppressed} ocorrências suprimidas)` : "";
+        const message = `[NativeWindowsWatcher] ${transient ? "Watch error tolerado" : "Watch error"} ${record.key}${suffix}`;
+        if (transient) console.warn(message);
+        else console.error(message);
+      }
       // Emit as internal event for diagnostics but don't crash
       this.emit("watcher.error", { error, timestamp: new Date().toISOString() });
     });
@@ -195,7 +259,11 @@ export class NativeWindowsWatcher extends EventEmitter {
       this.registryTimer = null;
     }
     if (this.watcher) {
-      await this.watcher.close();
+      try {
+        await this.watcher.close();
+      } catch (error) {
+        console.error("[NativeWindowsWatcher] Error closing watcher:", error);
+      }
       this.watcher = null;
     }
     this.validatedPaths = [];
@@ -322,6 +390,45 @@ export async function snapshotConnections(): Promise<ConnectionSnapshot[]> {
 
     if (!res.ok || !res.data) return [];
 
+    // Map numeric TcpState values (from Get-NetTCPConnection) to human-readable names
+    const STATE_MAP: Record<string, string> = {
+      "1": "Listen",
+      "2": "SynSent",
+      "3": "SynReceived",
+      "4": "Established",
+      "5": "FinWait1",
+      "6": "FinWait2",
+      "7": "CloseWait",
+      "8": "Closing",
+      "9": "LastAck",
+      "10": "TimeWait",
+      "11": "DeleteTCB",
+      "12": "Bound",
+      // Also handle string values that PowerShell may return directly
+      "Listen": "Listen",
+      "SynSent": "SynSent",
+      "SynReceived": "SynReceived",
+      "Established": "Established",
+      "FinWait1": "FinWait1",
+      "FinWait2": "FinWait2",
+      "CloseWait": "CloseWait",
+      "Closing": "Closing",
+      "LastAck": "LastAck",
+      "TimeWait": "TimeWait",
+      "DeleteTCB": "DeleteTCB",
+    };
+
+    const normalizeState = (raw: string): string => {
+      if (!raw) return "Desconhecido";
+      // Try numeric map first, then string map
+      const mapped = STATE_MAP[raw] ?? STATE_MAP[raw.toLowerCase()];
+      return mapped ?? "Desconhecido";
+    };
+
+    const isUnspecifiedAddress = (addr: string): boolean => {
+      return !addr || addr === "0.0.0.0" || addr === "::" || addr === "[::]";
+    };
+
     const seen = new Set<string>();
     const result: ConnectionSnapshot[] = [];
     for (const raw of res.data) {
@@ -329,16 +436,27 @@ export async function snapshotConnections(): Promise<ConnectionSnapshot[]> {
       const localPort = Number(raw.LocalPort) || 0;
       const remoteAddress = String(raw.RemoteAddress || "");
       const remotePort = Number(raw.RemotePort) || 0;
-      const state = String(raw.State || "unknown");
+      const state = normalizeState(String(raw.State || ""));
       const key = `${localAddress}:${localPort}:${remoteAddress}:${remotePort}:${state}`;
       if (seen.has(key)) continue;
       seen.add(key);
 
-      const isListening = remoteAddress === "" || remoteAddress === "0.0.0.0" || remoteAddress === "::" || state === "Listen";
+      const isListening = isUnspecifiedAddress(remoteAddress) || state === "Listen";
+
+      // For listening sockets: show local address/port as the destination
+      // and mark direction as inbound
+      // For established connections: show remote address/port
+      const displayAddress = isListening ? localAddress : remoteAddress;
+      const displayPort = isListening ? localPort : remotePort;
+
+      // Skip entries where the display address is still unspecified
+      // (these are truly unbound sockets with no useful info)
+      if (isUnspecifiedAddress(displayAddress) && displayPort === 0) continue;
+
       result.push({
         processPid: (raw.OwningProcess && raw.OwningProcess > 0) ? raw.OwningProcess : undefined,
-        remoteAddress: isListening ? localAddress : remoteAddress,
-        remotePort: isListening ? localPort : remotePort,
+        remoteAddress: displayAddress,
+        remotePort: displayPort,
         protocol: "tcp",
         state,
         direction: isListening ? "inbound" : "outbound",

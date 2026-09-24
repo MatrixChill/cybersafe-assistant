@@ -255,17 +255,28 @@ export class PowerShellExecutor {
 /**
  * Converte a lista de processos de CPU/RAM para o formato WindowsTopProcess,
  * guardando contra campos ausentes/enviados pelo que o PowerShell não fornece.
+ *
+ * Nota de unidades: Win32_Process.WorkingSetSize vem em BYTES (empiricamente
+ * verificado). Dividimos por 1024² para obter MB. O "System Idle Process"
+ * (PID 0 / System Idle Process) NÃO é consumo real — representa CPU ociosa,
+ * por isso é excluído dos rankings de consumidores.
  */
-function normalizeTopProcesses(input: unknown): WindowsTopProcess[] {
+export function normalizeTopProcesses(input: unknown): WindowsTopProcess[] {
   const arr = Array.isArray(input) ? input : input && typeof input === "object" ? [input] : [];
-  return arr.map((raw: any) => ({
-    pid: Number(raw?.ProcessId) || 0,
-    name: String(raw?.Name || "unknown"),
-    cpuPercent: Number(raw?.CpuPercent) || 0,
-    memoryMb: Math.round(Number(raw?.WorkingSet) / 1024) || 0,
-    path: String(raw?.ExecutablePath || ""),
-    user: String(raw?.User || "unknown"),
-  }));
+  return arr
+    .filter((raw: any) => {
+      const pid = Number(raw?.ProcessId);
+      const name = String(raw?.Name || "").toLowerCase();
+      return Number.isFinite(pid) && pid > 0 && name !== "system idle process";
+    })
+    .map((raw: any) => ({
+      pid: Number(raw?.ProcessId) || 0,
+      name: String(raw?.Name || "unknown"),
+      cpuPercent: Number(raw?.CpuPercent) || 0,
+      memoryMb: Math.round(Number(raw?.WorkingSet) / 1024 / 1024) || 0,
+      path: String(raw?.ExecutablePath || ""),
+      user: String(raw?.User || "unknown"),
+    }));
 }
 
 async function runSystemInfo(exec: PowerShellExecutor): Promise<WindowsSystemInfo> {
@@ -349,6 +360,17 @@ async function runTcpConnections(exec: PowerShellExecutor): Promise<WindowsTcpCo
     OwningProcess?: number;
   }>>("tcpConnections");
   if (!res.ok || !res.data) return [];
+
+  const STATE_MAP: Record<string, string> = {
+    "1": "Listen", "2": "SynSent", "3": "SynReceived", "4": "Established",
+    "5": "FinWait1", "6": "FinWait2", "7": "CloseWait", "8": "Closing",
+    "9": "LastAck", "10": "TimeWait", "11": "DeleteTCB", "12": "Bound",
+  };
+  const normalizeState = (raw: string): string => {
+    if (!raw) return "Desconhecido";
+    return STATE_MAP[raw] ?? raw;
+  };
+
   const seen = new Set<string>();
   const result: WindowsTcpConnection[] = [];
   for (const raw of res.data) {
@@ -356,7 +378,8 @@ async function runTcpConnections(exec: PowerShellExecutor): Promise<WindowsTcpCo
     const localPort = Number(raw?.LocalPort) || 0;
     const remoteAddress = String(raw?.RemoteAddress || "");
     const remotePort = Number(raw?.RemotePort) || 0;
-    const key = `${localAddress}:${localPort}:${remoteAddress}:${remotePort}:${String(raw?.State)}`;
+    const state = normalizeState(String(raw?.State || ""));
+    const key = `${localAddress}:${localPort}:${remoteAddress}:${remotePort}:${state}`;
     if (seen.has(key)) continue;
     seen.add(key);
     result.push({
@@ -364,7 +387,7 @@ async function runTcpConnections(exec: PowerShellExecutor): Promise<WindowsTcpCo
       localPort,
       remoteAddress,
       remotePort,
-      state: String(raw?.State || "unknown"),
+      state,
       owningProcessPid: raw?.OwningProcess || null,
       owningProcessName: null,
     });

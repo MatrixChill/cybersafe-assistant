@@ -1,6 +1,8 @@
 import { spawn } from 'child_process';
 import * as path from 'path';
 import * as fs from 'fs';
+import { fileURLToPath } from 'url';
+import type { EngineSubsystemHealth } from '@cybersafe/shared-types';
 
 export interface NativeScanResult {
   path: string;
@@ -21,12 +23,20 @@ export interface NativeScanResult {
   };
 }
 
-import { fileURLToPath } from 'url';
+export interface NativeScanOutcome {
+  ok: boolean;
+  result: NativeScanResult | null;
+  error?: string;
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export class NativeEngineBridge {
+  private static _health: EngineSubsystemHealth = { status: "unavailable", detail: "Not checked" };
+  private static binaryPath: string | null = null;
+  private static checked = false;
+
   private static getBinaryPath(): string {
     // Check multiple potential locations for the binary
     const possiblePaths = [
@@ -34,8 +44,6 @@ export class NativeEngineBridge {
       path.resolve(process.cwd(), 'packages/native-engine/build/Release/scan-engine.exe'),
       path.resolve(process.cwd(), 'packages/native-engine/build/scan-engine.exe'),
       path.resolve(process.cwd(), 'packages/native-engine/bin/scan-engine.exe'),
-      path.resolve(process.cwd(), 'packages/native-engine/build/scan-engine.exe'),
-      path.resolve(process.cwd(), 'packages/native-engine/bin/scan-engine.exe')
     ];
 
     for (const p of possiblePaths) {
@@ -43,9 +51,24 @@ export class NativeEngineBridge {
         return p;
       }
     }
-
-    // Return the first one as default if none exist (will fail gracefully later)
     return possiblePaths[0];
+  }
+
+  /** Verifica a disponibilidade do binário e expõe o estado de saúde do motor. */
+  public static checkAvailability(): EngineSubsystemHealth {
+    this.binaryPath = this.getBinaryPath();
+    this.checked = true;
+    if (fs.existsSync(this.binaryPath)) {
+      this._health = { status: "active", detail: `Native engine at ${this.binaryPath}` };
+    } else {
+      this._health = { status: "unavailable", detail: "scan-engine.exe não foi encontrado (não integrado)" };
+    }
+    return this._health;
+  }
+
+  public static get health(): EngineSubsystemHealth {
+    if (!this.checked) return this.checkAvailability();
+    return this._health;
   }
 
   private static activeProcesses = new Set<import('child_process').ChildProcess>();
@@ -62,13 +85,19 @@ export class NativeEngineBridge {
     this.activeProcesses.clear();
   }
 
-  public static async scan(filePath: string): Promise<NativeScanResult | null> {
-    const binPath = this.getBinaryPath();
+  public static async scan(filePath: string): Promise<NativeScanOutcome> {
+    const health = this.checkAvailability();
 
-    if (!fs.existsSync(binPath)) {
-      console.warn(`[NativeEngine] Binary not found at ${binPath}. Skipping native scan.`);
-      return null;
+    if (health.status !== "active") {
+      const unavailable: NativeScanOutcome = {
+        ok: false,
+        result: null,
+        error: health.detail ?? "Native engine unavailable",
+      };
+      return unavailable;
     }
+
+    const binPath = this.binaryPath!;
 
     return new Promise((resolve) => {
       const child = spawn(binPath, [filePath], { windowsHide: true });
@@ -90,7 +119,8 @@ export class NativeEngineBridge {
         child.kill('SIGKILL');
         console.error(`[NativeEngine] Timeout scanning ${filePath}`);
         this.activeProcesses.delete(child);
-        resolve(null);
+        this._health = { status: "degraded", detail: "Timeout durante scan nativo" };
+        resolve({ ok: false, result: null, error: "Native engine timeout" });
       }, 30000);
 
       child.on('close', (code) => {
@@ -99,20 +129,22 @@ export class NativeEngineBridge {
 
         if (code !== 0 && code !== null) {
           console.error(`[NativeEngine] Process exited with code ${code}. Error: ${stderr}`);
-          return resolve(null);
+          this._health = { status: "degraded", detail: `Native engine exit code ${code}` };
+          return resolve({ ok: false, result: null, error: stderr.trim() || `exit code ${code}` });
         }
 
         if (code === null) {
           // Process was killed
-          return resolve(null);
+          return resolve({ ok: false, result: null, error: "Native engine killed" });
         }
 
         try {
           const result = JSON.parse(stdout) as NativeScanResult;
-          resolve(result);
+          resolve({ ok: true, result });
         } catch (e) {
           console.error(`[NativeEngine] Failed to parse output: ${stdout}`, e);
-          resolve(null);
+          this._health = { status: "degraded", detail: "Output nativo não parseável" };
+          resolve({ ok: false, result: null, error: "Failed to parse native output" });
         }
       });
 
@@ -120,7 +152,8 @@ export class NativeEngineBridge {
         clearTimeout(timeout);
         this.activeProcesses.delete(child);
         console.error(`[NativeEngine] Failed to start process:`, err);
-        resolve(null);
+        this._health = { status: "error", detail: `Native engine spawn falhou: ${err.message}` };
+        resolve({ ok: false, result: null, error: err.message });
       });
     });
   }

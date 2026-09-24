@@ -1,4 +1,8 @@
-import type { ProtectionStatus, TrustDecision } from "@cybersafe/shared-types";
+import type {
+  EngineHealth,
+  ProtectionStatus,
+  TrustDecision,
+} from "@cybersafe/shared-types";
 
 export interface RiskThresholds {
   safeMax: number;
@@ -35,6 +39,41 @@ export function scoreToStatus(score: number, degraded = false): ProtectionStatus
   if (score > DEFAULT_THRESHOLDS.alertMax) return "critical";
   if (score > DEFAULT_THRESHOLDS.safeMax) return "attention";
   return "safe";
+}
+
+/**
+ * Quando a proteção está degradada (motores indisponíveis), o risco efetivo
+ * nunca desce abaixo de um piso que reflita a perda de confiança nas deteções.
+ * Sem motores ativos, nunca mostramos "safe".
+ */
+export function effectiveRiskScore(maxRisk: number, engine?: EngineHealth): number {
+  if (!engine) return maxRisk;
+  const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine];
+  const active = subEngines.filter(
+    (e): e is NonNullable<typeof e> => e?.status === "active",
+  ).length;
+  const degraded = subEngines.some(
+    (e) => e?.status === "degraded",
+  );
+
+  let floor = 0;
+  if (active === 0) floor = 75;
+  else if (active <= 2) floor = 45;
+  else if (degraded) floor = 20;
+
+  return Math.max(maxRisk, floor);
+}
+
+export function engineIsDegraded(engine?: EngineHealth): boolean {
+  if (!engine) return false;
+  const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall];
+  return subEngines.some((e) => e && e.status !== "active");
+}
+
+export function activeEngineCount(engine?: EngineHealth): number {
+  if (!engine) return 0;
+  const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall];
+  return subEngines.filter((e): boolean => e?.status === "active").length;
 }
 
 export function trustReduction(decision: TrustDecision): number {

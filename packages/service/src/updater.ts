@@ -4,6 +4,7 @@ import * as path from "node:path";
 import * as https from "node:https";
 import * as http from "node:http";
 import { spawn } from "node:child_process";
+import { compile } from "@litko/yara-x";
 
 // ── Configuration ────────────────────────────────────────────────────────────
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 horas
@@ -145,9 +146,15 @@ export class DefinitionUpdater {
     for (const url of YARA_SOURCES) {
       try {
         const content = await this.downloadText(url);
-        // Validação: regras YARA devem conter "rule "
+        // Validação: regras YARA devem conter "rule " e compilar com YARA-X.
+        // Só escrevemos no disco se o conteúdo for YARA válido.
         if (!content.includes("rule ") || content.includes("<!DOCTYPE html>")) {
           throw new Error("Conteúdo baixado não parece ser YARA válido.");
+        }
+        try {
+          compile(content);
+        } catch (compileErr: any) {
+          throw new Error(`Regras baixadas não compilam com YARA-X: ${compileErr?.message ?? "unknown"}`);
         }
         await fsPromises.writeFile(this.yaraPath, content, "utf-8");
         return; // Sucesso
@@ -249,6 +256,10 @@ export class DefinitionUpdater {
         },
         timeout: 30000
       }, (res) => {
+        if (res.statusCode && res.statusCode !== 200) {
+          reject(new Error(`MalwareBazaar HTTP ${res.statusCode}`));
+          return;
+        }
         let body = "";
         res.on("data", chunk => body += chunk);
         res.on("end", () => resolve(body));

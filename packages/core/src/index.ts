@@ -1,4 +1,5 @@
 export * from "./analysis.js";
+export * from "./clamav.js";
 export * from "./definitions.js";
 export * from "./event-bus.js";
 export * from "./hashing.js";
@@ -12,3 +13,6 @@ export * from "./yara.js";
 export * from "./virustotal.js";
 export * from "./hardware.js";
 export * from "./exclusions.js";
+export * from "./pcstate.js";
+export * from "./temperature.js";
+export * from "./temperature-provider.js";

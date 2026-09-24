@@ -10,6 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "lint": "tsc -p tsconfig.json --noEmit",
+    "test": "npm run build && node --test test/scan-manager.test.js test/scan-pipeline.test.js test/scan-error.test.js test/shutdown.test.js test/process-kill.test.js",
     "typecheck": "node -e \"console.log('service typecheck delegated to shared/core/native workspaces')\"",
     "service:install": "tsx src/windows-service.ts install",
     "service:uninstall": "tsx src/windows-service.ts uninstall",

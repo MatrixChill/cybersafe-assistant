@@ -11,6 +11,7 @@ import { sha256File } from "./hashing.js";
 import type { SignatureDatabase } from "./signatures.js";
 import type { TrustEngine } from "./trust.js";
 import type { YaraEngine } from "./yara.js";
+import type { ClamavBridge } from "./clamav.js";
 import { scoreThreat } from "./scoring.js";
 
 const MAGIC_NUMBERS: Record<string, string> = {
@@ -45,6 +46,8 @@ export interface AnalyzerDependencies {
   signatures: SignatureDatabase;
   trust: TrustEngine;
   yara: YaraEngine;
+  /** Opcional: se existir, o clamscan é usado; caso contrário o motor é reportado como unavailable. */
+  clamav?: ClamavBridge;
 }
 
 export class MalwareAnalyzer {
@@ -73,17 +76,11 @@ export class MalwareAnalyzer {
     // Scan completo com YARA
     const yaraMatches = await this.deps.yara.scanFile(artifactPath);
     
-    // Scan with ClamAV — async to avoid blocking the event loop
+    // Scan com ClamAV — só quando o binário existe; nunca simula proteção.
     let clamavDetected = false;
-    try {
-      const { exec: execCb } = await import("node:child_process");
-      const { promisify } = await import("node:util");
-      const execAsync = promisify(execCb);
-      await execAsync(`clamscan --no-summary "${artifactPath}"`, { timeout: 10000 });
-    } catch (error: any) {
-      if (error.status === 1) {
-        clamavDetected = true;
-      }
+    if (this.deps.clamav) {
+      const clamResult = await this.deps.clamav.scanFile(artifactPath);
+      clamavDetected = clamResult.detected;
     }
 
     const signatureMatch = this.deps.signatures.match(sha256);

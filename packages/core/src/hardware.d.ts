@@ -1,4 +1,4 @@
-import type { HardwareSnapshot, ProcessSnapshot } from "@cybersafe/shared-types";
+import type { HardwareSnapshot, ProcessSnapshot, StressContributions } from "@cybersafe/shared-types";
 export declare class HardwareHealthEngine {
     private lastSnapshot;
     private fastMetrics;

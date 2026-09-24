@@ -5,6 +5,11 @@ const execAsync = promisify(exec);
 
 export class WfpFilter {
   private blockedIps = new Set<string>();
+  private active = false;
+
+  isActive(): boolean {
+    return this.active;
+  }
 
   /**
    * Inicializa o "WFP Filter" (usando o Windows Firewall por debaixo dos panos)
@@ -15,12 +20,15 @@ export class WfpFilter {
       await execAsync(
         'powershell -Command "New-NetFirewallRule -DisplayName \'CyberSafe Blocklist\' -Direction Outbound -Action Block -RemoteAddress 127.0.0.2 -ErrorAction SilentlyContinue"'
       );
+      this.active = true;
     } catch (e) {
+      this.active = false;
       // Ignora, regra pode já existir ou requerer Admin
     }
   }
 
   async stop() {
+    this.active = false;
     // Limpa a regra ao parar
     try {
       await execAsync(

@@ -35,7 +35,26 @@ function logToFile(level: string, message: string, error?: unknown) {
   }
 }
 
+// Códigos que significam "o outro lado fechou o pipe" — esperados no shutdown.
+const EXPECTED_PIPE_ERROR_CODES = new Set<string>([
+  "EPIPE",
+  "ECONNRESET",
+  "ERR_STREAM_DESTROYED",
+  "ERR_STREAM_WRITE_AFTER_END",
+]);
+
 process.on("uncaughtException", (err) => {
+  const code = (err as NodeJS.ErrnoException)?.code;
+  // O peer (Electron) pode fechar o pipe antes de lermos/escrevermos a resposta.
+  // EPIPE/ECONNRESET são o resultado esperado desse fecho — sobretudo no
+  // shutdown — e não uma falha crítica do serviço. O engine já os trata no
+  // handler de "error" de cada socket; isto é a rede de segurança final.
+  if (EXPECTED_PIPE_ERROR_CODES.has(String(code))) {
+    try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] EXPECTED pipe close (${code}) — peer fechou a ligação\n`, "utf-8"); } catch {}
+    logToFile("WARN", `EXPECTED pipe close (${code}) — peer fechou a ligação`, err);
+    console.warn(`[Service] EXPECTED pipe close (${code}) — peer fechou a ligação`);
+    return;
+  }
   try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] CRITICAL uncaught exception: ${err.stack || err}\n`, "utf-8"); } catch {}
   logToFile("CRITICAL", "Uncaught exception — tentando manter serviço vivo", err);
   console.error("[Service] CRITICAL uncaught exception:", err);
@@ -86,10 +105,16 @@ void main();
 
 for (const signal of ["SIGINT", "SIGTERM"] as const) {
   process.on(signal, () => {
-    logToFile("INFO", `Received ${signal}, shutting down...`);
+    // Em `npm run dev`, o `concurrently -k` envia SIGTERM/SIGINT a todos os
+    // watchers quando o Electron fecha. Este caminho é um encerramento
+    // esperado do dev runner (o code 1 dos scripts npm que se seguem é
+    // normal), e não uma falha do produto.
+    logToFile("INFO", `Received ${signal} — EXPECTED DEV SHUTDOWN (dev runner)`);
+    console.log(`[Service] EXPECTED DEV SHUTDOWN (${signal})`);
     void service.stopProtection().finally(() => {
       void service.dispose().finally(() => {
         logToFile("INFO", "Service stopped.");
+        console.log("[Service] Service stopped");
         process.exit(0);
       });
     });
