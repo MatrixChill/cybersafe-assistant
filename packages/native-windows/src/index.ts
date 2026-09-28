@@ -271,16 +271,55 @@ export class NativeWindowsWatcher extends EventEmitter {
   }
 }
 
+/**
+ * Cadencia de DESCOBERTA de processos. É o número que governa a fase da
+ * latência com que um processo novo aparece na lista, e é a fonte de verdade
+ * que o `PROCESS_TRUTH_TTL_MS` do serviço tem de seguir.
+ *
+ * Escolhido por medição, e a medição disse para NÃO mexer. Numa máquina com
+ * 355+ processos:
+ *   - uma enumeração CIM completa custa 338-364 ms de wall e 266-297 ms de CPU
+ *     do próprio PowerShell (medido), dos quais ~204 ms/~188 ms são só o
+ *     arranque do `powershell.exe` — o arranque, não a consulta, é o custo;
+ *   - `tasklist` nativo, alternativa sem PowerShell, mede 376-403 ms: É MAIS
+ *     LENTO, portanto não serve;
+ *   - `systeminformation.processes()` devolve 0 ms em 4 de 5 chamadas: é um
+ *     cache, não uma fonte de verdade;
+ *   - A/B medido (5 s contra 10 s, mesma máquina, mesmo método, com a app a
+ *     pedir a lista de 10 em 10 s): 2 enumerações em 30 s NAS DUAS configs, e
+ *     CPU de máquina de 25,6% contra 28,2% — dentro do ruido. Encurtar o
+ *     intervalo não compra latência nenhuma, porque com uma enumeração a
+ *     demorar 8-12 s o `pollInFlight` salta o round seguinte de qualquer
+ *     maneira: o que manda é o CUSTO DA ENUMERAÇÃO, não o intervalo.
+ *
+ * Passa a 5 s só quando a enumeração ficar ordens de grandeza mais barata (uma
+ * sessão CIM persistente, por exemplo) — e nesse dia o número sai da medição
+ * outra vez, não de um palpite.
+ */
+export const PROCESS_POLL_INTERVAL_MS = 10_000;
+
 export class ProcessMonitor extends EventEmitter {
   private timer: NodeJS.Timeout | null = null;
   private previous = new Map<number, ProcessSnapshot>();
   private pollInFlight = false;
 
+  /**
+   * Seam de teste, mesmo padrão do `SnapshotProcessesDeps` abaixo e do
+   * `executor` desta página: por defeito é a enumeração real do SO, e o
+   * chamador de produção nunca passa nada. Existe para o diff ser testável sem
+   * WMI (e para nenhum teste poder transformar um "round" num poll de 5 s).
+   */
+  constructor(
+    private readonly snapshot: () => Promise<Map<number, ProcessSnapshot>> = snapshotProcesses,
+  ) {
+    super();
+  }
+
   async start() {
     await this.poll();
     this.timer = setInterval(() => {
       void this.poll();
-    }, 10_000);
+    }, PROCESS_POLL_INTERVAL_MS);
   }
 
   async stop() {
@@ -294,11 +333,24 @@ export class ProcessMonitor extends EventEmitter {
     return Array.from((await snapshotProcesses()).values());
   }
 
-  private async poll() {
+  /**
+   * Um round de descoberta. Público (e não `private`) só para o seam de teste
+   * poder correr rounds sem esperar pela cadência de produção.
+   */
+  async poll() {
     if (this.pollInFlight) return;
     this.pollInFlight = true;
     try {
-      const current = await snapshotProcesses();
+      // Enumeração indisponível ≠ "todos os processos saíram". Mantemos o
+      // `previous` intacto e saltamos o round: emitir diff contra uma lista
+      // vazia seria inventar a morte de todos os processos do SO.
+      let current: Map<number, ProcessSnapshot>;
+      try {
+        current = await this.snapshot();
+      } catch (error) {
+        console.warn("[ProcessMonitor] Round de poll ignorado (enumeração indisponível):", error);
+        return;
+      }
 
       for (const [pid, processInfo] of current.entries()) {
         if (!this.previous.has(pid)) {
@@ -319,56 +371,103 @@ export class ProcessMonitor extends EventEmitter {
   }
 }
 
-export async function snapshotProcesses(): Promise<Map<number, ProcessSnapshot>> {
+/**
+ * Fontes injetáveis de `snapshotProcesses` (seam de teste, mesmo padrão do
+ * `executor` já usado nesta página). Por defeito são as reais; o chamador de
+ * produção nunca passa nada.
+ */
+export interface SnapshotProcessesDeps {
+  /** Fase (a) primária: devolve o stdout da enumeração CIM. */
+  runPrimary?: () => Promise<string>;
+  /** Fase (b): enriquecimento com systeminformation (cpu/mem/path/user). */
+  enrich?: (map: Map<number, ProcessSnapshot>) => Promise<void>;
+}
+
+export async function snapshotProcesses(
+  deps: SnapshotProcessesDeps = {},
+): Promise<Map<number, ProcessSnapshot>> {
   const map = new Map<number, ProcessSnapshot>();
 
+  // ── Fase (a) PRIMÁRIA (CIM) ──────────────────────────────────────────────
+  // É a única fonte de verdade da lista. Se ela falha, esta função REJEITA:
+  // devolver um Map vazio é afirmar "o SO não tem processos", que é mentira e
+  // fazia o chamador apagar o cache e servir a lista vazia como fresca.
+  // Quem chama decide o plano B (servir o cache) — a fronteira só diz a verdade.
+  const runPrimary =
+    deps.runPrimary ??
+    (async () => {
+      const { exec } = await import("node:child_process");
+      const { promisify } = await import("node:util");
+      const execAsync = promisify(exec);
+      // Saída JSON (a versão CSV anterior partia campos com vírgulas e gerava dados corrompidos).
+      const { stdout } = await execAsync(
+        'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine | ConvertTo-Json -Compress"',
+        { windowsHide: true }
+      );
+      return stdout;
+    });
+
+  let rows: unknown;
   try {
-    const { exec } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const execAsync = promisify(exec);
-
-    // Saída JSON (a versão CSV anterior partia campos com vírgulas e gerava dados corrompidos).
-    const { stdout } = await execAsync(
-      'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine | ConvertTo-Json -Compress"',
-      { windowsHide: true }
-    );
-    const rows = JSON.parse(stdout.trim());
-    const list = Array.isArray(rows) ? rows : rows && typeof rows === "object" ? [rows] : [];
-    const now = new Date().toISOString();
-
-    for (const raw of list) {
-      const pid = parseInt(raw.ProcessId, 10);
-      if (!Number.isFinite(pid) || pid <= 0) continue;
-
-      map.set(pid, {
-        pid,
-        ppid: 0,
-        name: String(raw.Name || `pid-${pid}`),
-        path: "",
-        commandLine: String(raw.CommandLine || ""),
-        user: undefined,
-        cpu: 0,
-        memoryMb: 0,
-        startedAt: now,
-        signer: undefined,
-        trusted: "neutral",
-      });
-    }
-
-    // Complemento com systeminformation para CPU/Memória
-    const siProcesses = await si.processes();
-    for (const p of siProcesses.list) {
-      const existing = map.get(Number(p.pid));
-      if (existing) {
-        existing.cpu = Math.round((p.cpu ?? 0) * 10) / 10;
-        existing.memoryMb = Math.round((p.memRss ?? 0) / 1024);
-        existing.path = (p as any).path || existing.path;
-        existing.ppid = Number((p as any).parentPid || 0);
-        existing.user = p.user || existing.user;
-      }
-    }
+    const raw = await runPrimary();
+    rows = JSON.parse(raw.trim());
   } catch (err) {
     console.error("[ProcessMonitor] Falha ao coletar processos do S.O:", err);
+    throw new Error("Enumeração de processos indisponível (CIM falhou)", { cause: err });
+  }
+
+  const list = Array.isArray(rows) ? rows : rows && typeof rows === "object" ? [rows] : [];
+  const now = new Date().toISOString();
+
+  for (const raw of list) {
+    const pid = parseInt(raw.ProcessId, 10);
+    if (!Number.isFinite(pid) || pid <= 0) continue;
+
+    map.set(pid, {
+      pid,
+      ppid: 0,
+      name: String(raw.Name || `pid-${pid}`),
+      path: "",
+      commandLine: String(raw.CommandLine || ""),
+      user: undefined,
+      cpu: 0,
+      memoryMb: 0,
+      startedAt: now,
+      signer: undefined,
+      trusted: "neutral",
+    });
+  }
+
+  // Primária devolveu zero processos utilizáveis = também não-verdade (no Windows
+  // há sempre processos). Mesma política: falhar alto em vez de lista vazia.
+  if (map.size === 0) {
+    throw new Error("Enumeração de processos devolveu zero registos (CIM sem verdade)");
+  }
+
+  // ── Fase (b) ENRIQUECIMENTO (systeminformation) ─────────────────────────
+  // Opcional por natureza: a lista JÁ está completa sem ele. Falhar aqui é
+  // perder cpu/mem/path, não a verdade — logo NUNCA vira erro.
+  const enrich =
+    deps.enrich ??
+    (async (target: Map<number, ProcessSnapshot>) => {
+      const siProcesses = await si.processes();
+      for (const p of siProcesses.list) {
+        const existing = target.get(Number(p.pid));
+        if (existing) {
+          existing.cpu = Math.round((p.cpu ?? 0) * 10) / 10;
+          existing.memoryMb = Math.round((p.memRss ?? 0) / 1024);
+          existing.path = (p as any).path || existing.path;
+          existing.ppid = Number((p as any).parentPid || 0);
+          existing.user = p.user || existing.user;
+        }
+      }
+    });
+
+  try {
+    await enrich(map);
+  } catch (err) {
+    // Lista verdadeira, só sem métricas: segue na mesma.
+    console.warn("[ProcessMonitor] Enriquecimento (systeminformation) falhou; lista sem cpu/mem:", err);
   }
 
   return map;

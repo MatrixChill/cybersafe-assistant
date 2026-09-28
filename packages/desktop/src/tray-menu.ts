@@ -25,7 +25,7 @@ export const PROTECTION_STATUS_LABELS: Record<string, string> = {
   safe: "Protegida",
   attention: "Atenção",
   warning: "Atenção",
-  degraded: "Degradada",
+  degraded: "Precisa de atenção",
   critical: "Crítica",
   paused: "Pausada",
   unavailable: "Indisponível",
@@ -43,7 +43,7 @@ export function serviceStatusLine(serviceRunning: boolean): string {
   return serviceRunning ? "● Serviço ativo" : "○ Serviço parado";
 }
 
-/** Linha de proteção: "Proteção: Degradada · 55/100". */
+/** Linha de proteção: "Proteção: Precisa de atenção · 55/100". */
 export function protectionLine(info: TrayProtectionInfo): string {
   const label = protectionStatusLabel(info.status);
   const score =
@@ -83,7 +83,7 @@ export interface TrayMenuHandlers {
  *
  *   CyberSafe
  *   ● Serviço ativo
- *   Proteção: Degradada · 55/100
+ *   Proteção: Precisa de atenção · 55/100
  *   Ameaças recentes: 0
  *   Em quarentena: 6
  *   ────────────

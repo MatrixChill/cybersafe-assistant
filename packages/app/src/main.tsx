@@ -1,8 +1,13 @@
-import { StrictMode } from 'react'
+import { StrictMode, Profiler } from 'react'
 import { createRoot } from 'react-dom/client'
 import './index.css'
 import App from './App.tsx'
 import { applyAppearance } from './lib/appearance'
+// >>> CS-THEME-PROBE (medicao dev-only; remover junto com lib/themeProbe.ts) >>>
+import { installThemeProbe, onRootRender } from './lib/themeProbe'
+const CS_THEME_PROBE = import.meta.env.DEV
+if (CS_THEME_PROBE) installThemeProbe()
+// <<< CS-THEME-PROBE <<<
 
 try {
   applyAppearance()
@@ -12,10 +17,13 @@ try {
 
 const root = document.getElementById('root');
 if (root) {
-  createRoot(root).render(
+  const tree = (
     <StrictMode>
       <App />
-    </StrictMode>,
+    </StrictMode>
+  )
+  createRoot(root).render(
+    CS_THEME_PROBE ? <Profiler id="cs-root" onRender={onRootRender}>{tree}</Profiler> : tree,
   );
 } else {
   document.body.innerHTML = `

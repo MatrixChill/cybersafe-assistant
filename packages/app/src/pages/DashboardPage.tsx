@@ -1,10 +1,10 @@
-import { Shield, AlertTriangle, Download, Activity, CheckCircle2, Cpu, HardDrive, Wifi, Search, Play, FolderSearch } from "lucide-react";
+import { Shield, AlertTriangle, Download, Activity, CheckCircle2, Cpu, HardDrive, MemoryStick, Wifi, Search, Play, FolderSearch } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { DashboardSummary, HardwareSnapshot, PcState, PcStateLevel, Finding } from "@cybersafe/shared-types";
+import type { DashboardSummary, HardwareSnapshot, PcState, PcStateLevel, Severity, Finding } from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
 import { MatrixAvatar } from "../components/MatrixAvatar";
 import ProtectionDetails from "../components/ProtectionDetails";
-import { deriveProtectionLevel, levelMeta } from "../lib/protectionHealth";
+import { describeDiskSpace, deriveProtectionLevel, levelMeta } from "../lib/protectionHealth";
 import { MetricBarSkeleton } from "../components/Skeleton";
 import { TelemetrySparkline, useTelemetryHistory } from "../components/TelemetrySparkline";
 import { useTemperatureDisplay } from "../lib/temperature";
@@ -25,7 +25,6 @@ export default function DashboardPage({ dashboard, isLoading, hardware, pcState,
 
   const cpuSamples = useTelemetryHistory("cpu", 2000);
   const ramSamples = useTelemetryHistory("ram", 2000);
-  const gpuSamples = useTelemetryHistory("gpu", 2000);
   const netRxSamples = useTelemetryHistory("net-rx", 2000);
 
   // Temperaturas: nunca 0 °C artificial. "A recolher dados..." e, passado o
@@ -58,120 +57,116 @@ export default function DashboardPage({ dashboard, isLoading, hardware, pcState,
   }
 
   const matrixMood = level === "protected" ? "safe" : level === "attention" ? "guide" : "alert";
-  const statusLabel = level === "protected" ? "Protegido" : level === "attention" ? "Atenção" : level === "degraded" ? "Degradado" : "Crítico";
+  const statusLabel = level === "protected" ? "Protegido" : level === "attention" ? "Atenção" : level === "degraded" ? "Precisa de atenção" : "Crítico";
 
   return (
-    <div className="p-6 lg:p-8 space-y-6 animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="p-4 lg:p-6 space-y-4 animate-in fade-in slide-in-from-bottom-4 duration-500">
 
-      {/* ═══ CAMADA 1 — HERO / ESTADO PRINCIPAL ═══ */}
-      <div className="hero-banner relative overflow-hidden rounded-xl border border-primary/20 bg-card p-6 lg:p-8">
+      {/* ═══ CAMADA 1 — A PERGUNTA E A RESPOSTA ═══
+          Tudo cabe numa olhadela: a pergunta, a resposta, o número. O detalhe
+          vive na lista de prioridades e no overlay — o hero não repete frases
+          de nenhum dos dois. */}
+      <section className="hero-banner relative overflow-hidden rounded-xl border border-primary/20 bg-card px-4 py-3 lg:px-5 lg:py-4">
         <div className="hero-gradient" />
 
-        <div className="relative z-10 flex flex-col lg:flex-row items-start gap-6">
-          {/* Matrix + Saudação */}
-          <div className="flex items-start gap-4 flex-1 min-w-0">
-            <MatrixAvatar mood={matrixMood} size="xl" />
-            <div className="flex-1 min-w-0">
-              <div className="flex items-center gap-2 mb-1">
-                <h1 className="text-xl font-bold font-mono tracking-tight text-foreground">
-                  Olá! Sou a <span className="text-primary">Matrix</span>
-                </h1>
-                <span className="text-[10px] font-mono px-2 py-0.5 rounded-full bg-cyber-green/10 text-cyber-green border border-cyber-green/30">
-                  ONLINE
-                </span>
-              </div>
-              <p className="text-sm text-muted-foreground leading-relaxed max-w-lg">
-                {level === "protected"
-                  ? "Tudo calmo. Continuo a vigiar o teu sistema 24/7."
-                  : level === "attention"
-                    ? "Proteção ativa com algumas limitações. Alguns componentes precisam da tua atenção."
-                    : level === "degraded"
-                      ? "Alguns motores estão indisponíveis. O teu sistema está parcialmente protegido."
-                      : "Proteção essencial indisponível ou ameaça crítica. Revisa já."}
+        <div className="relative z-10 flex flex-wrap items-center gap-x-5 gap-y-3">
+          {/* Pergunta central + resposta direta (hierarquia: pergunta → resposta → porquê).
+              min-w em vez de min-w-0: com min-w-0 este bloco encolhia até ao
+              tamanho do score (medido: 38 px de largura a 640 px de viewport, o
+              título em 5 linhas de uma palavra). Com um piso de 268 px o
+              flex-wrap do pai faz o score descer para a linha própria, que é o
+              comportamento pedido a janela estreita — nada é escondido. */}
+          <div className="order-2 sm:order-1 flex min-w-[268px] flex-1 items-center gap-3">
+            <MatrixAvatar mood={matrixMood} size="md" />
+            <div className="min-w-0">
+              <h1 className="text-base lg:text-lg font-bold font-mono tracking-tight text-foreground leading-tight">
+                O meu computador está bem?
+              </h1>
+              <p className="mt-0.5 text-sm leading-snug">
+                <span className={cn("font-mono font-bold", meta.textClass)}>{meta.answer}</span>{" "}
+                <span className="text-muted-foreground">{meta.answerDetail}</span>
               </p>
             </div>
           </div>
 
-          {/* Score Ring + badges + CTA.
-              Layout responsivo real: coluna em < xl (score + CTA lado a lado),
-              linha completa apenas em ecrãs largos. O rótulo do anel nunca
-              transborda (largura fixa + truncate). */}
-          <div className="flex flex-col sm:flex-row xl:items-center justify-start lg:justify-end gap-6 min-w-0">
-            <div className="flex items-center gap-4 min-w-0">
-              <div className="relative w-28 h-28 shrink-0">
-                <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
-                  <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="6" className="text-secondary" />
-                  <circle
-                    cx="50" cy="50" r="40" fill="none" stroke="url(#hero-risk-gradient)" strokeWidth="6"
-                    strokeLinecap="round" strokeDasharray={`${(displayScore / 100) * 251.2} 251.2`}
-                    className="transition-all duration-500"
-                  />
-                  <defs>
-                    <linearGradient id="hero-risk-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
-                      <stop offset="0%" stopColor={level === "protected" ? "var(--cyber-green)" : level === "attention" ? "var(--cyber-yellow)" : "var(--cyber-red)"} />
-                      <stop offset="100%" stopColor="var(--primary)" />
-                    </linearGradient>
-                  </defs>
-                </svg>
-                <div className="absolute inset-0 flex flex-col items-center justify-center px-2">
-                  <span className="text-3xl leading-none font-bold font-mono text-foreground">{displayScore}</span>
-                  <span
-                    className={cn("mt-1 text-[10px] leading-none font-mono uppercase tracking-wide whitespace-nowrap text-center", meta.textClass)}
-                    title={meta.label}
-                  >
-                    {meta.shortLabel}
-                  </span>
-                </div>
+          {/* Score: número grande, etiqueta pequena, chip de estado ao lado. */}
+          <div className="order-1 sm:order-2 flex shrink-0 items-center gap-3">
+            <div className="relative w-[68px] h-[68px] shrink-0">
+              <svg className="w-full h-full -rotate-90" viewBox="0 0 100 100">
+                <circle cx="50" cy="50" r="40" fill="none" stroke="currentColor" strokeWidth="9" className="text-secondary" />
+                <circle
+                  cx="50" cy="50" r="40" fill="none" stroke="url(#hero-risk-gradient)" strokeWidth="9"
+                  strokeLinecap="round" strokeDasharray={`${(displayScore / 100) * 251.2} 251.2`}
+                  className="transition-all duration-500"
+                />
+                <defs>
+                  <linearGradient id="hero-risk-gradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor={level === "protected" ? "var(--cyber-green)" : level === "attention" ? "var(--cyber-yellow)" : "var(--cyber-red)"} />
+                    <stop offset="100%" stopColor="var(--primary)" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div className="absolute inset-0 flex flex-col items-center justify-center">
+                <span className="text-2xl leading-none font-bold font-mono text-foreground tabular-nums">{displayScore}</span>
+                <span className={cn("mt-0.5 text-[9px] leading-none font-mono uppercase tracking-wide whitespace-nowrap", meta.textClass)} title={meta.label}>
+                  /100
+                </span>
               </div>
-
-              {/* Category badges — podem encolher em janelas estreitas. */}
-              {pcState && (
-                <div className="grid grid-cols-1 min-w-0">
-                  {([
-                    { key: "security" as const, label: "Segurança" },
-                    { key: "performance" as const, label: "Desempenho" },
-                    { key: "system" as const, label: "Sistema" },
-                    { key: "privacy" as const, label: "Privacidade" },
-                  ]).map(({ key, label }) => {
-                    const catMeta = LEVEL_META[pcState[key]];
-                    return (
-                      <div key={key} className="flex min-w-0 items-center gap-2 px-2 py-1 rounded-lg bg-white/[0.04] border border-white/[0.06]">
-                        <div className={cn("w-1.5 h-1.5 rounded-full shrink-0", catMeta.dotClass)} />
-                        <span className="text-[11px] font-mono text-muted-foreground truncate">{label}</span>
-                        <span className={cn("text-[10px] font-mono font-semibold whitespace-nowrap shrink-0", catMeta.textClass)}>{catMeta.label}</span>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
             </div>
 
-            {/* CTA */}
-            <div className="flex flex-col gap-2 shrink-0">
+            <div className="flex min-w-0 flex-col items-start gap-1">
               <button
                 onClick={() => setDetailsOpen(true)}
                 title={`Estado geral: ${meta.label}`}
-                className={cn("px-4 py-2 rounded-lg font-mono text-xs font-semibold whitespace-nowrap transition-all hover:brightness-110", meta.chipClass, meta.textClass)}
+                className={cn(
+                  "px-3 py-1.5 rounded-lg font-mono text-xs font-semibold whitespace-nowrap transition-all hover:brightness-110",
+                  meta.chipClass,
+                  meta.textClass,
+                )}
               >
-                <div className="flex items-center gap-2">
-                  <div className={cn("w-2 h-2 rounded-full shrink-0 cyber-pulse", meta.dotClass)} />
-                  <span>{statusLabel}</span>
-                </div>
+                <span className="flex items-center gap-2">
+                  <span className={cn("w-2 h-2 rounded-full shrink-0 cyber-pulse", meta.dotClass)} />
+                  {statusLabel}
+                </span>
               </button>
-              <span className="text-[10px] font-mono text-muted-foreground text-center whitespace-nowrap">
+              <span className="text-[10px] font-mono text-muted-foreground whitespace-nowrap">
                 {dashboard.engineHealth?.definitionsUpdatedAt
-                  ? `Atualizado: ${new Date(dashboard.engineHealth.definitionsUpdatedAt).toLocaleTimeString()}`
-                  : "Definições:—"}
+                  ? `Definições: ${new Date(dashboard.engineHealth.definitionsUpdatedAt).toLocaleDateString("pt-PT")}`
+                  : "Definições: sem data"}
               </span>
             </div>
           </div>
-        </div>
-      </div>
 
-      {/* ═══ CAMADA 2 — O QUE PRECISA DE ATENÇÃO AGORA ═══ */}
+          {/* Quatro frentes numa linha: a cor já diz o estado, não repetimos palavras. */}
+          {pcState && (
+            <div className="order-3 flex flex-wrap items-center gap-1.5 sm:w-auto w-full">
+              {([
+                { key: "security" as const, label: "Segurança" },
+                { key: "performance" as const, label: "Desempenho" },
+                { key: "system" as const, label: "Sistema" },
+                { key: "privacy" as const, label: "Privacidade" },
+              ]).map(({ key, label }) => {
+                const catMeta = LEVEL_META[pcState[key]];
+                return (
+                  <span
+                    key={key}
+                    title={`${label}: ${catMeta.label}`}
+                    className="flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/[0.04] border border-white/[0.06]"
+                  >
+                    <span className={cn("w-1.5 h-1.5 rounded-full shrink-0", catMeta.dotClass)} />
+                    <span className="text-[10px] font-mono text-muted-foreground">{label}</span>
+                  </span>
+                );
+              })}
+            </div>
+          )}
+        </div>
+      </section>
+
+      {/* ═══ CAMADA 2 — PRIORIDADES (a única vez que as frases de aviso aparecem) ═══ */}
       {pcState && (pcState.counts.urgent + pcState.counts.attention > 0) && (
         <section>
-          <div className="flex items-center gap-2 mb-3">
+          <div className="flex items-center gap-2 mb-2">
             <AlertTriangle className="w-4 h-4 text-cyber-yellow" />
             <h2 className="text-sm font-mono font-bold text-foreground uppercase tracking-wider">O que precisa de atenção</h2>
           </div>
@@ -179,31 +174,21 @@ export default function DashboardPage({ dashboard, isLoading, hardware, pcState,
         </section>
       )}
 
-      {/* ═══ CAMADA 3 — TELEMETRIA E MÉTRICAS ═══ */}
-      <section>
-        <div className="flex items-center justify-between mb-3">
-          <div>
-            <h2 className="text-sm font-mono font-bold text-foreground uppercase tracking-wider">Telemetria</h2>
-            <p className="text-xs text-muted-foreground mt-0.5">Dados reais do serviço de proteção</p>
-          </div>
+      {/* ═══ CAMADA 3 — O QUE O PC ESTÁ A FAZER AGORA ═══ */}
+      <section className="space-y-3">
+        <div className="flex items-baseline justify-between gap-3">
+          <h2 className="text-sm font-mono font-bold text-foreground uppercase tracking-wider">Estado do computador</h2>
+          <span className="text-[10px] font-mono text-muted-foreground">medido agora pelo serviço</span>
         </div>
 
-        {/* Stats row */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
-          <StatCard label="Eventos" value={dashboard.totalEvents.toString()} icon={Activity} color="cyan" />
-          <StatCard label="Ameaças" value={dashboard.highSeverityEvents.toString()} icon={AlertTriangle} color={dashboard.highSeverityEvents > 0 ? "red" : "green"} />
-          <StatCard label="Downloads" value={dashboard.downloadRisk.toUpperCase()} icon={Download} color={dashboard.downloadRisk === "low" ? "green" : dashboard.downloadRisk === "medium" ? "yellow" : "red"} isText />
-          <StatCard label="Quarentena" value={pcState ? `${pcState.findings.length}` : "—"} icon={Shield} color="cyan" />
-        </div>
-
-        {/* Hardware metrics */}
-        <div className="grid grid-cols-2 lg:grid-cols-4 gap-4 mb-4">
+        {/* As quatro métricas que interessam no dia a dia. */}
+        <div className="grid grid-cols-2 lg:grid-cols-4 gap-3">
           {hardware ? (
             <>
-              <MetricBar label="CPU" subValue={`${cpuTemp.text}${hardware.cpu.model ? ` · ${hardware.cpu.model}` : ""}`} value={hardware.cpu.usage || 0} icon={Cpu} alert={hardware.alerts.find((a) => a.category === "cpu")?.title} sparkline={<TelemetrySparkline samples={cpuSamples} height={32} width={160} showArea />} />
-              <MetricBar label="RAM" subValue={`${hardware.ram.usedGb}/${hardware.ram.totalGb} GB`} value={hardware.ram.usagePercent || 0} icon={HardDrive} alert={hardware.alerts.find((a) => a.category === "ram")?.title} sparkline={<TelemetrySparkline samples={ramSamples} height={32} width={160} showArea />} />
-              <MetricBar label="Disco" subValue={`${hardware.disk.usedGb}/${hardware.disk.totalGb} GB`} value={hardware.disk.usagePercent || 0} icon={HardDrive} alert={hardware.alerts.find((a) => a.category === "disk")?.title} />
-              <MetricBar label="Rede" subValue={formatThroughput(hardware.network.rxSec)} value={Math.min(100, (hardware.network.rxSec || 0) / 1024 / 100)} icon={Wifi} sparkline={<TelemetrySparkline samples={netRxSamples} height={32} width={160} showArea />} />
+              <MetricBar label="CPU" subValue={`${cpuTemp.text}${hardware.cpu.model ? ` · ${hardware.cpu.model}` : ""}`} value={hardware.cpu.usage || 0} icon={Cpu} alertTitle={hardware.alerts.find((a) => a.category === "cpu")?.title} sparkline={<TelemetrySparkline samples={cpuSamples} height={28} width={150} showArea />} />
+              <MetricBar label="RAM" subValue={`${hardware.ram.usedGb.toFixed(1)} de ${hardware.ram.totalGb} GB usados`} value={hardware.ram.usagePercent || 0} icon={MemoryStick} alertTitle={hardware.alerts.find((a) => a.category === "ram")?.title} sparkline={<TelemetrySparkline samples={ramSamples} height={28} width={150} showArea />} />
+              <DiskMetric disk={hardware.disk} alertTitle={hardware.alerts.find((a) => a.category === "disk")?.title} />
+              <MetricBar label="Rede" subValue={`a receber ${formatThroughput(hardware.network.rxSec)}`} value={Math.min(100, (hardware.network.rxSec || 0) / 1024 / 100)} icon={Wifi} sparkline={<TelemetrySparkline samples={netRxSamples} height={28} width={150} showArea />} />
             </>
           ) : (
             <>
@@ -215,87 +200,91 @@ export default function DashboardPage({ dashboard, isLoading, hardware, pcState,
           )}
         </div>
 
+        {/* GPU/VRAM: informação secundária — uma linha, não quatro cartões. */}
         {hardware?.gpu && (
-          <div className="grid grid-cols-2 gap-4 mb-4">
-            <MetricBar label="GPU" subValue={`${gpuTemp.text}${hardware.gpu.model ? ` · ${hardware.gpu.model}` : ""}`} value={hardware.gpu.usagePercent ?? 0} icon={Cpu} alert={hardware?.alerts.find((a) => a.category === "gpu")?.title} sparkline={<TelemetrySparkline samples={gpuSamples} height={32} width={160} showArea />} />
-            {hardware.gpu.vramTotalMb && (
-              <MetricBar label="VRAM" subValue={`${((hardware.gpu.vramUsedMb ?? 0) / 1024).toFixed(1)}/${(hardware.gpu.vramTotalMb / 1024).toFixed(1)} GB`} value={hardware.gpu.vramUsedMb ? (hardware.gpu.vramUsedMb / hardware.gpu.vramTotalMb) * 100 : 0} icon={Cpu} />
+          <div className="flex flex-wrap items-center gap-x-4 gap-y-1 px-3 py-2 rounded-lg border border-white/[0.06] bg-white/[0.02]">
+            <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">Secundário</span>
+            <span className="text-[11px] font-mono text-foreground">
+              GPU {hardware.gpu.usagePercent !== null && hardware.gpu.usagePercent !== undefined ? `${hardware.gpu.usagePercent.toFixed(0)}%` : "sem leitura"}
+            </span>
+            {hardware.gpu.vramTotalMb ? (
+              <span className="text-[11px] font-mono text-muted-foreground">
+                VRAM {((hardware.gpu.vramUsedMb ?? 0) / 1024).toFixed(1)} de {(hardware.gpu.vramTotalMb / 1024).toFixed(1)} GB
+              </span>
+            ) : (
+              <span className="text-[11px] font-mono text-muted-foreground">VRAM sem leitura</span>
+            )}
+            <span className="text-[11px] font-mono text-muted-foreground">{gpuTemp.text}</span>
+            {hardware.gpu.model && <span className="text-[11px] font-mono text-muted-foreground truncate max-w-[220px]">{hardware.gpu.model}</span>}
+            {hardware.alerts.find((a) => a.category === "gpu") && (
+              <span className="text-[11px] font-mono text-cyber-yellow">{hardware.alerts.find((a) => a.category === "gpu")?.title}</span>
             )}
           </div>
         )}
 
-        {/* Quick actions */}
-        <div className="grid grid-cols-3 gap-3 mb-4">
-          <ScanButton label="Rápida" sub="Áreas prioritárias do PC" icon={Search} color="cyan" scanType="quick" onScan={onScan} />
-          <ScanButton label="Profunda" sub="Verificação do sistema" icon={Play} color="yellow" scanType="full" onScan={onScan} />
-          <ScanButton label="Pasta" sub="Ficheiros de uma pasta" icon={FolderSearch} color="primary" scanType="custom" onScan={onScan} />
+        {/* Contagem de atividade — discretos, ao lado um do outro. */}
+        <div className="flex flex-wrap items-stretch gap-3">
+          <StatCard label="Eventos" value={dashboard.totalEvents.toString()} icon={Activity} color="foreground" />
+          <StatCard label="Ameaças graves" value={dashboard.highSeverityEvents.toString()} icon={AlertTriangle} color={dashboard.highSeverityEvents > 0 ? "red" : "green"} />
+          <StatCard label="Downloads" value={DOWNLOAD_RISK_LABEL[dashboard.downloadRisk]} icon={Download} color={dashboard.downloadRisk === "low" ? "green" : dashboard.downloadRisk === "medium" ? "yellow" : "red"} isText />
+          <StatCard label="Recomendações" value={pcState ? `${pcState.findings.length}` : "—"} icon={Shield} color="foreground" />
         </div>
 
-        {/* Alerts + Threats */}
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          <div className="stat-card p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-mono text-xs font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
-                <Activity className="w-3.5 h-3.5 text-primary" />
-                Alertas Recentes
-              </h3>
-              <span className="text-[10px] font-mono text-muted-foreground">
-                {dashboard.alerts.length} registos
-              </span>
-            </div>
-            {dashboard.alerts.length === 0 ? (
-              <div className="flex flex-col items-center py-8 text-center">
-                <CheckCircle2 className="w-8 h-8 text-cyber-green mb-2" />
-                <p className="text-xs text-muted-foreground">Nenhum alerta severo</p>
-              </div>
-            ) : (
-              <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                {dashboard.alerts.map((alert) => (
-                  <div key={alert.id} className="flex items-center justify-between p-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
-                    <span className="text-[11px] font-mono text-foreground truncate">{alert.title}</span>
-                    <span className="text-[9px] font-mono text-cyber-red uppercase shrink-0 ml-2">{alert.severity}</span>
-                  </div>
-                ))}
-              </div>
-            )}
+        {/* Ações do Scanner: um grupo só, com a primaria destacada. */}
+        <div className="stat-card p-3">
+          <div className="flex items-baseline justify-between gap-3 mb-2">
+            <h3 className="text-xs font-mono font-semibold text-foreground uppercase tracking-wider">Procurar ameaças</h3>
+            <span className="text-[10px] font-mono text-muted-foreground">demora uns minutos; podes continuar a usar o PC</span>
           </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <ScanButton label="Verificação rápida" sub="Áreas onde os problemas costumam estar" icon={Search} tone="primary" scanType="quick" onScan={onScan} />
+            <ScanButton label="Verificação completa" sub="Todo o computador, ficheiro a ficheiro" icon={Play} tone="ghost" scanType="full" onScan={onScan} />
+            <ScanButton label="Analisar uma pasta" sub="Escolhes a pasta e só ela é vista" icon={FolderSearch} tone="ghost" scanType="custom" onScan={onScan} />
+          </div>
+        </div>
 
-          <div className="stat-card p-4">
-            <div className="flex items-center justify-between mb-4">
-              <h3 className="font-mono text-xs font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
-                <Shield className="w-3.5 h-3.5 text-primary" />
-                Ameaças Recentes
-              </h3>
-            </div>
-            {dashboard.recentThreats.length === 0 ? (
-              <div className="flex flex-col items-center py-8 text-center">
-                <Shield className="w-8 h-8 text-primary mb-2" />
-                <p className="text-xs text-muted-foreground">Nenhuma ameaça detetada</p>
+        {/* Alertas + Ameaças: só listas com conteúdo ganham espaço. */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+          <ListPanel
+            title="Alertas recentes"
+            icon={Activity}
+            empty="Nenhum alerta grave. Não há nada aqui para ver."
+            count={`${dashboard.alerts.length}`}
+          >
+            {dashboard.alerts.map((alert) => (
+              <div key={alert.id} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+                <span className="text-[11px] font-mono text-foreground truncate">{alert.title}</span>
+                <span className="text-[9px] font-mono text-cyber-red uppercase shrink-0">{alert.severity}</span>
               </div>
-            ) : (
-              <div className="space-y-1.5 max-h-40 overflow-y-auto">
-                {dashboard.recentThreats.slice(0, 5).map((threat, i) => (
-                  <div key={`${threat.createdAt}-${i}`} className="flex items-center justify-between p-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
-                    <div className="flex items-center gap-2 min-w-0">
-                      <div className={cn("w-1.5 h-1.5 rounded-full shrink-0",
-                        threat.severity === "critical" ? "bg-cyber-red"
-                          : threat.severity === "high" ? "bg-cyber-yellow" : "bg-cyber-cyan",
-                      )} />
-                      <span className="text-[11px] font-mono text-foreground truncate">{threat.domain}</span>
-                    </div>
-                    <span className={cn(
-                      "text-[9px] font-mono uppercase px-1.5 py-0.5 rounded border shrink-0 ml-2",
-                      threat.severity === "critical" ? "bg-cyber-red/10 text-cyber-red border-cyber-red/30"
-                        : threat.severity === "high" ? "bg-cyber-yellow/10 text-cyber-yellow border-cyber-yellow/30"
-                          : "bg-cyber-cyan/10 text-cyber-cyan border-cyber-cyan/30",
-                    )}>
-                      {threat.severity}
-                    </span>
-                  </div>
-                ))}
+            ))}
+          </ListPanel>
+
+          <ListPanel
+            title="Ameaças recentes"
+            icon={Shield}
+            empty="Nenhuma ameaça detetada. Continua tranquilo."
+            count={`${dashboard.recentThreats.length}`}
+          >
+            {dashboard.recentThreats.slice(0, 5).map((threat, i) => (
+              <div key={`${threat.createdAt}-${i}`} className="flex items-center justify-between gap-2 p-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
+                <div className="flex items-center gap-2 min-w-0">
+                  <span className={cn("w-1.5 h-1.5 rounded-full shrink-0",
+                    threat.severity === "critical" ? "bg-cyber-red"
+                      : threat.severity === "high" ? "bg-cyber-yellow" : "bg-cyber-cyan",
+                  )} />
+                  <span className="text-[11px] font-mono text-foreground truncate">{threat.domain}</span>
+                </div>
+                <span className={cn(
+                  "text-[9px] font-mono uppercase px-1.5 py-0.5 rounded border shrink-0",
+                  threat.severity === "critical" ? "bg-cyber-red/10 text-cyber-red border-cyber-red/30"
+                    : threat.severity === "high" ? "bg-cyber-yellow/10 text-cyber-yellow border-cyber-yellow/30"
+                      : "bg-cyber-cyan/10 text-cyber-cyan border-cyber-cyan/30",
+                )}>
+                  {threat.severity}
+                </span>
               </div>
-            )}
-          </div>
+            ))}
+          </ListPanel>
         </div>
       </section>
 
@@ -308,47 +297,49 @@ interface StatCardProps {
   label: string;
   value: string;
   icon: React.ElementType;
-  color: "cyan" | "green" | "red" | "yellow";
+  color: "cyan" | "green" | "red" | "yellow" | "foreground";
   isText?: boolean;
 }
 
+/** Contagem discreta: o valor é que interessa, não a cor do ícone. */
 function StatCard({ label, value, icon: Icon, color, isText }: StatCardProps) {
-  const colorClasses = {
+  const colorClasses: Record<StatCardProps["color"], string> = {
     cyan: "text-cyber-cyan",
     green: "text-cyber-green",
     red: "text-cyber-red",
     yellow: "text-cyber-yellow",
+    foreground: "text-foreground",
   };
 
   return (
-    <div className="stat-card p-4 flex items-center gap-3">
-      <div className={cn("w-9 h-9 rounded-lg flex items-center justify-center shrink-0", `bg-${color === "cyan" ? "cyber-cyan" : color === "green" ? "cyber-green" : color === "red" ? "cyber-red" : "cyber-yellow"}/10`)}>
-        <Icon className={cn("w-4 h-4", colorClasses[color])} />
-      </div>
+    <div className="stat-card px-3 py-2 flex items-center gap-2.5 min-w-[150px] flex-1">
+      <Icon className={cn("w-4 h-4 shrink-0", colorClasses[color])} />
       <div className="min-w-0">
         <span className="text-[10px] font-mono text-muted-foreground uppercase tracking-wider block">{label}</span>
-        <span className={cn(isText ? "text-sm" : "text-xl", "font-bold font-mono", colorClasses[color])}>{value}</span>
+        <span className={cn(isText ? "text-sm" : "text-lg", "font-bold font-mono tabular-nums", colorClasses[color])}>{value}</span>
       </div>
     </div>
   );
 }
 
+/** "MEDIUM" a gritar em maiúsculas não é linguagem de pessoa. */
+const DOWNLOAD_RISK_LABEL: Record<Severity, string> = {
+  low: "Baixo",
+  medium: "Médio",
+  high: "Alto",
+  critical: "Crítico",
+};
+
 interface ScanButtonProps {
   label: string;
   sub: string;
   icon: React.ElementType;
-  color: "cyan" | "yellow" | "primary";
+  tone: "primary" | "ghost";
   scanType: "quick" | "full" | "custom";
   onScan?: (type: string, targetPath?: string) => void;
 }
 
-function ScanButton({ label, sub, icon: Icon, color, scanType, onScan }: ScanButtonProps) {
-  const colorMap = {
-    cyan: "bg-cyber-cyan/10 text-cyber-cyan",
-    yellow: "bg-cyber-yellow/10 text-cyber-yellow",
-    primary: "bg-primary/10 text-primary",
-  };
-
+function ScanButton({ label, sub, icon: Icon, tone, scanType, onScan }: ScanButtonProps) {
   const handleClick = async () => {
     if (scanType === "custom") {
       // Botão "Pasta": tem de abrir o seletor de PASTAS, não de ficheiros.
@@ -364,15 +355,16 @@ function ScanButton({ label, sub, icon: Icon, color, scanType, onScan }: ScanBut
   return (
     <button
       onClick={handleClick}
-      className="stat-card p-3 flex items-center gap-3 hover:border-primary/30 transition-all group text-left"
+      title={sub}
+      className={cn(
+        "flex items-center gap-2 rounded-lg px-3 py-2 font-mono text-xs transition-all border",
+        tone === "primary"
+          ? "bg-primary/15 border-primary/40 text-primary font-semibold hover:bg-primary/25"
+          : "bg-white/[0.03] border-white/[0.08] text-foreground hover:bg-white/[0.07]",
+      )}
     >
-      <div className={cn("w-8 h-8 rounded-lg flex items-center justify-center shrink-0 group-hover:scale-110 transition-transform", colorMap[color])}>
-        <Icon className="w-4 h-4" />
-      </div>
-      <div className="min-w-0">
-        <span className="text-xs font-mono font-semibold text-foreground block">{label}</span>
-        <span className="text-[10px] text-muted-foreground">{sub}</span>
-      </div>
+      <Icon className="w-3.5 h-3.5 shrink-0" />
+      {label}
     </button>
   );
 }
@@ -382,7 +374,14 @@ interface MetricBarProps {
   value: number;
   subValue?: string;
   icon: React.ElementType;
-  alert?: string;
+  /**
+   * Aviso calculado pelo motor. Não se imprime aqui — a lista de prioridades
+   * já o diz, e repeti-lo em cada cartão era a fonte do "ecrã todo em alerta".
+   * Continua acessível no `title` da barra.
+   */
+  alertTitle?: string;
+  hint?: string;
+  sparkline?: React.ReactNode;
 }
 
 function formatThroughput(bytes: number): string {
@@ -392,36 +391,119 @@ function formatThroughput(bytes: number): string {
   return `${(bytes / 1024 / 1024).toFixed(1)} MB/s`;
 }
 
-function MetricBar({ label, value, subValue, icon: Icon, alert, sparkline }: MetricBarProps & { sparkline?: React.ReactNode }) {
+function metricColor(val: number) {
+  if (val < 60) return "bg-cyber-green";
+  if (val < 85) return "bg-cyber-yellow";
+  return "bg-cyber-red";
+}
+
+function MetricBar({ label, value, subValue, icon: Icon, alertTitle, hint, sparkline }: MetricBarProps) {
   const safeValue = Number.isFinite(value) ? Math.min(100, Math.max(0, value)) : 0;
 
-  const getColor = (val: number) => {
-    if (val < 60) return "bg-cyber-green";
-    if (val < 85) return "bg-cyber-yellow";
-    return "bg-cyber-red";
-  };
+  return (
+    <div className="stat-card p-3 flex flex-col justify-between gap-1" title={alertTitle}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <Icon className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+          <span className="font-mono text-xs text-foreground font-semibold">{label}</span>
+        </div>
+        <span className="font-mono text-xs text-muted-foreground tabular-nums">{safeValue.toFixed(0)}%</span>
+      </div>
+
+      <div className="text-[10px] font-mono text-muted-foreground truncate">{subValue}</div>
+
+      {sparkline && <div className="mt-1">{sparkline}</div>}
+
+      <div className="mt-1">
+        <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
+          <div className={cn("h-full transition-all duration-500", metricColor(safeValue))} style={{ width: `${safeValue}%` }} />
+        </div>
+        {hint && <div className="text-[9px] font-mono text-muted-foreground mt-1 leading-snug">{hint}</div>}
+      </div>
+    </div>
+  );
+}
+
+/**
+ * Disco em três linhas, por ordem: o dado (espaço LIVRE), o significado e a
+ * orientação. "62% usado" não diz a ninguém o que fazer.
+ */
+function DiskMetric({ disk, alertTitle }: { disk: HardwareSnapshot["disk"]; alertTitle?: string }) {
+  const guidance = describeDiskSpace(disk.usedGb, disk.totalGb);
+  const usedPercent = Number.isFinite(disk.usagePercent)
+    ? Math.min(100, Math.max(0, disk.usagePercent))
+    : 0;
 
   return (
-    <div className="stat-card p-3 flex flex-col justify-between">
-      <div>
-        <div className="flex items-center justify-between mb-0.5">
-          <div className="flex items-center gap-1.5">
-            <Icon className="w-3.5 h-3.5 text-primary" />
-            <span className="font-mono text-xs text-foreground font-semibold">{label}</span>
-          </div>
-          <span className="font-mono text-xs text-muted-foreground">{safeValue.toFixed(0)}%</span>
+    <div className="stat-card p-3 flex flex-col justify-between gap-1" title={alertTitle}>
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex items-center gap-1.5 min-w-0">
+          <HardDrive className="w-3.5 h-3.5 shrink-0 text-muted-foreground" />
+          <span className="font-mono text-xs text-foreground font-semibold">Disco</span>
         </div>
-        <div className="text-[10px] font-mono text-muted-foreground truncate">{subValue}</div>
+        <span
+          className={cn(
+            "font-mono text-xs tabular-nums",
+            guidance.urgency === "critical" ? "text-cyber-red" : guidance.urgency === "tight" ? "text-cyber-yellow" : "text-muted-foreground",
+          )}
+        >
+          {guidance.freeText}
+        </span>
       </div>
 
-      {sparkline && <div className="mt-2">{sparkline}</div>}
+      <div className="text-[10px] font-mono text-muted-foreground truncate">
+        {guidance.totalGb ? `${guidance.totalGb} GB no total · ${usedPercent.toFixed(0)}% usado` : "sem leitura do volume"}
+      </div>
 
-      <div className="mt-2">
+      <div className="mt-1">
         <div className="h-1.5 bg-secondary rounded-full overflow-hidden">
-          <div className={`h-full ${getColor(safeValue)} transition-all duration-500`} style={{ width: `${safeValue}%` }} />
+          <div className={cn("h-full transition-all duration-500", metricColor(usedPercent))} style={{ width: `${usedPercent}%` }} />
         </div>
-        {alert && <div className="text-[9px] text-cyber-red mt-1 animate-pulse">{alert}</div>}
+        {/* A orientação é texto, não botão: não há ação de limpeza no backend. */}
+        {guidance.action ? (
+          <div className="text-[9px] font-mono mt-1 leading-snug text-cyber-yellow">{guidance.action}</div>
+        ) : (
+          <div className="text-[9px] font-mono mt-1 leading-snug text-muted-foreground">{guidance.meaning}</div>
+        )}
       </div>
+    </div>
+  );
+}
+
+interface ListPanelProps {
+  title: string;
+  icon: React.ElementType;
+  count: string;
+  /** Copy do empty state — uma linha, sem ícone gigante. */
+  empty: string;
+  children: React.ReactNode;
+}
+
+function ListPanel({ title, icon: Icon, count, empty, children }: ListPanelProps) {
+  const hasItems = Array.isArray(children) ? children.length > 0 : !!children;
+
+  return (
+    <div className="stat-card p-3">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="font-mono text-xs font-semibold text-foreground uppercase tracking-wider flex items-center gap-2">
+          <Icon className="w-3.5 h-3.5 text-muted-foreground" />
+          {title}
+        </h3>
+        <span className="text-[10px] font-mono text-muted-foreground tabular-nums">{count}</span>
+      </div>
+      {hasItems ? (
+        <div
+          className="space-y-1.5 max-h-36 overflow-y-auto pr-1"
+          style={{ scrollbarWidth: "thin", scrollbarColor: "color-mix(in oklch, var(--muted-foreground) 30%, transparent) transparent" }}
+        >
+          {children}
+        </div>
+      ) : (
+        <p className="flex items-center gap-2 py-2 text-[11px] font-mono text-muted-foreground">
+          <CheckCircle2 className="w-3.5 h-3.5 shrink-0 text-cyber-green" />
+          {empty}
+        </p>
+      )}
     </div>
   );
 }
@@ -456,11 +538,12 @@ const LEVEL_META: Record<PcStateLevel, { label: string; chipClass: string; textC
   },
 };
 
+/** Rótulos em português, sempre — a UI não mostra "URGENT"/"ATTENTION" crus. */
 const SEVERITY_LABEL: Record<Finding["severity"], string> = {
-  urgent: "PROBLEMA",
+  urgent: "AGORA",
   attention: "PROBLEMA",
   recommended: "MELHORIA",
-  informative: "RECOMENDAÇÃO",
+  informative: "NOTA",
 };
 
 function severityChip(f: Finding) {
@@ -522,7 +605,7 @@ function PcStateAttention({ pcState, onShowDetails }: { pcState: PcState; onShow
           {problems.filter((f) => f.id !== principalFinding?.id).slice(0, 3).map((f) => (
             <div key={f.id} className="flex items-center justify-between p-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
               <span className="text-[11px] font-mono text-foreground truncate">{f.title}</span>
-              <span className={severityChip(f)}>{f.severity.toUpperCase()}</span>
+              <span className={severityChip(f)}>{SEVERITY_LABEL[f.severity]}</span>
             </div>
           ))}
         </div>

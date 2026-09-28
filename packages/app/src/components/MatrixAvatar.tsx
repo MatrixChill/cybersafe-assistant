@@ -1,21 +1,28 @@
 import { cn } from "@/lib/utils";
 import { useState } from "react";
 import { useAppearance } from "@/contexts/AppearanceContext";
+import { publicAssetUrl } from "../lib/publicAssetUrl";
 
 type Mood = "safe" | "guide" | "alert" | "success" | "happy" | "defender" | "avatar" | "mini";
 
 // Retratos oficiais da Matrix (variante "bust" — rosto e ombros — para avatares
 // pequenos/redondos; avatar/mini já são quadrados focados no rosto).
-const MOOD_ASSET: Record<Mood, string> = {
-  safe: "/branding/matrix/matrix-safe-bust-96.png",
-  guide: "/branding/matrix/matrix-guide-bust-96.png",
-  alert: "/branding/matrix/matrix-alert-bust-96.png",
-  success: "/branding/matrix/matrix-success-bust-96.png",
-  happy: "/branding/matrix/matrix-happy-bust-96.png",
-  defender: "/branding/matrix/matrix-defender-bust-96.png",
-  avatar: "/branding/matrix/matrix-avatar-96.png",
-  mini: "/branding/matrix/matrix-mini-96.png",
+// Só o nome do ficheiro: a resolução do path vive em lib/publicAssetUrl, para
+// funcionar igual em dev, staged e empacotado (file://).
+const MOOD_FILE: Record<Mood, string> = {
+  safe: "matrix-safe-bust-96.png",
+  guide: "matrix-guide-bust-96.png",
+  alert: "matrix-alert-bust-96.png",
+  success: "matrix-success-bust-96.png",
+  happy: "matrix-happy-bust-96.png",
+  defender: "matrix-defender-bust-96.png",
+  avatar: "matrix-avatar-96.png",
+  mini: "matrix-mini-96.png",
 };
+
+function matrixAvatarUrl(mood: Mood): string {
+  return publicAssetUrl("branding", "matrix", MOOD_FILE[mood]);
+}
 
 interface MatrixAvatarProps {
   mood?: Mood;
@@ -55,7 +62,7 @@ export function MatrixAvatar({ mood = "safe", size = "md", className, rounded = 
     >
       {!hasError ? (
         <img
-          src={MOOD_ASSET[mood]}
+          src={matrixAvatarUrl(mood)}
           alt="Matrix"
           className="w-full h-full object-cover"
           onError={() => setHasError(true)}

@@ -67,6 +67,7 @@ export const FEATURES = {
 export type FeatureKey = (typeof FEATURES)[keyof typeof FEATURES];
 export type AccountType = "personal" | "business";
 export type PlanType = "free" | "pro" | "premium";
+export type Role = "user" | "admin";
 
 interface PlanDefinition {
   name: string;
@@ -151,7 +152,13 @@ export function getUserFeatures(accountType: AccountType, plan: PlanType): Featu
   const accountSpecific = accountType === "business" ? BUSINESS_SPECIFIC_FEATURES : PERSONAL_SPECIFIC_FEATURES;
   
   if (plan === "premium") {
-    return [...planFeatures, ...accountSpecific, ...Object.values(FEATURES)];
+    // Include all features EXCEPT business-specific ones for non-business accounts.
+    // BUSINESS_SPECIFIC_FEATURES are already in accountSpecific for business accounts,
+    // so filtering them out of the spread prevents personal-premium from leaking them.
+    const allFeatures = (Object.values(FEATURES) as FeatureKey[]).filter(
+      (f) => accountType === "business" || !BUSINESS_SPECIFIC_FEATURES.includes(f)
+    );
+    return [...new Set([...planFeatures, ...accountSpecific, ...allFeatures])];
   }
   if (plan === "pro") {
     return [...planFeatures, ...accountSpecific];
@@ -215,14 +222,28 @@ export function isBusinessFeature(feature: FeatureKey): boolean {
   return BUSINESS_SPECIFIC_FEATURES.includes(feature);
 }
 
-export function canAccess(feature: FeatureKey, accountType: AccountType, plan: PlanType): boolean {
+export function canAccess(feature: FeatureKey, accountType: AccountType, plan: PlanType, role: Role = "user"): boolean {
   // Business Security Center básico é associado ao ACCOUNT TYPE, não ao plano.
   // Qualquer conta Business — incluindo o plano free — pode aceder.
   // Contas Personal não podem aceder, independentemente do plano.
+  // Exceção: role "admin" também acede (ex. conta de desenvolvimento),
+  // sem deixar de ser uma conta Personal.
   if (feature === FEATURES.BUSINESS_SECURITY_CENTER) {
-    return accountType === "business";
+    return accountType === "business" || role === "admin";
   }
   return getUserFeatures(accountType, plan).includes(feature);
+}
+
+export interface FeatureAccessUser {
+  type: AccountType;
+  plan: PlanType;
+  role?: Role;
+}
+
+// Fonte de verdade única usada por Sidebar e App: deriva accountType/plan/role
+// do utilizador autenticado, com fallbacks defensivos para payloads antigos.
+export function canUserAccess(feature: FeatureKey, user: FeatureAccessUser | null | undefined): boolean {
+  return canAccess(feature, user?.type ?? "personal", user?.plan ?? "free", user?.role ?? "user");
 }
 
 export function canAccessLegacy(feature: FeatureKey, tier: SubscriptionTier): boolean {

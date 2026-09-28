@@ -1,5 +1,5 @@
 import { createContext, useContext, useState, useEffect, useCallback, type ReactNode } from "react";
-import type { AccountType, PlanType } from "../lib/featureControl";
+import type { AccountType, PlanType, Role } from "../lib/featureControl";
 
 export interface Company {
   name: string;
@@ -13,6 +13,7 @@ export interface AuthUser {
   email: string;
   type: AccountType;
   plan: PlanType;
+  role: Role;
   company?: Company;
   createdAt: string;
 }
@@ -45,6 +46,36 @@ const AuthContext = createContext<AuthContextType | null>(null);
 const API_BASE = "http://localhost:4000";
 const TOKEN_KEY = "cybersafe_token";
 
+// Bootstrap DEV: conta de desenvolvimento auto-registada (ver autoLogin).
+// Este é o único sítio onde o email identifica a conta dev — a autorização
+// de features usa sempre user.role (featureControl).
+const DEV_ACCOUNT = {
+  email: "admin@cybersafe.local",
+  password: "CyberSafe2026!",
+} as const;
+
+// Payloads antigos (sem role) ou com role inválido degradam para "user".
+function normalizeUser(raw: Omit<AuthUser, "role"> & { role?: Role }): AuthUser {
+  return { ...raw, role: raw.role === "admin" ? "admin" : "user" };
+}
+
+// Garante que a conta dev tem role "admin" (promoção feita pela API via
+// POST /auth/dev/ensure-admin). Silencioso em falha: mantém-se o role do login.
+async function ensureDevAdminRole(user: AuthUser, token: string): Promise<AuthUser> {
+  if (user.email !== DEV_ACCOUNT.email || user.role === "admin") return user;
+  try {
+    const res = await fetch(`${API_BASE}/auth/dev/ensure-admin`, {
+      method: "POST",
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    if (!res.ok) return user;
+    const data = await res.json();
+    return data?.user ? normalizeUser(data.user) : user;
+  } catch {
+    return user;
+  }
+}
+
 // ── Provider ──
 export function AuthProvider({ children }: { children: ReactNode }) {
   const [user, setUser] = useState<AuthUser | null>(null);
@@ -59,12 +90,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       fetch(`${API_BASE}/auth/me`, {
         headers: { Authorization: `Bearer ${token}` },
       })
-        .then((res) => {
+        .then(async (res) => {
           if (!res.ok) throw new Error("Invalid token");
           return res.json();
         })
-        .then((data) => {
-          setUser(data.user);
+        .then(async (data) => {
+          // DB legada ainda não promovida: o bootstrap dev garante o role admin.
+          const user = normalizeUser(data.user);
+          setUser(await ensureDevAdminRole(user, token));
         })
         .catch(() => {
           localStorage.removeItem(TOKEN_KEY);
@@ -84,7 +117,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         let res = await fetch(`${API_BASE}/auth/login`, {
           method: "POST",
           headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ email: "admin@cybersafe.local", password: "CyberSafe2026!" }),
+          body: JSON.stringify({ email: DEV_ACCOUNT.email, password: DEV_ACCOUNT.password }),
         });
 
         // If test account doesn't exist, register it
@@ -94,8 +127,8 @@ export function AuthProvider({ children }: { children: ReactNode }) {
             headers: { "Content-Type": "application/json" },
             body: JSON.stringify({
               name: "CyberSafe Admin",
-              email: "admin@cybersafe.local",
-              password: "CyberSafe2026!",
+              email: DEV_ACCOUNT.email,
+              password: DEV_ACCOUNT.password,
               type: "personal",
               plan: "premium",
             }),
@@ -105,7 +138,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         if (res.ok) {
           const json = await res.json();
           localStorage.setItem(TOKEN_KEY, json.token);
-          setUser(json.user);
+          // O register público cria sempre role "user": a promoção a admin
+          // é feita pelo bootstrap DEV logo de seguida.
+          setUser(await ensureDevAdminRole(normalizeUser(json.user), json.token));
         }
       } catch {
         // API not ready yet, ignore
@@ -130,7 +165,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       localStorage.setItem(TOKEN_KEY, json.token);
-      setUser(json.user);
+      setUser(normalizeUser(json.user));
       return { success: true };
     } catch {
       return { success: false, error: "Erro de conexão com o servidor." };
@@ -152,7 +187,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       }
 
       localStorage.setItem(TOKEN_KEY, json.token);
-      setUser(json.user);
+      setUser(normalizeUser(json.user));
       return { success: true };
     } catch {
       return { success: false, error: "Erro de conexão com o servidor." };

@@ -49,6 +49,7 @@ export type HeuristicRuleId =
   | "trusted_publisher"
   | "trusted_system_path"
   | "known_bad_hash"
+  | "dev_canary_signature"
   | "yara_match"
   | "allowlisted_hash"
   | "unsigned_binary"
@@ -82,10 +83,13 @@ export interface ProcessSnapshot {
 
 export interface KillProcessResult {
   ok: boolean;
-  status: "ok" | "not-found" | "timeout" | "failed";
+  status: "ok" | "not-found" | "access-denied" | "timeout" | "failed";
   pid: number;
   exitCode?: number;
   error?: string;
+  /** stdout/stderr reais do taskkill — diagnóstico preservado, nunca descartado. */
+  stdout?: string;
+  stderr?: string;
 }
 
 /** Desfecho estruturado de um pedido de terminar processo. */
@@ -95,6 +99,13 @@ export type ProcessKillStatus =
   | "protected"
   | "timeout"
   | "reused"
+  | "access-denied"
+  /**
+   * O PID terminado era um stub/App Execution Alias (MSIX) ou morreu antes do
+   * taskkill, e existe outra instância viva com a mesma identidade no OS —
+   * o processo REAL (outro PID) continua vivo. Nunca é falso sucesso.
+   */
+  | "alias-stub"
   | "failed";
 
 /** Porque é que um alvo de kill foi protegido. */
@@ -115,6 +126,11 @@ export interface ProcessKillResult {
   protectedReason?: ProcessKillProtectionReason;
   /** Identidade do alvo capturada antes da tentativa (diagnóstico/PID reuse). */
   target?: { name?: string; path?: string };
+  /** Código de saída real do taskkill (0 = terminado; 128 = já não existia; 5 = acesso negado…). */
+  exitCode?: number;
+  /** stdout/stderr brutos do taskkill — diagnóstico propagado até ao registo/UI. */
+  stdout?: string;
+  stderr?: string;
 }
 
 export interface ConnectionSnapshot {

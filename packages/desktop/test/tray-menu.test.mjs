@@ -35,7 +35,7 @@ const handlers = { open() {}, exit() {} };
 describe("tray — tradução dos estados", () => {
   it("cada estado interno tem rótulo em português", () => {
     assert.equal(protectionStatusLabel("safe"), "Protegida");
-    assert.equal(protectionStatusLabel("degraded"), "Degradada");
+    assert.equal(protectionStatusLabel("degraded"), "Precisa de atenção");
     assert.equal(protectionStatusLabel("attention"), "Atenção");
     assert.equal(protectionStatusLabel("warning"), "Atenção");
     assert.equal(protectionStatusLabel("critical"), "Crítica");
@@ -50,15 +50,15 @@ describe("tray — tradução dos estados", () => {
   });
 
   it("aceita variações de caixa/espaços vindas do backend", () => {
-    assert.equal(protectionStatusLabel("  DEGRADED "), "Degradada");
+    assert.equal(protectionStatusLabel("  DEGRADED "), "Precisa de atenção");
   });
 
   it("linha de proteção tem o formato pedido", () => {
-    assert.equal(protectionLine(info({ status: "degraded", score: 55 })), "Proteção: Degradada · 55/100");
+    assert.equal(protectionLine(info({ status: "degraded", score: 55 })), "Proteção: Precisa de atenção · 55/100");
   });
 
   it("sem pontuação real a linha não inventa um número", () => {
-    assert.equal(protectionLine(info({ status: "degraded", score: null })), "Proteção: Degradada");
+    assert.equal(protectionLine(info({ status: "degraded", score: null })), "Proteção: Precisa de atenção");
   });
 });
 
@@ -84,7 +84,7 @@ describe("tray — menu final", () => {
     );
     const dump = JSON.stringify(template);
     assert.doesNotMatch(dump, ENUM_PATTERN, `menu não pode expor enums internos: ${dump}`);
-    assert.match(dump, /Proteção: Degradada · 55\/100/);
+    assert.match(dump, /Proteção: Precisa de atenção · 55\/100/);
   });
 
   it("nenhum estado interno vaza para o menu", () => {
@@ -104,7 +104,7 @@ describe("tray — menu final", () => {
       [
         "CyberSafe",
         "● Serviço ativo",
-        "Proteção: Degradada · 55/100",
+        "Proteção: Precisa de atenção · 55/100",
         "Ameaças recentes: 0",
         "Em quarentena: 6",
         "---",

@@ -21,7 +21,7 @@ import {
 import { cn } from "@/lib/utils"
 import { useState } from "react"
 import type { AuthUser } from "../contexts/AuthContext"
-import { canAccess, FEATURES, type FeatureKey } from "../lib/featureControl"
+import { canUserAccess, FEATURES, type FeatureKey } from "../lib/featureControl"
 import { BrandLogo } from "./BrandLogo"
 import type { AccentMode, ThemeMode } from "../lib/appearance"
 import { levelMeta, type ProtectionLevel } from "../lib/protectionHealth"
@@ -56,6 +56,21 @@ const navItems: { id: Page; label: string; icon: typeof LayoutDashboard; feature
   { id: "settings", label: "Configurações", icon: Settings2, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
 ];
 
+/** Rótulos PT-PT dos acentos — o valor interno fica interno. */
+const ACCENT_LABELS: Record<string, string> = {
+  cyan: "Ciano",
+  pink: "Rosa",
+  purple: "Roxo",
+  "red-wine": "Vinho",
+};
+
+const ACCENT_SWATCH: Record<string, string> = {
+  cyan: "bg-cyber-cyan",
+  pink: "bg-cyber-pink",
+  purple: "bg-cyber-purple",
+  "red-wine": "bg-accent-wine",
+};
+
 export default function Sidebar({
   activePage,
   onNavigate,
@@ -68,33 +83,44 @@ export default function Sidebar({
   level,
 }: SidebarProps) {
   const [collapsed, setCollapsed] = useState(false)
-  const accountType = user?.type || "personal";
-  const plan = user?.plan || "free";
   const statusMeta = level ? levelMeta(level) : null;
 
-  const visibleNavItems = navItems.filter((item) => canAccess(item.feature, accountType, plan));
+  const visibleNavItems = navItems.filter((item) => canUserAccess(item.feature, user));
 
   return (
     <aside
+      aria-label="Navegação principal"
       className={cn(
-        "bg-sidebar border-r border-sidebar-border flex flex-col transition-all duration-300 relative z-50",
-        collapsed ? "w-20" : "w-64"
+        // Superfície e borda vêm dos tokens (bg-sidebar / border-sidebar-border),
+        // que é a correção real. A classe `.sidebar` NÃO é posta de volta: as
+        // regras por tema dela (blur de 24px de backdrop-filter em toda a
+        // altura do sidebar, gradiente vinho) nunca estiveram ativas antes desta
+        // ronda porque ninguém punha a classe no elemento — ligá-las era um
+        // efeito de pintura novo, não pedido, e é exatamente o género de coisa
+        // que se paga num switch de tema. Ficam dormentes até haver medição.
+        "bg-sidebar border-r border-sidebar-border text-sidebar-foreground flex flex-col transition-all duration-300 relative z-50",
+        collapsed ? "w-[var(--shell-sidebar-w-collapsed)]" : "w-[var(--shell-sidebar-w)]"
       )}
     >
       {/* Decorative top line */}
-      <div className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent" />
+      <div aria-hidden className="absolute top-0 left-0 right-0 h-px bg-gradient-to-r from-transparent via-primary to-transparent" />
 
       {/* Logo Section */}
       <div className="p-6 border-b border-sidebar-border">
         <div className="flex items-center gap-3">
           <div className="relative shrink-0">
-            <div className="w-10 h-10 rounded-lg bg-primary/10 flex items-center justify-center cyber-border">
-              <BrandLogo size="sm" />
-            </div>
-            {/* Pulse indicator */}
-            <div className="absolute -top-1 -right-1 w-3 h-3 bg-cyber-green rounded-full cyber-pulse">
-              <div className="absolute inset-0 bg-cyber-green rounded-full animate-ping opacity-75" />
-            </div>
+            {/* Sem placa por trás: o monograma flat já traz a sua margem de ar
+                livre e, no modo claro, o tile traz a sua própria placa. Uma
+                moldura em cima de outra era só ruído. */}
+            <BrandLogo size="md" label="" />
+            {/* Indicador de atividade do motor: usa o MESMO estado do chip de
+                baixo. Antes era verde permanente, o que anunciava "tudo bem"
+                mesmo com o motor em falha. */}
+            {statusMeta && (
+              <div className={cn("absolute -top-1 -right-1 w-3 h-3 rounded-full cyber-pulse", statusMeta.dotClass)}>
+                <div className={cn("absolute inset-0 rounded-full animate-ping opacity-75", statusMeta.dotClass)} />
+              </div>
+            )}
           </div>
           {!collapsed && (
             <div className="flex flex-col min-w-0">
@@ -119,22 +145,15 @@ export default function Sidebar({
             <button
               key={item.id}
               onClick={() => onNavigate(item.id)}
+              aria-label={collapsed ? item.label : undefined}
+              aria-current={isActive ? "page" : undefined}
+              title={collapsed ? item.label : undefined}
               className={cn(
-                "w-full flex items-center gap-3 px-4 py-3 rounded-lg transition-all duration-200 group relative overflow-hidden",
-                isActive
-                  ? "bg-primary/10 text-primary cyber-border"
-                  : "text-muted-foreground hover:text-foreground hover:bg-secondary/50"
+                "nav-item w-full flex items-center gap-3 px-4 py-3 overflow-hidden",
+                isActive && "active",
               )}
             >
-              {/* Active indicator line */}
-              {isActive && (
-                <div className="absolute left-0 top-1/2 -translate-y-1/2 w-1 h-8 bg-primary rounded-r-full shadow-[0_0_10px_var(--primary)]" />
-              )}
-
-              <Icon className={cn(
-                "w-5 h-5 shrink-0 transition-all",
-                isActive && "cyber-glow-text"
-              )} />
+              <Icon className="w-5 h-5 shrink-0" />
 
               {!collapsed && (
                 <>
@@ -152,12 +171,6 @@ export default function Sidebar({
                   )}
                 </>
               )}
-
-              {/* Hover glow effect */}
-              <div className={cn(
-                "absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none",
-                "bg-gradient-to-r from-primary/5 to-transparent"
-              )} />
             </button>
           )
         })}
@@ -171,7 +184,8 @@ export default function Sidebar({
             {/* Theme Toggle */}
             <button
                 onClick={() => onThemeChange(theme === 'dark' ? 'light' : 'dark')}
-                className="flex items-center gap-3 px-4 py-2 rounded-lg text-muted-foreground hover:text-foreground hover:bg-secondary/50 transition-all group"
+                aria-label={theme === 'dark' ? "Ativar modo claro" : "Ativar modo escuro"}
+                className="nav-item flex items-center gap-3 px-4 py-2 text-muted-foreground"
                 title={collapsed ? (theme === 'dark' ? "Modo Claro" : "Modo Escuro") : ""}
             >
                 {theme === 'dark' ? <Sun className="w-4 h-4 shrink-0" /> : <Moon className="w-4 h-4 shrink-0" />}
@@ -187,15 +201,15 @@ export default function Sidebar({
                             <button
                                 key={c}
                                 onClick={() => onAccentChange(c)}
-                                aria-label={`Tema ${c}`}
-                                title={c}
+                                aria-label={`Cor de destaque: ${ACCENT_LABELS[c] ?? c}`}
+                                aria-pressed={accent === c}
+                                title={ACCENT_LABELS[c] ?? c}
                                 className={cn(
-                                    "w-4 h-4 rounded-full transition-transform hover:scale-125",
-                                    c === 'cyan' && "bg-[var(--color-cyber-cyan)]",
-                                    c === 'pink' && "bg-[var(--color-cyber-pink)]",
-                                    c === 'purple' && "bg-[var(--color-cyber-purple)]",
-                                    c === 'red-wine' && "bg-[#c8324a]",
-                                    accent === c && "ring-2 ring-white ring-offset-2 ring-offset-background"
+                                    "w-4 h-4 rounded-full border border-border transition-transform hover:scale-125",
+                                    ACCENT_SWATCH[c],
+                                    // O estado selecionado não é só cor: anel
+                                    // duplo com contraste nos dois modos.
+                                    accent === c && "ring-2 ring-foreground/70 ring-offset-2 ring-offset-sidebar",
                                 )}
                             />
                         ))}
@@ -227,8 +241,9 @@ export default function Sidebar({
                 </div>
                 <button
                   onClick={onLogout}
+                  aria-label="Terminar sessão"
+                  title="Terminar sessão"
                   className="text-muted-foreground hover:text-destructive transition-colors p-1 rounded"
-                  title="Sair"
                 >
                   <LogOut className="w-4 h-4" />
                 </button>
@@ -243,16 +258,21 @@ export default function Sidebar({
         <div className={cn(
           "border rounded-lg p-3",
           collapsed && "p-2",
-          statusMeta ? statusMeta.chipClass : "bg-cyber-green/10 border-cyber-green/30",
+          statusMeta ? statusMeta.chipClass : "border-border bg-secondary/40",
         )}>
-          <div className="flex items-center gap-2">
-            <div className={cn("w-2 h-2 rounded-full cyber-pulse", statusMeta ? statusMeta.dotClass : "bg-cyber-green")} />
-            {!collapsed && (
+          <div className="flex items-center gap-2 justify-center">
+            <div className={cn("w-2 h-2 rounded-full cyber-pulse", statusMeta ? statusMeta.dotClass : "bg-muted-foreground")} />
+            {!collapsed ? (
               <span className={cn(
                 "text-xs font-mono uppercase tracking-wider",
-                statusMeta ? statusMeta.textClass : "text-cyber-green",
+                statusMeta ? statusMeta.textClass : "text-muted-foreground",
               )}>
-                {statusMeta ? statusMeta.shortLabel : "Sistema Online"}
+                {statusMeta ? statusMeta.shortLabel : "A verificar"}
+              </span>
+            ) : (
+              /* Colapsado: o ponto colorido sozinho não é um sinal acessível. */
+              <span className="sr-only">
+                {statusMeta ? `Estado do sistema: ${statusMeta.shortLabel}` : "Estado do sistema por verificar"}
               </span>
             )}
           </div>
@@ -262,6 +282,9 @@ export default function Sidebar({
       {/* Collapse Toggle */}
       <button
         onClick={() => setCollapsed(!collapsed)}
+        aria-label={collapsed ? "Expandir menu de navegação" : "Fechar menu de navegação"}
+        aria-expanded={!collapsed}
+        title={collapsed ? "Expandir menu" : "Fechar menu"}
         className="absolute -right-3 top-1/2 -translate-y-1/2 w-6 h-6 bg-secondary border border-border rounded-full flex items-center justify-center hover:bg-primary/20 hover:border-primary/50 transition-all shadow-lg z-50"
       >
         {collapsed ? (
@@ -270,15 +293,6 @@ export default function Sidebar({
           <ChevronLeft className="w-4 h-4 text-muted-foreground" />
         )}
       </button>
-
-      {/* Version info */}
-      {!collapsed && (
-        <div className="p-4 pt-0">
-          <div className="text-[10px] font-mono text-muted-foreground/50 text-center">
-            v2.4.1 • Build 2026.03
-          </div>
-        </div>
-      )}
     </aside>
   )
 }

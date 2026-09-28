@@ -1,7 +1,132 @@
 import { useState, useMemo } from "react";
 import { FileBarChart, Download, Filter, Calendar, AlertTriangle, Shield, Activity, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { SecurityEvent, ThreatEvent, QuarantineEntry, ProtectionState, PcState, EngineSubsystemHealth } from "@cybersafe/shared-types";
+// Fonte central de textos/classes do nível de proteção (consumo READ-ONLY).
+import { levelMeta } from "@/lib/protectionHealth";
+import type { SecurityEvent, ThreatEvent, QuarantineEntry, ProtectionState, PcState, EngineSubsystemHealth, EngineHealth, ProtectionStatus, PcStateLevel } from "@cybersafe/shared-types";
+
+export type ReportVerdict = "protected" | "attention" | "degraded" | "critical" | "unknown";
+export type ReportTone = "green" | "amber" | "red" | "unknown";
+
+export interface ReportHealth {
+  verdict: ReportVerdict;
+  tone: ReportTone;
+  /** "Protegido" só com fontes reais. */
+  canClaimProtected: boolean;
+  /** Score REAL do serviço, ou null = indisponível (nunca 0). */
+  score: number | null;
+  dataAvailable: boolean;
+  reason: string;
+}
+
+export interface ReportCategory {
+  key: "security" | "performance" | "system" | "privacy";
+  label: string;
+  verdict: ReportVerdict;
+  tone: ReportTone;
+  available: boolean;
+}
+
+const VERDICT_RANK: Record<ReportVerdict, number> = {
+  unknown: 0, protected: 1, attention: 2, degraded: 3, critical: 4,
+};
+const TONE_BY_VERDICT: Record<ReportVerdict, ReportTone> = {
+  protected: "green", attention: "amber", degraded: "amber", critical: "red", unknown: "unknown",
+};
+const CATEGORY_LABELS: Record<ReportCategory["key"], string> = {
+  security: "Segurança", performance: "Desempenho", system: "Sistema", privacy: "Privacidade",
+};
+
+function worst(a: ReportVerdict, b: ReportVerdict): ReportVerdict {
+  return VERDICT_RANK[a] >= VERDICT_RANK[b] ? a : b;
+}
+
+/**
+ * Nível de proteção a partir da telemetria do serviço. Espelha as regras
+ * centrais (`deriveProtectionLevel` em @/lib/protectionHealth e
+ * `reportHealthFromCentralSources` em @cybersafe/core) — o relatório NÃO tem
+ * opinião própria. A igualdade com a fonte central é fixada por teste.
+ */
+function protectionVerdict(
+  status: ProtectionStatus | null | undefined,
+  engine: EngineHealth | null | undefined,
+): ReportVerdict {
+  if (engine && engine.serviceRunning === false) return "critical";
+  if (engine && [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall]
+    .some((sub) => sub && sub.status === "error")) return "critical";
+  const unhealthy = engine?.anyEngineDegraded === true;
+  switch (status) {
+    case "critical": return "critical";
+    case "attention": return unhealthy ? "degraded" : "attention";
+    case "safe": return unhealthy ? "degraded" : "protected";
+    case "degraded": return "degraded";
+    default: return "unknown";
+  }
+}
+
+function pcStateVerdict(level: PcStateLevel | null | undefined): ReportVerdict {
+  switch (level) {
+    case "good": return "protected";
+    case "attention": return "attention";
+    case "critical": return "critical";
+    default: return "unknown";
+  }
+}
+
+/**
+ * Consolida as FONTES CENTRAIS (ProtectionState + PcState) num veredicto honesto.
+ * Não calcula score: devolve exatamente o riskScore do serviço, ou null.
+ * Invariantes: sem fontes ⇒ unknown; "degraded" nunca vira "protected";
+ * sem ProtectionState nunca se afirma "Protegido"; ausente nunca é 0.
+ */
+export function reportHealthFromCentralSources(sources: {
+  protectionStatus?: ProtectionStatus | null;
+  engine?: EngineHealth | null;
+  pcStateOverall?: PcStateLevel | null;
+  riskScore?: number | null;
+}): ReportHealth {
+  const protection = protectionVerdict(sources.protectionStatus, sources.engine);
+  const pcState = pcStateVerdict(sources.pcStateOverall);
+  const dataAvailable = protection !== "unknown" || pcState !== "unknown";
+  let verdict: ReportVerdict = dataAvailable ? worst(protection, pcState) : "unknown";
+  if (protection === "unknown" && (pcState === "protected" || pcState === "unknown")) {
+    verdict = "unknown";
+  }
+  const raw = sources.riskScore;
+  const score = typeof raw === "number" && Number.isFinite(raw)
+    ? Math.max(0, Math.min(100, Math.round(raw)))
+    : null;
+
+  const reasons: string[] = [];
+  if (protection === "unknown" && pcState === "unknown") reasons.push("sem estado de proteção nem PcState disponíveis");
+  else {
+    if (protection !== "unknown") reasons.push(`proteção: ${protection}`);
+    if (pcState !== "unknown") reasons.push(`PC: ${pcState}`);
+    if (protection === "unknown") reasons.push("estado de proteção indisponível");
+  }
+  if (score === null) reasons.push("riskScore indisponível");
+
+  return {
+    verdict,
+    tone: TONE_BY_VERDICT[verdict],
+    canClaimProtected: verdict === "protected" && dataAvailable && protection !== "unknown",
+    score,
+    dataAvailable,
+    reason: reasons.join(" · "),
+  };
+}
+
+/** Linhas "Categorias" do relatório — derivadas do PcState; sem PcState = Indisponível. */
+export function reportCategoriesFromPcState(
+  pcState: Partial<Record<ReportCategory["key"], PcStateLevel>> | null | undefined,
+): ReportCategory[] {
+  return (Object.keys(CATEGORY_LABELS) as ReportCategory["key"][]).map((key) => {
+    const level = pcState ? pcState[key] : undefined;
+    const available = level === "good" || level === "attention" || level === "critical";
+    const verdict = available ? pcStateVerdict(level) : "unknown";
+    return { key, label: CATEGORY_LABELS[key], verdict, tone: available ? TONE_BY_VERDICT[verdict] : "unknown", available };
+  });
+}
 
 interface ReportsPageProps {
   events: SecurityEvent[];
@@ -38,6 +163,41 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
     sources: [...new Set(threats.map(t => t.source))],
   }), [events, threats, quarantine]);
 
+  // ── Fontes centrais (nunca opinião própria do relatório) ──
+  // O relatório consome ProtectionState (status + engine + stats.riskScore) e
+  // PcState (overall + categorias + findings). Sem fontes ⇒ "Desconhecido",
+  // nunca "Protegido"; score ausente ⇒ "Indisponível", nunca 0.
+  const health = useMemo(() => reportHealthFromCentralSources({
+    protectionStatus: protection?.status ?? null,
+    engine: protection?.engine ?? null,
+    pcStateOverall: pcState?.overall ?? null,
+    riskScore: protection?.stats?.riskScore ?? null,
+  }), [protection, pcState]);
+
+  const categories = useMemo(() => reportCategoriesFromPcState(pcState ?? null), [pcState]);
+
+  // O veredicto vem das fontes centrais; o texto/classe do nível vem do
+  // protectionHealth central. "unknown" não existe lá — tratamos como tal.
+  const verdictLabel = health.verdict === "unknown"
+    ? "Estado desconhecido"
+    : levelMeta(health.verdict as Exclude<ReportVerdict, "unknown">).shortLabel;
+  const statusBadge: ReportTone = health.tone;
+  const badgeClass = statusBadge === "green"
+    ? "badge-green"
+    : statusBadge === "red"
+      ? "badge-red"
+      : statusBadge === "amber"
+        ? "badge-amber"
+        : "badge-gray";
+  const bigClass = statusBadge === "green" ? "green" : statusBadge === "unknown" ? "gray" : "amber";
+  const scoreText = health.score === null ? "Indisponível" : `${health.score}/100`;
+
+  // Findings: vêm do PcState (fonte central). "Sem threats" ≠ "saudável".
+  const findings = useMemo(() => {
+    const fromPcState = pcState?.findings ?? [];
+    return fromPcState.slice(0, 4);
+  }, [pcState]);
+
   const severityColor = (s: string) => {
     switch (s) {
       case "critical": return "text-cyber-red bg-cyber-red/10 border-cyber-red/30";
@@ -62,15 +222,10 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
         <td>${t.summary}</td>
       </tr>`).join("");
 
-    // Estado geral herdado da resposta real do serviço (protection.status)
-    // e do pcState.overall — nunca um score paralelo inventado.
-    const realStatus = protection?.status ?? "degraded";
-    const pcOverall = pcState?.overall ?? "unknown";
-    const systemStatus = (realStatus === "critical" || realStatus === "attention") ? "attention" : "safe";
-    const statusLabel = systemStatus === "attention" ? "Precisa de atenção" : "Protegido";
-    const statusBadge = systemStatus === "attention" ? "amber" : "green";
-    // Score real vindo do backend (protection.stats.riskScore), sem fórmula paralela.
-    const protectionScore = protection?.stats?.riskScore ?? 0;
+    // Estado geral: veredicto das FONTES CENTRAIS (reportHealthFromCentralSources).
+    // "degraded"/"attention"/"critical" nunca são apresentados como "Protegido",
+    // e sem fontes o estado é "Desconhecido" — não "Seguro".
+    const statusLabel = verdictLabel;
 
     // Motores — estado real derivado de protection.engine (quando disponível).
     const engineEntries: { name: string; status: string; detail: string }[] = [];
@@ -81,7 +236,11 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
         ["Hash DB", engine.hashDb],
         ["ClamAV", engine.clamav],
         ["Native Engine", engine.nativeEngine],
-        ["Firewall", engine.firewall],
+        // Nao se escreve so "Firewall": este campo e o MODULO WFP do CyberSafe
+        // (engine.ts:762-765 deriva-o de wfpFilter.isActive()). O Windows
+        // Firewall e outra coisa, e o produto ainda nao o consulta — por isso
+        // entra como desconhecido, nunca como desligado.
+        ["Filtro WFP (CyberSafe)", engine.firewall],
       ];
       for (const [name, sub] of subsystems) {
         if (!sub) continue;
@@ -91,13 +250,45 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
           detail: sub.detail ?? (sub.status === "active" ? "Ativo" : "Indisponível"),
         });
       }
+      // Linha do Windows Firewall: o produto ainda nao o consulta, e isso e o que
+      // se diz. Inventar "desligado" aqui seria afirmar o que nao foi medido.
+      engineEntries.push({
+        name: "Windows Firewall",
+        status: "unknown",
+        detail: "Nao verificado — o CyberSafe ainda nao consulta o estado do Windows Firewall.",
+      });
     }
+    // Estado por motor: o relatório espelha o status real. "degraded" nunca
+    // aparece como "Ok"/verde, e "unavailable"/"error" são mostrados como tal.
+    const subsystemTone = (status: string) =>
+      status === "active" ? "green" : status === "degraded" ? "medium" : status === "error" ? "high" : "gray";
     const engineRows = engineEntries.map((e) => `
       <tr>
         <td>${e.name}</td>
-        <td><span class="sev sev-${e.status === "active" ? "green" : "gray"}">${e.status.toUpperCase()}</span></td>
+        <td><span class="sev sev-${subsystemTone(e.status)}">${e.status.toUpperCase()}</span></td>
         <td>${e.detail}</td>
       </tr>`).join("");
+    const engineEmpty = engineEntries.length === 0
+      ? '<tr><td colspan="3" class="lbl">Telemetria de motores indisponível — estado não avaliado.</td></tr>'
+      : engineRows;
+
+    // Categorias: derivados do PcState. Sem PcState ⇒ "Indisponível" (nunca "Ok").
+    const categoryRows = categories.map((c) => {
+      if (!c.available) {
+        return `<div class="mini"><span class="k">${c.label}</span><span class="v"><span class="sev sev-gray">Indisponível</span></span></div>`;
+      }
+      const cls = c.tone === "green" ? "green" : c.verdict === "critical" ? "high" : "medium";
+      const text = c.verdict === "protected" ? "Bom" : c.verdict === "critical" ? "Crítico" : "Atenção";
+      return `<div class="mini"><span class="k">${c.label}</span><span class="v"><span class="sev sev-${cls}">${text}</span></span></div>`;
+    }).join("");
+
+    // Findings: fonte central PcState. Ausentes ⇒ desconhecido, não "saudável".
+    const findingsBlock = findings.length > 0
+      ? findings.map((f) => {
+        const cls = f.severity === "urgent" ? "high" : f.severity === "attention" ? "medium" : f.severity === "recommended" ? "low" : "gray";
+        return `<div class="mini"><span class="k"><span class="sev sev-${cls}">${f.severity.toUpperCase()}</span></span><span class="v">${f.title}</span></div>`;
+      }).join("") + (stats.totalThreats > 0 ? `<div class="mini"><span class="k"><span class="sev sev-medium">Atenção</span></span><span class="v">${stats.totalThreats} ameaça(s) registada(s)</span></div>` : "")
+      : `<div class="mini"><span class="k"><span class="sev sev-gray">Desconhecido</span></span><span class="v">Sem findings reportados pelo PC Center</span></div>`;
 
     const html = `<!doctype html>
 <html lang="pt-BR">
@@ -124,11 +315,13 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
   .card .big { font-size: 22px; font-weight: 700; }
   .card .big.green { color: #138a4b; }
   .card .big.amber { color: #b45309; }
+  .card .big.gray { color: #68777d; }
   .badge { display: inline-block; padding: 3px 10px; border-radius: 999px; font-size: 11px; font-weight: 600; }
   .badge-green { background: #e4f6ec; color: #138a4b; border: 1px solid #b7e6cb; }
   .badge-amber { background: #fdf1e2; color: #b45309; border: 1px solid #f0d5a8; }
   .badge-red { background: #fdeaea; color: #c0392b; border: 1px solid #f2b8b0; }
   .badge-cyan { background: #e3f5f7; color: #0e6b78; border: 1px solid #b7e2e8; }
+  .badge-gray { background: #eef2f4; color: #4a5b62; border: 1px solid #d5dee1; }
   .grid2 { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
   .mini { display: flex; justify-content: space-between; align-items: baseline; padding: 8px 2px; border-bottom: 1px solid #edf3f5; font-size: 12px; }
   .mini:last-child { border-bottom: none; }
@@ -163,7 +356,7 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
     <div class="meta">
       <b>Data/hora:</b> ${now.toLocaleString("pt-BR")}<br/>
       <b>Computador:</b> ${pcName}<br/>
-      <b>Estado do PC:</b> ${pcOverall}<br/>
+      <b>Estado do PC:</b> ${pcState?.overall ?? "indisponivel"}<br/>
       <b>Versão CyberSafe:</b> 0.1.1
     </div>
   </div>
@@ -171,11 +364,11 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
   <h2>Resumo principal</h2>
   <div class="summary">
     <div class="card status">
-      <div class="lbl">Estado geral do PC</div>
-      <div style="margin-bottom:4px"><span class="badge badge-${statusBadge}">${statusLabel}</span></div>
-      <div class="lbl" style="margin-top:6px">Proteção</div>
-      <div class="big ${statusBadge}">${protectionScore}/100</div>
-      <div class="lbl">${stats.highCritical > 0 ? "Degradada" : "Ativa"}</div>
+      <div class="lbl">Estado geral (fontes centrais)</div>
+      <div style="margin-bottom:4px"><span class="badge ${badgeClass}">${statusLabel}</span></div>
+      <div class="lbl" style="margin-top:6px">Score de proteção (serviço)</div>
+      <div class="big ${bigClass}" style="${health.score === null ? "font-size:15px" : ""}">${scoreText}</div>
+      <div class="lbl">${health.canClaimProtected ? "Proteção ativa nos componentes reportados" : "Ver abaixo o detalhe por componente"}</div>
     </div>
     <div class="card">
       <div class="lbl">Ameaças detetadas</div>
@@ -196,23 +389,18 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
       <h2>Motores de análise</h2>
       <table>
         <thead><tr><th>Motor</th><th>Estado</th><th>Detalhe</th></tr></thead>
-        <tbody>${engineRows}</tbody>
+        <tbody>${engineEmpty}</tbody>
       </table>
     </div>
     <div>
-      <h2>Categorias</h2>
+      <h2>Categorias <span class="accent">(PcState)</span></h2>
       <div class="card" style="padding:6px 14px">
-        <div class="mini"><span class="k">Segurança</span><span class="v">${stats.highCritical > 0 ? '<span class="sev sev-high">Atenção</span>' : '<span class="sev sev-green">Ok</span>'}</span></div>
-        <div class="mini"><span class="k">Desempenho</span><span class="v sev sev-green">Ok</span></div>
-        <div class="mini"><span class="k">Sistema</span><span class="v">Estável</span></div>
-        <div class="mini"><span class="k">Privacidade</span><span class="v">Protegido</span></div>
+        ${categoryRows}
       </div>
 
-      <h2>Findings principais</h2>
+      <h2>Findings principais <span class="accent">(PcState)</span></h2>
       <div class="card" style="padding:6px 14px">
-        ${stats.highCritical > 0 ? `
-        <div class="mini"><span class="k"><span class="sev sev-high">Urgente</span></span><span class="v">Ameaças de alta/crítica detetadas</span></div>` : `<div class="mini"><span class="k"><span class="sev sev-green">Recomendado</span></span><span class="v">Sem ameaças pendentes</span></div>`}
-        ${stats.totalThreats > 0 ? `<div class="mini"><span class="k"><span class="sev sev-medium">Atenção</span></span><span class="v">${stats.totalThreats} ameaça(s) registada(s)</span></div>` : ""}
+        ${findingsBlock}
       </div>
     </div>
   </div>
@@ -222,7 +410,7 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
   <table class="section-break">
     <thead><tr><th>Data/Hora</th><th>Severidade</th><th>Tipo</th><th>Fonte</th><th>Resumo</th></tr></thead>
     <tbody>${rows}</tbody>
-  </table>` : `<div class="nothreat">Nenhuma ameaça registada no período analisado.</div>`}
+  </table>` : `<div class="nothreat">Nenhuma ameaça registada no período analisado. ${health.canClaimProtected ? "Proteção ativa nos componentes reportados." : "Isto não indica que o sistema esteja saudável — consulte o estado de proteção acima."}</div>`}
 
   <div class="footer">
     <p>Este relatório resume o estado observado pelo CyberSafe e não constitui auditoria formal.</p>

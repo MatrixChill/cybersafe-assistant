@@ -125,16 +125,16 @@ const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
     answer: "**Phishing** é uma técnica onde atacantes enviam emails ou mensagens falsas para roubar dados. Para te proteger:\n\n- **Nunca cliques** em links de emails a pedir dados sensíveis\n- Verifica o remetente real (não apenas o nome exibido)\n- Acede a sites diretamente pelo navegador, não por links de emails\n- Desconfia de urgência excessiva ou ameaças\n\nSe suspeitares de um email, não cliques em nada e apaga-o ou marca-o como phishing."
   },
   {
-    keywords: ["senha", "password", "forte", "fraca", "segura", "123456"],
-    answer: "**Senhas fortes** são a primeira linha de defesa:\n\n- **12+ caracteres** com letras, números e símbolos\n- Evita palavras do dicionário, datas ou nomes conhecidos\n- Usa uma **frase-passe** (ex.: `Cafe#Frio2026!`)\n- Ativa **2FA** sempre que possível\n- Usa um **gestor de senhas** (Bitwarden, 1Password)\n\nPior, usar `123456` é deixar a chave de casa debaixo do tapete 😅 Não vale a pena o risco."
+    keywords: ["senha", "palavra-passe", "palavras-passe", "password", "forte", "fraca", "segura", "123456"],
+    answer: "**Palavras-passe fortes** são a primeira linha de defesa:\n\n- **12+ caracteres** com letras, números e símbolos\n- Evita palavras do dicionário, datas ou nomes conhecidos\n- Usa uma **frase-passe** (ex.: `Cafe#Frio2026!`)\n- Ativa **2FA** sempre que possível\n- Usa um **gestor de palavras-passe** (Bitwarden, 1Password)\n\nPior, usar `123456` é deixar a chave de casa debaixo do tapete. Não vale a pena o risco."
   },
   {
-    keywords: ["ransomware", "resgate", "criptografar"],
+    keywords: ["ransomware", "resgate", "criptografar", "encriptar"],
     answer: "**Ransomware** é malware que **criptografa os teus ficheiros** e exige resgate.\n\n**Como te proteger:**\n\n- **Backups regulares** (regra 3-2-1: 3 cópias, 2 mídias, 1 offsite)\n- Não abras anexos suspeitos\n- Mantém o sistema e apps atualizados\n- Ativa a **Proteção de Pasta** do Windows\n\nSe for vítima: **não pagues o resgate** — não há garantia de recuperação e financia o crime."
   },
   {
     keywords: ["2fa", "autenticação", "dois fatores", "mfa"],
-    answer: "**2FA (Autenticação em 2 Passos)** adiciona uma segunda camada além da senha.\n\n- **App authenticator** (Google Authenticator, Authy) — mais seguro\n- **SMS** — melhor que nada, mas suscetível a SIM swap\n- **Hardware key** (YubiKey) — máxima segurança\n\nPrecisas? Tecnicamente ninguém te obriga 😌 Mas se a senha vazar, o 2FA é o segurança da porta a dizer: 'hoje não, querido'."
+    answer: "**2FA (Autenticação em 2 Passos)** adiciona uma segunda camada além da palavra-passe.\n\n- **App authenticator** (Google Authenticator, Authy) — mais seguro\n- **SMS** — melhor que nada, mas suscetível a SIM swap\n- **Hardware key** (YubiKey) — máxima segurança\n\nPrecisas? Tecnicamente ninguém te obriga. Mas se a palavra-passe vazar, o 2FA é o segurança da porta a dizer: 'hoje não, querido'."
   },
   {
     keywords: ["firewall", "rede", "wifi", "conexão", "vpn"],
@@ -146,7 +146,7 @@ const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
   },
   {
     keywords: ["disco", "espaço", "lento", "desempenho", "86%", "temporários"],
-    answer: "**Disco cheio / PC lento:**\n\nUm disco a **86%** não é emergência, mas já está a pedir socorro 😅 Vale:\n\n- Libertar **ficheiros temporários** e de cache\n- Mover ficheiros grandes para um disco externo/cloud\n- Executar **Otimizar** no CyberSafe\n- Ver quais programas ocupam espaço em **Task Manager**\n\nAcima de 90% começa a afetar o desempenho do Windows."
+    answer: "**Disco cheio / PC lento:**\n\nUm disco a **86%** não é emergência, mas já está a pedir socorro. Vale:\n\n- Libertar **ficheiros temporários** e de cache\n- Mover ficheiros grandes para um disco externo/cloud\n- Executar **Otimizar** no CyberSafe\n- Ver quais programas ocupam espaço em **Task Manager**\n\nAcima de 90% começa a afetar o desempenho do Windows."
   },
   {
     keywords: ["backup", "cópia", "certificar"],
@@ -158,26 +158,26 @@ const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
   },
   {
     keywords: ["engenharia social", "social engineering", "golpe", "manipulação"],
-    answer: "**Engenharia social** é manipular pessoas para obter acesso ou informações:\n\n- **Pretexto**: história falsa para convencer\n- **Baiting**: prometem algo em troca de dados\n- **Tailgating**: seguem alguém para áreas restritas\n- **Oferta irresistível**: prémios, urgência, medo\n\nDefende-te desconfiando do contacto não solicitado, verificando por outros canais e nunca fornecendo senhas ou códigos por telefone/email."
+    answer: "**Engenharia social** é manipular pessoas para obter acesso ou informações:\n\n- **Pretexto**: história falsa para convencer\n- **Baiting**: prometem algo em troca de dados\n- **Tailgating**: seguem alguém para áreas restritas\n- **Oferta irresistível**: prémios, urgência, medo\n\nDefende-te desconfiando do contacto não solicitado, verificando por outros canais e nunca fornecendo palavras-passe ou códigos por telefone/email."
   },
   {
     keywords: ["oi", "olá", "ola", "hello", "bom dia", "boa tarde", "boa noite", "tudo bem", "quem és", "quem é", "quem es", "quem e"],
-    answer: "Sou a **Matrix**, a assistente de IA do **CyberSafe** 🛡️\n\nPosso ajudar-te com **phishing, malware, senhas, privacidade, backups, ransomware** e a entender o teu painel. Pergunta o que quiseres!"
+    answer: "Sou a **Matrix**, a assistente de IA do **CyberSafe**.\n\nPosso ajudar-te com **phishing, malware, palavras-passe, privacidade, backups, ransomware** e a entender o teu painel. Pergunta o que quiseres!"
   },
 ]
 
 // Fallback OT para fora-de-tema (variado, para não repetir sempre).
 const OFF_TOPIC_REPLIES = [
-  "Eu protejo os teus ficheiros — e a tua lasanha, não 😅🛡️ Pergunta-me algo sobre segurança digital, o teu PC ou o CyberSafe.",
-  "Se eu começar a prever isso, daqui a pouco estou a analisar a vida alheia em vez de malware 😂 Fica comigo na cibersegurança.",
-  "Posso proteger a tua redação contra perderes o ficheiro… escrevê-la já foge do meu turno 😅 Manda uma questão sobre segurança ou CyberSafe.",
-  "O meu domínio é cibersegurança, não campeonatos 😌 Isso deixava o antivírus com ciúmes. Pergunta-me sobre o teu PC?",
+  "Eu protejo os teus ficheiros — e a tua lasanha, não. Pergunta-me algo sobre segurança digital, o teu PC ou o CyberSafe.",
+  "Se eu começar a prever isso, daqui a pouco estou a analisar a vida alheia em vez de malware. Fica comigo na cibersegurança.",
+  "Posso proteger a tua redação contra perderes o ficheiro… escrevê-la já foge do meu turno. Manda uma questão sobre segurança ou CyberSafe.",
+  "O meu domínio é cibersegurança, não campeonatos. Isso deixava o antivírus com ciúmes. Pergunta-me sobre o teu PC?",
 ]
 
 // Fallback para pedidos perigosos (recurso defensivo, nunca as instruções).
 const DANGER_REPLIES = [
-  "Essa já entrou na zona 'a Matrix não quer receber visita da polícia' 😅 Posso mostrar como **detetar, bloquear ou estudar** esse ataque de forma segura.",
-  "Isso é linha ofensiva, e eu sou a guardiã do teu PC, não uma arma 😌 Posso ajudar-te a **defender** — detetar, prevenir e analisar na horizontal.",
+  "Essa já entrou na zona 'a Matrix não quer receber visita da polícia'. Posso mostrar como **detetar, bloquear ou estudar** esse ataque de forma segura.",
+  "Isso é linha ofensiva, e eu sou a guardiã do teu PC, não uma arma. Posso ajudar-te a **defender** — detetar, prevenir e analisar na horizontal.",
   "Não entro aí, mas posso ajudar-te a estudar **deteção e mitigação** num laboratório seguro. Proteger > atacar, sempre.",
 ]
 
@@ -190,7 +190,7 @@ function offlineReply(input: string, page: Page): { content: string; isOffTopic?
 
   if (SECRET_PATTERN.test(input)) {
     return {
-      content: "⚠️ **Atenção**: parece que colaste uma credencial (senha/chave). **Nunca** partilhes senhas, tokens ou chaves API no chat — nem comigo. \n\nSe foi acidente, **revoga essa credencial** (troca a senha / regenera a chave) e usa um **gestor de senhas**. Nenhum serviço legítimo te pede credenciais por chat.",
+      content: "**Atenção**: parece que colaste uma credencial (palavra-passe/chave). **Nunca** partilhes palavras-passe, tokens ou chaves API no chat — nem comigo. \n\nSe foi acidente, **revoga essa credencial** (troca a palavra-passe / regenera a chave) e usa um **gestor de palavras-passe**. Nenhum serviço legítimo te pede credenciais por chat.",
     }
   }
 
@@ -219,7 +219,7 @@ function offlineReply(input: string, page: Page): { content: string; isOffTopic?
   }
   const hint = pageMap[page]
   return {
-    content: `Estou em **modo local** (a ligação ao fornecedor de IA não está disponível), então notei que não tenho uma resposta pronta para isso. Posso tentar de novo, ou foca-te na segurança — ${hint || "por exemplo, o que é phishing ou como criar senhas fortes."}`,
+    content: `Estou em **modo local** (a ligação ao fornecedor de IA não está disponível), então notei que não tenho uma resposta pronta para isso. Posso tentar de novo, ou foca-te na segurança — ${hint || "por exemplo, o que é phishing ou como criar palavras-passe fortes."}`,
   }
 }
 
@@ -510,7 +510,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "" }:
           }
           if (result.code === "rate_limited") {
             setPhase("rate_limited")
-            setMessages((prev) => [...prev, { role: "assistant", content: "🔥 Cheguei ao limite de pedidos por enquanto. Aguarda uns segundos e tenta de novo — estou aqui." }])
+            setMessages((prev) => [...prev, { role: "assistant", content: "Cheguei ao limite de pedidos por enquanto. Aguarda uns segundos e tenta de novo — estou aqui." }])
             return
           }
           if (result.code === "no_provider" || result.code === "auth") {
@@ -722,7 +722,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "" }:
           whileHover={{ scale: 1.05 }}
           whileTap={{ scale: 0.95 }}
           onClick={() => setUpOpenState(!isOpen)}
-          title="Olá! Sou a Matrix 🛡️ Posso ajudar-te com segurança digital e com o CyberSafe."
+          title="Olá! Sou a Matrix. Posso ajudar-te com segurança digital e com o CyberSafe."
           className={cn(
             "relative w-14 h-14 rounded-full flex items-center justify-center shadow-2xl transition-all duration-500 overflow-hidden group",
             isOpen ? "bg-card cyber-border rotate-90" : "bg-primary shadow-primary/40"

@@ -693,3 +693,235 @@ describe("ZIP scan", () => {
     await cleanupZip();
   });
 });
+
+// ─── Nested ZIP scan — no double-counting, correct depth limit ────────
+describe("Nested ZIP scan", () => {
+  let tmpDir;
+
+  beforeEach(async () => {
+    tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cybersafe-nested-zip-"));
+  });
+
+  async function cleanup() {
+    await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+  }
+
+  /**
+   * Build a tiny fixture ZIP hierarchy in-memory and write to disk.
+   * outer.zip
+   *   inner.zip          ← nested ZIP (depth 1)
+   *     deep.txt         ← regular file inside inner.zip
+   *   safe.txt           ← regular file at depth 0
+   */
+  async function buildNestedZip(outerPath) {
+    const inner = new AdmZip();
+    inner.addFile("deep.txt", Buffer.from("deep content"));
+    const innerBuf = inner.toBuffer();
+
+    const outer = new AdmZip();
+    outer.addFile("inner.zip", innerBuf);
+    outer.addFile("safe.txt", Buffer.from("safe content"));
+    outer.writeZip(outerPath);
+  }
+
+  /**
+   * outer.zip
+   *   mid.zip            ← depth 1
+   *     inner.zip        ← depth 2
+   *       threat.exe     ← evil file, depth 3 — max nesting == 3, so depth 2 zip
+   *                         is the deepest that gets recursed into (nestingDepth=2 < 3).
+   */
+  async function buildDeepNestedZip(outerPath, { threatInInner = false } = {}) {
+    const innermost = new AdmZip();
+    innermost.addFile("threat.exe", Buffer.from("MZ payload"));
+
+    const inner = new AdmZip();
+    inner.addFile("inner.zip", innermost.toBuffer());
+    inner.addFile("clean.txt", Buffer.from("clean"));
+
+    const mid = new AdmZip();
+    mid.addFile("mid.zip", inner.toBuffer());
+
+    const outer = new AdmZip();
+    outer.addFile("outer-level.txt", Buffer.from("outer"));
+    outer.addFile("mid.zip", mid.toBuffer());
+    outer.writeZip(outerPath);
+  }
+
+  it("a threat inside a nested ZIP is counted exactly once (no double-count)", async () => {
+    // outer.zip contains inner.zip which contains threat.exe.
+    // With the fix, scanZipWithSafety recurses into inner.zip and returns 1 threat.
+    // It must NOT also call scanArtifact on inner.zip, which would add another 1.
+    const innerZip = new AdmZip();
+    innerZip.addFile("threat.exe", Buffer.from("MZ payload"));
+    const innerBuf = innerZip.toBuffer();
+
+    const outerZip = new AdmZip();
+    outerZip.addFile("inner.zip", innerBuf);
+    outerZip.addFile("safe.txt", Buffer.from("ok"));
+    const outerPath = path.join(tmpDir, "outer.zip");
+    outerZip.writeZip(outerPath);
+
+    // threat.exe triggers a threat; inner.zip itself does NOT (it's a container).
+    const engine = createMockEngine({ threatFiles: ["threat.exe"] });
+    const mgr = new ScanManager(engine);
+
+    const id = await mgr.startScan("custom", outerPath);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.status, "completed");
+
+    // Exactly 1 threat (threat.exe inside inner.zip). Must not be 2 due to double-count.
+    assert.equal(
+      state.threatsFound,
+      1,
+      `Expected exactly 1 threat, got ${state.threatsFound} (double-counting regression?)`
+    );
+
+    await cleanup();
+  });
+
+  it("a clean nested ZIP contributes 0 threats (no ghost threat from container scan)", async () => {
+    // outer.zip contains inner.zip which contains only safe files.
+    // No threats in anything. threatsFound must be 0.
+    const innerZip = new AdmZip();
+    innerZip.addFile("clean.txt", Buffer.from("clean content"));
+
+    const outerZip = new AdmZip();
+    outerZip.addFile("inner.zip", innerZip.toBuffer());
+    outerZip.addFile("safe.txt", Buffer.from("ok"));
+    const outerPath = path.join(tmpDir, "clean-nested.zip");
+    outerZip.writeZip(outerPath);
+
+    const engine = createMockEngine(); // no threats
+    const mgr = new ScanManager(engine);
+
+    const id = await mgr.startScan("custom", outerPath);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.status, "completed");
+    assert.equal(state.threatsFound, 0, "No threats expected in a clean nested ZIP");
+
+    await cleanup();
+  });
+
+  it("multiple threats across nesting levels are each counted once", async () => {
+    // outer.zip:
+    //   direct-threat.exe  ← threat at depth 0 inside ZIP
+    //   inner.zip          ← nested zip
+    //     nested-threat.exe ← threat at depth 1 inside ZIP
+    //     clean.txt
+    const innerZip = new AdmZip();
+    innerZip.addFile("nested-threat.exe", Buffer.from("MZ nested"));
+    innerZip.addFile("clean.txt", Buffer.from("clean"));
+
+    const outerZip = new AdmZip();
+    outerZip.addFile("direct-threat.exe", Buffer.from("MZ direct"));
+    outerZip.addFile("inner.zip", innerZip.toBuffer());
+    const outerPath = path.join(tmpDir, "multi-threat.zip");
+    outerZip.writeZip(outerPath);
+
+    // Both threat files are flagged
+    const engine = createMockEngine({ threatFiles: ["direct-threat.exe", "nested-threat.exe"] });
+    const mgr = new ScanManager(engine);
+
+    const id = await mgr.startScan("custom", outerPath);
+    await new Promise((r) => setTimeout(r, 2500));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.status, "completed");
+
+    // Exactly 2 threats — one per threat file, each counted once.
+    assert.equal(
+      state.threatsFound,
+      2,
+      `Expected exactly 2 threats, got ${state.threatsFound}`
+    );
+
+    await cleanup();
+  });
+
+  it("nesting depth is respected: ZIP at depth >= ZIP_MAX_NESTING (3) is not recursed into", async () => {
+    // Build a 4-level deep ZIP hierarchy: l0 > l1.zip > l2.zip > l3.zip > deep-threat.exe
+    // ZIP_MAX_NESTING=3 means recursion is allowed at depths 0,1,2 but NOT at depth 3.
+    // So l3.zip at depth 3 should NOT be recursed into, and deep-threat.exe must not be found.
+    // But at depths 0-2, files ARE scanned.
+
+    const l3 = new AdmZip();
+    l3.addFile("deep-threat.exe", Buffer.from("MZ deep"));
+
+    const l2 = new AdmZip();
+    l2.addFile("l3.zip", l3.toBuffer());
+    l2.addFile("l2-clean.txt", Buffer.from("l2 clean"));
+
+    const l1 = new AdmZip();
+    l1.addFile("l2.zip", l2.toBuffer());
+    l1.addFile("l1-clean.txt", Buffer.from("l1 clean"));
+
+    // l0 is the outer ZIP the scan sees (nestingDepth=0 when scanZipWithSafety is called).
+    // l1.zip is at nestingDepth=1, l2.zip at nestingDepth=2.
+    // l3.zip would be nestingDepth=3 which equals ZIP_MAX_NESTING → guard fires → returns 0.
+    const l0 = new AdmZip();
+    l0.addFile("l1.zip", l1.toBuffer());
+    l0.addFile("l0-clean.txt", Buffer.from("l0 clean"));
+    const outerPath = path.join(tmpDir, "deep-nesting.zip");
+    l0.writeZip(outerPath);
+
+    // deep-threat.exe is at nesting depth 3 (beyond limit) — should NOT be scanned.
+    const engine = createMockEngine({ threatFiles: ["deep-threat.exe"] });
+    const mgr = new ScanManager(engine);
+
+    const id = await mgr.startScan("custom", outerPath);
+    await new Promise((r) => setTimeout(r, 3000));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.status, "completed");
+
+    // deep-threat.exe must not be reached (nesting depth exceeded).
+    assert.equal(
+      state.threatsFound,
+      0,
+      `Expected 0 threats (depth limit), got ${state.threatsFound}`
+    );
+
+    // Sanity: files at allowed nesting depths were scanned (no crash).
+    assert.ok(
+      engine.scannedFiles.some((f) => f.includes("l0-clean") || f.includes("l1-clean") || f.includes("l2-clean")),
+      "Files at allowed nesting depths must be scanned"
+    );
+
+    await cleanup();
+  });
+
+  it("a threat at nesting depth 2 (last allowed level) IS detected", async () => {
+    // l0.zip > l1.zip > threat.exe
+    // nestingDepth when processing l1.zip = 1, recurse into it (1 < 3 = ZIP_MAX_NESTING).
+    // nestingDepth when processing threat.exe = 2, it's a regular file → scanArtifact.
+    const l1 = new AdmZip();
+    l1.addFile("threat.exe", Buffer.from("MZ payload"));
+    l1.addFile("clean.txt", Buffer.from("ok"));
+
+    const l0 = new AdmZip();
+    l0.addFile("l1.zip", l1.toBuffer());
+    const outerPath = path.join(tmpDir, "depth2-threat.zip");
+    l0.writeZip(outerPath);
+
+    const engine = createMockEngine({ threatFiles: ["threat.exe"] });
+    const mgr = new ScanManager(engine);
+
+    const id = await mgr.startScan("custom", outerPath);
+    await new Promise((r) => setTimeout(r, 2000));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.status, "completed");
+    assert.equal(
+      state.threatsFound,
+      1,
+      `Expected 1 threat at depth 2, got ${state.threatsFound}`
+    );
+
+    await cleanup();
+  });
+});

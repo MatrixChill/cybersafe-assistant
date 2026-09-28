@@ -1,19 +1,69 @@
 import * as fs from "node:fs";
-import * as path from "node:path";
 
-import * as os from "node:os";
+import "dotenv/config";
+import {
+  BOOT_DEBUG_LOG_BUDGET,
+  ERROR_LOG_BUDGET,
+  SyncLogWriter,
+  bootDebugLogPath,
+  errorLogPath,
+  reclaimOversizedLog,
+  serviceBaseDir,
+} from "./log-writer.js";
 
-// ── BOOT SURVIVAL LOG ────────────────────────────────────────────────────────
-const BASE_DIR = path.join(os.homedir(), ".cybersafe-service");
-const DEBUG_LOG = path.join(BASE_DIR, "boot-debug.log");
+// ── LOG HYGIENE (Workstream F) ───────────────────────────────────────────────
+// error.log e boot-debug.log cresceram para GB porque eram escritos com
+// `fs.appendFileSync` cru, sem rotação nem retenção. Passam a usar
+// SyncLogWriter com orçamento fixo: rotação por tamanho + retenção real.
+// Em regime normal nada é apagado antes de estar dentro da retenção; o
+// reclaim de truncar só dispara para ficheiros já macroscopicamente acima do
+// orçamento (o caso dos GB herdados desta máquina).
+const BASE_DIR = serviceBaseDir();
+const DEBUG_LOG = bootDebugLogPath(BASE_DIR);
+const ERROR_LOG = errorLogPath(BASE_DIR);
+
 try {
   fs.mkdirSync(BASE_DIR, { recursive: true });
-  fs.appendFileSync(DEBUG_LOG, `\n\n[${new Date().toISOString()}] BOOT INICIADO EM: ${process.cwd()}\n`, "utf-8");
-} catch (e) {
+  reclaimOversizedLog(ERROR_LOG, ERROR_LOG_BUDGET.maxBytes, ERROR_LOG_BUDGET.maxFiles);
+  reclaimOversizedLog(DEBUG_LOG, BOOT_DEBUG_LOG_BUDGET.maxBytes, BOOT_DEBUG_LOG_BUDGET.maxFiles);
+} catch {
   // Ignorar falha inicial se não tiver permissão
 }
 
-import "dotenv/config";
+const bootDebug = new SyncLogWriter(BASE_DIR, "boot-debug.log", BOOT_DEBUG_LOG_BUDGET);
+const errorLog = new SyncLogWriter(BASE_DIR, "error.log", ERROR_LOG_BUDGET);
+
+/**
+ * Consola à prova de EPIPE.
+ *
+ * Causa raiz dos GB de log: sob o serviço Windows o stdout é um pipe sem
+ * leitor. Um `console.error` dentro do handler de `uncaughtException` lançava
+ * ele próprio EPIPE, que voltava a entrar no mesmo handler, infinitamente —
+ * cada iteração anexava um stack trace de ~600 B a error.log e boot-debug.log.
+ * Aqui absorvemos o erro de escrita em vez de o propagar, quebrando o ciclo.
+ */
+function safeWrite(stream: "out" | "err", args: unknown[]): void {
+  const fn = stream === "out" ? process.stdout : process.stderr;
+  try {
+    if (fn.destroyed || !fn.writable) return;
+    fn.write(args.map((a) => (typeof a === "string" ? a : safeInspect(a))).join(" ") + "\n");
+  } catch {
+    // stdout/stderr indisponível — jamais propagar a partir daqui.
+  }
+}
+
+function safeInspect(value: unknown): string {
+  if (value instanceof Error) return value.stack || `${value.name}: ${value.message}`;
+  try {
+    return JSON.stringify(value) ?? String(value);
+  } catch {
+    return String(value);
+  }
+}
+
+/** Cabeçalho de sessão, escrito uma vez por arranque. */
+bootDebug.write(`[${new Date().toISOString()}] BOOT INICIADO EM: ${process.cwd()}`);
+
 import { ProtectionEngineService } from "./engine.js";
 import { DefinitionUpdater } from "./updater.js";
 
@@ -27,12 +77,8 @@ fs.mkdirSync(LOG_DIR, { recursive: true });
 function logToFile(level: string, message: string, error?: unknown) {
   const timestamp = new Date().toISOString();
   const errorStr = error instanceof Error ? `\n  Stack: ${error.stack}` : "";
-  const line = `[${timestamp}] [${level}] ${message}${errorStr}\n`;
-  try {
-    fs.appendFileSync(path.join(LOG_DIR, "error.log"), line, "utf-8");
-  } catch (e) {
-    console.error("Failed to write to log file", e);
-  }
+  // Dedupe + rotação + retenção via SyncLogWriter (nunca appendFileSync cru).
+  errorLog.write(`[${timestamp}] [${level}] ${message}${errorStr}`);
 }
 
 // Códigos que significam "o outro lado fechou o pipe" — esperados no shutdown.
@@ -43,28 +89,53 @@ const EXPECTED_PIPE_ERROR_CODES = new Set<string>([
   "ERR_STREAM_WRITE_AFTER_END",
 ]);
 
+/**
+ * Um EPIPE dentro do próprio handler de excepção deve nunca voltar a
+ * disparar o handler. Esta guarda é a rede que fecha o ciclo de realimentação.
+ */
+let inCrashHandler = false;
+
 process.on("uncaughtException", (err) => {
-  const code = (err as NodeJS.ErrnoException)?.code;
-  // O peer (Electron) pode fechar o pipe antes de lermos/escrevermos a resposta.
-  // EPIPE/ECONNRESET são o resultado esperado desse fecho — sobretudo no
-  // shutdown — e não uma falha crítica do serviço. O engine já os trata no
-  // handler de "error" de cada socket; isto é a rede de segurança final.
-  if (EXPECTED_PIPE_ERROR_CODES.has(String(code))) {
-    try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] EXPECTED pipe close (${code}) — peer fechou a ligação\n`, "utf-8"); } catch {}
-    logToFile("WARN", `EXPECTED pipe close (${code}) — peer fechou a ligação`, err);
-    console.warn(`[Service] EXPECTED pipe close (${code}) — peer fechou a ligação`);
+  if (inCrashHandler) {
+    try {
+      errorLog.write(`[${new Date().toISOString()}] [CRITICAL] exceção dentro do handler de crash (ignorada): ${safeInspect(err)}`);
+    } catch {
+      /* nada mais a fazer */
+    }
     return;
   }
-  try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] CRITICAL uncaught exception: ${err.stack || err}\n`, "utf-8"); } catch {}
-  logToFile("CRITICAL", "Uncaught exception — tentando manter serviço vivo", err);
-  console.error("[Service] CRITICAL uncaught exception:", err);
-  // NÃO chamamos process.exit() — o serviço deve sobreviver
+  inCrashHandler = true;
+  try {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    // O peer (Electron) pode fechar o pipe antes de lermos/escrevermos a resposta.
+    // EPIPE/ECONNRESET são o resultado esperado desse fecho — sobretudo no
+    // shutdown — e não uma falha crítica do serviço. O engine já os trata no
+    // handler de "error" de cada socket; isto é a rede de segurança final.
+    if (EXPECTED_PIPE_ERROR_CODES.has(String(code))) {
+      bootDebug.write(`[${new Date().toISOString()}] EXPECTED pipe close (${code}) — peer fechou a ligação`);
+      logToFile("WARN", `EXPECTED pipe close (${code}) — peer fechou a ligação`, err);
+      safeWrite("err", [`[Service] EXPECTED pipe close (${code}) — peer fechou a ligação`]);
+      return;
+    }
+    bootDebug.write(`[${new Date().toISOString()}] CRITICAL uncaught exception: ${err.stack || err}`);
+    logToFile("CRITICAL", "Uncaught exception — tentando manter serviço vivo", err);
+    safeWrite("err", ["[Service] CRITICAL uncaught exception:", err]);
+    // NÃO chamamos process.exit() — o serviço deve sobreviver
+  } finally {
+    inCrashHandler = false;
+  }
 });
 
 process.on("unhandledRejection", (reason) => {
-  try { fs.appendFileSync(DEBUG_LOG, `[${new Date().toISOString()}] Unhandled rejection: ${reason}\n`, "utf-8"); } catch {}
-  logToFile("ERROR", "Unhandled promise rejection", reason as Error);
-  console.error("[Service] Unhandled rejection:", reason);
+  if (inCrashHandler) return;
+  inCrashHandler = true;
+  try {
+    bootDebug.write(`[${new Date().toISOString()}] Unhandled rejection: ${reason}`);
+    logToFile("ERROR", "Unhandled promise rejection", reason as Error);
+    safeWrite("err", ["[Service] Unhandled rejection:", reason]);
+  } finally {
+    inCrashHandler = false;
+  }
 });
 
 // ── Service Bootstrap ────────────────────────────────────────────────────────
@@ -73,13 +144,13 @@ const service = new ProtectionEngineService();
 
 async function main() {
   logToFile("INFO", "Service starting...");
-  console.log("[Service] Starting init...");
+  safeWrite("out", ["[Service] Starting init..."]);
 
   try {
     await service.init();
-    console.log("[Service] Init complete. Starting pipe server...");
+    safeWrite("out", ["[Service] Init complete. Starting pipe server..."]);
     await service.startPipeServer();
-    console.log("[Service] Pipe server started!");
+    safeWrite("out", ["[Service] Pipe server started!"]);
     logToFile("INFO", "Service fully initialized. Pipe server listening. Protection remains OFF until monitor.start is called.");
 
     // Sinaliza para o processo pai (Electron em dev) que está pronto
@@ -90,11 +161,11 @@ async function main() {
     // reutiliza o serviço que já está a servir o pipe.
     if (err?.code === "EADDRINUSE") {
       logToFile("WARN", "Pipe já em uso. Outra instância do serviço está ativa; encerrando nova instância.");
-      console.log("[Service] Outra instância já ativa no pipe. Encerrando nova instância (0).");
+      safeWrite("out", ["[Service] Outra instância já ativa no pipe. Encerrando nova instância (0)."]);
       process.exit(0);
     }
     logToFile("CRITICAL", "Fatal error during startup", err as Error);
-    console.error("[Service] Fatal error during startup:", err);
+    safeWrite("err", ["[Service] Fatal error during startup:", err]);
     process.exit(1);
   }
 }
@@ -110,11 +181,11 @@ for (const signal of ["SIGINT", "SIGTERM"] as const) {
     // esperado do dev runner (o code 1 dos scripts npm que se seguem é
     // normal), e não uma falha do produto.
     logToFile("INFO", `Received ${signal} — EXPECTED DEV SHUTDOWN (dev runner)`);
-    console.log(`[Service] EXPECTED DEV SHUTDOWN (${signal})`);
+    safeWrite("out", [`[Service] EXPECTED DEV SHUTDOWN (${signal})`]);
     void service.stopProtection().finally(() => {
       void service.dispose().finally(() => {
         logToFile("INFO", "Service stopped.");
-        console.log("[Service] Service stopped");
+        safeWrite("out", ["[Service] Service stopped"]);
         process.exit(0);
       });
     });

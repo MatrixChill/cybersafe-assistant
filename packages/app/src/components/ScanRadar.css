@@ -1,3 +1,5 @@
+/* Radar de análise — lê tudo do token layer (index.css). Nenhuma cor literal
+   aqui: o radar tem de se ler no painel escuro e no claro sem regras por tema. */
 .scan-radar-wrapper {
   display: flex;
   flex-direction: column;
@@ -5,22 +7,21 @@
   justify-content: center;
   gap: 1.5rem;
   padding: 2rem;
-  background: rgba(0, 0, 0, 0.3);
-  border-radius: var(--radius-lg);
-  border: 1px solid var(--border-color);
+  background: color-mix(in oklch, var(--background) 55%, transparent);
+  border-radius: var(--radius);
+  border: 1px solid var(--border);
   margin: 1.5rem 0;
   position: relative;
   overflow: hidden;
-  align-items: center;
 }
 
 .radar-circle {
   width: 220px;
   height: 220px;
   border-radius: 50%;
-  border: 1px solid rgba(160, 32, 240, 0.2);
+  border: 1px solid color-mix(in oklch, var(--cyber-purple) 22%, transparent);
   position: relative;
-  background: radial-gradient(circle, rgba(160, 32, 240, 0.05) 0%, transparent 70%);
+  background: radial-gradient(circle, color-mix(in oklch, var(--cyber-purple) 7%, transparent) 0%, transparent 70%);
   display: flex;
   align-items: center;
   justify-content: center;
@@ -33,7 +34,9 @@
   width: 100%;
   height: 100%;
   border-radius: 50%;
-  background: conic-gradient(from 0deg, rgba(160, 32, 240, 0) 0deg, rgba(160, 32, 240, 0.4) 360deg);
+  background: conic-gradient(from 0deg,
+    color-mix(in oklch, var(--cyber-purple) 0%, transparent) 0deg,
+    color-mix(in oklch, var(--cyber-purple) 40%, transparent) 360deg);
   z-index: 1;
   pointer-events: none;
 }
@@ -43,7 +46,7 @@
   top: 50%;
   left: 50%;
   transform: translate(-50%, -50%);
-  border: 1px solid rgba(160, 32, 240, 0.1);
+  border: 1px solid color-mix(in oklch, var(--cyber-purple) 12%, transparent);
   border-radius: 50%;
   pointer-events: none;
 }
@@ -53,8 +56,8 @@
 .ring-3 { width: 100%; height: 100%; }
 
 .radar-center {
-  background: #000;
-  border: 2px solid var(--accent);
+  background: var(--card);
+  border: 2px solid var(--primary);
   width: 48px;
   height: 48px;
   border-radius: 50%;
@@ -62,22 +65,22 @@
   align-items: center;
   justify-content: center;
   z-index: 2;
-  box-shadow: 0 0 15px var(--accent-glow);
+  box-shadow: 0 0 15px var(--cyber-glow);
 }
 
 .radar-icon {
   width: 24px;
   height: 24px;
-  color: var(--accent);
+  color: var(--primary);
 }
 
 .radar-blip {
   position: absolute;
   width: 10px;
   height: 10px;
-  background: var(--cyber-blue);
+  background: var(--cyber-cyan);
   border-radius: 50%;
-  box-shadow: 0 0 10px var(--cyber-blue);
+  box-shadow: 0 0 10px var(--cyber-cyan);
   z-index: 2;
 }
 
@@ -96,11 +99,11 @@
   justify-content: center;
   gap: 0.5rem;
   margin-bottom: 0.25rem;
-  font-family: 'JetBrains Mono', monospace;
+  font-family: var(--font-jetbrains);
   font-size: 0.75rem;
   letter-spacing: 0.1em;
   font-weight: 700;
-  color: var(--text-muted);
+  color: var(--muted-foreground);
 }
 
 .status-dot {
@@ -110,24 +113,31 @@
 }
 
 .status-dot.online {
-  background: var(--success);
-  box-shadow: 0 0 8px var(--success);
+  background: var(--cyber-green);
+  box-shadow: 0 0 8px var(--cyber-green);
 }
 
 .spinning-icon {
   width: 14px;
   height: 14px;
-  animation: spin 2s linear infinite;
-  color: var(--accent);
+  animation: radar-spin 2s linear infinite;
+  color: var(--primary);
 }
 
 .status-message {
   font-size: 0.9rem;
-  color: var(--text-secondary);
+  color: var(--muted-foreground);
   margin: 0;
 }
 
-@keyframes spin {
+@keyframes radar-spin {
   from { transform: rotate(0deg); }
   to { transform: rotate(360deg); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .radar-sweep,
+  .spinning-icon {
+    animation: none;
+  }
 }

@@ -4,9 +4,84 @@
 @custom-variant dark (&:is(.dark *));
 
 /* ═══════════════════════════════════════════════════════════════
-   CYBERSAFE NEON — Premium, comercial, amigável, azul/ciano profundo
-   Glow controlado, cards suaves, cantos arredondados, hero bonito
+   TOKENS — fonte única de verdade do shell.
+   Semânticas fixas do produto: cyber-red, cyber-yellow, cyber-green,
+   cyber-cyan. NÃO existe cyber-blue — estado nunca se pinta de azul.
+   Todos os 10 blocos de tema definem o mesmo conjunto de tokens; um
+   tema novo que esqueça um deles apanha o valor de :root, não um buraco.
    ═══════════════════════════════════════════════════════════════ */
+
+:root {
+  /* Métricas do shell — o layout lê daqui em vez de literais repetidos. */
+  --shell-sidebar-w: 16rem;
+  --shell-sidebar-w-collapsed: 5rem;
+  --shell-radius-card: 10px;
+  --shell-focus-w: 2px;
+  --shell-focus-offset: 2px;
+  --shell-nav-bar-w: 3px;
+
+  /* Superfície do sidebar: identidade que não a defina fica no card. */
+  --sidebar: var(--card);
+  --sidebar-border: var(--border);
+  --sidebar-active: color-mix(in oklch, var(--primary) 10%, transparent);
+
+  /* Vinho do acento "red-wine" — o único sítio onde este tom vive. */
+  --accent-wine: #a81f38;
+
+  /* Fontes: só famílias locais. O repo não carrega web fonts, por isso a stack
+     é de sistema e os nomes preferidos ficam à frente para quem os tiver
+     instalados. Antes disto --font-inter só existia em 2 dos 10 blocos e
+     `body { font-family: var(--font-sans) }` ficava inválido em core, neon
+     dark, liquid e red-belbete.
+     DOIS EIXOS SEPARADOS: os blocos de tema abaixo só trocam COR consoante
+     .dark / :not(.dark); --font-inter e --font-jetbrains nunca podem ser
+     declarados dentro de um selector que mencione o modo de cor, porque
+     Light/Dark têm de manter a MESMA família. A única tipografia própria é
+     do Matrix Terminal e vive no bloco [data-theme="matrix-terminal"]
+     abaixo, sem referência a .dark. */
+  --font-inter: 'Inter', ui-sans-serif, system-ui, -apple-system, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, sans-serif;
+  --font-jetbrains: 'JetBrains Mono', ui-monospace, 'Cascadia Mono', Consolas, 'Liberation Mono', monospace;
+
+  /* Variante de TEXTO das semânticas: no modo escuro é a cor de marca tal e
+     qual; nos temas claros é a mesma família, mais escura, para passar AA.
+     Os --cyber-* globais NÃO mudam — continuam a alimentar preenchimentos,
+     bordas e glow. */
+  --cyber-cyan-text: var(--cyber-cyan);
+  --cyber-green-text: var(--cyber-green);
+  --cyber-yellow-text: var(--cyber-yellow);
+  --cyber-red-text: var(--cyber-red);
+  --cyber-pink-text: var(--cyber-pink);
+  --cyber-purple-text: var(--cyber-purple);
+  --cyber-magenta-text: var(--cyber-magenta);
+
+  /* Item de navegação ativo: barra com tom dedicado (não depende da força do
+     --primary) e texto na tinta do tema. */
+  --nav-active-bg: var(--sidebar-active);
+  --nav-active-ink: var(--foreground);
+  --nav-active-bar: var(--primary);
+}
+
+/* Temas claros: mesmo matiz, luminância em baixo para o texto passar AA.
+   Medido contra as 8 superfícies claras dos 5 temas (card e sidebar), usando
+   sempre o pior painel. Alvo >= 4.5:1 para texto de 14px. */
+:root:not(.dark) {
+  --cyber-cyan-text: #0e6f68;    /* 4.75 */
+  --cyber-green-text: #166534;   /* 5.63 */
+  --cyber-yellow-text: #9a4a06;  /* 4.94 */
+  --cyber-red-text: #b91c1c;     /* 5.11 */
+  --cyber-pink-text: #be185d;    /* 4.76 */
+  --cyber-purple-text: #6d28d9;  /* 5.61 */
+  --cyber-magenta-text: #a21caf; /* 4.99 */
+
+  /* Barra do item ativo: escurece o acento para o preto, por isso acompanha
+     qualquer acento escolhido e fica >= 4.3:1 nos 10 acentos claros medidos
+     (o pior caso era --primary de core light a 2.76). */
+  --nav-active-bar: color-mix(in srgb, var(--primary) 72%, #000);
+}
+
+.dark {
+  --accent-wine: #c8324a;
+}
 
 /* Light — CyberSafe Neon */
 [data-theme="cybersafe-neon"]:not(.dark) {
@@ -54,9 +129,6 @@
   --cyber-red: oklch(0.55 0.22 25);
   --cyber-yellow: oklch(0.7 0.16 85);
   --cyber-glow: oklch(0.58 0.18 220);
-
-  --font-inter: 'Inter', system-ui, sans-serif;
-  --font-jetbrains: 'JetBrains Mono', monospace;
 }
 
 /* Dark — CyberSafe Core */
@@ -80,15 +152,17 @@
   --border: rgba(129, 207, 207, 0.16);
   --input: rgba(129, 207, 207, 0.16);
   --ring: #16d6c1;
+  --radius: 10px;
   --cyber-cyan: #16d6c1;
   --cyber-green: #56d48a;
   --cyber-red: #ff5c5c;
   --cyber-yellow: #ffbf3e;
-  --cyber-blue: #4d8dff;
   --cyber-purple: #9e9bff;
   --cyber-pink: #ff6bb5;
+  --cyber-magenta: #f25ca7;
   --cyber-glow: rgba(22, 214, 193, 0.18);
-  --sidebar-bg: rgba(3, 16, 20, 0.66);
+  --sidebar: rgba(3, 16, 20, 0.66);
+  --sidebar-foreground: #edf8f8;
   --sidebar-border: rgba(129, 207, 207, 0.16);
   --sidebar-active: rgba(22, 214, 193, 0.1);
   font-family: var(--font-inter);
@@ -96,19 +170,18 @@
 
 /* Core Dark component styles */
 [data-theme="cybersafe-core"].dark .sidebar {
-  background: var(--sidebar-bg);
+  background: var(--sidebar);
   backdrop-filter: blur(24px) saturate(140%);
-  border-right-color: var(--border);
+  border-right-color: var(--sidebar-border);
 }
 [data-theme="cybersafe-core"].dark .stat-card,
 [data-theme="cybersafe-core"].dark .cyber-border {
   background: var(--card);
   border-color: var(--border);
-  border-radius: 10px;
+  border-radius: var(--shell-radius-card);
 }
 [data-theme="cybersafe-core"].dark .nav-item.active {
-  box-shadow: inset 3px 0 var(--primary);
-  color: var(--primary);
+  box-shadow: inset var(--shell-nav-bar-w) 0 var(--nav-active-bar);
 }
 
 /* Light — CyberSafe Core */
@@ -132,15 +205,17 @@
   --border: rgba(16, 75, 92, 0.18);
   --input: rgba(16, 75, 92, 0.18);
   --ring: #0fa495;
+  --radius: 10px;
   --cyber-cyan: #0fa495;
   --cyber-green: #16a34a;
   --cyber-red: #dc2626;
   --cyber-yellow: #d97706;
-  --cyber-blue: #2563eb;
   --cyber-purple: #7c3aed;
   --cyber-pink: #db2777;
+  --cyber-magenta: #c026a3;
   --cyber-glow: rgba(15, 164, 149, 0.12);
-  --sidebar-bg: rgba(255, 255, 255, 0.38);
+  --sidebar: rgba(255, 255, 255, 0.38);
+  --sidebar-foreground: #102b39;
   --sidebar-border: rgba(16, 75, 92, 0.18);
   --sidebar-active: rgba(15, 164, 149, 0.1);
   font-family: var(--font-inter);
@@ -150,20 +225,19 @@
 
 /* Core Light component styles */
 [data-theme="cybersafe-core"]:not(.dark) .sidebar {
-  background: var(--sidebar-bg);
+  background: var(--sidebar);
   backdrop-filter: blur(24px) saturate(140%);
-  border-right-color: var(--border);
+  border-right-color: var(--sidebar-border);
 }
 [data-theme="cybersafe-core"]:not(.dark) .stat-card,
 [data-theme="cybersafe-core"]:not(.dark) .cyber-border {
   background: var(--card);
   border-color: var(--border);
-  border-radius: 10px;
+  border-radius: var(--shell-radius-card);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 [data-theme="cybersafe-core"]:not(.dark) .nav-item.active {
-  box-shadow: inset 3px 0 var(--primary);
-  color: var(--primary);
+  box-shadow: inset var(--shell-nav-bar-w) 0 var(--nav-active-bar);
 }
 
 /* Dark — CyberSafe Neon */
@@ -219,6 +293,14 @@
    Fundo terminal/cyber, menos rounded, menos glow, monospace
    ═══════════════════════════════════════════════════════════════ */
 
+/* Tipografia — eixo de IDENTIDADE do Matrix Terminal, não de cor: um selector
+   sem .dark / :not(.dark), por isso vale igual em claro e em escuro. É a
+   única excepção admitida à família padrão (Inter/JetBrains de :root). */
+[data-theme="matrix-terminal"] {
+  --font-inter: 'JetBrains Mono', monospace;
+  --font-jetbrains: 'JetBrains Mono', monospace;
+}
+
 /* Light — Matrix Terminal */
 [data-theme="matrix-terminal"]:not(.dark) {
   --background: oklch(0.96 0.002 140);
@@ -265,9 +347,6 @@
   --cyber-red: oklch(0.55 0.22 25);
   --cyber-yellow: oklch(0.68 0.14 85);
   --cyber-glow: oklch(0.45 0.15 145);
-
-  --font-inter: 'JetBrains Mono', monospace;
-  --font-jetbrains: 'JetBrains Mono', monospace;
 }
 
 /* Dark — Matrix Terminal */
@@ -283,7 +362,8 @@
   --secondary: oklch(0.12 0.02 140);
   --secondary-foreground: oklch(0.8 0.02 140);
   --muted: oklch(0.15 0.02 140);
-  --muted-foreground: oklch(0.55 0.02 140);
+  /* 0.55 dava 4.39:1 sobre o painel — texto secundário de 14px abaixo do AA. */
+  --muted-foreground: oklch(0.62 0.02 140);
   --accent: oklch(0.65 0.18 145);
   --accent-foreground: oklch(0.06 0.01 140);
   --destructive: oklch(0.6 0.22 25);
@@ -380,7 +460,8 @@
   --secondary: oklch(0.18 0.02 240 / 0.6);
   --secondary-foreground: oklch(0.75 0.02 220);
   --muted: oklch(0.2 0.02 240);
-  --muted-foreground: oklch(0.55 0.02 220);
+  /* 0.55 dava 4.31:1 sobre o painel — o mesmo defeito do matrix-terminal. */
+  --muted-foreground: oklch(0.62 0.02 220);
   --accent: oklch(0.7 0.15 190);
   --accent-foreground: oklch(0.08 0.02 240);
   --destructive: oklch(0.6 0.22 25);
@@ -525,7 +606,7 @@
   --ring: #c8324a;
   --radius: 0.75rem;
 
-  --sidebar-bg: rgba(11, 7, 8, 0.66);
+  --sidebar: rgba(11, 7, 8, 0.66);
   --sidebar-border: rgba(224, 74, 98, 0.16);
   --sidebar-active: rgba(200, 50, 74, 0.14);
   --sidebar-foreground: #f7edef;
@@ -540,7 +621,6 @@
   --cyber-green: #4ecb83;
   --cyber-red: #ff5454;
   --cyber-yellow: #ffbf3e;
-  --cyber-blue: #5b9bff;
   --cyber-purple: #b49bff;
   --cyber-pink: #ff7ab0;
   --cyber-magenta: #ff5aa0;
@@ -567,15 +647,16 @@
 
 [data-theme="cybersafe-red-belbete"].dark .nav-item.active {
   background: linear-gradient(90deg, rgba(200, 50, 74, 0.18), transparent);
-  color: var(--ruby);
-  box-shadow: inset 3px 0 var(--ruby);
+  /* Sem color: ruby — como texto de 14px são 3.83:1 sobre o painel. A barra
+     e o wash carregam o vinho; a etiqueta fica na tinta do tema. */
+  box-shadow: inset var(--shell-nav-bar-w) 0 var(--nav-active-bar);
 }
 
 [data-theme="cybersafe-red-belbete"].dark .stat-card,
 [data-theme="cybersafe-red-belbete"].dark .cyber-border {
   background: var(--card);
   border-color: var(--border);
-  border-radius: 10px;
+  border-radius: var(--shell-radius-card);
 }
 
 [data-theme="cybersafe-red-belbete"].dark .hero-banner {
@@ -625,7 +706,7 @@
   --ring: #a81f38;
   --radius: 0.75rem;
 
-  --sidebar-bg: rgba(255, 255, 255, 0.5);
+  --sidebar: rgba(255, 255, 255, 0.5);
   --sidebar-border: rgba(168, 31, 56, 0.16);
   --sidebar-active: rgba(168, 31, 56, 0.1);
   --sidebar-foreground: #3d1218;
@@ -639,9 +720,9 @@
   --cyber-green: #16a34a;
   --cyber-red: #d43a3a;
   --cyber-yellow: #d97706;
-  --cyber-blue: #2563eb;
   --cyber-purple: #7c3aed;
   --cyber-pink: #db2777;
+  --cyber-magenta: #c026a3;
   --cyber-glow: rgba(168, 31, 56, 0.12);
 
   --deep-wine: #7a1f31;
@@ -654,22 +735,21 @@
 }
 
 [data-theme="cybersafe-red-belbete"]:not(.dark) .sidebar {
-  background: var(--sidebar-bg);
+  background: var(--sidebar);
   backdrop-filter: blur(24px) saturate(140%);
   border-right-color: var(--sidebar-border);
 }
 
 [data-theme="cybersafe-red-belbete"]:not(.dark) .nav-item.active {
   background: linear-gradient(90deg, rgba(168, 31, 56, 0.1), transparent);
-  color: var(--ruby);
-  box-shadow: inset 3px 0 var(--ruby);
+  box-shadow: inset var(--shell-nav-bar-w) 0 var(--nav-active-bar);
 }
 
 [data-theme="cybersafe-red-belbete"]:not(.dark) .stat-card,
 [data-theme="cybersafe-red-belbete"]:not(.dark) .cyber-border {
   background: var(--card);
   border-color: var(--border);
-  border-radius: 10px;
+  border-radius: var(--shell-radius-card);
   box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
 }
 
@@ -689,8 +769,7 @@
 [data-theme][data-accent="purple"] { --primary: var(--cyber-purple); --ring: var(--cyber-purple); --accent: var(--cyber-purple); --cyber-glow: var(--cyber-purple); }
 [data-theme][data-accent="pink"] { --primary: var(--cyber-pink); --ring: var(--cyber-pink); --accent: var(--cyber-pink); --cyber-glow: var(--cyber-pink); }
 [data-theme][data-accent="amber"] { --primary: var(--cyber-yellow); --ring: var(--cyber-yellow); --accent: var(--cyber-yellow); --cyber-glow: var(--cyber-yellow); }
-[data-theme][data-accent="red-wine"] { --primary: #a81f38; --ring: #a81f38; --accent: #a81f38; --cyber-glow: rgba(168, 31, 56, 0.16); }
-[data-theme="cybersafe-red-belbete"].dark[data-accent="red-wine"] { --primary: #c8324a; --ring: #c8324a; --accent: #c8324a; --cyber-glow: rgba(200, 50, 74, 0.16); }
+[data-theme][data-accent="red-wine"] { --primary: var(--accent-wine); --ring: var(--accent-wine); --accent: var(--accent-wine); --cyber-glow: color-mix(in oklch, var(--accent-wine) 16%, transparent); }
 
 /* Dark accent variants */
 .dark[data-accent="cyan"] { --primary: var(--cyber-cyan); --ring: var(--cyber-cyan); --accent: var(--cyber-cyan); --cyber-glow: var(--cyber-cyan); }
@@ -699,7 +778,6 @@
 .dark[data-accent="purple"] { --primary: var(--cyber-purple); --ring: var(--cyber-purple); --accent: var(--cyber-purple); --cyber-glow: var(--cyber-purple); }
 .dark[data-accent="pink"] { --primary: var(--cyber-pink); --ring: var(--cyber-pink); --accent: var(--cyber-pink); --cyber-glow: var(--cyber-pink); }
 .dark[data-accent="amber"] { --primary: var(--cyber-yellow); --ring: var(--cyber-yellow); --accent: var(--cyber-yellow); --cyber-glow: var(--cyber-yellow); }
-.dark[data-accent="red-wine"] { --primary: #c8324a; --ring: #c8324a; --accent: #c8324a; --cyber-glow: rgba(200, 50, 74, 0.16); }
 
 @theme inline {
   --font-sans: var(--font-inter);
@@ -723,14 +801,25 @@
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --color-cyber-cyan: var(--cyber-cyan);
-  --color-cyber-magenta: var(--cyber-magenta);
-  --color-cyber-purple: var(--cyber-purple);
-  --color-cyber-pink: var(--cyber-pink);
-  --color-cyber-green: var(--cyber-green);
-  --color-cyber-red: var(--cyber-red);
-  --color-cyber-yellow: var(--cyber-yellow);
+  /* Os utilitários cyber-* leem a variante -text: nos temas claros isto corrige
+     o texto sem tocar nos --cyber-* globais (glow, gradientes e regras próprias
+     continuam na cor de marca). Em modo escuro, -text == cor de marca. */
+  --color-cyber-cyan: var(--cyber-cyan-text);
+  --color-cyber-magenta: var(--cyber-magenta-text);
+  --color-cyber-purple: var(--cyber-purple-text);
+  --color-cyber-pink: var(--cyber-pink-text);
+  --color-cyber-green: var(--cyber-green-text);
+  --color-cyber-red: var(--cyber-red-text);
+  --color-cyber-yellow: var(--cyber-yellow-text);
   --color-cyber-glow: var(--cyber-glow);
+  --color-accent-wine: var(--accent-wine);
+
+  /* O shell usa bg-sidebar / border-sidebar-border / text-sidebar-foreground.
+     Sem este mapeamento as classes não existem (Tailwind só gera utilitários a
+     partir de --color-*) e o sidebar ficava sem superfície nem borda. */
+  --color-sidebar: var(--sidebar);
+  --color-sidebar-foreground: var(--sidebar-foreground);
+  --color-sidebar-border: var(--sidebar-border);
 }
 
 @layer base {
@@ -741,6 +830,43 @@
     @apply bg-background text-foreground transition-colors duration-300;
     font-family: var(--font-sans);
   }
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   SHELL PRIMITIVES — nav, foco e superfícies do contentor.
+   Uma regra base por primitivo; cada identidade só sobrepõe o seu
+   caráter (o que já existia em .nav-item.active por tema continua a
+   vencer, porque é mais específico).
+   ═══════════════════════════════════════════════════════════════ */
+
+/* Foco visível a teclado — em todo o shell, com a cor do anel do tema.
+   matrix-terminal mantém a sua variante angular logo abaixo (mais específica). */
+:where(button, a, input, select, textarea, summary, [tabindex]):focus-visible {
+  outline: var(--shell-focus-w) solid var(--ring);
+  outline-offset: var(--shell-focus-offset);
+}
+
+/* Tinta do item de navegação.
+   Usa --sidebar-foreground e não --muted-foreground: medido contra a
+   superfície do sidebar nos 10 temas, --muted-foreground fica em 4.31-4.39
+   (matrix dark e liquid dark) — abaixo do AA para texto de 14px. A hierarquia
+   entre item ativo e inativo faz-se com barra + tinta + wash, não a
+   esconder o texto abaixo do limiar de leitura. */
+.nav-item {
+  position: relative;
+  border-radius: var(--shell-radius-card);
+  color: var(--sidebar-foreground);
+  transition: background 0.2s ease, color 0.2s ease, box-shadow 0.2s ease;
+}
+.nav-item:hover {
+  background: color-mix(in oklch, var(--sidebar-foreground) 9%, transparent);
+  color: var(--foreground);
+}
+.nav-item.active {
+  background: var(--nav-active-bg);
+  color: var(--nav-active-ink);
+  font-weight: 600;
+  box-shadow: inset var(--shell-nav-bar-w) 0 var(--nav-active-bar);
 }
 
 /* Cyber Glow Effects */
@@ -765,8 +891,8 @@
 /* Grid Background */
 .cyber-grid {
   background-image:
-    linear-gradient(color-mix(in oklch, var(--primary) 4%, transparent) 1px, transparent 1px),
-    linear-gradient(90deg, color-mix(in oklch, var(--primary) 4%, transparent) 1px, transparent 1px);
+    linear-gradient(color-mix(in oklch, var(--primary) 3%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--primary) 3%, transparent) 1px, transparent 1px);
   background-size: 40px 40px;
 }
 
@@ -796,9 +922,10 @@
   animation: cyber-pulse 2s ease-in-out infinite;
 }
 
-/* Hexagon Pattern */
+/* Hexagon Pattern — 2% em vez de 3%: o padrão é textura, não ruído. (A camada
+   que o aplica em App.tsx ainda leva opacity-50 por cima.) */
 .hex-pattern {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%2300d4aa' fill-opacity='0.03'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%2300d4aa' fill-opacity='0.02'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
 }
 
 /* Progress Bar Glow */
@@ -810,6 +937,24 @@
 /* Scrollbar Hide */
 .scrollbar-hide::-webkit-scrollbar { display: none; }
 .scrollbar-hide { -ms-overflow-style: none; scrollbar-width: none; }
+
+/* Scrollbar global — fina e discreta, o mesmo tratamento dado ao overlay de
+   proteção: o thumb existe quando faz falta e não compete com o conteúdo.
+   `.scrollbar-hide` (especificidade de classe) continua a vencê-la, e o tema
+   matrix-terminal tem regras próprias mais específicas logo abaixo. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: color-mix(in oklch, var(--muted-foreground) 26%, transparent) transparent;
+}
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: color-mix(in oklch, var(--muted-foreground) 20%, transparent);
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: color-mix(in oklch, var(--muted-foreground) 36%, transparent);
+}
 
 /* Smooth Scroll */
 html { scroll-behavior: smooth; }
@@ -1041,7 +1186,7 @@ html { scroll-behavior: smooth; }
   background: color-mix(in oklch, var(--input) 60%, transparent);
   color: var(--foreground);
   font-size: 0.9rem;
-  transition: all 0.2s;
+  transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s, color 0.2s;
   outline: none;
 }
 
@@ -1128,7 +1273,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.95rem;
   font-weight: 700;
   cursor: pointer;
-  transition: all 0.2s;
+  transition: box-shadow 0.2s, filter 0.2s;
   box-shadow: 0 4px 15px color-mix(in oklch, var(--primary) 30%, transparent);
   margin-top: 0.5rem;
 }
@@ -1210,7 +1355,7 @@ html { scroll-behavior: smooth; }
   border: 2px solid var(--border);
   background: color-mix(in oklch, var(--card) 50%, transparent);
   cursor: pointer;
-  transition: all 0.25s;
+  transition: border-color 0.25s, background-color 0.25s, box-shadow 0.25s;
   text-align: center;
 }
 
@@ -1652,7 +1797,7 @@ html { scroll-behavior: smooth; }
   border-radius: var(--radius);
   border: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
   background: var(--card);
-  transition: all 0.25s ease;
+  transition: border-color 0.25s ease, background-color 0.25s ease, box-shadow 0.25s ease;
 }
 
 /* Matrix Avatar integration fix — ensure clean rendering */
@@ -1689,17 +1834,17 @@ html { scroll-behavior: smooth; }
 }
 .badge-success {
   background: color-mix(in oklch, var(--cyber-green) 15%, transparent);
-  color: var(--cyber-green);
+  color: var(--cyber-green-text);
   border: 1px solid color-mix(in oklch, var(--cyber-green) 30%, transparent);
 }
 .badge-warning {
   background: color-mix(in oklch, var(--cyber-yellow) 15%, transparent);
-  color: var(--cyber-yellow);
+  color: var(--cyber-yellow-text);
   border: 1px solid color-mix(in oklch, var(--cyber-yellow) 30%, transparent);
 }
 .badge-danger {
   background: color-mix(in oklch, var(--cyber-red) 15%, transparent);
-  color: var(--cyber-red);
+  color: var(--cyber-red-text);
   border: 1px solid color-mix(in oklch, var(--cyber-red) 30%, transparent);
 }
 
@@ -1709,7 +1854,7 @@ html { scroll-behavior: smooth; }
   border: 1px solid var(--border);
   border-radius: var(--radius);
   color: var(--foreground);
-  transition: all 0.2s ease;
+  transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
 }
 .input-field:focus {
   border-color: var(--primary);
@@ -1722,7 +1867,7 @@ html { scroll-behavior: smooth; }
   color: var(--primary-foreground);
   border-radius: var(--radius);
   font-weight: 600;
-  transition: all 0.2s ease;
+  transition: box-shadow 0.2s ease, filter 0.2s ease;
 }
 .btn-primary:hover {
   filter: brightness(1.05);
@@ -2009,7 +2154,11 @@ html { scroll-behavior: smooth; }
   *, *::before, *::after {
     animation-duration: 0.01ms !important;
     animation-iteration-count: 1 !important;
-    transition-duration: 0.01ms !important;
+    /* none, e nao duration 0.01ms: com duracao e sem property explicito, o
+       browser cria uma transicao por propriedade alterada em TODOS os
+       elementos (o `*` propagava isso), o que na troca de tema se media em
+       milhares de animacoes. */
+    transition-property: none !important;
     scroll-behavior: auto !important;
   }
   .scanlines::before,

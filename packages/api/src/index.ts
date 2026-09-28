@@ -48,6 +48,8 @@ function broadcastEvent(event: ThreatEvent) {
 }
 
 const app = express();
+// Exportado para os testes poderem exercitar as rotas sem subir o servidor.
+export { app };
 
 /** Persona da Matrix é centralizada em ./ai.ts (persona feminina + escopo + guardas). */
 
@@ -190,6 +192,9 @@ app.post("/auth/register", async (req, res) => {
         passwordHash,
         type,
         plan: userPlan as any,
+        // O register público nunca cria admins: role no body é ignorado.
+        // A única via para "admin" é o bootstrap DEV (POST /auth/dev/ensure-admin).
+        role: "user",
         company: type === "business" ? company : undefined,
       },
     });
@@ -261,6 +266,59 @@ app.get("/auth/me", async (req, res) => {
     res.json({ user: sanitizeUser(user) });
   } catch (error) {
     console.error("[AUTH] Me error:", error);
+    res.status(500).json({ message: "Erro interno.", error: String(error) });
+  }
+});
+
+// ── DEV bootstrap: promoção da conta de desenvolvimento ──
+// Promove APENAS admin@cybersafe.local (conta auto-registada pela app em modo
+// dev) para role "admin", sem recriar a DB. Não é uma via pública de criação
+// de admins: exige o token da própria conta dev — nenhum outro utilizador
+// consegue promover nada.
+const DEV_ADMIN_EMAIL = "admin@cybersafe.local";
+
+app.post("/auth/dev/ensure-admin", async (req, res) => {
+  // Guard de ambiente: em produção (NODE_ENV=production, convenção do projeto)
+  // o bootstrap DEV rejeita sempre com 404, antes de qualquer outra verificação
+  // — mesmo para a própria conta dev com token válido.
+  if (process.env.NODE_ENV === "production") {
+    res.status(404).json({ message: "Não encontrado." });
+    return;
+  }
+
+  try {
+    const authHeader = req.headers.authorization;
+    if (!authHeader || !authHeader.startsWith("Bearer ")) {
+      res.status(401).json({ message: "Token não fornecido." });
+      return;
+    }
+
+    const payload = verifyToken(authHeader.split(" ")[1]);
+    if (!payload) {
+      res.status(401).json({ message: "Token inválido ou expirado." });
+      return;
+    }
+
+    const caller = await prisma.user.findUnique({ where: { id: payload.sub } });
+    if (!caller || caller.email !== DEV_ADMIN_EMAIL) {
+      res.status(403).json({ message: "Apenas a conta de desenvolvimento pode acionar este bootstrap." });
+      return;
+    }
+
+    if (caller.role !== "admin") {
+      await prisma.user.setRole({ where: { email: DEV_ADMIN_EMAIL }, role: "admin" });
+    }
+
+    const updated = await prisma.user.findUnique({ where: { email: DEV_ADMIN_EMAIL } });
+    if (!updated) {
+      res.status(404).json({ message: "Conta de desenvolvimento não encontrada." });
+      return;
+    }
+
+    console.log(`[AUTH] Dev account promoted to admin: ${DEV_ADMIN_EMAIL}`);
+    res.json({ user: sanitizeUser(updated) });
+  } catch (error) {
+    console.error("[AUTH] Dev ensure-admin error:", error);
     res.status(500).json({ message: "Erro interno.", error: String(error) });
   }
 });
@@ -523,23 +581,26 @@ app.get("/api/training-score", async (_req, res) => {
   }
 });
 
-const server = app.listen(port, () => {
-  console.log(`CyberSafe API listening on http://localhost:${port}`);
-});
-
-function gracefulShutdown(signal: string) {
-  console.log(`[API] Received ${signal}, shutting down...`);
-  server.close(() => {
-    console.log("[API] Server closed.");
-    process.exit(0);
+// CYBERSAFE_API_NO_LISTEN=1 deixa os testes importar o app sem bind à porta 4000.
+if (process.env.CYBERSAFE_API_NO_LISTEN !== "1") {
+  const server = app.listen(port, () => {
+    console.log(`CyberSafe API listening on http://localhost:${port}`);
   });
 
-  // Force close after 2s if still hanging
-  setTimeout(() => {
-    console.log("[API] Forcing exit after timeout.");
-    process.exit(0);
-  }, 2000);
-}
+  const gracefulShutdown = (signal: string) => {
+    console.log(`[API] Received ${signal}, shutting down...`);
+    server.close(() => {
+      console.log("[API] Server closed.");
+      process.exit(0);
+    });
 
-process.on("SIGINT", () => gracefulShutdown("SIGINT"));
-process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+    // Force close after 2s if still hanging
+    setTimeout(() => {
+      console.log("[API] Forcing exit after timeout.");
+      process.exit(0);
+    }, 2000);
+  };
+
+  process.on("SIGINT", () => gracefulShutdown("SIGINT"));
+  process.on("SIGTERM", () => gracefulShutdown("SIGTERM"));
+}

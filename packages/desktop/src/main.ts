@@ -1,4 +1,4 @@
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, Tray, nativeImage } from "electron";
+import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, Tray, nativeImage, screen } from "electron";
 import path from "node:path";
 import fs from "node:fs";
 import net from "node:net";
@@ -54,13 +54,34 @@ function assetsPath(...segments: string[]): string {
   return path.join(__dirname, "assets", ...segments);
 }
 
+// Icones do SO usam a familia `icon-*`: o mesmo tile, recortado ao bounding
+// box de alpha e re-centrado com ~4% de margem (scripts/
+// generate-branding-derivatives.py). Medido no mestre: o alpha occupa
+// 90.6% linear do canvas (bbox 29/32 em icon-32), padding 3.1-6.2% por lado
+// — a arte preenche o slot, o recorte nao e a causa do "pequeno" na bandeja.
+// A causa e a DPI: a bandeja usa SM_CXSMICON = 16 px logicos x scaleFactor
+// (20 px a 125%, 24 px a 150%), mas o bitmap era forcado a 16 px fisicos —
+// a 150% ficava com 16/24 do slot. A taskbar nao sofre disto porque consome
+// o icon.ico multi-frame e o Windows escolhe o frame certo para o DPI.
+// O .ico actual e gerado a partir do mesmo mestre, por isso a taskbar
+// continua a PARTILHAR a arte; so a entrega da tray muda.
+function trayIconSizePx(): number {
+  let sf = 1;
+  try {
+    sf = screen.getPrimaryDisplay().scaleFactor || 1;
+  } catch {
+    // screen ainda nao inicializado: 16 px e o nominal a 100%.
+  }
+  // 32 e o frame maximo entregue (icon-32); acima disso o Windows escala o
+  // hIcon ate ao slot, que e melhor do que upsample embacado por resize.
+  return Math.min(32, Math.max(16, Math.round(16 * sf)));
+}
+
 function resolveTrayIconPath(): string {
   const candidates = [
-    // Versão simplificada desenhada para tamanhos minúsculos (16/32)
-    assetsPath("icons", "cybersafe-shield-cs-simple-32.png"),
-    assetsPath("icons", "cybersafe-shield-cs-32.png"),
-    assetsPath("icons", "cybersafe-shield-cs-16.png"),
-    assetsPath("cybersafe-logo.png"),
+    assetsPath("cybersafe", "icon-32.png"),
+    assetsPath("cybersafe", "icon-24.png"),
+    assetsPath("cybersafe", "icon-16.png"),
     assetsPath("icon.png"),
   ];
   for (const candidate of candidates) {
@@ -69,12 +90,14 @@ function resolveTrayIconPath(): string {
   return candidates[candidates.length - 1];
 }
 
+// Ícone da janela/taskbar: o .ico multi-tamanho gerado a partir do mesmo tile
+// recortado (Windows escolhe 16/24/32/48 conforme a barra e o DPI); os PNG são
+// o caminho em Linux.
 function resolveWindowIconPath(): string {
   const candidates = [
     assetsPath("icon.ico"),
-    assetsPath("icons", "cybersafe-shield-cs-256.png"),
-    assetsPath("icons", "cybersafe-shield-cs-128.png"),
-    assetsPath("cybersafe-logo.png"),
+    assetsPath("cybersafe", "icon-256.png"),
+    assetsPath("cybersafe", "icon-48.png"),
     assetsPath("icon.png"),
   ];
   for (const candidate of candidates) {
@@ -83,38 +106,37 @@ function resolveWindowIconPath(): string {
   return candidates[candidates.length - 1];
 }
 
-// Em dev, copia o branding da marca (na raiz do repo) para dist/assets se existir.
+// Em dev, refresca os derivados da marca (assets/branding/generated) para
+// dist/assets, para que mexer no mestre se veja sem re-correr o build.
+// Antes isto copiava toda a árvore otimizada (escudos antigos + matrix) e
+// qualquer PNG solto na raiz de branding — era assim que o logo de 1,5 MB sem
+// alpha chegava ao bundle. Os retratos matrix não têm consumo aqui.
 function syncBrandingAssets() {
   if (app.isPackaged) return;
   try {
     const repoRoot = path.resolve(app.getAppPath(), "..", "..");
-    const brandingDir = path.join(repoRoot, "assets", "branding");
-    if (!fs.existsSync(brandingDir)) return;
-    fs.mkdirSync(assetsPath(), { recursive: true });
+    const generatedDir = path.join(repoRoot, "assets", "branding", "generated");
+    if (!fs.existsSync(generatedDir)) return;
+    const outDir = assetsPath("cybersafe");
+    fs.mkdirSync(outDir, { recursive: true });
 
-    const copyPngTree = (srcDir: string, dstDir: string) => {
-      for (const root of fs.readdirSync(srcDir)) {
-        const srcEntry = path.join(srcDir, root);
-        const stat = fs.statSync(srcEntry);
-        if (stat.isDirectory()) {
-          copyPngTree(srcEntry, path.join(dstDir, root));
-        } else if (path.extname(srcEntry).toLowerCase() === ".png") {
-          fs.mkdirSync(dstDir, { recursive: true });
-          fs.copyFileSync(srcEntry, path.join(dstDir, path.basename(srcEntry)));
-        }
-      }
-    };
-
-    // Sincroniza os assets otimizados (icons/ e matrix/) quando presentes.
-    const optimizedDir = path.join(brandingDir, "optimized");
-    if (fs.existsSync(optimizedDir)) {
-      copyPngTree(optimizedDir, assetsPath());
+    let copied = 0;
+    // So o que o shell consome: a familia icon-* (janela/bandeja), o tile do
+    // splash e o .ico. Copiar generated/ inteiro traria o symbol-flat e a
+    // familia tile-* da UI para dentro do bundle do desktop.
+    const wanted = /^icon-\d+\.png$|^tile-128\.png$|^cybersafe-icon\.ico$/;
+    for (const file of fs.readdirSync(generatedDir)) {
+      if (!wanted.test(file)) continue;
+      const src = path.join(generatedDir, file);
+      if (!fs.statSync(src).isFile()) continue;
+      fs.copyFileSync(src, path.join(outDir, file));
+      copied += 1;
     }
-    for (const file of fs.readdirSync(brandingDir)) {
-      if (!file.toLowerCase().endsWith(".png")) continue;
-      fs.copyFileSync(path.join(brandingDir, file), assetsPath(file));
-      console.log("[Electron] Logo da marca aplicado:", file);
-    }
+    // Os nomes que o empacotamento e os resolvedores acima já conhecem.
+    const readIf = (name: string) => fs.readFileSync(path.join(generatedDir, name));
+    fs.writeFileSync(assetsPath("icon.ico"), readIf("cybersafe-icon.ico"));
+    fs.writeFileSync(assetsPath("icon.png"), readIf("icon-256.png"));
+    console.log("[Electron] Branding sincronizado:", copied, "derivative(s).");
   } catch (error) {
     console.error("[Electron] Falha ao sincronizar branding:", error);
   }
@@ -240,7 +262,10 @@ function startServiceProcess(): Promise<boolean> {
     serviceProcess = spawn(process.execPath, [serviceEntry], {
       stdio: ["ignore", "pipe", "pipe", "ipc"],
       windowsHide: true,
-      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1" },
+      // Build packaged = produção: o serviço embutido tem de correr com
+      // NODE_ENV=production (desliga o canário dev-only e alinha com o
+      // windows-service.ts, que também o define).
+      env: { ...process.env, ELECTRON_RUN_AS_NODE: "1", NODE_ENV: "production" },
     });
 
     let exitedEarly = false;
@@ -298,7 +323,8 @@ async function updateServiceStatus() {
 
       const image = nativeImage.createFromPath(iconPathToUse);
       if (!image.isEmpty()) {
-        tray.setImage(image.resize({ width: 16, height: 16 }));
+        const size = trayIconSizePx();
+        tray.setImage(image.resize({ width: size, height: size }));
       }
     } catch (e) {
       console.error("Erro ao atualizar icone", e);
@@ -505,7 +531,8 @@ const exitConfirmation = createExitConfirmation({
 
 function createTray() {
   const image = nativeImage.createFromPath(resolveTrayIconPath());
-  tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image.resize({ width: 16, height: 16 }));
+  const size = trayIconSizePx();
+  tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image.resize({ width: size, height: size }));
 
   updateTrayMenu();
 

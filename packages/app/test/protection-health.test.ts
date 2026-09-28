@@ -1,4 +1,5 @@
 import { test, describe } from "node:test";
+import { engineStatusText, windowsFirewallDisplay, wfpModuleDisplay } from "../src/lib/protectionHealth";
 import assert from "node:assert/strict";
 import type { EngineHealth, ProtectionStatus } from "@cybersafe/shared-types";
 import { deriveProtectionLevel, explainProtectionScore, PROTECTION_LEVEL_META } from "../src/lib/protectionHealth";
@@ -152,7 +153,141 @@ describe("explainProtectionScore — fórmula real do Dashboard", () => {
     assert.equal(explainProtectionScore(100, engine).maxPossible, 100);
   });
 
-  test("o texto do nível degraded mantém o rótulo do bug original", () => {
-    assert.equal(PROTECTION_LEVEL_META.degraded.shortLabel, "Degradado");
+  test("o texto do nível degraded é compreensível por utilizadores comuns", () => {
+    assert.equal(PROTECTION_LEVEL_META.degraded.shortLabel, "Atenção");
+    assert.equal(PROTECTION_LEVEL_META.degraded.label, "Proteção precisa de atenção");
+  });
+});
+/**
+ * O texto de estado de cada motor tem de ser o que o serviço reportou.
+ * Runtime real (probe ao serviço vivo): o ClamAV chega com status "degraded"
+ * e o motivo "ClamAV instalado mas sem base de assinaturas ... corre freshclam".
+ */
+describe("honestidade do estado de cada motor", () => {
+  test("o ClamAV sem base de assinaturas mostra DEGRADED, nunca ACTIVE", () => {
+    // Motor instalado mas inerte NAO e motor operacional. Se isto virar ACTIVE,
+    // a UI passa a afirmar que o ClamAV protege, e ele nao analisa nada.
+    assert.equal(engineStatusText("degraded"), "DEGRADED");
+    assert.notEqual(engineStatusText("degraded"), "ACTIVE");
+  });
+
+  test("um motor indisponivel mostra UNAVAILABLE, nunca ACTIVE", () => {
+    // O mesmo princípio para o firewall (WFP filter not started).
+    assert.equal(engineStatusText("unavailable"), "UNAVAILABLE");
+    assert.notEqual(engineStatusText("unavailable"), "ACTIVE");
+  });
+
+  test("só o estado 'active' é apresentado como ACTIVE", () => {
+    // ACTIVE é uma afirmação: o motor viu os ficheiros. Só o serviço a pode fazer.
+    assert.equal(engineStatusText("active"), "ACTIVE");
+  });
+
+  test("um motor em erro mostra ERROR", () => {
+    assert.equal(engineStatusText("error"), "ERROR");
+  });
+
+  test("a telemetria real do ClamAV degrada o nivel, nao o mantem protegido", () => {
+    // O estado exato que o serviço devolveu nesta maquina.
+    const engine: EngineHealth = {
+      serviceRunning: true,
+      anyEngineDegraded: true,
+      clamav: { status: "degraded", detail: "ClamAV instalado mas sem base de assinaturas" },
+      yara: { status: "active", detail: "Loaded 1 rule(s) from file" },
+      hashDb: { status: "active", detail: "Loaded 4 signature(s)" },
+    } as EngineHealth;
+    const level = deriveProtectionLevel("safe", engine);
+    assert.notEqual(level, "protected", "com o ClamAV inerte nao se pode dizer 'Sistema Protegido'");
+    assert.equal(level, "degraded");
+  });
+});
+
+/**
+ * O Windows Firewall e o modulo WFP do CyberSafe sao coisas diferentes.
+ * Runtime real (protection.getState ao servico vivo): engine.firewall =
+ * { status: "unavailable", detail: "WFP filter not started" }, e vem de
+ * wfpFilter.isActive() (engine.ts:762-765) — ou seja, so do modulo WFP.
+ * A UI dizia "protecao desligada", o que afirmava sobre o Windows algo que
+ * o produto nunca mediu.
+ */
+describe("honestidade do firewall", () => {
+  test("estado REAL desligado, com evidencia, e dito como desligado", () => {
+    // Aqui ha leitura real (Get-NetFirewallProfile), logo afirmar e honesto.
+    const win = windowsFirewallDisplay({ enabled: false, available: true, profiles: [{ name: "Dominio", enabled: false }, { name: "Publico", enabled: true }] });
+    assert.equal(win.status, "inactive");
+    assert.equal(win.text, "DESATIVADO");
+    assert.match(win.detail, /Dominio/);
+  });
+
+  test("estado REAL ligado, com evidencia, e dito como ativo", () => {
+    const win = windowsFirewallDisplay({ enabled: true, available: true, profiles: [{ name: "Publico", enabled: true }] });
+    assert.equal(win.status, "active");
+    assert.equal(win.text, "ATIVO");
+  });
+
+  test("estado DESCONHECIDO: diz desconhecido, nunca desligado", () => {
+    // Sem leitura real nao se afirma nada sobre o Windows. Este e o caso de hoje:
+    // o servico nao consulta o firewall do Windows.
+    for (const entrada of [null, undefined, { enabled: false, available: false, profiles: [] }]) {
+      const win = windowsFirewallDisplay(entrada as never);
+      assert.equal(win.status, "unknown");
+      assert.equal(win.text, "NAO VERIFICADO");
+      assert.notEqual(win.text, "DESATIVADO");
+      assert.doesNotMatch(win.text, /desligad/i, "desconhecido nunca se escreve como desligado");
+    }
+  });
+
+  test("modulo WFP inativo mostra o estado real e o motivo acionavel", () => {
+    // Payload exacto do servico nesta maquina.
+    const wfp = wfpModuleDisplay({ status: "unavailable", detail: "WFP filter not started" });
+    assert.equal(wfp.text, "UNAVAILABLE");
+    assert.match(wfp.detail, /WFP/i);
+    assert.match(wfp.detail, /Protecao/i, "o motivo diz o que fazer: arranca com a Protecao");
+  });
+
+  test("nenhum estado do modulo WFP se escreve como protecao desligada", () => {
+    // A mentira que o utilizador viu. unavailable, unknown e degraded nao podem
+    // aparecer como "protecao desligada" — isso sugeriria que o Windows esta
+    // desprotegido, e o modulo WFP nao diz nada sobre o Windows.
+    for (const sub of [
+      { status: "unavailable", detail: "WFP filter not started" },
+      { status: "degraded", detail: "WFP filter not active" },
+      { status: "error", detail: "WFP filter off" },
+      undefined,
+    ] as never[]) {
+      const wfp = wfpModuleDisplay(sub as never);
+      assert.doesNotMatch(wfp.text, /desligad/i, `estado ${JSON.stringify(sub)}`);
+      assert.doesNotMatch(wfp.detail, /protecao desligada/i, `estado ${JSON.stringify(sub)}`);
+    }
+  });
+
+  test("o nivel global nunca regressa a protegido com o WFP inativo", () => {
+    // Payload real: clamav degraded + firewall unavailable, com o servico a correr.
+    const engine = {
+      serviceRunning: true,
+      anyEngineDegraded: true,
+      yara: { status: "active", detail: "Loaded 1 rule(s) from file" },
+      hashDb: { status: "active", detail: "Loaded 4 signature(s)" },
+      clamav: { status: "degraded", detail: "sem base de assinaturas" },
+      nativeEngine: { status: "active", detail: "ok" },
+      firewall: { status: "unavailable", detail: "WFP filter not started" },
+    } as unknown as EngineHealth;
+    const level = deriveProtectionLevel("safe", engine);
+    assert.notEqual(level, "protected", "com o WFP inativo e o ClamAV degradado nao se pode dizer Sistema Protegido");
+    assert.equal(level, "degraded");
+  });
+
+  test("o Windows Firewall desconhecido NAO torna o nivel critico", () => {
+    // Desconhecer o Windows Firewall nao e evidencia de problema: nao pode
+    //agerir a protecao para critical, que seria alarmismo sem prova.
+    const engine = {
+      serviceRunning: true,
+      anyEngineDegraded: false,
+      yara: { status: "active", detail: "ok" },
+      hashDb: { status: "active", detail: "ok" },
+      clamav: { status: "active", detail: "ok" },
+      nativeEngine: { status: "active", detail: "ok" },
+    } as unknown as EngineHealth;
+    const level = deriveProtectionLevel("safe", engine);
+    assert.notEqual(level, "critical", "desconhecer o Windows Firewall nao e um erro de motor");
   });
 });

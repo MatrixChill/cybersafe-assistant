@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   NO_DETECTIONS_NOTE,
   SCAN_ACTION_CARDS,
+  SCAN_STALL_MS,
   SCAN_HYDRATING_DETAIL,
   SCAN_HYDRATING_TITLE,
   SCAN_RESULT_LABELS,
@@ -10,6 +11,7 @@ import {
   activeScanTitle,
   buildResultSummary,
   decideScanEvent,
+  decideScanRecovery,
   formatEta,
   isActiveUiStatus,
   isTerminalScanStatus,
@@ -19,6 +21,7 @@ import {
   normalizeScanType,
   scanEtaSeconds,
   scanProgressPercent,
+  scanRateLabel,
   scanScopeFor,
   scopeFromIntent,
   scopeTitle,
@@ -433,6 +436,17 @@ describe("progresso real e contadores monotónicos", () => {
       filesExcluded: 4,
     });
     assert.match(summary, /4 ficheiros foram ignorados pelas exclusões/);
+    assert.match(summary, /4 ficheiros foram ignorados pelas exclusões e não passaram pelos motores de análise\./);
+    assert.doesNotMatch(summary, /passou\/passaram/);
+    const singular = buildResultSummary({
+      scope: "computer",
+      type: "full",
+      status: "completed",
+      filesScanned: 899,
+      threatsFound: 0,
+      filesExcluded: 1,
+    });
+    assert.match(singular, /1 ficheiro foi ignorado pelas exclusões e não passou pelos motores de análise\./);
   });
 });
 
@@ -525,34 +539,200 @@ describe("scan session flow (integration of the pure rules)", () => {
 });
 
 /**
- * Hidratação ao montar a página. O bug manual: ao voltar à secção a meio de uma
- * análise existia um flash do estado idle ("O que pretende analisar?") antes de
- * o snapshot de `scan.getActive` chegar. Estes testes fixam a regra: enquanto a
- * ressincronização está pendente, o ecrã de hidratação substitui o idle.
+ * O portão de recuperação. A regra mudou: a tela deixou de ser uma espera
+ * cega e passou a exigir PROVA de uma sessão viva. Sem prova, o scanner abre em
+ * IDLE — o `hydrating` deixou de nascer a `true` no mount, que era o que
+ * prometia "A recuperar análise em curso" em cada abertura do CyberSafe sem
+ * qualquer análise para recuperar.
  */
+describe("velocidade mostrada — a medição real do arranque", () => {
+  // Números vindos de um probe real contra o serviço vivo (2.º arranque, motores
+  // quentes): REQUEST->scanId 1984 ms · primeiro progress 1984 ms ·
+  // `gathering`->`scanning` 90 653 ms. Durante esses ~88 s o serviço conta
+  // ficheiros encontrados (filesDiscovered 0->800) mas filesScanned fica a 0 e
+  // SÓ calcula filesPerSecond no ciclo de análise.
+  const st = (over: Record<string, unknown>) => ({
+    id: "a", type: "quick", status: "running", progress: 0, filesScanned: 0,
+    threatsFound: 0, revision: 0, ...over,
+  });
+
+  test("a enumerar ficheiros NÃO mostra 0 f/s: mostra que ainda não há velocidade", () => {
+    // "0 f/s" afirma que o motor parou. Está a fazer trabalho real.
+    assert.equal(scanRateLabel(st({ phase: "gathering", filesDiscovered: 412 })), "—");
+  });
+
+  test("a preparar também não mostra 0 f/s", () => {
+    assert.equal(scanRateLabel(st({ phase: "preparing" })), "—");
+  });
+
+  test("sem estado nenhum, não inventa velocidade", () => {
+    assert.equal(scanRateLabel(null), "—");
+  });
+
+  test("a analisar com velocidade real, mostra a velocidade real", () => {
+    // Só depois de haver ficheiros analisados é que a velocidade significa algo.
+    assert.equal(scanRateLabel(st({ phase: "scanning", filesScanned: 89, filesTotal: 800, filesPerSecond: 12.5 })), "12.5 f/s");
+  });
+
+  test("a analisar sem velocidade conhecida, honesto é '—' e não 0", () => {
+    // filesScanned > 0 mas o serviço ainda não mandou filesPerSecond.
+    assert.equal(scanRateLabel(st({ phase: "scanning", filesScanned: 30, filesTotal: 800 })), "—");
+  });
+
+  test("já terminado, mostra a velocidade final que o serviço mediu", () => {
+    assert.equal(scanRateLabel(st({ status: "completed", filesScanned: 800, filesTotal: 800, filesPerSecond: 9.1 })), "9.1 f/s");
+  });
+});
+
 describe("scanner hydration gate", () => {
-  test("mostra hidratação (e não idle) enquanto o snapshot está pendente", () => {
-    assert.equal(shouldShowHydration(true, "idle"), true);
+  test("sem sessão comprovada, nunca promete recuperar uma análise", () => {
+    // A regressão que importa: hydrating a true, idle, e NADA comprovado.
+    // Antes isto era `true` — a tela mentia em cada arranque.
+    assert.equal(shouldShowHydration(true, "idle", false), false);
   });
 
-  test("depois do snapshot sem scan ativo, deixa de hidratar (mostra idle)", () => {
-    assert.equal(shouldShowHydration(false, "idle"), false);
+  test("com sessão viva comprovada, mostra a recuperação em vez do idle", () => {
+    assert.equal(shouldShowHydration(true, "idle", true), true);
   });
 
-  test("nunca esconde uma análise ativa atrás da hidratação", () => {
+  test("depois do resync, nunca hidrata (mostra idle)", () => {
+    assert.equal(shouldShowHydration(false, "idle", true), false);
+  });
+
+  test("nunca esconde uma análise ativa atrás da recuperação", () => {
     for (const status of ["preparing", "gathering", "scanning", "finalizing"] as const) {
-      assert.equal(shouldShowHydration(true, status), false, status);
+      assert.equal(shouldShowHydration(true, status, true), false, status);
     }
   });
 
   test("nunca substitui um resultado terminal", () => {
     for (const status of ["completed", "cancelled", "failed"] as const) {
-      assert.equal(shouldShowHydration(true, status), false, status);
+      assert.equal(shouldShowHydration(true, status, true), false, status);
     }
   });
 
-  test("a cópia de hidratação é explícita e não promete resultados", () => {
+  test("a cópia de recuperação é explícita e não promete resultados", () => {
     assert.match(SCAN_HYDRATING_TITLE, /recuperar/i);
     assert.ok(SCAN_HYDRATING_DETAIL.length > 0);
+  });
+});
+
+/**
+ * As quatro regressões do P0. Fixam a DECISÃO (`decideScanRecovery`), não a
+ * estética: o que separa "abrir o CyberSafe" de "retomar uma análise" é o que
+ * o motor responde, e nada mais.
+ */
+describe("recuperação de análise — a decisão, não a tela", () => {
+  test("CASO A: abrir sem análise recente ou interrompida — nada a recuperar", () => {
+    for (const raw of [null, undefined, {}, { id: "" }, { type: "quick" }, "scan", 42, []]) {
+      assert.equal(decideScanRecovery(raw), null, JSON.stringify(raw));
+    }
+    // E o portão concorda: sem decisão, não há promessa na tela.
+    assert.equal(shouldShowHydration(true, "idle", false), false);
+  });
+
+  test("CASO B: análise terminada normalmente, depois restart — nada a recuperar", () => {
+    // Carimbo fresco de propósito: a recusa tem de vir do estado TERMINAL, não
+    // de um carimbo velho ou em falta.
+    const completed = decideScanRecovery(
+      scanState({ status: "completed", phase: "finalizing", progress: 100, filesScanned: 1200, filesTotal: 1200, endTime: "2026-09-21T10:30:00.000Z", updatedAt: new Date().toISOString() }),
+    );
+    assert.equal(completed, null, "completed nunca abre recuperação");
+  });
+
+  test("CASO C: cancelada ou falhada terminalmente, depois restart — nada a recuperar", () => {
+    // Tal como em B: com carimbo fresco, quem recusa é o estado terminal.
+    const fresh = new Date().toISOString();
+    assert.equal(decideScanRecovery(scanState({ status: "cancelled", updatedAt: fresh })), null, "cancelled");
+    assert.equal(decideScanRecovery(scanState({ status: "failed", error: "motor caiu", updatedAt: fresh })), null, "failed");
+    // E o que o serviço devolve quando o PID já não lá estava: "já saiu", que
+    // também não é uma sessão retomável.
+    assert.equal(decideScanRecovery({ id: "abc", status: "idle", phase: "scanning", filesTotal: 10, updatedAt: fresh }), null, "idle");
+  });
+
+  test("CASO D: interrompida a meio, depois restart — recupera E traz dados reais", () => {
+    const resumed = decideScanRecovery(
+      scanState({ status: "running", phase: "scanning", filesScanned: 340, filesTotal: 1200, progress: 28, updatedAt: new Date().toISOString() }),
+    );
+    assert.ok(resumed, "uma sessão viva é retomável");
+    assert.equal(resumed!.id, "6f2b6f2b-1111-2222-3333-444455556666");
+    assert.equal(resumed!.status, "running");
+    assert.equal(resumed!.phase, "scanning");
+    assert.equal(resumed!.filesScanned, 340, "os contadores verdadeiros chegam com a recuperação");
+    assert.equal(resumed!.filesTotal, 1200);
+    assert.equal(resumed!.targetPath, "C:\\Users\\caioc\\Downloads");
+  });
+
+  test("sessão a correr com `updatedAt` recente — continua a abrir", () => {
+    // O heartbeat do serviço carimba `updatedAt` de 1 em 1 s, e o watchdog usa
+    // SCAN_STALL_MS como limite de emudecia (scan-manager.ts:155-163,
+    // FileScannerPage.tsx:288). Um carimbo dentro desse limite é o produto a
+    // dizer que o motor continua a falar: a sessão TEM de ser retomada.
+    const beating = scanState({
+      status: "running", phase: "scanning", filesScanned: 340, filesTotal: 1200,
+      updatedAt: new Date().toISOString(),
+    });
+    const resumed = decideScanRecovery(beating);
+    assert.ok(resumed, "uma sessão viva e a emitir tem de continuar a abrir");
+    assert.equal(resumed!.id, "6f2b6f2b-1111-2222-3333-444455556666");
+    assert.equal(resumed!.filesScanned, 340, "e a trazer os contadores reais");
+    assert.equal(resumed!.filesTotal, 1200);
+  });
+
+  test("sessão a correr parada há mais de SCAN_STALL_MS — NÃO é recuperável", () => {
+    // Um scan "running" cujo updatedAt já passou o limite está parado pelo
+    // critério do próprio produto. Era a ressalva 5: dentro da mesma vida do
+    // serviço um scan encravado sem atividade nenhuma continuava a ser
+    // oferecido para sempre. Aberta, agora, em idle.
+    const silent = new Date(Date.now() - SCAN_STALL_MS - 1_000).toISOString();
+    assert.equal(
+      decideScanRecovery(scanState({ status: "running", phase: "scanning", filesScanned: 340, filesTotal: 1200, updatedAt: silent })),
+      null,
+      "sem atividade há mais de SCAN_STALL_MS não há nada a recuperar",
+    );
+    // Ainda dentro do limite (com folga de 1 s) continua a recuperar: o corte
+    // tem de ser o do produto, não um limite arbitrário mais apertado.
+    const justBeating = new Date(Date.now() - SCAN_STALL_MS + 1_000).toISOString();
+    assert.ok(
+      decideScanRecovery(scanState({ status: "running", phase: "scanning", filesScanned: 340, filesTotal: 1200, updatedAt: justBeating })),
+      "dentro de SCAN_STALL_MS a sessão ainda é retomável",
+    );
+  });
+
+  test("sem `updatedAt`, ou com um ilegível — NÃO é recuperável", () => {
+    // Porta 4, à letra: o carimbo tem de EXISTIR e ser PARSEÁVEL. Sem ele não há
+    // prova suficiente para oferecer Recuperar análise, e sem prova o scanner
+    // abre em IDLE. Mesmo com id válido, status vivo e dados para retomar — é a
+    // ausência do carimbo que recusa.
+    const base = { status: "running", phase: "scanning", filesScanned: 12, filesTotal: 900 };
+    assert.equal(
+      decideScanRecovery(scanState({ ...base, updatedAt: undefined })),
+      null,
+      "carimbo ausente não é recuperável",
+    );
+    assert.equal(
+      decideScanRecovery(scanState({ ...base, updatedAt: "ontem" })),
+      null,
+      "carimbo ilegível não é recuperável",
+    );
+    assert.equal(
+      decideScanRecovery(scanState({ ...base, updatedAt: "" })),
+      null,
+      "carimbo vazio não é recuperável",
+    );
+  });
+
+  test("as portas do contrato: id, sessão viva e dados para retomar", () => {
+    const fresh = { updatedAt: new Date().toISOString() };
+    // Porta 1 — identidade real.
+    assert.equal(decideScanRecovery(scanState({ ...fresh, id: "" })), null, "sem id");
+    // Porta 2 — sessão viva. `idle` não é terminal, mas também não é vida.
+    assert.equal(decideScanRecovery(scanState({ ...fresh, status: "idle" })), null, "idle nao e vida");
+    // Porta 3 — dados. Sem fase nem total não há progresso honesto a mostrar.
+    assert.equal(decideScanRecovery(scanState({ ...fresh, phase: undefined, filesTotal: undefined })), null, "sem dados");
+    // Uma fase viva basta (o serviço escreve `phase` desde o arranque do scan).
+    assert.ok(decideScanRecovery(scanState({ ...fresh, status: "queued", phase: "preparing", filesTotal: undefined })), "queued com fase");
+    // E um total real basta, sem fase.
+    assert.ok(decideScanRecovery(scanState({ ...fresh, status: "running", phase: undefined, filesTotal: 7 })), "running com total");
   });
 });

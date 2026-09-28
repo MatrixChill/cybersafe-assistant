@@ -228,6 +228,16 @@ export class ScanManager {
       const totalFiles = files.length;
       if (totalFiles === 0) {
         // Explicit terminal state — a zero-file scan must never stay "running".
+        //
+        // Mas NUNCA sobrescreve um estado terminal já decidido. O caso real:
+        // cancelar durante a gathering parte a recolha, `files` fica vazio e
+        // este ramo escrevia `completed` + `progress: 100` por cima do
+        // `cancelled` — dois estados terminais para o mesmo scan, com o
+        // cancel do utilizador ignorado. Um scan cancelado é cancelado.
+        const statusNow = this.activeScans.get(id)?.status;
+        if (statusNow !== "running" && statusNow !== "queued") {
+          return;
+        }
         this.updateScan(id, {
           status: "completed",
           phase: "finalizing",
@@ -267,10 +277,8 @@ export class ScanManager {
               (await this.looksLikeZip(file));
             if (isZip) {
               zipCount++;
-              const zipResult = await this.scanZipWithSafety(id, file, scanned, startTime);
-              threats += zipResult.threats;
-              scanned += zipResult.scanned;
-              analyzed += zipResult.analyzed;
+              const zipThreats = await this.scanZipWithSafety(id, file);
+              threats += zipThreats;
             }
 
             const fileStart = perfEnabled ? Date.now() : 0;
@@ -278,7 +286,10 @@ export class ScanManager {
             if (perfEnabled) engineMs += Date.now() - fileStart;
             analyzed++;
             scanned++;
-            if (result && result.highRiskCount > 0) {
+            // Contrato único de "ameaca": highRiskCount > 0 OU severity
+            // high/critical/medium (mesmo critério que o engine.ts para
+            // threat.detected — sem isto o toast chega e o scanner mostra 0).
+            if (result && (result.highRiskCount > 0 || result.overallSeverity === "high" || result.overallSeverity === "critical" || result.overallSeverity === "medium")) {
               threats++;
             }
           }
@@ -351,6 +362,7 @@ export class ScanManager {
   // ── ZIP safety: extraction with zip-slip / bomb / limit protections ──
   private static readonly ZIP_MAX_ENTRIES = 500;
   private static readonly ZIP_MAX_DEPTH = 3;
+  private static readonly ZIP_MAX_NESTING = 3;
   private static readonly ZIP_MAX_EXTRACTED_BYTES = 200 * 1024 * 1024; // 200 MB
   private static readonly ZIP_MAX_COMPRESSION_RATIO = 1000;
 
@@ -370,18 +382,27 @@ export class ScanManager {
   /**
    * Scan a ZIP safely: list entries, enforce limits, extract to a temp dir
    * with zip-slip protection, scan the extracted files, clean up.
-   * Returns the number of threats found inside the archive plus how many
-   * entries were scanned/analyzed, so the caller can keep counters truthful.
+   * Returns the number of threats found inside the archive.
+   * Entradas internas NÃO contam para filesScanned/filesAnalyzed do scan
+   * exterior — o ZIP é um único candidato (o outer file já incrementou
+   * scanned/analyzed no loop principal). Contadores de entradas internas
+   * são mantidos em variáveis locais apenas para logging/perf.
+   *
+   * Nesting depth semantics: ZIP_MAX_NESTING is the exclusive upper bound.
+   * Valid recursion depths are 0..ZIP_MAX_NESTING-1. A call at depth >= ZIP_MAX_NESTING
+   * returns immediately (guard). Recursion is allowed when nestingDepth < ZIP_MAX_NESTING,
+   * which is consistent with the guard.
    */
   private async scanZipWithSafety(
     scanId: string,
     zipPath: string,
-    baseScanned: number,
-    startTime: number
-  ): Promise<{ threats: number; scanned: number; analyzed: number }> {
+    nestingDepth = 0
+  ): Promise<number> {
+    // Guard: depth >= ZIP_MAX_NESTING means we've reached the limit — stop recursion.
+    // This is consistent with the recursion condition `nestingDepth < ZIP_MAX_NESTING`
+    // below. The old `> ZIP_MAX_NESTING` guard was off-by-one (allowed one extra level).
+    if (nestingDepth >= ScanManager.ZIP_MAX_NESTING) return 0;
     let threats = 0;
-    let zipScanned = 0;
-    let zipAnalyzed = 0;
     const tmpRoot = await fs.mkdtemp(path.join(os.tmpdir(), "cybersafe-zip-"));
     try {
       // Import AdmZip lazily (keeps it in the same module graph as core).
@@ -390,14 +411,14 @@ export class ScanManager {
       const entries = zip.getEntries();
 
       // Limit entry count
-      if (entries.length > ScanManager.ZIP_MAX_ENTRIES) return { threats: 0, scanned: 0, analyzed: 0 };
+      if (entries.length > ScanManager.ZIP_MAX_ENTRIES) return 0;
 
       // Depth-first bounded walk
       const normalizedPaths = new Set<string>();
       let extractedBytes = 0;
 
       for (const entry of entries) {
-        if (this.isCancelled.has(scanId)) return { threats, scanned: zipScanned, analyzed: zipAnalyzed };
+        if (this.isCancelled.has(scanId)) return threats;
         if (entry.isDirectory) continue;
 
         const rawEntryName = entry.entryName;
@@ -423,7 +444,7 @@ export class ScanManager {
             ? (entry.header.size ?? 0)
             : 0;
           extractedBytes += entryData;
-          if (extractedBytes > ScanManager.ZIP_MAX_EXTRACTED_BYTES) return { threats, scanned: zipScanned, analyzed: zipAnalyzed };
+          if (extractedBytes > ScanManager.ZIP_MAX_EXTRACTED_BYTES) return threats;
         } catch {
           // corrupt entry — skip
           continue;
@@ -436,7 +457,7 @@ export class ScanManager {
 
       let unscannedThreats = 0;
       for (const entry of entries) {
-        if (this.isCancelled.has(scanId)) return { threats, scanned: zipScanned, analyzed: zipAnalyzed };
+        if (this.isCancelled.has(scanId)) return threats;
         if (entry.isDirectory) continue;
         const rawEntryName = entry.entryName;
         const safeName = rawEntryName.replace(/\\/g, "/");
@@ -455,11 +476,31 @@ export class ScanManager {
             continue;
           }
           await fs.writeFile(target, data);
-          zipScanned++;
 
-          const res = await this.engine.scanArtifact(target, "system-scanner");
-          zipAnalyzed++;
-          if (res && res.highRiskCount > 0) unscannedThreats++;
+          // Nested archive: if entry is also an archive and nesting limit allows, recurse.
+          // When we recurse, we do NOT also call scanArtifact on this entry — the recursive
+          // call covers all its contents. Calling scanArtifact on top would double-count any
+          // threat found inside the nested archive.
+          const isNestedZip = path.extname(target).toLowerCase() === ".zip" || (await this.looksLikeZip(target));
+          if (isNestedZip && nestingDepth < ScanManager.ZIP_MAX_NESTING) {
+            // Recurse; all threats from the nested zip's contents are returned.
+            // Do NOT call scanArtifact on this entry (would double-count).
+            const nestedThreats = await this.scanZipWithSafety(scanId, target, nestingDepth + 1);
+            unscannedThreats += nestedThreats;
+          } else {
+            // Regular file (or nested zip at max depth — treat as opaque file).
+            const res = await this.engine.scanArtifact(target, "system-scanner");
+            // Contrato único de "ameaca": highRiskCount > 0 OU severity
+            // high/critical/medium. O engine.ts publica threat.detected para
+            // medium (finalSeverity !== "low") — o scan-manager tem de usar a
+            // mesma definição, senão o toast chega e o scanner mostra 0.
+            // Alguns motores expõem o campo como `severity` (AnalysisResult)
+            // e outros como `overallSeverity` (FileScanResponse) — aceitamos os dois.
+            const sev = (res as any)?.overallSeverity ?? (res as any)?.severity;
+            if (res && (res.highRiskCount > 0 || sev === "high" || sev === "critical" || sev === "medium")) {
+              unscannedThreats++;
+            }
+          }
         } catch {
           // ignore extraction errors
         }
@@ -471,7 +512,7 @@ export class ScanManager {
       // Always clean up temp files, even on cancel/error
       await fs.rm(tmpRoot, { recursive: true, force: true }).catch(() => {});
     }
-    return { threats, scanned: zipScanned, analyzed: zipAnalyzed };
+    return threats;
   }
 
   // ── Quick Scan gather: depth-limited, extension-prioritised ──────────

@@ -69,10 +69,10 @@ export default function ScanRadar({ scanning, statusText }: ScanRadarProps) {
           ) : (
             <div className="status-dot online" />
           )}
-          <span>{scanning ? "ANÁLISE ATIVA" : "AGUARDANDO"}</span>
+          <span>{scanning ? "ANÁLISE ATIVA" : "À ESPERA"}</span>
         </div>
         <p className="status-message">
-          {statusText || (scanning ? "Inspecionando assinaturas de arquivo..." : "Pronto para nova verificação")}
+          {statusText || (scanning ? "A analisar assinaturas de ficheiro..." : "Pronto para nova verificação")}
         </p>
       </div>
     </div>

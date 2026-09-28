@@ -6,12 +6,12 @@ import os from 'os';
 
 // ── SQLite Database Setup ──
 
-const dbDir = path.join(os.homedir(), '.cybersafe-service');
-if (!fs.existsSync(dbDir)) {
-  fs.mkdirSync(dbDir, { recursive: true });
-}
+// CYBERSAFE_DB_PATH permite aos testes usar uma DB isolada; o default é a DB real do serviço.
+const dbPath = process.env.CYBERSAFE_DB_PATH
+  ? path.resolve(process.env.CYBERSAFE_DB_PATH)
+  : path.join(os.homedir(), '.cybersafe-service', 'cybersafe.db');
+fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
-const dbPath = path.join(dbDir, 'cybersafe.db');
 const db = new Database(dbPath);
 
 // ── Migrations ──
@@ -24,6 +24,7 @@ db.exec(`
     passwordHash TEXT NOT NULL,
     type TEXT NOT NULL,
     plan TEXT NOT NULL,
+    role TEXT NOT NULL DEFAULT 'user',
     companyName TEXT,
     createdAt TEXT NOT NULL
   );
@@ -49,6 +50,13 @@ db.exec(`
   );
 `);
 
+// Migração de DBs legadas (criadas antes de existir role): ALTER TABLE é
+// não-destrutivo e o DEFAULT 'user' mantém todas as contas existentes válidas.
+const usersColumns = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
+if (!usersColumns.some((column) => column.name === 'role')) {
+  db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+}
+
 // ── Types ──
 
 export interface Company {
@@ -64,9 +72,12 @@ export interface User {
   passwordHash: string;
   type: "personal" | "business";
   plan: "free" | "pro" | "premium";
+  role: UserRole;
   company?: Company;
   createdAt: Date;
 }
+
+export type UserRole = "user" | "admin";
 
 // ── Prisma-like Adapter ──
 
@@ -89,6 +100,7 @@ export const prisma = {
         passwordHash: row.passwordHash,
         type: row.type,
         plan: row.plan,
+        role: row.role === 'admin' ? 'admin' : 'user',
         company: row.companyName ? { name: row.companyName } : undefined,
         createdAt: new Date(row.createdAt)
       };
@@ -96,15 +108,20 @@ export const prisma = {
     create: async ({ data }: { data: Omit<User, "id" | "createdAt"> }): Promise<User> => {
       const id = `usr-${Math.random().toString(36).substring(2, 10)}`;
       const createdAt = new Date().toISOString();
+      const role: UserRole = data.role === 'admin' ? 'admin' : 'user';
 
-      const stmt = db.prepare('INSERT INTO users (id, name, email, passwordHash, type, plan, companyName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?)');
-      stmt.run(id, data.name, data.email, data.passwordHash, data.type, data.plan, data.company?.name || null, createdAt);
+      const stmt = db.prepare('INSERT INTO users (id, name, email, passwordHash, type, plan, role, companyName, createdAt) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)');
+      stmt.run(id, data.name, data.email, data.passwordHash, data.type, data.plan, role, data.company?.name || null, createdAt);
 
       return {
         ...data,
+        role,
         id,
         createdAt: new Date(createdAt)
       };
+    },
+    setRole: async ({ where, role }: { where: { email: string }; role: UserRole }): Promise<void> => {
+      db.prepare('UPDATE users SET role = ? WHERE email = ?').run(role, where.email);
     },
   },
 

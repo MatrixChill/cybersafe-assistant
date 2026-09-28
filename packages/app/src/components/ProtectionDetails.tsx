@@ -6,7 +6,7 @@ import type {
   EngineSubsystemStatus,
 } from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
-import { levelMeta, type ProtectionLevel } from "../lib/protectionHealth";
+import { levelMeta, engineStatusText, wfpModuleDisplay, windowsFirewallDisplay, type ProtectionLevel } from "../lib/protectionHealth";
 
 interface ProtectionDetailsProps {
   engine?: EngineHealth;
@@ -17,19 +17,22 @@ interface ProtectionDetailsProps {
   score?: number;
 }
 
-const ENGINE_ROWS: { key: "yara" | "hashDb" | "clamav" | "nativeEngine" | "firewall"; label: string }[] = [
+const ENGINE_ROWS: { key: "yara" | "hashDb" | "clamav" | "nativeEngine"; label: string }[] = [
   { key: "yara", label: "YARA" },
   { key: "hashDb", label: "Hash DB" },
   { key: "clamav", label: "ClamAV" },
   { key: "nativeEngine", label: "Native Engine" },
-  { key: "firewall", label: "Firewall" },
 ];
 
+/** O modulo WFP do CyberSafe, e o Windows Firewall, sao linhas diferentes. */
+const WFP_MODULE_LABEL = "Filtro WFP (CyberSafe)";
+const WINDOWS_FIREWALL_LABEL = "Windows Firewall";
+
 const STATUS_META: Record<EngineSubsystemStatus, { text: string; cls: string }> = {
-  active: { text: "ACTIVE", cls: "text-success border-success/40 bg-success/10" },
-  degraded: { text: "DEGRADED", cls: "text-warning border-warning/40 bg-warning/10" },
-  unavailable: { text: "UNAVAILABLE", cls: "text-muted-foreground border-border bg-secondary/40" },
-  error: { text: "ERROR", cls: "text-danger border-danger/40 bg-danger/10" },
+  active: { text: engineStatusText("active"), cls: "text-success border-success/40 bg-success/10" },
+  degraded: { text: engineStatusText("degraded"), cls: "text-warning border-warning/40 bg-warning/10" },
+  unavailable: { text: engineStatusText("unavailable"), cls: "text-muted-foreground border-border bg-secondary/40" },
+  error: { text: engineStatusText("error"), cls: "text-danger border-danger/40 bg-danger/10" },
 };
 
 /**
@@ -79,7 +82,8 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
       onClick={onClose}
     >
       <div
-        className="cyber-border rounded-2xl w-full max-w-lg max-h-[85vh] overflow-y-auto bg-card p-6"
+        className="cyber-border rounded-2xl w-full max-w-lg max-h-[80vh] overflow-y-auto bg-card p-5"
+        style={{ scrollbarWidth: "thin", scrollbarColor: "color-mix(in oklch, var(--muted-foreground) 30%, transparent) transparent" }}
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex items-start justify-between gap-4">
@@ -113,20 +117,20 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
         {scoreInfo && (
           <div className="mt-4 p-4 rounded-xl border border-border bg-secondary/30">
             <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Porquê {score}/100?
+              Porque é que a nota é {score}/100
             </p>
             <ul className="mt-2 space-y-1.5 text-sm text-foreground">
-              <li>• Motores de análise ativos: <b>{scoreInfo.active} de {scoreInfo.total}</b>.</li>
-              <li>• Com {scoreInfo.active} ativo(s), a pontuação máxima possível é <b>{scoreInfo.maxPossible}/100</b>.</li>
+              <li>• Dos {scoreInfo.total} motores de análise, <b>{scoreInfo.active} estão a funcionar</b>.</li>
+              <li>• Com isso, o máximo que podias ter aqui é <b>{scoreInfo.maxPossible}</b>.</li>
               {scoreInfo.threatPenalty > 0 ? (
-                <li>• Ameaças recentes reduziram a pontuação em mais <b>{scoreInfo.threatPenalty}</b> pontos.</li>
+                <li>• As ameaças recentes tiraram mais <b>{scoreInfo.threatPenalty}</b>.</li>
               ) : (
-                <li>• Nenhuma ameaça recente reduziu a pontuação — o limite vem dos componentes indisponíveis.</li>
+                <li>• Nenhuma ameaça recente tirou pontos — o teto vem dos motores em falta.</li>
               )}
             </ul>
             <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
-              A pontuação é 100 menos o risco efetivo: o maior valor entre as ameaças recentes
-              e o piso de confiança definido pelos motores de análise ativos.
+              A nota é o contrário do risco: partimos de 100 e retiramos o maior dos dois
+              perigos — as ameaças recentes, ou a confiança que falta nos motores.
             </p>
           </div>
         )}
@@ -149,7 +153,10 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
                   <div className="flex items-center gap-2">
                     <span className="font-mono text-sm text-foreground">{label}</span>
                     {detail && (
-                      <span className="text-[10px] text-muted-foreground font-mono truncate max-w-[180px]">— {detail}</span>
+                      // O motivo real vem do serviço e é o que diz o que está a
+                      // falhar ("corre freshclam"). Truncado a 180 px, o utilizador
+                      // perdia a acção a fazer; o title devolve o texto inteiro.
+                      <span title={detail} className="text-[10px] text-muted-foreground font-mono truncate max-w-[180px]">— {detail}</span>
                     )}
                   </div>
                   <span className={cn("text-[10px] font-mono uppercase px-2 py-1 rounded border", STATUS_META[status].cls)}>
@@ -158,6 +165,39 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
                 </div>
               );
             })}
+
+            {/* O Windows Firewall e o modulo WFP do CyberSafe sao coisas
+                diferentes. O payload do servico so cobre o segundo, e dizer
+                "protecao desligada" a partir dele afirmava que o Windows
+                estava desprotegido sem nenhuma evidencia. Sao agora duas
+                linhas: uma so afirma o que tem leitura real, a outra mostra o
+                que o servico reporta. */}
+            {(() => {
+              const wfp = wfpModuleDisplay(engine?.firewall);
+              const win = windowsFirewallDisplay(null);
+              return (
+                <>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/40 border border-border">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm text-foreground">{WINDOWS_FIREWALL_LABEL}</span>
+                      <span title={win.detail} className="text-[10px] text-muted-foreground font-mono truncate max-w-[180px]">— {win.detail}</span>
+                    </div>
+                    <span className="text-[10px] font-mono uppercase px-2 py-1 rounded border text-muted-foreground border-border bg-secondary/40">
+                      {win.text}
+                    </span>
+                  </div>
+                  <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/40 border border-border">
+                    <div className="flex items-center gap-2">
+                      <span className="font-mono text-sm text-foreground">{WFP_MODULE_LABEL}</span>
+                      <span title={wfp.detail} className="text-[10px] text-muted-foreground font-mono truncate max-w-[180px]">— {wfp.detail}</span>
+                    </div>
+                    <span className={cn("text-[10px] font-mono uppercase px-2 py-1 rounded border", STATUS_META[engine?.firewall?.status ?? "unavailable"].cls)}>
+                      {wfp.text}
+                    </span>
+                  </div>
+                </>
+              );
+            })()}
 
             {reasons.length > 0 && (
               <div className="mt-4 p-3 rounded-lg bg-danger/5 border border-danger/20">

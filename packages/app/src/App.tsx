@@ -13,7 +13,7 @@ import type {
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AppearanceProvider, useAppearance } from "./contexts/AppearanceContext";
 import { deriveProtectionLevel } from "./lib/protectionHealth";
-import { canAccess, FEATURES } from "./lib/featureControl";
+import { canUserAccess, FEATURES } from "./lib/featureControl";
 import Sidebar, { type Page } from "./components/Sidebar";
 import DashboardPage from "./pages/DashboardPage";
 import ThreatsPage from "./pages/ThreatsPage";
@@ -41,6 +41,11 @@ import {
   isAppShuttingDown,
   onAppShutdown,
 } from "@/lib/shutdownState";
+import {
+  PROCESSES_POLL_MS,
+  PROCESSES_REFRESH_COALESCE_MS,
+  resolveEventRefresh,
+} from "@/lib/processActions";
 
 type AuthPage = "login" | "register";
 
@@ -206,6 +211,80 @@ function AuthenticatedApp() {
   const TOAST_DEBOUNCE_MS = 12_000;
   const TOAST_AUTO_DISMISS_MS = 10_000;
 
+  /**
+   * Lista de processos: caminho PRÓPRIO, com uma só garantia de trabalho.
+   *
+   * Medido nesta máquina: o poll inicial do serviço emitiu 177 eventos
+   * `process.started` num único poll, e cada evento fazia fetchSnapshot completo
+   * (7 pedidos IPC) — ou seja, a rajada de arranque virava milhares de pedidos
+   * para atualizar uma lista. `processes.list` mede 720–1085 ms; os outros seis
+   * tópicos do snapshot medem 0–1 ms. Por isso:
+   *   · um evento de processos pede UM pedido (processes), nunca os 7;
+   *   · a rajada é agrupada numa janela de 250 ms (0,3× de uma enumeração);
+   *   · com um pedido em voo não se abre outro (o serviço, aliás, já
+   *     partilha uma única enumeração concorrente).
+   */
+  const processesRefreshRef = useRef<{ inFlight: boolean; lastRequestedAt: number; timer?: ReturnType<typeof setTimeout> }>({
+    inFlight: false,
+    lastRequestedAt: 0,
+  });
+
+  const refreshProcesses = useCallback(async (): Promise<void> => {
+    const api = window.electronAPI;
+    if (!api || isAppShuttingDown()) return;
+    const state = processesRefreshRef.current;
+    if (state.inFlight) return; // um pedido em voo: não se deita trabalho fora
+    state.inFlight = true;
+    try {
+      const next = await ipcUnlessShuttingDown(() => api.getProcesses());
+      if (next) setProcesses(next);
+    } catch {
+      // Falha isolada: o próximo refresh (evento ou poll) corrige. A lista
+      // anterior fica no ecrã — nunca uma lista vazia por causa de um erro.
+    } finally {
+      state.inFlight = false;
+    }
+  }, []);
+
+  /** Pedido agrupado: várias ondas de uma rajada dão UM pedido no fim. */
+  const scheduleProcessesRefresh = useCallback(() => {
+    const state = processesRefreshRef.current;
+    const fire = () => {
+      state.timer = undefined;
+      state.lastRequestedAt = Date.now();
+      void refreshProcesses();
+    };
+    if (state.timer !== undefined) return; // já há uma janela aberta
+    state.timer = setTimeout(fire, PROCESSES_REFRESH_COALESCE_MS);
+  }, [refreshProcesses]);
+
+  useEffect(() => {
+    // Poll da lista só enquanto uma página mostra processos, e só com a janela
+    // visível: 10 s é a cadência a que o poll do serviço (10 s) produz nova
+    // verdade, e uma enumeração custa ~800 ms — mais rápido seria o dobro do
+    // trabalho para a mesma informação.
+    const showsProcesses = page === "taskmanager" || page === "monitor";
+    if (!showsProcesses || !window.electronAPI) return;
+    const interval = setInterval(() => {
+      if (document.visibilityState !== "visible") return;
+      scheduleProcessesRefresh();
+    }, PROCESSES_POLL_MS);
+    const stopOnShutdown = onAppShutdown(() => {
+      clearInterval(interval);
+      const state = processesRefreshRef.current;
+      if (state.timer !== undefined) clearTimeout(state.timer);
+      state.timer = undefined;
+    });
+    return () => {
+      stopOnShutdown();
+      clearInterval(interval);
+      const state = processesRefreshRef.current;
+      if (state.timer !== undefined) clearTimeout(state.timer);
+      state.timer = undefined;
+    };
+  }, [page, scheduleProcessesRefresh]);
+
+
   const fetchSnapshot = useCallback(async () => {
     const api = window.electronAPI;
     if (!api) {
@@ -326,9 +405,17 @@ function AuthenticatedApp() {
         }, TOAST_AUTO_DISMISS_MS);
         toastDismissTimers.current.set(event.id, tid);
       }
-      // scan.progress é um evento de UI de alta frequência (heartbeat do motor):
-      // não força um refresh completo do snapshot a cada atualização do scanner.
-      if (event.type !== "scan.progress") void fetchSnapshot();
+      // Uma decisão, um sítio: `resolveEventRefresh` diz o que cada evento
+      // obriga a fazer. `scan.progress` não pede nada; um evento de processos
+      // pede UM pedido (a lista) e nunca o snapshot completo de 7; o resto
+      // mantém o snapshot de sempre.
+      const route = resolveEventRefresh(event.type);
+      if (route === "none") return;
+      if (route === "processes") {
+        scheduleProcessesRefresh();
+        return;
+      }
+      void fetchSnapshot();
     });
 
     // No shutdown cancelamos já a subscrição de eventos e os toasts pendentes.
@@ -336,6 +423,9 @@ function AuthenticatedApp() {
       unsubscribe?.();
       toastDismissTimers.current.forEach((t) => clearTimeout(t));
       toastDismissTimers.current.clear();
+      const state = processesRefreshRef.current;
+      if (state.timer !== undefined) clearTimeout(state.timer);
+      state.timer = undefined;
     });
 
     return () => {
@@ -344,7 +434,7 @@ function AuthenticatedApp() {
       toastDismissTimers.current.forEach((t) => clearTimeout(t));
       toastDismissTimers.current.clear();
     };
-  }, [fetchSnapshot]);
+  }, [fetchSnapshot, scheduleProcessesRefresh]);
 
   useEffect(() => {
     const api = window.electronAPI;
@@ -438,9 +528,6 @@ function AuthenticatedApp() {
   }
 
   function renderPage() {
-    const accountType = user?.type || "personal";
-    const plan = user?.plan || "free";
-
     switch (page) {
       case "dashboard":
         return <DashboardPage dashboard={dashboard} isLoading={isLoading} hardware={hardware} pcState={pcState} onScan={handleScan} />;
@@ -451,7 +538,7 @@ function AuthenticatedApp() {
       case "scanner":
         return <FileScannerPage pendingScan={pendingScan} onScanConsumed={() => setPendingScan(null)} />;
       case "taskmanager":
-        return <TaskManagerPage processes={processes} onRefreshProcesses={fetchSnapshot} />;
+        return <TaskManagerPage processes={processes} onRefreshProcesses={refreshProcesses} />;
       case "monitor":
         return <MonitorPage events={events} processes={processes} connections={connections} protection={protection} quarantine={quarantine} />;
       case "simulator":
@@ -461,12 +548,12 @@ function AuthenticatedApp() {
       case "settings":
         return <SettingsPage />;
       case "reports":
-        if (!canAccess(FEATURES.REPORTS, accountType, plan)) {
+        if (!canUserAccess(FEATURES.REPORTS, user)) {
           return <DashboardPage dashboard={dashboard} isLoading={isLoading} hardware={hardware} pcState={pcState} />;
         }
         return <ReportsPage events={events} threats={threats} quarantine={quarantine} protection={protection} pcState={pcState} />;
       case "business":
-        if (!canAccess(FEATURES.BUSINESS_SECURITY_CENTER, accountType, plan)) {
+        if (!canUserAccess(FEATURES.BUSINESS_SECURITY_CENTER, user)) {
           return (
             <div className="p-8">
               <div className="cyber-border rounded-xl p-12 text-center space-y-4">
@@ -519,10 +606,16 @@ function AuthenticatedApp() {
         </>
       )}
 
+      {/* Hexágonos: camada própria, não-interativa e a meio da opacidade do
+          padrão (que já é 3% de alpha). Antes ficava colada ao contentor com o
+          conteúdo por cima, a competir com os cartões. */}
+      {!isLiquid && !isCore && (
+        <div aria-hidden className="hex-pattern pointer-events-none fixed inset-0 z-0 opacity-50" />
+      )}
+
       <div className={cn(
         "flex w-full h-full relative z-10",
-        !isLiquid && !isCore && "scanlines",
-        !isLiquid && !isCore && "hex-pattern"
+        !isLiquid && !isCore && "scanlines"
       )}>
         <Sidebar
           activePage={page}

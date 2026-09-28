@@ -270,20 +270,110 @@ export function isActiveUiStatus(status: ScanUiStatus): boolean {
 }
 
 /**
- * Título/cópia do estado de hidratação (montagem da página). Enquanto o
- * snapshot de `scan.getActive` está pendente NÃO podemos mostrar o estado
- * idle: isso produziria o flash "idle → análise ativa" ao voltar à página
- * a meio de uma análise. Mostramos antes este estado discreto.
+ * Cópia do ecrã de recuperação. Só aparece quando já existe uma sessão viva
+ * comprovada (ver `shouldShowHydration`), por isso a promessa é verdadeira.
  */
 export const SCAN_HYDRATING_TITLE = "A recuperar análise em curso...";
 export const SCAN_HYDRATING_DETAIL = "A consultar o motor de análise local.";
 
 /**
- * Deve mostrar o ecrã de hidratação em vez do estado inicial?
- * Só enquanto a ressincronização está pendente E ainda não há nada a mostrar.
+ * Velocidade a mostrar, ou "—" quando ainda não há velocidade nenhuma.
+ *
+ * MEDIDO (probe real contra o serviço vivo, 2.º arranque, motores quentes):
+ *   REQUEST -> scanId .............. 1 984 ms
+ *   scanId -> primeiro progress ..... 1 984 ms
+ *   fase `gathering` -> `scanning` .. 90 653 ms   <- 87,7 s só a enumerar
+ * Nesse intervalo o serviço conta ficheiros encontrados (filesDiscovered foi de 0
+ * a 800) mas filesScanned fica a 0 e o serviço SÓ calcula filesPerSecond dentro
+ * do ciclo de análise (scan-manager.ts, no ramo de `scanning`).
+ *
+ * Portanto, durante a preparação e a enumeração, escrever "0 f/s" afirma que o
+ * motor parou — e está a fazer trabalho real. "—" afirma só o que é verdade:
+ * ainda não foi medida nenhuma velocidade. Mostrar 0 seria inventar uma
+ * paragem que não existe.
  */
-export function shouldShowHydration(hydrating: boolean, status: ScanUiStatus): boolean {
-  return hydrating && status === "idle";
+export function scanRateLabel(state: ScanState | null): string {
+  if (!state) return "—";
+  if (isTerminalScanStatus(state.status)) {
+    const done = state.filesPerSecond;
+    return typeof done === "number" && Number.isFinite(done) ? `${done} f/s` : "—";
+  }
+  if (state.status !== "running" && state.status !== "queued") return "—";
+  // Sem um único ficheiro analisado não há velocidade de análise por mostrar.
+  if ((state.filesScanned ?? 0) <= 0) return "—";
+  const fps = state.filesPerSecond;
+  if (typeof fps !== "number" || !Number.isFinite(fps)) return "—";
+  return `${fps} f/s`;
+}
+
+/**
+ * Deve mostrar o ecrã de recuperação em vez do estado inicial?
+ *
+ * A tela deixa de ser uma espera cega e passa a exigir PROVA: sem uma sessão
+ * viva já encontrada, o scanner abre em IDLE. Um ecrã que promete "a recuperar
+ * uma análise" quando o motor não tem análise nenhuma era a mentira que abria
+ * o CyberSafe sem qualquer análise em curso — e durava tanto quanto o
+ * `getActiveScan` demorasse a responder (o cliente do serviço espera até 30
+ * tentativas de ligação antes de sequer enviar o pedido).
+ */
+export function shouldShowHydration(
+  hydrating: boolean,
+  status: ScanUiStatus,
+  hasRecoverableScan: boolean,
+): boolean {
+  return hydrating && status === "idle" && hasRecoverableScan;
+}
+
+/**
+ * Uma sessão é retomável? As três portas do contrato, nesta ordem:
+ * 1. identidade real — um id não vazio;
+ * 2. sessão VIVA — `queued`/`running`. `idle` não é terminal mas também não é
+ *    vida: tratá-lo como ativo era abrir a recuperação sem análise nenhuma;
+ * 3. dados para retomar — sem fase nem total conhecido não há progresso
+ *    honesto a mostrar, e mostrar um anel vazio seria inventar dados;
+ * 4. o motor continua a falar — `updatedAt` presente, parseável e dentro de
+ *    `SCAN_STALL_MS`, o mesmo limite que o watchdog do produto já usa para
+ *    declarar que o motor emudeceu. Sem carimbo válido, não há prova.
+ *
+ * `completed`/`cancelled`/`failed` caem na porta 2: nunca são retomáveis.
+ */
+export function isResumableScanSession(snapshot: ScanState): boolean {
+  if (typeof snapshot.id !== "string" || snapshot.id.length === 0) return false;
+  if (snapshot.status !== "queued" && snapshot.status !== "running") return false;
+  const hasTotal = typeof snapshot.filesTotal === "number" && snapshot.filesTotal > 0;
+  if (snapshot.phase === undefined && !hasTotal) return false;
+  // Porta 4 — o motor continua a falar? O serviço carimba `updatedAt` em cada
+  // `updateScan` e mantem um heartbeat de 1 s enquanto o scan trabalha, mesmo
+  // durante o `gathering` (scan-manager.ts:93 e :155-163), e o watchdog do
+  // produto já usa SCAN_STALL_MS para declarar que o motor emudeceu. Uma sessão
+  // cujo carimbo já passou esse limite está parada pelo critério do próprio
+  // produto: oferecê-la seria a mesma mentira do arranque a frio, agora com o
+  // motor calado. Margem de 20 s contra 1 s de cadencia — cortar aqui nunca
+  // apanha uma sessão a correr.
+  // Porta 4, ao pe da letra: o carimbo tem de EXISTIR, ser PARSEAVEL e estar
+  // dentro de SCAN_STALL_MS. Ausente, ilegível ou velho, a sessão não é
+  // retomável. Se o snapshot não tem um timestamp válido, não há prova
+  // suficiente para oferecer Recuperar analise — e sem prova, o scanner abre em
+  // IDLE. É o mesmo princípio das portas 1 a 3: o que não está provado não se
+  // apresenta. O serviço carimba `updatedAt` de 1 em 1 s (scan-manager.ts:93 e o
+  // heartbeat em :155-163), por isso qualquer sessão a correr tem carimbo.
+  const lastBeat = Date.parse(snapshot.updatedAt ?? "");
+  if (!Number.isFinite(lastBeat)) return false;
+  if (Date.now() - lastBeat > SCAN_STALL_MS) return false;
+  return true;
+}
+
+/**
+ * A DECISÃO: o que recovered de um payload do motor, se alguma coisa.
+ *
+ * `null` significa "não há nada a recuperar" e é o resultado normal de abrir o
+ * CyberSafe sem uma análise em curso. Um snapshot terminal, um `idle`, ou um
+ * registo sem dados suficientes devolvem `null` — nunca uma tela de recuperação.
+ */
+export function decideScanRecovery(raw: unknown): ScanState | null {
+  const snapshot = normalizeScanState(raw);
+  if (!snapshot) return null;
+  return isResumableScanSession(snapshot) ? snapshot : null;
 }
 
 /** Mapeia estado do backend (+ fase) para a fase que a UI mostra. */
@@ -450,7 +540,7 @@ export function buildResultSummary(input: ScanResultInput): string {
     tailParts.push(`${filesFailed} ${filesFailed === 1 ? "ficheiro não pôde" : "ficheiros não puderam"} ser analisado(s).`);
   }
   if (filesExcluded && filesExcluded > 0) {
-    tailParts.push(`${filesExcluded} ${filesExcluded === 1 ? "ficheiro foi ignorado" : "ficheiros foram ignorados"} pelas exclusões e não passou/passaram pelos motores.`);
+    tailParts.push(`${filesExcluded} ${filesExcluded === 1 ? "ficheiro foi ignorado" : "ficheiros foram ignorados"} pelas exclusões e não ${filesExcluded === 1 ? "passou" : "passaram"} pelos motores de análise.`);
   }
   const tail = tailParts.length > 0 ? ` ${tailParts.join(" ")}` : "";
 

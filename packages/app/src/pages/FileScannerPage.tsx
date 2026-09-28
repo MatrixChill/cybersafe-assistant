@@ -13,6 +13,7 @@ import {
   SCAN_STALL_MS,
   ZIP_CONTENT_NOTE,
   activeScanDetail,
+  decideScanRecovery,
   activeScanTitle,
   buildResultSummary,
   decideScanEvent,
@@ -25,6 +26,7 @@ import {
   normalizeScanType,
   scanEtaSeconds,
   scanProgressPercent,
+  scanRateLabel,
   scanScopeFor,
   scopeTitle,
   shouldAcceptScanState,
@@ -93,11 +95,15 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
   const [scanLog, setScanLog] = useState<string[]>([])
   const [stalled, setStalled] = useState(false)
   /**
-   * Verdadeiro até a ressincronização (`scan.getActive`) terminar. Enquanto
-   * estiver pendente, a página NÃO pode renderizar o estado idle: ao voltar a
-   * esta secção a meio de uma análise isso criava um flash "idle → ativo".
+   * Só é verdadeiro depois de uma sessão VIVA ter sido comprovada, nunca por
+   * omissão. Antes vinha `true` desde o mount, e isso prometia no ecrã
+   * "A recuperar análise em curso" em cada abertura do CyberSafe — sem análise
+   * nenhuma para recuperar, durante todo o tempo que o `getActiveScan`
+   * demorasse a responder. Sem prova, o scanner abre em IDLE.
    */
-  const [hydrating, setHydrating] = useState(true)
+  const [hydrating, setHydrating] = useState(false)
+  /** Sessão comprovada a recuperar, ou null enquanto não houver prova. */
+  const [recovering, setRecovering] = useState<ScanState | null>(null)
 
   /** Ref = verdade síncrona usada pelos callbacks (nunca espera por render). */
   const expectedScanIdRef = useRef<string | null>(null)
@@ -207,30 +213,34 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
     let cancelled = false
     void (async () => {
       try {
-        const snapshot = normalizeScanState(await api.getActiveScan())
+        // A DECISÃO é de uma só porta: terminal, `idle`, sem id ou sem dados
+        // devolvem null e o scanner fica em IDLE. Só uma sessão viva e
+        // comprovada abre a recuperação.
+        const recovery = decideScanRecovery(await api.getActiveScan())
         if (cancelled || !mountedRef.current) return
-        if (!snapshot) {
-          devLog("resync: no active scan")
+        if (!recovery) {
+          devLog("resync: no resumable scan — staying idle")
           return
         }
         if (expectedScanIdRef.current) {
           devLog("resync skipped: a launch is already in flight")
           return
         }
-        if (isTerminalScanStatus(snapshot.status)) return
 
-        devLog(`resync: attached to running scan id=${snapshot.id} phase=${snapshot.phase}`)
-        expectedScanIdRef.current = snapshot.id
-        activeScanIdRef.current = snapshot.id
-        setActiveScanId(snapshot.id)
-        setScanType(snapshot.type)
+        devLog(`resync: attached to running scan id=${recovery.id} phase=${recovery.phase}`)
+        setRecovering(recovery)
+        setHydrating(true)
+        expectedScanIdRef.current = recovery.id
+        activeScanIdRef.current = recovery.id
+        setActiveScanId(recovery.id)
+        setScanType(recovery.type)
         setScanLog([`${logStamp()} Análise em curso retomada do motor`])
-        applyScanState(snapshot, "snapshot")
+        applyScanState(recovery, "snapshot")
       } catch (err) {
         devLog("resync failed", err)
       } finally {
-        // Independentemente do resultado, deixa de fazer sentido esconder o
-        // estado inicial — um scan ativo já foi aplicado acima se existisse.
+        // Sem sessão comprovada nunca houve o que recuperar: o estado inicial
+        // está livre desde o início e este caminho não volta a escondê-lo.
         if (!cancelled && mountedRef.current) setHydrating(false)
       }
     })()
@@ -519,8 +529,8 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
         </div>
       )}
 
-      {/* ── HIDRATAÇÃO: nunca mostrar idle enquanto o snapshot está pendente ── */}
-      {shouldShowHydration(hydrating, uiStatus) && (
+      {/* ── RECUPERAÇÃO: só com uma sessão viva já comprovada ── */}
+      {shouldShowHydration(hydrating, uiStatus, recovering !== null) && (
         <div className="cyber-border rounded-xl p-8 bg-gradient-to-br from-primary/5 to-transparent">
           <div className="flex items-center gap-3">
             <MatrixAvatar mood="defender" size="sm" />
@@ -629,7 +639,7 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
                 <div className="text-xs text-muted-foreground uppercase mb-1">Velocidade</div>
                 <div className="text-xl font-mono font-bold text-foreground flex items-center gap-1">
                   <Activity className="w-4 h-4 text-primary" />
-                  {scanProgress?.filesPerSecond ?? 0} f/s
+                  {scanRateLabel(scanProgress)}
                 </div>
               </div>
             )}
@@ -771,8 +781,8 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
         </div>
       )}
 
-      {/* ── IDLE: escolher o que analisar (só depois do resync terminar) ── */}
-      {uiStatus === "idle" && !hydrating && (
+      {/* ── IDLE: escolher o que analisar (aberto de imediato sem sessão) ── */}
+      {uiStatus === "idle" && (
         <div
           onDragOver={handleDragOver}
           onDragLeave={handleDragLeave}
@@ -861,9 +871,10 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
               <Zap className="w-6 h-6 text-cyber-cyan" />
             </div>
             <div>
-              <h3 className="font-mono font-semibold text-foreground">Análise em Tempo Real</h3>
+              <h3 className="font-mono font-semibold text-foreground">Análise em Segundo Plano</h3>
               <p className="text-xs text-muted-foreground mt-1">
-                O motor continua a analisar mesmo que mude de página. Ao voltar a esta secção, o progresso é retomado automaticamente.
+                O motor continua a analisar mesmo que mude de página. Ao voltar a esta secção, o progresso é retomado automaticamente. Isto
+                descreve a análise, não uma proteção em tempo real: os ficheiros só são vigiados dentro de uma análise.
               </p>
             </div>
           </div>

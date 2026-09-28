@@ -105,7 +105,7 @@ export function ExitConfirmDialog({ open, onRespond, busy = false }: ExitConfirm
               </div>
             </div>
 
-            <div className="flex justify-end gap-3 border-t border-white/5 bg-secondary/20 px-6 py-4">
+            <div className="flex justify-end gap-3 border-t border-border bg-secondary/20 px-6 py-4">
               <button
                 ref={cancelRef}
                 type="button"
@@ -113,7 +113,7 @@ export function ExitConfirmDialog({ open, onRespond, busy = false }: ExitConfirm
                 onClick={() => onRespond("cancel")}
                 className={cn(
                   "cyber-border rounded-lg px-4 py-2 font-mono text-sm text-foreground transition-colors",
-                  "hover:bg-white/5 focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
+                  "hover:bg-secondary focus:outline-none focus-visible:ring-2 focus-visible:ring-primary/60",
                   "disabled:opacity-50",
                 )}
               >
@@ -124,8 +124,8 @@ export function ExitConfirmDialog({ open, onRespond, busy = false }: ExitConfirm
                 disabled={busy}
                 onClick={() => onRespond("confirm")}
                 className={cn(
-                  "rounded-lg border border-cyber-red/40 bg-cyber-red/90 px-4 py-2 font-mono text-sm font-semibold text-white transition-all",
-                  "hover:bg-cyber-red focus:outline-none focus-visible:ring-2 focus-visible:ring-cyber-red/60",
+                  "rounded-lg border border-destructive/50 bg-destructive/90 px-4 py-2 font-mono text-sm font-semibold text-destructive-foreground transition-all",
+                  "hover:bg-destructive focus:outline-none focus-visible:ring-2 focus-visible:ring-destructive/60",
                   "disabled:opacity-60",
                 )}
               >

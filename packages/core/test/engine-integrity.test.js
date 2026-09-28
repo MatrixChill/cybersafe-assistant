@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 import {
   ClamavBridge,
+  classifyClamavHealth,
   MalwareAnalyzer,
   SignatureDatabase,
   TrustEngine,
@@ -18,7 +19,7 @@ const EICAR_BUFFER = Buffer.from(
   "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
   "utf8",
 );
-const EICAR_HASH = "44d88612fea8a8f36de82e1278abb02f2b8d6f66b0f0455d8f4f0d5dce9d734a";
+const EICAR_HASH = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
 
 const EICAR_RULE = `
 rule eicar
@@ -176,18 +177,40 @@ describe("Hash DB integrity", () => {
 });
 
 describe("ClamAV integrity", () => {
-  test("ClamAV ausente ⇒ unavailable, nunca ativo", async () => {
+  test("ClamAV não-disponível ⇒ unavailable/degraded com diagnóstico, nunca ativo", async () => {
     const bridge = new ClamavBridge();
     const available = await bridge.isAvailable();
 
     if (available) {
       assert.equal(bridge.health.status, "active");
+      assert.notEqual(bridge.health.detail, "Not checked", "o probe tem de correr de facto");
     } else {
-      assert.equal(bridge.health.status, "unavailable", "binário ausente deve reportar unavailable");
-      const res = await bridge.scanFile(__filename);
-      assert.equal(res.detected, false);
-      assert.equal(res.status.status, "unavailable");
+      // unavailable = binário ausente; degraded = binário OK SEM base de
+      // assinaturas (Workstream C: sem .cvd/.cld não há deteção real).
+      assert.ok(
+        ["unavailable", "degraded"].includes(bridge.health.status),
+        `estado inesperado: ${bridge.health.status}`,
+      );
+      assert.notEqual(bridge.health.detail, "Not checked");
+      const res = await bridge.scanFile(import.meta.filename);
+      assert.equal(res.detected, false, "motor indisponível nunca simula proteção");
+      assert.equal(res.status.status, bridge.health.status);
     }
+  });
+
+  test("classifyClamavHealth — binário sem definições NUNCA é active", () => {
+    const versionOk = "ClamAV 1.5.2\n";
+    assert.equal(classifyClamavHealth({ versionOutput: null, versionError: "not found", dbDir: null, dbFiles: null }).health.status, "unavailable");
+    assert.equal(classifyClamavHealth({ versionOutput: "outra coisa", dbDir: null, dbFiles: null }).health.status, "unavailable");
+    assert.equal(classifyClamavHealth({ versionOutput: versionOk, dbDir: null, dbFiles: null }).health.status, "degraded");
+    assert.equal(classifyClamavHealth({ versionOutput: versionOk, dbDir: "C:\\db", dbFiles: null }).health.status, "degraded");
+    const semBase = classifyClamavHealth({ versionOutput: versionOk, dbDir: "C:\\db", dbFiles: ["readme.txt"] });
+    assert.equal(semBase.available, false);
+    assert.match(semBase.health.detail, /sem base de assinaturas.*freshclam/i);
+    const comBase = classifyClamavHealth({ versionOutput: versionOk, dbDir: "C:\\db", dbFiles: ["main.cvd", "daily.cld", "notas.txt"] });
+    assert.equal(comBase.available, true);
+    assert.equal(comBase.health.status, "active");
+    assert.match(comBase.health.detail, /2 signature database file/);
   });
 });
 

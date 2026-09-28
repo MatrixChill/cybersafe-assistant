@@ -1,16 +1,208 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useReducer, useRef, useState } from "react";
 import { Activity, Shield, Trash2, Cpu, HardDrive, AlertTriangle, AlertCircle, Search, RefreshCw, X } from "lucide-react";
-import type { ProcessSnapshot, ProcessAnalysisResult } from "@cybersafe/shared-types";
-import { cn } from "@/lib/utils";
-import { KILL_UNAVAILABLE_ERROR, runKillProcess, shouldRefetchAfterKill } from "@/lib/processActions";
+import type { ProcessSnapshot, ProcessAnalysisResult, ProcessKillResult } from "@cybersafe/shared-types";
+// Import relativo de propósito: o alias `@/lib` só existe no Vite, e sem isto a
+// página não é carregável por `tsx --test` — foi por isso que nenhum teste deste
+// ficheiro conseguiu jamais renderizar o modal (o defeito de identificação vive
+// aqui desde a primeira versão).
+import { cn } from "../lib/utils";
+import {
+  isTerminalKillOutcome,
+  KILL_UNAVAILABLE_ERROR,
+  pidsConfirmedGone,
+  PROCESSES_POLL_MS,
+  runKillProcess,
+  shouldRefetchAfterKill,
+  withoutPids,
+  type KillOutcome,
+} from "../lib/processActions";
+
+type SortKey = "cpu" | "mem" | "name";
+
+/**
+ * Ordem estável. Comparar apenas pela métrica deixava a lista saltar sob o
+ * cursor a cada refresh: dois processos com o mesmo CPU (ou 0, o caso normal
+ * quando a enumeração ainda não mediu) ficavam empatados e a ordem do empate
+ * dependia da ordem de entrada do snapshot. Nome + PID desempateiam de forma
+ * determinística — o desenho não muda, o salto é que acaba.
+ */
+export function sortProcesses(list: ProcessSnapshot[], sortBy: SortKey): ProcessSnapshot[] {
+  return [...list].sort((a, b) => {
+    if (sortBy === "cpu" && a.cpu !== b.cpu) return b.cpu - a.cpu;
+    if (sortBy === "mem" && a.memoryMb !== b.memoryMb) return b.memoryMb - a.memoryMb;
+    const byName = a.name.localeCompare(b.name);
+    if (byName !== 0) return byName;
+    return a.pid - b.pid;
+  });
+}
+
+export interface KillSequenceDeps {
+  pid: number;
+  kill: (pid: number) => Promise<ProcessKillResult>;
+  /** Snapshot autoritativo do App. Já é tolerante a falha por si — não se engole aqui nada. */
+  refresh: () => Promise<unknown> | void;
+  /** Entrega o desfecho ao ecrã (aviso). */
+  onOutcome: (outcome: KillOutcome) => void;
+  /** Fecha o overlay/isKilling. */
+  onFinish: () => void;
+  timeoutMs?: number;
+}
+
+/**
+ * Sequência do kill. A ordem é o bug: o overlay escuro (que cobre e escurece
+ * toda a área principal) fechava no `finally`, **depois** de `await` do
+ * refetch — e esse refetch é o `fetchSnapshot` completo do App, com
+ * `getProcesses` a enumerar o SO outra vez. Resultado: ecrã preto durante o
+ * kill (até 15 s de prazo) MAIS uma enumeração por cima, com o processo já
+ * morto.
+ *
+ * Aqui o overlay fecha assim que o kill é terminal e o refetch autoritativo
+ * continua em segundo plano: a UI resolve cedo, os dados corrigem-se a seguir.
+ */
+export async function runKillSequence(deps: KillSequenceDeps): Promise<KillOutcome> {
+  const outcome = await runKillProcess({ pid: deps.pid, kill: deps.kill, timeoutMs: deps.timeoutMs });
+  deps.onOutcome(outcome);
+  deps.onFinish();
+  if (shouldRefetchAfterKill(outcome)) void deps.refresh();
+  return outcome;
+}
 
 interface TaskManagerPageProps {
   processes: ProcessSnapshot[];
   /**
-   * Refetch autoritativo do snapshot de processos (dono do estado é o App).
-   * Chamado depois de um kill para a lista refletir o serviço, sem remoção otimista.
+   * Refetch autoritativo da LISTA (dono do estado é o App). É o caminho
+   * só-processos: um `getProcesses`, nunca o snapshot completo de 7 tópicos —
+   * que mede 720–1085 ms contra os 0–1 ms dos outros seis.
    */
   onRefreshProcesses?: () => Promise<void> | void;
+}
+
+/**
+ * HOTFIX P0 — o alvo do kill é CONGELADO no clique.
+ *
+ * Bug reproduzido: o modal derivava o alvo da lista viva
+ * (`processes.find(p => p.pid === killingPid)`). O Notepad moderno é um MSIX
+ * App Execution Alias (stub + processo real com o mesmo timestamp); quando o
+ * stub morria, o serviço tombstoneava esse PID e a lista deixava de o conter →
+ * `killTarget` passava a `null`, o modal desaparecia em silêncio com
+ * `killingPid` definido, e o clique seguinte no mesmo PID fazia `setKillingPid`
+ * com o mesmo número → bailout por Object.is, sem re-render, sem kill enviado.
+ * A ordem/refresh passa a ser IRRELEVANTE para o alvo: o alvo é um valor.
+ */
+export interface KillTarget {
+  pid: number;
+  name: string;
+  user?: string;
+  memoryMb: number;
+}
+
+export type KillSource = "filtered" | "unfiltered";
+
+export interface KillState {
+  target: KillTarget | null;
+  /** Incrementado pelo reducer a cada seleção; identidade da ação para o trace. */
+  actionId: number;
+  source: KillSource;
+}
+
+export const initialKillState: KillState = { target: null, actionId: 0, source: "unfiltered" };
+
+export type KillEvent =
+  | { type: "select"; target: KillTarget; source: KillSource }
+  | { type: "clear" }
+  /** Limpa só se a seleção corrente for a desta ação (kills concorrentes). */
+  | { type: "clearStale"; actionId: number };
+
+/** Reducer puro: é a única coisa que decide quem é o alvo, e é testável sem DOM. */
+export function killReducer(state: KillState, event: KillEvent): KillState {
+  switch (event.type) {
+    case "select":
+      return { target: event.target, actionId: state.actionId + 1, source: event.source };
+    case "clear":
+      return { target: null, actionId: state.actionId, source: state.source };
+    case "clearStale":
+      return state.actionId === event.actionId ? { ...state, target: null } : state;
+  }
+}
+
+/**
+ * Normaliza no boundary. `ProcessSnapshot` declara `memoryMb: number`, mas o
+ * valor atravessa JSON e o tipo não vale nada no runtime — e o JSX do modal
+ * chamava `target.memoryMb.toFixed(0)`, que com `undefined` é um TypeError em
+ * render. Aqui o alvo passa a ser sempre dados seguros; o modal deixa de ter de
+ * confiar em quem o chamou.
+ */
+export function freezeKillTarget(p: ProcessSnapshot): KillTarget {
+  const pid = Number.isFinite(Number(p?.pid)) ? Number(p.pid) : 0;
+  return {
+    pid,
+    name: p?.name == null ? "" : String(p.name),
+    user: typeof p?.user === "string" && p.user.length > 0 ? p.user : undefined,
+    memoryMb: Number.isFinite(p?.memoryMb) ? Number(p.memoryMb) : 0,
+  };
+}
+
+/**
+ * Formatação segura: nunca chamar métodos sobre um valor que pode não ser
+ * número. `null`/`undefined`/`NaN` são "sem leitura" (`n/d`) e não zero — zero
+ * MB seria uma leitura falsa. A normalização do alvo (freezeKillTarget) é que
+ * decide o valor canónico; isto é só a última linha de defesa do JSX.
+ */
+export function formatMemoryMb(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(0) : "n/d";
+}
+
+/** Mesma razão para o CPU — a ROW também chamava .toFixed(1) direto no snapshot. */
+export function formatCpu(value: number | null | undefined): string {
+  return typeof value === "number" && Number.isFinite(value) ? value.toFixed(1) : "n/d";
+}
+
+/**
+ * Limpa o alvo só se a seleção corrente ainda for a deste kill. Sem isto, um
+ * kill em curso (até 12 s) que termine depois de o utilizador ter escolhido
+ * outra linha apagava a escolha nova — o modal sumia sem aviso nem IPC.
+ */
+export function killStaleGuard(state: KillState, startedActionId: number): KillState {
+  return state.actionId === startedActionId ? killReducer(state, { type: "clear" }) : state;
+}
+
+/** De onde veio o pedido — só para o trace, nunca para decidir o alvo. */
+export function killSourceFor(searchTerm: string): KillSource {
+  return searchTerm.trim().length > 0 ? "filtered" : "unfiltered";
+}
+
+/**
+ * Traço de diagnóstico TEMPORÁRIO do hotfix. `DEV_TRACE` é falso em produção
+ * (o Vite define `import.meta.env.PROD` no build) e também falso fora do Vite,
+ * por ex. em `tsx --test`. Não escreve em ficheiro nem fala com o serviço; um
+ * `console.log` por EVENTO (nunca por render). Para remover: apagar esta
+ * constante, o `trace()` e as suas quatro chamadas.
+ */
+const DEV_TRACE = !(import.meta as unknown as { env?: { PROD?: boolean } }).env?.PROD;
+export const TM_KILL_TRACE_ENABLED = DEV_TRACE;
+
+interface KillTraceFields {
+  actionId: number;
+  source: KillSource;
+  rowPid?: number;
+  rowName?: string;
+  /** Valor BRUTO e tipo do que veio do serviço — foi isto que rebentou o render. */
+  rowMemoryMb?: unknown;
+  rowMemoryMbType?: string;
+  selectedPid?: number;
+  selectedName?: string;
+  modalPid?: number | null;
+  handlerPid?: number | null;
+  isKilling?: boolean;
+  ok?: boolean;
+  status?: string;
+  message?: string | null;
+  listContainsPidAfter?: boolean;
+}
+
+export function traceKill(event: string, fields: KillTraceFields): void {
+  if (!DEV_TRACE) return;
+  console.log("[TM-KILL]", { event, ...fields });
 }
 
 export default function TaskManagerPage({ processes, onRefreshProcesses }: TaskManagerPageProps) {
@@ -18,21 +210,108 @@ export default function TaskManagerPage({ processes, onRefreshProcesses }: TaskM
   const [sortBy, setSortBy] = useState<"cpu" | "mem" | "name">("cpu");
   const [analyzingPid, setAnalyzingPid] = useState<number | null>(null);
   const [analysisResult, setAnalysisResult] = useState<ProcessAnalysisResult | null>(null);
-  const [killingPid, setKillingPid] = useState<number | null>(null);
   const [isKilling, setIsKilling] = useState(false);
   /** Aviso da última tentativa de kill — mostrado fora do overlay (que fecha sempre). */
   const [killNotice, setKillNotice] = useState<{ message: string; ok: boolean } | null>(null);
   /** Aviso da última análise de processo — mesmo padrão que o killNotice. */
   const [analyzeNotice, setAnalyzeNotice] = useState<{ message: string; ok: boolean } | null>(null);
 
-  // Filter and sort processes
-  const filteredProcesses = processes
-    .filter((p) => p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.pid.toString().includes(searchTerm))
-    .sort((a, b) => {
-      if (sortBy === "cpu") return b.cpu - a.cpu;
-      if (sortBy === "mem") return b.memoryMb - a.memoryMb;
-      return a.name.localeCompare(b.name);
+  /** Alvo congelado no clique + ação corrente. Nada disto vem da lista. */
+  const [kill, setKill] = useReducer(killReducer, initialKillState);
+  const { target: killTarget, actionId: killActionId, source: killSource } = kill;
+
+  /**
+   * Linhas que o serviço JÁ confirmou mortas (`killed`) ou que já não estavam
+   * em execução (`already-exited`): saem no instante, sem esperar pela ida e
+   * volta. O refetch autoritativo continua a correr e, quando chega, a verdade
+   * substitui o filtro — se o snapshot ainda trouxer o PID (o SO ainda não
+   *Actualizou, ou o serviço confirmou por outro caminho) a linha volta, que é
+   * o comportamento honesto: só se apaga o que se sabe que já não existe.
+   */
+  const [removedPids, setRemovedPids] = useState<number[]>([]);
+  /** Índice da linha removida: onde o foco tem de ir quando ela desaparece. */
+  const pendingFocusIndex = useRef<number | null>(null);
+  const rowsRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+
+  /**
+   * Selecionar uma linha congela o alvo inteiro. Se o PID sair da lista a seguir
+   * (foi exatamente o que o stub do Notepad fazia), o modal fica igual e o
+   * terminal continua a apontar para o PID que o utilizador escolheu.
+   */
+  const selectKillTarget = useCallback(
+    (row: ProcessSnapshot) => {
+      const target = freezeKillTarget(row);
+      const source = killSourceFor(searchTerm);
+      setKill({ type: "select", target, source });
+      traceKill("select", {
+        actionId: killActionId + 1,
+        source,
+        rowPid: row.pid,
+        rowName: row.name,
+        rowMemoryMb: row.memoryMb,
+        rowMemoryMbType: typeof row.memoryMb,
+        selectedPid: target.pid,
+        selectedName: target.name,
+        modalPid: target.pid,
+      });
+    },
+    [searchTerm, killActionId],
+  );
+
+  const clearKillTarget = useCallback(() => setKill({ type: "clear" }), []);
+
+  // HOTFIX (DEV only): uma linha por render com o modal montado. Se o sintoma
+  // voltar, uma única reprodução diz se o render do card chegou a acontecer e
+  // se o PID ainda estava na lista — o que separa estado perdido de crash.
+  if (DEV_TRACE && killTarget) {
+    traceKill("render", {
+      actionId: killActionId,
+      source: killSource,
+      modalPid: killTarget.pid,
+      isKilling,
+      listContainsPidAfter: processes.some((p) => p.pid === killTarget.pid),
     });
+  }
+
+  // Filter and sort processes
+  const visibleProcesses = withoutPids(processes, removedPids);
+  const filteredProcesses = sortProcesses(
+    visibleProcesses.filter(
+      (p) => p.name.toLowerCase().includes(searchTerm.toLowerCase()) || p.pid.toString().includes(searchTerm),
+    ),
+    sortBy,
+  );
+
+  /**
+   * A verdade chegou: os PIDs que o snapshot autoritativo já não traz podem ser
+   * esquecidos, e o filtro local deixa de ser um estado próprio.
+   */
+  useEffect(() => {
+    const confirmed = pidsConfirmedGone(processes, removedPids);
+    if (confirmed.length === 0) return;
+    setRemovedPids((prev) => prev.filter((pid) => !confirmed.includes(pid)));
+  }, [processes, removedPids]);
+
+  /**
+   * Acessibilidade: quando a linha que tinha o foco desaparece, o browser deixa
+   * o foco no `body` e o teclado perde-se a meio de uma sessão de kill de
+   * processos. Passa o foco ao botão de ação da linha seguinte (ou à anterior,
+   * se for a última; e ao campo de pesquisa se a lista ficar vazia).
+   */
+  useEffect(() => {
+    const index = pendingFocusIndex.current;
+    if (index === null) return;
+    pendingFocusIndex.current = null;
+    const active = typeof document !== "undefined" ? document.activeElement : null;
+    // O utilizador já mudou de foco entretanto: não se mexe.
+    if (active && active !== document.body) return;
+    const actions = Array.from(
+      rowsRef.current?.querySelectorAll<HTMLElement>("[data-row-action]") ?? [],
+    );
+    const target = actions[Math.min(index, actions.length - 1)] ?? searchRef.current;
+    target?.focus();
+  });
 
 const handleAnalyze = async (pid: number) => {
     setAnalyzingPid(pid);
@@ -65,31 +344,86 @@ const handleAnalyze = async (pid: number) => {
   }, [onRefreshProcesses]);
 
   const handleKill = async () => {
-    const pid = killingPid;
-    if (!pid) return;
+    // O PID é o que foi congelado no clique. Não volta a ser derivado da lista —
+    // era aí que o modal desaparecia quando o stub do Notepad saía do snapshot.
+    const target = killTarget;
+    if (!target) return;
+    const actionId = killActionId;
+    const listContainsPid = () => processes.some((p) => p.pid === target.pid);
 
     const api = window.electronAPI;
     if (!api) {
       setKillNotice({ message: KILL_UNAVAILABLE_ERROR, ok: false });
       setIsKilling(false);
-      setKillingPid(null);
+      setKill({ type: "clearStale", actionId });
+      traceKill("result", {
+        actionId,
+        source: killSource,
+        handlerPid: target.pid,
+        modalPid: target.pid,
+        ok: false,
+        status: "unavailable",
+        message: KILL_UNAVAILABLE_ERROR,
+        listContainsPidAfter: listContainsPid(),
+      });
       return;
     }
 
     setIsKilling(true);
     setKillNotice(null);
+    traceKill("confirm", {
+      actionId,
+      source: killSource,
+      selectedPid: target.pid,
+      selectedName: target.name,
+      modalPid: target.pid,
+      handlerPid: target.pid,
+    });
+
     try {
-      // Com prazo máximo: nunca deixa o overlay preso se a `invoke` não resolver.
-      const outcome = await runKillProcess({ pid, kill: api.killProcessTree });
-
-      if (outcome.message) setKillNotice({ message: outcome.message, ok: outcome.success });
-
-      // Sem remoção otimista: pede o snapshot ao serviço (fonte de verdade).
-      if (shouldRefetchAfterKill(outcome)) await refreshProcesses();
+      // O overlay fecha no instante em que o kill passa a terminal; o refetch
+      // autoritativo corre em segundo plano (ver runKillSequence).
+      const outcome = await runKillSequence({
+        pid: target.pid,
+        kill: api.killProcessTree,
+        refresh: refreshProcesses,
+        onOutcome: (o) => {
+          if (o.message) setKillNotice({ message: o.message, ok: o.success });
+          // A linha sai no instante em que o serviço confirma: esperar pelo
+          // refetch (720–1085 ms medidos) é fazer o utilizador esperar por algo
+          // que já sabemos. O snapshot autoritativo continua a correr atrás.
+          if (isTerminalKillOutcome(o)) {
+            pendingFocusIndex.current = Math.max(
+              0,
+              filteredProcesses.findIndex((p) => p.pid === target.pid),
+            );
+            setRemovedPids((prev) => (prev.includes(target.pid) ? prev : [...prev, target.pid]));
+          }
+        },
+        onFinish: () => {
+          setIsKilling(false);
+          // Só limpa ESTA seleção: se o utilizador escolheu outra linha entretanto
+          // (kill demora até 12 s), apagar-lhe a escolha era o modal a sumir sózinho.
+          setKill({ type: "clearStale", actionId });
+        },
+      });
+      // `listContainsPidAfter` lê o snapshot desta render — o refresh de
+      // background ainda não cá chegou; serve para comparar select vs result.
+      traceKill("result", {
+        actionId,
+        source: killSource,
+        handlerPid: target.pid,
+        modalPid: target.pid,
+        ok: outcome.success,
+        status: outcome.status,
+        message: outcome.message,
+        listContainsPidAfter: listContainsPid(),
+      });
     } finally {
-      // Garantia de fechar o overlay, aconteça o que acontecer.
+      // Rede de segurança, não máscara: se a entrega do desfecho falhar pelo
+      // meio, o overlay continua garantido que fecha (nunca fica preso).
       setIsKilling(false);
-      setKillingPid(null);
+      setKill({ type: "clearStale", actionId });
     }
   };
 
@@ -101,13 +435,20 @@ const handleAnalyze = async (pid: number) => {
             Gestor de <span className="text-primary">Tarefas</span>
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Gestão avançada de processos e análise em tempo real
+            Gestão avançada de processos e análise
+          </p>
+          {/* Honestidade: isto é uma actualização automática com temporizador,
+              não "tempo real" — o serviço é que descobre as mudanças, de 10 em
+              10 s. Dizer "tempo real" seria uma promessa que o código não cumpre. */}
+          <p className="text-muted-foreground/70 text-xs font-mono mt-1">
+            Actualização automática a cada {PROCESSES_POLL_MS / 1000} s
           </p>
         </div>
         <div className="flex items-center gap-4">
           <div className="relative">
             <Search className="w-4 h-4 absolute left-3 top-1/2 -translate-y-1/2 text-muted-foreground" />
             <input
+              ref={searchRef}
               type="text"
               placeholder="Pesquisar processo..."
               value={searchTerm}
@@ -175,7 +516,7 @@ const handleAnalyze = async (pid: number) => {
           <div className="col-span-2 text-right">Ações</div>
         </div>
 
-        <div className="flex-1 overflow-y-auto scrollbar-hide">
+        <div className="flex-1 overflow-y-auto scrollbar-hide" ref={rowsRef}>
           {filteredProcesses.length === 0 ? (
             <div className="h-full flex flex-col items-center justify-center text-muted-foreground space-y-4">
               <Activity className="w-12 h-12 opacity-20" />
@@ -201,11 +542,11 @@ const handleAnalyze = async (pid: number) => {
                     <div className="col-span-2 text-center text-xs font-mono text-muted-foreground">{process.pid}</div>
                     <div className="col-span-2 text-center">
                       <span className={cn("text-xs font-mono px-2 py-1 rounded bg-black/20", process.cpu > 80 ? "text-cyber-red" : "text-foreground")}>
-                        {process.cpu.toFixed(1)}%
+                        {formatCpu(process.cpu)}%
                       </span>
                     </div>
                     <div className="col-span-2 text-center text-xs font-mono text-muted-foreground">
-                      {process.memoryMb.toFixed(0)} MB
+                      {formatMemoryMb(process.memoryMb)} MB
                     </div>
                     <div className="col-span-2 flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
                       <button
@@ -217,9 +558,10 @@ const handleAnalyze = async (pid: number) => {
                         {analyzingPid === process.pid ? <RefreshCw className="w-4 h-4 animate-spin" /> : <Shield className="w-4 h-4" />}
                       </button>
                       <button
-                        onClick={() => setKillingPid(process.pid)}
+                        onClick={() => selectKillTarget(process)}
                         disabled={isCritical}
-                        className={cn("p-2 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed", 
+                        data-row-action={process.pid}
+                        className={cn("p-2 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
                           "bg-cyber-red/10 text-cyber-red hover:bg-cyber-red/20")}
                         title={isCritical ? "Processo crítico protegido" : "Terminar Processo"}
                       >
@@ -234,9 +576,9 @@ const handleAnalyze = async (pid: number) => {
         </div>
       </div>
 
-      {/* Analysis Modal */}
+      {/* Analysis Modal — `fixed` como todos os overlays do projeto */}
       {analysisResult && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in">
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in">
           <div className="w-full max-w-2xl cyber-border border-primary/50 bg-card rounded-2xl shadow-2xl flex flex-col overflow-hidden">
             <div className="p-4 border-b border-border/50 flex justify-between items-center bg-secondary/50">
               <div className="flex items-center gap-3">
@@ -337,7 +679,7 @@ const handleAnalyze = async (pid: number) => {
               </button>
               {analysisResult.recommendation !== "safe" && !analysisResult.isCritical && (
                  <button 
-                   onClick={() => { setKillingPid(analysisResult.process.pid); setAnalysisResult(null); }}
+                   onClick={() => { selectKillTarget(analysisResult.process); setAnalysisResult(null); }}
                    className="px-4 py-2 font-mono text-sm rounded bg-cyber-red text-white hover:bg-cyber-red/90 transition-colors"
                  >
                    Terminar Ameaça
@@ -348,43 +690,103 @@ const handleAnalyze = async (pid: number) => {
         </div>
       )}
 
-      {/* Kill Confirmation Modal */}
-      {killingPid && (
-        <div className="absolute inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in">
-          <div className="w-full max-w-sm cyber-border border-cyber-red/50 bg-card rounded-2xl shadow-lg p-6 text-center space-y-6">
-            <div className="w-16 h-16 rounded-full bg-cyber-red/10 border border-cyber-red/30 mx-auto flex items-center justify-center">
-              <AlertTriangle className="w-8 h-8 text-cyber-red animate-pulse" />
-            </div>
-            <div>
-              <h2 className="text-lg font-mono font-bold text-foreground">Terminar Processo?</h2>
-              <p className="text-sm font-mono text-muted-foreground mt-2">
-                O processo pode estar sendo usado por um programa ativo. Qualquer alteração não guardada será perdida.
-              </p>
-            </div>
-            {isKilling && (
-              <p className="text-xs font-mono text-muted-foreground">
-                A terminar processo… o aviso fecha automaticamente se o serviço não responder.
-              </p>
-            )}
-            <div className="flex gap-3 justify-center">
-              <button 
-                disabled={isKilling}
-                onClick={() => setKillingPid(null)}
-                className="flex-1 px-4 py-2 font-mono text-sm rounded bg-white/5 hover:bg-white/10 transition-colors"
-              >
-                Cancelar
-              </button>
-              <button 
-                disabled={isKilling}
-                onClick={handleKill}
-                className="flex-1 px-4 py-2 font-mono text-sm rounded bg-cyber-red text-white hover:bg-cyber-red/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
-              >
-                {isKilling ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Sim, Terminar"}
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* Kill Confirmation Modal — o alvo vem do estado congelado, nunca da lista */}
+      {killTarget && (
+        <KillConfirmModal
+          target={killTarget}
+          isKilling={isKilling}
+          onCancel={() => {
+            traceKill("cancel", {
+              actionId: killActionId,
+              source: killSource,
+              selectedPid: killTarget.pid,
+              selectedName: killTarget.name,
+              modalPid: killTarget.pid,
+              handlerPid: null,
+            });
+            clearKillTarget();
+          }}
+          onConfirm={handleKill}
+        />
       )}
+    </div>
+  );
+}
+
+interface KillConfirmModalProps {
+  /** Alvo congelado. O modal não sabe nem precisa de saber o que a lista contém. */
+  target: KillTarget;
+  isKilling: boolean;
+  onCancel: () => void;
+  onConfirm: () => void;
+}
+
+/**
+ * Exportado para poder ser renderizado em teste sem jsdom: a pagina inteira nao
+ * abre o modal (e estado interno), e foi exatamente por isso que o defeito de
+ * identificacao sobreviveu a todas as revisoes anteriores.
+ */
+export function KillConfirmModal({ target, isKilling, onCancel, onConfirm }: KillConfirmModalProps) {
+  // Nenhum acesso abaixo pode chamar métodos sobre valor possivelmente ausente:
+  // o nome é lido como string, a memória passa por formatMemoryMb.
+  const name = typeof target.name === "string" ? target.name : "";
+  const memoryText = formatMemoryMb(target.memoryMb);
+  return (
+    // Overlay `fixed`, não `absolute`: este modal vive dentro do contentor
+    // scrollável da página (`p-8 h-full ... relative`). Com `absolute inset-0`
+    // ficava preso à caixa do conteúdo — quando a lista ultrapassava o ecrã, o
+    // card era centrado fora da área visível: o clique registava-se, o estado
+    // comitava, o escuro pintava a página e o card nunca aparecia, sem crash e
+    // sem IPC (e a sidebar, irmã deste contentor, ficava normal). Os outros
+    // três modais do projeto usam `fixed inset-0`; este era o único exceção.
+    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in">
+      <div className="w-full max-w-sm cyber-border border-cyber-red/50 bg-card rounded-2xl shadow-lg p-6 text-center space-y-6">
+        <div className="w-16 h-16 rounded-full bg-cyber-red/10 border border-cyber-red/30 mx-auto flex items-center justify-center">
+          <AlertTriangle className="w-8 h-8 text-cyber-red animate-pulse" />
+        </div>
+        <div>
+          <h2 className="text-lg font-mono font-bold text-foreground">Terminar este processo?</h2>
+          {/* O processo identificado é o dado mais importante deste ecrã: sem
+              nome nem PID, confirmar era um voto cego — e a lista reordena. */}
+          <div
+            data-testid="kill-target"
+            className="mt-3 rounded-lg border border-cyber-red/30 bg-cyber-red/5 px-3 py-2 text-left"
+          >
+            <span className="block text-sm font-mono font-bold text-foreground truncate" title={name}>
+              {name || "(sem nome)"}
+            </span>
+            <span className="block text-[11px] font-mono text-muted-foreground">
+              PID {target.pid}
+              {target.user ? ` · ${target.user}` : ""}
+              {` · ${memoryText} MB`}
+            </span>
+          </div>
+          <p className="text-sm font-mono text-muted-foreground mt-2">
+            Só este processo será terminado, juntamente com os seus processos filhos. Qualquer alteração não guardada será perdida.
+          </p>
+        </div>
+        {isKilling && (
+          <p className="text-xs font-mono text-muted-foreground">
+            A terminar… a lista atualiza-se sozinha a seguir; o aviso diz se o serviço não respondeu.
+          </p>
+        )}
+        <div className="flex gap-3 justify-center">
+          <button
+            disabled={isKilling}
+            onClick={onCancel}
+            className="flex-1 px-4 py-2 font-mono text-sm rounded bg-white/5 hover:bg-white/10 transition-colors"
+          >
+            Cancelar
+          </button>
+          <button
+            disabled={isKilling}
+            onClick={onConfirm}
+            className="flex-1 px-4 py-2 font-mono text-sm rounded bg-cyber-red text-white hover:bg-cyber-red/90 transition-colors disabled:opacity-50 flex items-center justify-center gap-2"
+          >
+            {isKilling ? <RefreshCw className="w-4 h-4 animate-spin" /> : "Sim, Terminar"}
+          </button>
+        </div>
+      </div>
     </div>
   );
 }

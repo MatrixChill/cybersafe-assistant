@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
-    "test": "npm run build && node --test test/engine-integrity.test.js test/pcstate.test.js test/stress-index.test.js test/exclusions.test.js test/hardware-gpu.test.js test/temperature-providers.test.js test/process-kill.test.js",
+    "test": "npm run build && node --test test/engine-integrity.test.js test/signatures.test.js test/pcstate.test.js test/stress-index.test.js test/exclusions.test.js test/hardware-gpu.test.js test/temperature-providers.test.js test/process-kill.test.js test/clamav-db.test.js test/detection-criterion.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

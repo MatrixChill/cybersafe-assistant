@@ -8,7 +8,13 @@ import {
   type HeuristicRuleId,
 } from "@cybersafe/shared-types";
 import { sha256File } from "./hashing.js";
-import type { SignatureDatabase } from "./signatures.js";
+import {
+  DEV_CANARY_CONTENT,
+  DEV_CANARY_SIGNATURE,
+  isDevCanaryEnabled,
+  type SignatureDatabase,
+  type SignatureRecord,
+} from "./signatures.js";
 import type { TrustEngine } from "./trust.js";
 import type { YaraEngine } from "./yara.js";
 import type { ClamavBridge } from "./clamav.js";
@@ -84,12 +90,28 @@ export class MalwareAnalyzer {
     }
 
     const signatureMatch = this.deps.signatures.match(sha256);
+
+    // Canário dev-only (benigno): detetado por hash (conteúdo exato) ou por
+    // conteúdo no cabeçalho já lido (robusto a newline/BOM do teste manual).
+    // Em NODE_ENV=production nunca deteta — segue como ficheiro limpo.
+    let devCanary: SignatureRecord | undefined;
+    if (isDevCanaryEnabled()) {
+      if (signatureMatch?.source === DEV_CANARY_SIGNATURE.source) {
+        devCanary = signatureMatch;
+      } else if (sample.toString("utf8").includes(DEV_CANARY_CONTENT)) {
+        devCanary = DEV_CANARY_SIGNATURE;
+      }
+    }
+    // O canário NÃO usa o caminho known_bad_hash: severity media, sem quarentena.
+    const knownBadHash = !!signatureMatch && !devCanary;
+
     const trust = this.deps.trust.evaluate({ sha256, artifactPath, signer });
 
     const rules = new Set<HeuristicRuleId>(metadata.rulesTriggered);
     const isExecutable = EXECUTABLE_EXTENSIONS.has(extension) || magic === "MZ";
 
-    if (signatureMatch) rules.add("known_bad_hash");
+    if (knownBadHash) rules.add("known_bad_hash");
+    if (devCanary) rules.add("dev_canary_signature");
     if (yaraMatches.length > 0) rules.add("yara_match");
     if (clamavDetected) rules.add("known_malware");
     if (artifactPath.toLowerCase().includes("\\downloads\\") || artifactPath.toLowerCase().includes("\\temp\\")) {
@@ -111,7 +133,7 @@ export class MalwareAnalyzer {
     }
 
     const score = scoreThreat({
-      signatureMatch: !!signatureMatch,
+      signatureMatch: knownBadHash,
       yaraMatches: yaraMatches.length,
       rulesTriggered: Array.from(rules),
       trustDecision: trust.decision,
@@ -124,7 +146,7 @@ export class MalwareAnalyzer {
       verdict: score.verdict,
       severity: score.severity,
       riskScore: score.riskScore,
-      confidence: signatureMatch ? 0.99 : yaraMatches.length > 0 ? 0.92 : metadata.confidence,
+      confidence: knownBadHash || devCanary ? 0.99 : yaraMatches.length > 0 ? 0.92 : metadata.confidence,
       rulesTriggered: Array.from(rules),
       factors: score.factors,
       recommendedAction: score.recommendedAction,

@@ -1,15 +1,25 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import {
   KILL_REAP_DEADLINE_MS,
   TASKKILL_TIMEOUT_MS,
   classifyKillTarget,
+  firstDiagnosticLine,
+  interpretTaskkillOutcome,
+  isAliasStubTarget,
   isProcessAlive,
   killProcessTree,
   killTargetIdentity,
   normalizeProcessPath,
   reconcileProcessExit,
+  taskkillArgs,
+  normalizeTaskkillText,
+  decideTaskkillRetry,
+  treeChildrenOf,
+  planTreeSweep,
+  TREE_SWEEP_MAX_TARGETS,
 } from "../dist/response.js";
 
 /**
@@ -19,48 +29,90 @@ import {
  * continuava na lista. O backend tem agora (a) `taskkill` com timeout real,
  * (b) resultado estruturado, (c) auto-proteção por PID/ppid/path (nome só em
  * fallback) e (d) reconciliação autoritativa antes de publicar `process.killed`.
+ *
+ * Regressão P0 seguinte: o `stdio: "ignore"` descartava stdout/stderr e os
+ * códigos != 0/128 (ex.: 5 = acesso negado) viravam "erro genérico" sem
+ * diagnóstico nenhum. Agora o output é capturado e classificado.
  */
 
-function fakeChild() {
+function fakeChild({ stdout = "", stderr = "" } = {}) {
   const child = new EventEmitter();
   child.killed = false;
   child.kill = () => {
     child.killed = true;
     return true;
   };
+  // O killProcessTree real usa stdio em pipe — o fake também tem de ter
+  // streams, com o output já escrito (fica em buffer até aos listeners).
+  child.stdout = new PassThrough();
+  child.stderr = new PassThrough();
+  if (stdout) child.stdout.write(stdout);
+  if (stderr) child.stderr.write(stderr);
+  child.stdout.end();
+  child.stderr.end();
   return child;
 }
 
 const emitSoon = (child, event, ...args) => setImmediate(() => child.emit(event, ...args));
 
 describe("killProcessTree — prazo real e resultado estruturado", () => {
-  it("exit 0 → ok/ok", async () => {
-    const child = fakeChild();
+  it("exit 0 → ok/ok, com o stdout real capturado", async () => {
+    const child = fakeChild({ stdout: "SUCCESS: The process with PID 4242 has been terminated.\n" });
     const pending = killProcessTree(4242, { spawnImpl: () => child });
     emitSoon(child, "exit", 0);
+    emitSoon(child, "close", 0);
     const result = await pending;
     assert.equal(result.ok, true);
     assert.equal(result.status, "ok");
     assert.equal(result.exitCode, 0);
+    assert.match(result.stdout ?? "", /SUCCESS/, "o stdout do taskkill é preservado");
+    assert.equal(result.stderr, "");
   });
 
-  it("exit 128 → not-found (o alvo já não existia)", async () => {
-    const child = fakeChild();
+  it("exit 128 → not-found (o alvo já não existia) com a linha real", async () => {
+    const child = fakeChild({ stderr: 'ERROR: The process "4242" not found.\n' });
     const pending = killProcessTree(4242, { spawnImpl: () => child });
     emitSoon(child, "exit", 128);
+    emitSoon(child, "close", 128);
     const result = await pending;
     assert.equal(result.ok, false);
     assert.equal(result.status, "not-found");
     assert.equal(result.exitCode, 128);
+    assert.match(result.error ?? "", /not found/);
   });
 
-  it("exit != 0/128 → failed com o código", async () => {
-    const child = fakeChild();
+  it("exit 5 → access-denied com a mensagem real do taskkill (nunca genérico)", async () => {
+    const child = fakeChild({ stderr: "ERRO: O processo 4242 não pode ser terminado. Razão: Acesso negado.\n" });
+    const pending = killProcessTree(4242, { spawnImpl: () => child });
+    emitSoon(child, "exit", 5);
+    emitSoon(child, "close", 5);
+    const result = await pending;
+    assert.equal(result.ok, false);
+    assert.equal(result.status, "access-denied");
+    assert.equal(result.exitCode, 5);
+    assert.match(result.error ?? "", /Acesso negado/);
+    assert.match(result.stderr ?? "", /Acesso negado/);
+  });
+
+  it("exit 1 com texto de acesso negado → access-denied (não falha genérica)", async () => {
+    const child = fakeChild({ stderr: "ERROR: The process \"4242\" could not be terminated. Reason: Access is denied.\n" });
     const pending = killProcessTree(4242, { spawnImpl: () => child });
     emitSoon(child, "exit", 1);
+    emitSoon(child, "close", 1);
+    const result = await pending;
+    assert.equal(result.status, "access-denied");
+    assert.match(result.error ?? "", /Access is denied/);
+  });
+
+  it("exit != 0/128/5 → failed com o código e a mensagem real", async () => {
+    const child = fakeChild({ stderr: "ERRO: argumento inválido.\n" });
+    const pending = killProcessTree(4242, { spawnImpl: () => child });
+    emitSoon(child, "exit", 1);
+    emitSoon(child, "close", 1);
     const result = await pending;
     assert.equal(result.status, "failed");
     assert.equal(result.exitCode, 1);
+    assert.match(result.error ?? "", /argumento inválido/);
   });
 
   it("erro de spawn → failed, sem ficar pendente", async () => {
@@ -84,17 +136,65 @@ describe("killProcessTree — prazo real e resultado estruturado", () => {
     assert.ok(Date.now() - startedAt < 2_000, "não pode esperar indefinidamente");
   });
 
-  it("um exit tardio depois do timeout não muda o resultado", async () => {
+  it("um close tardio depois do timeout não muda o resultado", async () => {
     const child = fakeChild();
     const pending = killProcessTree(4242, { timeoutMs: 15, spawnImpl: () => child });
     const result = await pending;
-    child.emit("exit", 0);
+    child.emit("close", 0);
     assert.equal(result.status, "timeout");
   });
 
   it("expõe prazos default positivos", () => {
     assert.ok(TASKKILL_TIMEOUT_MS > 0);
     assert.ok(KILL_REAP_DEADLINE_MS > 0);
+  });
+});
+
+describe("interpretTaskkillOutcome — tabela de classificação (exit code + output real)", () => {
+  const base = { stdout: "", stderr: "", timedOut: false };
+
+  it("0 → ok", () => {
+    assert.deepEqual(interpretTaskkillOutcome({ ...base, exitCode: 0 }), { ok: true, status: "ok" });
+  });
+
+  it("128 → not-found, com a linha do taskkill quando existe", () => {
+    const hit = interpretTaskkillOutcome({ ...base, exitCode: 128, stderr: "ERROR: The process \"9\" not found." });
+    assert.equal(hit.status, "not-found");
+    assert.match(hit.error ?? "", /not found/);
+    const bare = interpretTaskkillOutcome({ ...base, exitCode: 128 });
+    assert.match(bare.error ?? "", /já não existe/);
+  });
+
+  it("5 → access-denied; 1 com texto de acesso negado também", () => {
+    assert.equal(interpretTaskkillOutcome({ ...base, exitCode: 5 }).status, "access-denied");
+    const denied = interpretTaskkillOutcome({ ...base, exitCode: 1, stderr: "Acesso negado." });
+    assert.equal(denied.status, "access-denied");
+    assert.match(denied.error ?? "", /Acesso negado/);
+  });
+
+  it("timeout tem prioridade sobre qualquer código", () => {
+    const out = interpretTaskkillOutcome({ ...base, exitCode: 0, timedOut: true });
+    assert.equal(out.status, "timeout");
+    assert.equal(out.ok, false);
+  });
+
+  it("código inesperado → failed com mensagem honesta (com ou sem output)", () => {
+    const withLine = interpretTaskkillOutcome({ ...base, exitCode: 3, stderr: " ERRO: qualquer coisa. \n lixo" });
+    assert.equal(withLine.status, "failed");
+    assert.equal(withLine.error, "ERRO: qualquer coisa.");
+    const bare = interpretTaskkillOutcome({ ...base, exitCode: 3 });
+    assert.match(bare.error ?? "", /código 3/);
+    const unknown = interpretTaskkillOutcome({ ...base, exitCode: null });
+    assert.match(unknown.error ?? "", /desconhecido/);
+  });
+});
+
+describe("firstDiagnosticLine", () => {
+  it("prioriza stderr sobre stdout e salta linhas vazias", () => {
+    assert.equal(firstDiagnosticLine("OUT: linha stdout", "ERRO: linha stderr"), "ERRO: linha stderr");
+    assert.equal(firstDiagnosticLine("OUT: linha stdout", "\r\n  \r\nERRO: segunda"), "ERRO: segunda");
+    assert.equal(firstDiagnosticLine("OUT: só stdout", ""), "OUT: só stdout");
+    assert.equal(firstDiagnosticLine("", ""), "");
   });
 });
 
@@ -131,6 +231,36 @@ describe("killTargetIdentity", () => {
     assert.equal(a, b, "nome é case-insensitive");
     assert.notEqual(a, killTargetIdentity({ name: "chrome.exe", commandLine: "chrome.exe --type=gpu" }));
     assert.notEqual(a, killTargetIdentity({ name: "edge.exe", commandLine: "chrome.exe --type=renderer" }));
+  });
+});
+
+describe("isAliasStubTarget — stub App Execution Alias (MSIX) vs exe real", () => {
+  it("deteta o launcher em %LOCALAPPDATA%\\Microsoft\\WindowsApps (path ou commandLine)", () => {
+    assert.equal(
+      isAliasStubTarget({ pid: 1, path: "C:\\Users\\x\\AppData\\Local\\Microsoft\\WindowsApps\\Notepad.exe", commandLine: "Notepad.exe" }),
+      true,
+    );
+    assert.equal(
+      isAliasStubTarget({ pid: 1, commandLine: "c:/users/x/appdata/local/microsoft/windowsapps/notepad.exe" }),
+      true,
+      "normaliza barras e maiúsculas",
+    );
+  });
+
+  it("NUNCA confunde com o exe real empacotado sob Program Files\\WindowsApps", () => {
+    assert.equal(
+      isAliasStubTarget({
+        pid: 1,
+        path: "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2607.14.0_x64__8wekyb3d8bbwe\\Notepad\\Notepad.exe",
+        commandLine: "C:\\Program Files\\WindowsApps\\Microsoft.WindowsNotepad_11.2607.14.0_x64__8wekyb3d8bbwe\\Notepad\\Notepad.exe",
+      }),
+      false,
+    );
+  });
+
+  it("processo comum sem path nem commandLine não é stub", () => {
+    assert.equal(isAliasStubTarget({ pid: 1 }), false);
+    assert.equal(isAliasStubTarget({ pid: 1, path: "C:\\Windows\\notepad.exe", commandLine: "notepad.exe" }), false);
   });
 });
 
@@ -277,5 +407,200 @@ describe("reconcileProcessExit — só publica depois de o PID desaparecer", () 
       sleep: async () => {},
     });
     assert.equal(status.status, "exited");
+  });
+});
+
+/**
+ * O comando real do taskkill. Regressão provada em actions.log: a linha a
+ * registar `Cmd=taskkill /PID x /T /F` enquanto o spawn passava outra coisa é
+ * pior do que não ter log — faz-nos confiar numa evidência falsa.
+ *
+ * `/F` antes de `/PID` não é cosmético aqui: sem `/F` o taskkill pede um fecho
+ * gracioso à janela, e um Notepad com documento por guardar nunca responde
+ * (o "A terminar processo" lento e por nunca acabar). `/T` leva a árvore, que é
+ * o que os pacotes MSIX precisam.
+ */
+describe("taskkillArgs — um comando, uma fonte, sem deriva entre log e spawn", () => {
+  it("/F e /T antes do /PID, exatamente um de cada, e o PID alvo", () => {
+    assert.deepEqual(taskkillArgs(4321), ["/F", "/T", "/PID", "4321"]);
+    const args = taskkillArgs(4321);
+    assert.ok(args.indexOf("/F") < args.indexOf("/PID"), "/F tem de vir antes do /PID");
+    assert.ok(args.indexOf("/T") < args.indexOf("/PID"), "/T tem de vir antes do /PID");
+    assert.equal(args.filter((a) => a === "/F").length, 1);
+    assert.equal(args.filter((a) => a === "/T").length, 1);
+    assert.equal(args.filter((a) => a === "/PID").length, 1, "um so PID alvo, nunca /IM");
+  });
+
+  it("killProcessTree entrega ao spawn exatamente taskkillArgs", async () => {
+    const calls = [];
+    const child = fakeChild({ stdout: "SUCCESS: The process with PID 4321 has been terminated.\n" });
+    const pending = killProcessTree(4321, {
+      spawnImpl: (cmd, args, options) => {
+        calls.push({ cmd, args, options });
+        return child;
+      },
+    });
+    emitSoon(child, "exit", 0);
+    emitSoon(child, "close", 0);
+    const result = await pending;
+
+    assert.equal(result.ok, true, JSON.stringify(result));
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0].cmd, "taskkill");
+    assert.deepEqual(calls[0].args, taskkillArgs(4321), "o argv executado e o argv canónico");
+    assert.deepEqual(calls[0].args, ["/F", "/T", "/PID", "4321"]);
+    // stdio em pipe (nunca "ignore") — sem isto o stderr do taskkill perde-se.
+    assert.deepEqual(calls[0].options.stdio, ["ignore", "pipe", "pipe"]);
+  });
+
+  it("o PID chega como string e sem flags extras entre /PID e o numero", () => {
+    const args = taskkillArgs(7);
+    const pidIndex = args.indexOf("/PID");
+    assert.equal(args[pidIndex + 1], "7");
+    assert.equal(args.length, pidIndex + 2, "nada depois do PID");
+  });
+});
+
+/**
+ * ROUND 2 — o exit 255 nao e uma categoria, e um caixote.
+ *
+ * Evidence real do actions.log: pid 22660 → taskkill Exit=255 com
+ * "Não foi possível terminar o processo" em pt-PT, e o codigo nao distinguish
+ * "ja nao existe" de "nao consegui terminar". Alem disso, repetir o taskkill
+ * sem perguntar ao Windows se o PID la estava era o ciclo que se chamava
+ * resiliencia a si proprio.
+ */
+const base = { stdout: "", stderr: "", timedOut: false };
+
+describe("normalizeTaskkillText — a mensagem chega partido da codepage", () => {
+  it("tira acentos, passa a minusculas e colapsa espaços", () => {
+    assert.equal(normalizeTaskkillText("  Não   Foi Possível TERMINAR "), "nao foi possivel terminar");
+    assert.equal(normalizeTaskkillText("Acesso é negado."), "acesso e negado.");
+  });
+
+  it("sobrevive a null/undefined sem rebentar", () => {
+    assert.equal(normalizeTaskkillText(undefined), "");
+    assert.equal(normalizeTaskkillText(null), "");
+  });
+});
+
+describe("interpretTaskkillOutcome — classificacao do 255 pela mensagem", () => {
+  it("255 + 'não foi possível terminar' (acentos partidos) continua failed, com a mensagem real", () => {
+    const out = interpretTaskkillOutcome({
+      ...base,
+      exitCode: 255,
+      stderr: "ERRO: Não foi possível terminar o processo com PID: 22660.\n",
+    });
+    assert.equal(out.ok, false);
+    assert.equal(out.status, "failed");
+    assert.match(out.error ?? "", /Não foi possível terminar/, "a mensagem do Windows e que se mostra");
+  });
+
+  it("255 + mensagem de PID inexistente vira not-found (nao falha generica)", () => {
+    const out = interpretTaskkillOutcome({ ...base, exitCode: 255, stderr: "ERROR: The process \"9\" not found." });
+    assert.equal(out.status, "not-found");
+  });
+
+  it("255 + 'tarefa inexistente' em pt-PT vira not-found, com o nome da tarefa entre aspas", () => {
+    const out = interpretTaskkillOutcome({
+      ...base,
+      exitCode: 255,
+      stderr: "ERRO: Não há ocorrência da tarefa \"22660\" em execução.\n",
+    });
+    assert.equal(out.ok, false);
+    assert.equal(out.status, "not-found");
+    assert.equal(
+      interpretTaskkillOutcome({ ...base, exitCode: 255, stderr: 'ERROR: The task "22660" not found.' }).status,
+      "not-found",
+    );
+  });
+
+  it("255 + acesso negado vira access-denied, em pt e en", () => {
+    assert.equal(
+      interpretTaskkillOutcome({ ...base, exitCode: 255, stderr: "ERRO: Acesso negado." }).status,
+      "access-denied",
+    );
+    assert.equal(
+      interpretTaskkillOutcome({ ...base, exitCode: 255, stderr: "ERROR: Access is denied." }).status,
+      "access-denied",
+    );
+  });
+
+  it("sem mensagem utilizável, nao se inventa nada: falha com o codigo", () => {
+    const out = interpretTaskkillOutcome({ ...base, exitCode: 255 });
+    assert.equal(out.status, "failed");
+    assert.match(out.error ?? "", /255/);
+  });
+});
+
+describe("decideTaskkillRetry — so se o Windows disser que esta vivo", () => {
+  it("PID morto para logo, mesmo com orcamento e tentativas sobras", () => {
+    assert.equal(decideTaskkillRetry({ attempts: 1, targetAlive: false, budgetRemainingMs: 9_000, status: "failed" }), "stop");
+  });
+
+  it("not-found e access-denied nao repetem: a segunda tentativa daria no mesmo", () => {
+    for (const status of ["not-found", "access-denied"]) {
+      assert.equal(decideTaskkillRetry({ attempts: 1, targetAlive: true, budgetRemainingMs: 9_000, status }), "stop", status);
+    }
+  });
+
+  it("vivo + falha generica = uma repeticao, e nunca uma terceira", () => {
+    assert.equal(decideTaskkillRetry({ attempts: 1, targetAlive: true, budgetRemainingMs: 9_000, status: "failed" }), "retry");
+    assert.equal(decideTaskkillRetry({ attempts: 2, targetAlive: true, budgetRemainingMs: 9_000, status: "failed" }), "stop");
+  });
+
+  it("sem orcamento nao se inicia outra tentativa", () => {
+    assert.equal(decideTaskkillRetry({ attempts: 1, targetAlive: true, budgetRemainingMs: 0, status: "failed" }), "stop");
+  });
+});
+
+describe("arvore — filhos proprios e varredura segura", () => {
+  const rows = [
+    { pid: 100, ppid: 4, name: "raiz.exe" },
+    { pid: 101, ppid: 100, name: "filho.exe" },
+    { pid: 102, ppid: 101, name: "neto.exe" },
+    { pid: 103, ppid: 999, name: "nao-e-da-arvore.exe" },
+  ];
+  const context = {
+    selfPid: 4,
+    ancestorPids: [3],
+    internalPaths: [],
+    internalPathPrefixes: ["c:\\program files\\cybersafe"],
+    commandLineMarkers: [],
+    fallbackNames: ["svchost.exe"],
+    systemPidThreshold: 100,
+  };
+
+  it("treeChildrenOf so aceita quem declara aquele ppid", () => {
+    assert.deepEqual(treeChildrenOf(100, rows).map((r) => r.pid), [101]);
+    assert.deepEqual(treeChildrenOf(999, rows).map((r) => r.pid), [103]);
+    // um linho sem ppid nao e filho de ninguem
+    assert.deepEqual(treeChildrenOf(100, [{ pid: 7 }]), []);
+  });
+
+  it("planTreeSweep desce niveis e mata um a um, sem incluir a raiz nem estranhos", () => {
+    const plan = planTreeSweep({ rootPid: 100, rows, context });
+    assert.deepEqual(plan.targets, [101, 102]);
+    assert.equal(plan.targets.includes(100), false, "a raiz nao e alvo da varredura");
+    assert.equal(plan.targets.includes(103), false, "quem nao e descendente nao e tocado");
+  });
+
+  it("recusa componentes do CyberSafe e PIDs de sistema, e reporta a recusa", () => {
+    const protectedRows = [
+      { pid: 101, ppid: 100, name: "filho.exe" },
+      { pid: 55, ppid: 101, name: "svchost.exe" },
+      { pid: 104, ppid: 101, path: "C:\\Program Files\\CyberSafe\\service.exe" },
+      { pid: 4, ppid: 101, name: "system" },
+    ];
+    const plan = planTreeSweep({ rootPid: 100, rows: protectedRows, context });
+    assert.deepEqual(plan.targets, [101], "so o filho normal e abatido");
+    assert.deepEqual(plan.refusedProtected.sort((a, b) => a - b), [4, 55, 104]);
+  });
+
+  it("tem teto de alvos para a enumeracao nao correr descontrolada", () => {
+    const many = [{ pid: 100, ppid: 4 }];
+    for (let i = 0; i < TREE_SWEEP_MAX_TARGETS + 10; i += 1) many.push({ pid: 1000 + i, ppid: 100, name: `w${i}.exe` });
+    const plan = planTreeSweep({ rootPid: 100, rows: many, context });
+    assert.equal(plan.targets.length, TREE_SWEEP_MAX_TARGETS);
   });
 });

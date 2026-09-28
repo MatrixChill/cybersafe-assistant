@@ -101,14 +101,8 @@ export const TASKKILL_TIMEOUT_MS = 10_000;
 export const KILL_REAP_INTERVAL_MS = 150;
 /** Prazo máximo à espera de que o PID desapareça depois do taskkill. */
 export const KILL_REAP_DEADLINE_MS = 5_000;
-
-export interface TaskkillResult {
-  /** `taskkill` saiu com sucesso (código 0). Não garante que o PID já desapareceu. */
-  ok: boolean;
-  status: "ok" | "not-found" | "timeout" | "failed";
-  exitCode: number | null;
-  error?: string;
-}
+/** Limite do stdout/stderr preservados por stream (o resto é cortado). */
+export const TASKKILL_OUTPUT_CAP = 4_000;
 
 export interface KillProcessTreeOptions {
   timeoutMs?: number;
@@ -117,10 +111,236 @@ export interface KillProcessTreeOptions {
 }
 
 /**
- * Corre `taskkill /T /F` com **prazo real**: se o utilitário não terminar dentro
+ * Primeira linha não vazia de stderr (fallback: stdout), aparada — é o
+ * diagnóstico real que o `taskkill` escreveu, nunca uma mensagem inventada.
+ */
+export function firstDiagnosticLine(stdout: string, stderr: string): string {
+  for (const source of [stderr, stdout]) {
+    const line = source
+      .split(/\r?\n/)
+      .map((entry) => entry.trim())
+      .find((entry) => entry.length > 0);
+    if (line) return line.slice(0, 400);
+  }
+  return "";
+}
+
+export interface TaskkillOutcomeInput {
+  /** Código de saída do taskkill; `null` quando não houve código (timeout/sinal). */
+  exitCode: number | null;
+  stdout: string;
+  stderr: string;
+  timedOut: boolean;
+}
+
+export interface TaskkillOutcome {
+  ok: boolean;
+  status: "ok" | "not-found" | "access-denied" | "timeout" | "failed";
+  error?: string;
+}
+
+/**
+ * Normaliza o texto que o taskkill escreveu: minusculas, sem acentos, espaços
+ * colapsados. Não é cosmético — no Windows em português a mensagem real é
+ * "Não foi possível terminar o processo" e chega da codepage da consola com os
+ * acentos partidos. Um regex com `ó` ao lado não apanha nada, e um falhanço
+ * documentado pelo stderr ficava a parecer "falha genérica".
+ */
+export function normalizeTaskkillText(value: string | null | undefined): string {
+  return (value ?? "")
+    .normalize("NFD")
+    .replace(/[̀-ͯ]/g, "")
+    .toLowerCase()
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+const ACCESS_DENIED_PATTERN =
+  /acesso negado|acesso e negado|nao e possivel negar acesso|access is denied|access denied/;
+/**
+ * "O PID já não existe", em pt-PT e en-US.
+ *
+ * O Windows nunca escreve "process not found" a seco: escreve
+ * `ERROR: The process "22660" not found.` e, em pt-PT,
+ * `ERRO: O processo "22660" não foi encontrado.` — o PID vem sempre entre
+ * aspas, entre "process" e "not found". Com o `combined` já sem aspas (ver
+ * abaixo) sobra `the process not found`; as formas em pt-PT entram aqui
+ * pela ordem em que o Windows as escreve, que não é a do `processo nao
+ * encontrado` que já cá estava.
+ *
+ * As variantes da TAREFA (task, não processo) entram sem acentos porque o
+ * `normalizeTaskkillText` os remove antes do match, e sem o nome no meio
+ * porque o `combined` já não traz o que estava entre aspas — `ERRO: Não há
+ * ocorrência da tarefa "41113" em execução.` reduz-se a `erro: nao ha
+ * ocorrencia da tarefa em execucao`. A ordem NOT_FOUND antes de
+ * TERMINATE_FAILED é o que impede o 255 de um PID morto de virar erro.
+ */
+const NOT_FOUND_PATTERN =
+  /nao foi possivel encontrar o processo|processo nao encontrado|processo nao foi encontrado|nao foi encontrado o processo|nao existe o processo|nao ha ocorrencia da tarefa em execucao|nao ha nenhuma tarefa em execucao|nao ha ocorrencia da tarefa|nao existe a tarefa|task not found|nao ha instancia em execucao|process not found|unable to find the process|no running instance/;
+/** A frase que acompanha o exit 255 quando nada da árvore pôde ser terminado. */
+const TERMINATE_FAILED_PATTERN =
+  /nao foi possivel terminar|could not be terminated|unable to terminate|falha ao terminar/;
+
+/**
+ * Tabela de classificação do `taskkill`, pura e testável:
+ * - 0   → ok (terminado; a confirmação de desaparecimento é outra fase);
+ * - 128 → o PID já não existia;
+ * - 5, ou exit 1 com texto "acesso negado" → o Windows recusou (processo
+ *   protegido / sem privilégios) — distinto de falha genérica;
+ * - timeout → abortado no prazo;
+ * - resto → failed com a mensagem real do taskkill quando existe.
+ */
+export function interpretTaskkillOutcome(input: TaskkillOutcomeInput): TaskkillOutcome {
+  if (input.timedOut) {
+    return { ok: false, status: "timeout", error: "taskkill excedeu o prazo de execução." };
+  }
+  const detail = firstDiagnosticLine(input.stdout, input.stderr);
+  if (input.exitCode === 0) return { ok: true, status: "ok" };
+  if (input.exitCode === 128) {
+    return { ok: false, status: "not-found", error: detail || "O processo já não existe (taskkill: PID não encontrado)." };
+  }
+  if (input.exitCode === 5) {
+    return { ok: false, status: "access-denied", error: detail || "Acesso negado ao terminar o processo (taskkill exit 5)." };
+  }
+  // O texto que se casa com os padrões vai SEM o que está entre aspas: o
+  // taskkill identifica o alvo sempre assim (`The process "22660" not found.`)
+  // e essa citação parte a frase ao meio, fazendo o 255 de um PID já morto
+  // cair em "falha genérica" e o utilizador ver um erro onde já não havia nada
+  // a fazer. Tira-se ANTES de normalizar, para o colapso de espaços do
+  // `normalizeTaskkillText` tapar os dois espaços que ficam em `process  not`
+  // — depois de normalizar já seria tarde. A mensagem mostrada ao utilizador
+  // sai de `detail`, que nunca foi tocada: o que se perde aqui é só o eco do
+  // PID da stderr, e o PID que importa é o do alvo congelado.
+  const combined = normalizeTaskkillText(`${input.stderr}\n${input.stdout}`.replace(/"[^"]*"|'[^']*'/g, " "));
+  if (input.exitCode === 1 && ACCESS_DENIED_PATTERN.test(combined)) {
+    return { ok: false, status: "access-denied", error: detail || "Acesso negado ao terminar o processo." };
+  }
+  // Codigos genericos (o 255 do taskkill e o maior deles): o numero nao diz
+  // nada, a mensagem sim. Sem isto, "o processo ja nao existe" dicho pelo
+  // stderr a um exit 255 virava falha generic e o utilizador via um erro onde
+  // ja nao havia nada a fazer.
+  if (NOT_FOUND_PATTERN.test(combined)) {
+    return { ok: false, status: "not-found", error: detail || "O processo já não existe (taskkill: PID não encontrado)." };
+  }
+  if (ACCESS_DENIED_PATTERN.test(combined)) {
+    return { ok: false, status: "access-denied", error: detail || "Acesso negado ao terminar o processo." };
+  }
+  // O taskkill em pt-PT escreve "Não foi possível terminar o processo..." e
+  // sai com 255. Não é falha desconhecida: é recusa do Windows em matar AQUELE
+  // PID (protegido, já em fecho, ou dono doutro token). Dizemos isso com a
+  // mensagem real à frente em vez de atirar um "código 255" para o ecrã.
+  if (TERMINATE_FAILED_PATTERN.test(combined)) {
+    return {
+      ok: false,
+      status: "failed",
+      error: detail || `O Windows não conseguiu terminar o processo (taskkill exit ${input.exitCode ?? "desconhecido"}).`,
+    };
+  }
+  return {
+    ok: false,
+    status: "failed",
+    error: detail || `taskkill terminou com código ${input.exitCode ?? "desconhecido"}.`,
+  };
+}
+
+/** Quantas vezes o mesmo PID leva `taskkill` antes de mudar de estratégia. */
+export const KILL_MAX_ATTEMPTS = 2;
+/** Intervalo curto entre tentativas: dá tempo ao Windows para libertar o PID. */
+export const KILL_RETRY_DELAY_MS = 250;
+
+/**
+ * Política de retry: só há segunda tentativa se o processo estiver VIVO para o
+ * SO. Um PID que o SO já não tem não precisa de mais um taskkill — precisa de
+ * uma confirmação verdadeira, que foi precisamente o erro que esteve a voltar
+ * (repetir o mesmo comando sobre um PID inexistente e chamar-lhe resiliência).
+ * `not-found` e `access-denied` param logo: a segunda tentativa daria no mesmo.
+ */
+export function decideTaskkillRetry(input: {
+  attempts: number;
+  targetAlive: boolean;
+  budgetRemainingMs: number;
+  status: TaskkillOutcome["status"];
+}): "retry" | "stop" {
+  if (!input.targetAlive) return "stop";
+  if (input.status === "not-found" || input.status === "access-denied") return "stop";
+  if (input.attempts >= KILL_MAX_ATTEMPTS) return "stop";
+  if (input.budgetRemainingMs <= 0) return "stop";
+  return "retry";
+}
+
+/** Filhos DIRETOS de um PID, numa recolha de linhas Win32_Process. */
+export function treeChildrenOf<T extends { pid: number; ppid?: number }>(
+  parentPid: number,
+  rows: readonly T[],
+): T[] {
+  return rows.filter((r) => Number.isInteger(r.pid) && r.pid > 0 && r.pid !== parentPid && r.ppid === parentPid);
+}
+
+/** Tetos da varredura: não pode correr descontrolada no meio de um kill. */
+export const TREE_SWEEP_MAX_DEPTH = 4;
+export const TREE_SWEEP_MAX_TARGETS = 32;
+
+/**
+ * Descendentes a abater, um a um, já sem o que não pode ser alvo.
+ *
+ * `taskkill /T` depende do vínculo pai-filho EXISTENTE: se a raiz morreu e os
+ * netos ficaram órfãos (re-parented), o `/T` não tem nada para alcançar — era
+ * isso que fazia o kill do pai não resolver nada. Aqui percorre-se a árvore
+ * nível a nível. Componentes do CyberSafe, o serviço e os seus ancestrais são
+ * recusados mesmo que apareçam ligados à árvore.
+ */
+export function planTreeSweep<T extends KillTargetInfo>(options: {
+  rootPid: number;
+  rows: readonly T[];
+  context: KillProtectionContext;
+  maxTargets?: number;
+}): { targets: number[]; refusedProtected: number[] } {
+  const maxTargets = options.maxTargets ?? TREE_SWEEP_MAX_TARGETS;
+  const targets: number[] = [];
+  const refusedProtected: number[] = [];
+  const seen = new Set<number>([options.rootPid]);
+  let frontier: number[] = [options.rootPid];
+
+  for (let depth = 0; depth < TREE_SWEEP_MAX_DEPTH && frontier.length > 0 && targets.length < maxTargets; depth += 1) {
+    const next: number[] = [];
+    for (const parentPid of frontier) {
+      for (const child of treeChildrenOf(parentPid, options.rows)) {
+        if (seen.has(child.pid) || targets.length >= maxTargets) continue;
+        seen.add(child.pid);
+        if (classifyKillTarget(child, options.context)) {
+          refusedProtected.push(child.pid);
+          continue;
+        }
+        targets.push(child.pid);
+        next.push(child.pid);
+      }
+    }
+    frontier = next;
+  }
+  return { targets, refusedProtected };
+}
+
+/**
+ * Argumentos CANONICOS do `taskkill`. Uma única fonte: o `spawn` e o registo em
+ * `actions.log` usam-nos, por isso o log prova sempre o comando real.
+ *
+ * `/F` e `/T` **antes** do `/PID`: `/F` força sem esperar que a janela responda
+ * (sem `/F`, um Notepad com documento por guardar fica à espera de uma resposta
+ * que nunca chega — era o "A terminar processo" lento e por nunca acabar), e
+ * `/T` leva a árvore toda, incluindo os filhos que os MSIX criam.
+ */
+export function taskkillArgs(pid: number): string[] {
+  return ["/F", "/T", "/PID", String(pid)];
+}
+
+/**
+ * Corre `taskkill /F /T /PID <pid>` com **prazo real**: se o utilitário não terminar dentro
  * de `timeoutMs`, o processo filho é morto e o resultado é `timeout`. Nunca
  * rejeita e nunca fica pendente — é isto que impede um pedido de kill de ficar
  * preso à espera para sempre.
+ *
+ * O stdout/stderr são **capturados** (com teto) — sem eles um exit code != 0
+ * não tem diagnóstico nenhum e o utilizador só vê "falha genérica".
  */
 export async function killProcessTree(pid: number, options?: KillProcessTreeOptions): Promise<KillProcessResult> {
   const timeoutMs = options?.timeoutMs ?? TASKKILL_TIMEOUT_MS;
@@ -128,8 +348,8 @@ export async function killProcessTree(pid: number, options?: KillProcessTreeOpti
 
   let child: ChildProcess;
   try {
-    child = spawnFn("taskkill", ["/PID", String(pid), "/T", "/F"], {
-      stdio: "ignore",
+    child = spawnFn("taskkill", taskkillArgs(pid), {
+      stdio: ["ignore", "pipe", "pipe"],
       windowsHide: true,
     });
   } catch (err) {
@@ -138,33 +358,61 @@ export async function killProcessTree(pid: number, options?: KillProcessTreeOpti
 
   return new Promise((resolve) => {
     let settled = false;
+    let exitCode: number | null = null;
+    let stdout = "";
+    let stderr = "";
+    const collect = (which: "stdout" | "stderr") => (chunk: Buffer | string) => {
+      const text = typeof chunk === "string" ? chunk : chunk.toString("utf8");
+      if (which === "stdout") stdout = (stdout + text).slice(0, TASKKILL_OUTPUT_CAP);
+      else stderr = (stderr + text).slice(0, TASKKILL_OUTPUT_CAP);
+    };
+    child.stdout?.on("data", collect("stdout"));
+    child.stderr?.on("data", collect("stderr"));
+
     const timer = setTimeout(() => {
       settled = true;
       child.kill();
-      resolve({ ok: false, status: "timeout", pid, exitCode: undefined });
+      resolve({
+        ...interpretTaskkillOutcome({ exitCode: null, stdout, stderr, timedOut: true }),
+        pid,
+        stdout,
+        stderr,
+      });
     }, timeoutMs);
+    // 'exit' só regista o código; a resolução é em 'close', quando o output
+    // capturado está completo (com stdio em pipe, 'exit' pode chegar antes dos
+    // últimos chunks).
     child.on("exit", (code) => {
+      exitCode = code ?? null;
+    });
+    child.on("close", (code) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      if (code === 0) {
-        resolve({ ok: true, status: "ok", pid, exitCode: 0 });
-      } else if (code === 128) {
-        resolve({ ok: false, status: "not-found", pid, exitCode: 128 });
-      } else {
-        resolve({ ok: false, status: "failed", pid, exitCode: code ?? undefined });
-      }
+      const finalCode = code ?? exitCode ?? null;
+      const outcome = interpretTaskkillOutcome({ exitCode: finalCode, stdout, stderr, timedOut: false });
+      resolve({ ...outcome, pid, exitCode: finalCode ?? undefined, stdout, stderr });
     });
     child.on("error", (err) => {
       if (settled) return;
       settled = true;
       clearTimeout(timer);
-      resolve({ ok: false, status: "failed", pid, error: err.message, exitCode: undefined });
+      resolve({ ok: false, status: "failed", pid, error: err.message, exitCode: undefined, stdout, stderr });
     });
   });
 }
 
-/** `process.kill(pid, 0)` não envia sinal — só diz se o PID ainda existe. */
+/**
+ * `process.kill(pid, 0)` não envia sinal — só diz se o PID ainda existe.
+ *
+ * LIMITAÇÃO (foi causa de bug): no Windows o OBJETO de um processo já terminado
+ * continua abrível enquanto houver handles em aberto — Notepad com documento
+ * por guardar, notificação de shell pendurada, etc. Para esses PIDs isto
+ * responde `true` quando o processo já morreu (`EPERM` também é "existe", mas
+ * com outro dono). Quem precisa de saber se o processo **ainda é o alvo** — o
+ * kill no serviço — confirma pela palavra do CIM/Win32_Process, que deixa de
+ * listar o PID assim que ele sai; isto serve apenas como primeiro filtro barato.
+ */
 export function isProcessAlive(pid: number): boolean {
   if (!Number.isInteger(pid) || pid <= 0) return false;
   try {
@@ -207,6 +455,21 @@ export function normalizeProcessPath(value: string | undefined | null): string {
   let normalized = value.trim().replace(/\//g, "\\");
   if (normalized.startsWith("\\\\?\\")) normalized = normalized.slice(4);
   return normalized.toLowerCase();
+}
+
+/**
+ * Stub de App Execution Alias (MSIX): os lançadores vivem em
+ * %LOCALAPPDATA%\Microsoft\WindowsApps e MORREM após ativar a app — o PID do
+ * launcher nunca é o PID real. O executável REAL das apps empacotadas vive sob
+ * C:\Program Files\WindowsApps\... e NÃO corresponde a este marcador.
+ */
+export const ALIAS_STUB_MARKER = "appdata\\local\\microsoft\\windowsapps";
+
+/** Verdadeiro quando path ou commandLine do alvo aponta para o stub/alias. */
+export function isAliasStubTarget(target: { path?: string; commandLine?: string }): boolean {
+  const path = normalizeProcessPath(target.path);
+  const commandLine = normalizeProcessPath(target.commandLine);
+  return path.includes(ALIAS_STUB_MARKER) || commandLine.includes(ALIAS_STUB_MARKER);
 }
 
 /** Identidade estável o suficiente para detetar PID reuse (nome + linha de comando). */
