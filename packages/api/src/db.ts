@@ -14,6 +14,18 @@ fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const db = new Database(dbPath);
 
+/**
+ * Fecha a ligacao singleton. Usada pelos testes no teardown: sem isto o
+ * Windows mantem o handle do ficheiro sqlite aberto e o `rm` do diretorio
+ * temporario falha com EPERM, deixando lixo em %TEMP%. Idempotente: chamar
+ * duas vezes ou depois de fechada nao faz nada.
+ */
+export function closeDb(): void {
+  if (db.open) {
+    db.close();
+  }
+}
+
 // ── Migrations ──
 
 db.exec(`

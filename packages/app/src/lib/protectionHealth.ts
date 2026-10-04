@@ -5,6 +5,7 @@ import type {
   ProtectionStatus,
   WindowsFirewallState,
 } from "@cybersafe/shared-types";
+import { wfpHealth } from "@cybersafe/shared-types";
 
 /**
  * Níveis apresentados no Dashboard.
@@ -21,7 +22,7 @@ export function deriveProtectionLevel(
 ): ProtectionLevel {
   if (engine && !engine.serviceRunning) return "critical";
   const hasEngineError = engine
-    && [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall]
+    && [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)]
       .some((e) => e && e.status === "error");
   if (hasEngineError) return "critical";
   const unhealthy = engine?.anyEngineDegraded === true;
@@ -44,10 +45,19 @@ export function deriveProtectionLevel(
  * Um `degraded` que aparecesse como ACTIVE seria a UI a mentir sobre protecao.
  */
 export function engineStatusText(status: EngineSubsystemStatus): string {
-  if (status === "active") return "ACTIVE";
-  if (status === "degraded") return "DEGRADED";
-  if (status === "error") return "ERROR";
-  return "UNAVAILABLE";
+  // PT-PT curto. Antes devolvia os tokens tecnicos crus em maiusculas
+  // ("ACTIVE", "DEGRADED", "ERROR", "UNAVAILABLE"): o nome da funcao prometia
+  // texto humano e nao cumpria, e o utilizador lia DEGRADED no ecra.
+  //
+  // A cor continua a ser a que a tabela de badges ja usava, portanto nao ha
+  // colisao visual: a distincao passou a estar na PALAVRA, nao so na cor.
+  if (status === "active") return "Ativo";
+  if (status === "degraded") return "Degradado";
+  if (status === "error") return "Erro";
+  // Estado desconhecido (nao e um dos quatro): "Indisponivel" seria uma
+  // AFIRMACAO sobre o motor, e nao se sabe. Diz-se que nao se sabe.
+  if (status === "unavailable") return "Indisponível";
+  return "Estado desconhecido";
 }
 
 /**
@@ -71,9 +81,9 @@ export function engineStatusText(status: EngineSubsystemStatus): string {
  * inativo nao diz nada disso. E a mesma mentira do ClamAV instalado mas inerte.
  */
 export const WFP_MODULE_NOT_STARTED_DETAIL =
-  "Modulo WFP do CyberSafe inativo. Arranca quando ligas a Protecao. Isto nao diz nada sobre o Windows Firewall.";
+  "O filtro de rede próprio do CyberSafe não está ativo. Isto não significa que o Firewall do Windows esteja desligado.";
 export const WINDOWS_FIREWALL_UNKNOWN_DETAIL =
-  "O CyberSafe ainda nao consulta o estado do Windows Firewall. Sem leitura real, nao se afirma que esteja ligado nem desligado.";
+  "O CyberSafe ainda não consultou o estado do Firewall do Windows nesta vista.";
 
 export interface WindowsFirewallDisplay {
   status: "unknown" | "active" | "inactive";
@@ -88,7 +98,7 @@ export interface WindowsFirewallDisplay {
  */
 export function windowsFirewallDisplay(state?: WindowsFirewallState | null): WindowsFirewallDisplay {
   if (!state || !state.available) {
-    return { status: "unknown", text: "NAO VERIFICADO", detail: WINDOWS_FIREWALL_UNKNOWN_DETAIL };
+    return { status: "unknown", text: "Não verificado", detail: WINDOWS_FIREWALL_UNKNOWN_DETAIL };
   }
   if (state.enabled) {
     return {
@@ -110,7 +120,7 @@ export function windowsFirewallDisplay(state?: WindowsFirewallState | null): Win
  * tecnico acionavel e NAO o transforma numa afirmacao sobre o Windows.
  */
 export function wfpModuleDisplay(sub?: EngineSubsystemHealth): { text: string; detail: string } {
-  if (!sub) return { text: engineStatusText("unavailable"), detail: "Sem telemetria do modulo WFP." };
+  if (!sub) return { text: engineStatusText("unavailable"), detail: "Sem telemetria do módulo WFP." };
   const notStarted = /not started|not active/i.test(sub.detail ?? "");
   return {
     text: engineStatusText(sub.status),
@@ -136,7 +146,7 @@ export interface ProtectionLevelMeta {
   summary: string;
   /** Mensagem técnica curta para o modo técnico. */
   techSummary: string;
-  /** Classes tokens semânticos (sucesso/aviso/perigo) do projeto. */
+  /** Classes dos tokens semânticos reais do projeto (cyber-green/yellow/red). */
   dotClass: string;
   chipClass: string;
   textClass: string;
@@ -151,10 +161,10 @@ export const PROTECTION_LEVEL_META: Record<ProtectionLevel, ProtectionLevelMeta>
     answerDetail: "Tudo a funcionar e sob vigilância.",
     summary: "Todos os componentes de proteção estão ativos e o teu sistema está bem.",
     techSummary: "Todos os motores reportam ACTIVE.",
-    dotClass: "bg-success",
-    chipClass: "border bg-success/10 border-success/30",
-    textClass: "text-success",
-    bannerBadgeClass: "bg-success/10 border-success/30 text-success",
+    dotClass: "bg-cyber-green",
+    chipClass: "border bg-cyber-green/10 border-cyber-green/30",
+    textClass: "text-cyber-green",
+    bannerBadgeClass: "bg-cyber-green/10 border-cyber-green/30 text-cyber-green",
   },
   attention: {
     label: "Atenção Necessária",
@@ -163,10 +173,10 @@ export const PROTECTION_LEVEL_META: Record<ProtectionLevel, ProtectionLevelMeta>
     answerDetail: "Está protegido, mas há coisas que devias ver.",
     summary: "Proteção parcialmente disponível. Alguns componentes estão limitados, mas o sistema continua monitorizado.",
     techSummary: "Pelo menos um motor não está totalmente ativo.",
-    dotClass: "bg-warning",
-    chipClass: "border bg-warning/10 border-warning/30",
-    textClass: "text-warning",
-    bannerBadgeClass: "bg-warning/10 border-warning/30 text-warning",
+    dotClass: "bg-cyber-yellow",
+    chipClass: "border bg-cyber-yellow/10 border-cyber-yellow/30",
+    textClass: "text-cyber-yellow",
+    bannerBadgeClass: "bg-cyber-yellow/10 border-cyber-yellow/30 text-cyber-yellow",
   },
   degraded: {
     label: "Proteção precisa de atenção",
@@ -175,10 +185,10 @@ export const PROTECTION_LEVEL_META: Record<ProtectionLevel, ProtectionLevelMeta>
     answerDetail: "Está a vigiar, mas com menos olhos do que devia.",
     summary: "Alguns componentes de proteção não estão disponíveis neste computador. O sistema continua a monitorizar o que puder, mas a confiança nas deteções está reduzida.",
     techSummary: "Motores IMPORTANTES indisponíveis — a confiança nas deteções está reduzida.",
-    dotClass: "bg-danger",
-    chipClass: "border bg-danger/10 border-danger/30",
-    textClass: "text-danger",
-    bannerBadgeClass: "bg-danger/10 border-danger/30 text-danger",
+    dotClass: "bg-cyber-red",
+    chipClass: "border bg-cyber-red/10 border-cyber-red/30",
+    textClass: "text-cyber-red",
+    bannerBadgeClass: "bg-cyber-red/10 border-cyber-red/30 text-cyber-red",
   },
   critical: {
     label: "Estado Crítico",
@@ -187,10 +197,10 @@ export const PROTECTION_LEVEL_META: Record<ProtectionLevel, ProtectionLevelMeta>
     answerDetail: "Falta proteção essencial. Vê isto já.",
     summary: "Proteção essencial indisponível ou ameaça crítica detetada. Revisão imediata recomendada.",
     techSummary: "Motor essencial em ERROR ou serviço parado.",
-    dotClass: "bg-danger",
-    chipClass: "border bg-danger/10 border-danger/40",
-    textClass: "text-danger",
-    bannerBadgeClass: "bg-danger/10 border-danger/30 text-danger",
+    dotClass: "bg-cyber-red",
+    chipClass: "border bg-cyber-red/10 border-cyber-red/40",
+    textClass: "text-cyber-red",
+    bannerBadgeClass: "bg-cyber-red/10 border-cyber-red/30 text-cyber-red",
   },
 };
 

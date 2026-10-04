@@ -1,4 +1,5 @@
 import { useState } from "react";
+import type { LucideIcon } from "lucide-react";
 import {
   LayoutGrid,
   Settings,
@@ -60,7 +61,7 @@ function overallStatusMeta(overall: PcStateLevel): {
   colorClass: string;
   bgClass: string;
   borderClass: string;
-  StatusIcon: any;
+  StatusIcon: LucideIcon;
 } {
   switch (overall) {
     case "good":

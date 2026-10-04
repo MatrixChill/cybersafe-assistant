@@ -3,6 +3,20 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { ProtectionEngineService } from "../dist/engine.js";
+import * as os from "node:os";
+import * as path from "node:path";
+import { mkdtempSync } from "node:fs";
+
+/**
+ * P0 ISOLAMENTO DE RUNTIME: raiz de dados INJETADA num tmpdir deste ficheiro.
+ * Sem isto, qualquer `killProcess` num teste faria appendFile em
+ * `%USERPROFILE%\.cybersafe-service\logs\actions.log` — o home real do
+ * utilizador. `new ProtectionEngineService(TEST_BASE_DIR)` sem argumentos continua a
+ * significar "home real" (default de PRODUÇÃO); em teste passa-se o tmpdir.
+ * Ver test/p0-runtime-isolation.test.js.
+ */
+const TEST_BASE_DIR = mkdtempSync(path.join(os.tmpdir(), "cybersafe-p0-kill-budget-"));
+
 
 /**
  * P4 — orçamento global do kill.
@@ -108,7 +122,7 @@ describe("P4 — orçamento global do kill", () => {
 
   it("1b. a espera entre tentativas tambem come orçamento (nada gasta fora do deadline)", async () => {
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const BUDGET = 700;
     try {
       // taskkill falha e o SO diz que o alvo esta vivo: a segunda tentativa e
@@ -145,7 +159,7 @@ describe("P4 — orçamento global do kill", () => {
     // PID tem de ESTAR VIVO: um PID inexistente faz o kill curto-circuitar em
     // `already-exited` antes de qualquer etapa (e o orçamento) ser consumido.
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const BUDGET = 900;
     const PER_STAGE = BUDGET / 3;
     try {
@@ -220,7 +234,7 @@ describe("P4 — orçamento global do kill", () => {
   });
 
   it("3. o reap ainda confirma a morte no caso típico (não regrediu por encolher)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     // PID inexistente → `isProcessAlive` falso, o reap confirma à primeira.
     engine.processes = [processEntry({ pid: 42001, name: "morto.exe", commandLine: "morto.exe" })];
     engine.queryCimProcesses = async () => [];
@@ -241,7 +255,7 @@ describe("P4 — orçamento global do kill", () => {
     // de desistir por orçamento. É o teste que prova que encolher o reap não
     // fabricou um `still-running` falso.
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     try {
       // O CIM "não vê" o PID duas vezes → ausência confirmada.
       let queries = 0;
@@ -269,7 +283,7 @@ describe("P4 — orçamento global do kill", () => {
 
   it("4. orçamento já esgotado antes do taskkill devolve timeout sem disparar o kill", async () => {
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     try {
       engine.queryCimProcesses = async (_filter, timeoutMs) => {
         // Com o orçamento a zero, o lookup recebe 0 e responde de imediato.

@@ -1,6 +1,7 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { PcStateEngine, DEFAULT_PC_STATE_CONFIG } from "../dist/index.js";
+import { buildFindingDado } from "@cybersafe/shared-types";
 
 const now = () => 1_700_000_000_000;
 
@@ -346,10 +347,18 @@ describe("PcState — Proteção degradada, summary simples", () => {
     assert.equal(state.security, "attention");
     assert.equal(state.security !== "critical", true);
     assert.match(f.summary, /3 componentes de proteção precisam de atenção/);
-    assert.match(f.evidence.engine ?? "", /clamav/);
-    assert.match(f.evidence.engine ?? "", /nativeEngine/);
-    assert.match(f.evidence.engine ?? "", /firewall/);
-    assert.ok((f.evidence.evidenceLines ?? []).some((l) => l.includes("degraded")));
+    // A evidence mostra o NOME do motor, nao a chave interna: escrever
+    // "firewall" ai dizia ao utilizador que a proteccao de rede do Windows
+    // estava desligada, quando o que falhou foi o filtro WFP do CyberSafe.
+    assert.match(f.evidence.engine ?? "", /ClamAV/);
+    assert.match(f.evidence.engine ?? "", /Motor nativo/);
+    assert.match(f.evidence.engine ?? "", /Filtro WFP do CyberSafe/);
+    // CONTRASTE: nao pode voltar a dizer so "firewall".
+    assert.doesNotMatch(f.evidence.engine ?? "", /^\s*firewall\s*[,;|]/im);
+    // WS-B: a evidenceLines sai em PT-PT ("Degradado"), nunca o token cru.
+    assert.ok((f.evidence.evidenceLines ?? []).some((l) => l.includes("Degradado")));
+    assert.doesNotMatch((f.evidence.evidenceLines ?? []).join("\n"), /\b(degraded|unavailable)\b/i, "token cru na copy do painel");
+    assert.doesNotMatch(f.evidence.engine ?? "", /\((degraded|unavailable)\)/i, "parenteses com estado interno");
   });
 
   test("um único motor degradado ⇒ mensagem singular", () => {
@@ -366,12 +375,64 @@ describe("PcState — Proteção degradada, summary simples", () => {
     assert.ok(f);
     assert.match(f.summary, /Um componente de proteção não está totalmente disponível/);
     assert.ok(!(f.summary ?? "").includes("clamav"), "nomes internos fora da mensagem principal");
-    assert.match(f.evidence.engine ?? "", /clamav/);
+    // A evidence mostra o NOME legivel do motor, nao a chave interna. O
+    // invariante acima continua: a MENSAGEM principal nao leva nomes internos.
+    assert.match(f.evidence.engine ?? "", /ClamAV/);
+  });
+});
+
+/**
+ * WS-B — telemetria REAL medida live via pipe protection.getState nesta
+ * maquina. O DADO do painel nao pode despejar tokens crus, paths nem
+ * mensagens do provider; a copy e PT-PT e diz a cobertura real.
+ */
+describe("WS-B — DADO com a telemetria real da maquina", () => {
+  const liveProtection = protection({
+    status: "degraded",
+    engine: {
+      anyEngineDegraded: true,
+      degradedReasons: [
+        "ClamAV: degraded — ClamAV instalado mas sem base de assinaturas — C:\\ClamAV\\db nao tem ficheiros .cvd/.cld; corre freshclam",
+        "Filtro WFP do CyberSafe: unavailable — WFP filter not started",
+      ],
+      yara: { status: "active", detail: "Loaded 1 rule(s) from file" },
+      hashDb: { status: "active", detail: "Loaded 4 signature(s) from C:\\ProgramData\\CyberSafe\\definitions\\default.json" },
+      nativeEngine: { status: "active", detail: "packages\\native-engine\\build\\Release\\scan-engine.exe" },
+      clamav: { status: "degraded", detail: "ClamAV instalado mas sem base de assinaturas — C:\\ClamAV\\db nao tem ficheiros .cvd/.cld; corre freshclam" },
+      firewall: { status: "unavailable", detail: "WFP filter not started" },
+    },
+  });
+
+  const engine = new PcStateEngine();
+  const state = engine.update(baseInput({ protection: liveProtection }));
+  const f = findById(state, "security:engine-unavailable");
+  const dado = buildFindingDado(f.evidence);
+
+  test("nenhum token cru nem parentesis de estado no DADO", () => {
+    assert.doesNotMatch(dado.join("\n"), /\((degraded|unavailable|active)\)/i, dado.join("\n"));
+    assert.doesNotMatch(dado.join("\n"), /\b(degraded|unavailable)\b/i, dado.join("\n"));
+  });
+
+  test("nenhum path ou mensagem de provider no DADO", () => {
+    for (const linha of dado) {
+      assert.doesNotMatch(linha, /[A-Za-z]:\\|packages\\|\.exe|\.json|\.cvd|freshclam|Loaded \d|WFP filter/i, linha);
+    }
+  });
+
+  test("estados em PT-PT, um por motor", () => {
+    assert.ok(dado.some((l) => /^ClamAV: Degradado/.test(l)), JSON.stringify(dado));
+    assert.ok(dado.some((l) => /^Filtro WFP do CyberSafe: Indisponível/.test(l)), JSON.stringify(dado));
+  });
+
+  test("ClamAV explica a base ausente; WFP nao confunde com o Windows", () => {
+    const texto = dado.join("\n");
+    assert.match(texto, /base de assinaturas antivírus ainda não está disponível/);
+    assert.match(texto, /Isto não significa que o Firewall do Windows esteja desligado\./);
   });
 });
 
 describe("PcState — Deduplicação de serviços (service-down)", () => {
-  test("firewall já coberto pela proteção ⇒ mpssvc deduplicado", () => {
+  test("filtro WFP indisponivel NÃO deduplica o mpssvc (são coisas diferentes)", () => {
     const engine = new PcStateEngine();
     const windowsDown = health({
       services: [
@@ -388,8 +449,20 @@ describe("PcState — Deduplicação de serviços (service-down)", () => {
         windowsHealth: windowsDown,
       }),
     );
-    assert.equal(findById(state, "system:win:service-down"), null, "não duplicar o mesmo firewall");
-    assert.ok(findById(state, "security:engine-unavailable"), "a causa real continua representada");
+    // WS-A: este teste antes afirmava o CONTRARIO — que o filtro WFP do
+    // CyberSafe "cobre" o servico mpssvc (o Firewall do Windows) e por isso o
+    // achado de servico parado devia desaparecer. Sao coisas diferentes: o
+    // `mpssvc` parado e uma falha do Windows Firewall, exista ou nao exista
+    // filtro do CyberSafe. Suprimir o achado deixava o utilizador sem aviso
+    // de rede desprotegida, e a supressao dependia do estado do CyberSafe —
+    // o mpssvc aparecia ou nao conforme um modulo alheio.
+    //
+    // O WFP indisponivel continua representado, pela sua propria via.
+    assert.ok(
+      findById(state, "system:win:service-down"),
+      "o mpssvc parado e um problema do Windows Firewall e nao se esconde por causa do WFP",
+    );
+    assert.ok(findById(state, "security:engine-unavailable"), "o filtro WFP tambem e reportado, pela sua via");
   });
 
   test("serviço distinto de facto ⇒ mantido com evidência", () => {

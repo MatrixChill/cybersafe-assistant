@@ -1,10 +1,35 @@
-import { describe, it } from "node:test";
+import { describe, it, after } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import { spawn } from "node:child_process";
 import { ProtectionEngineService } from "../dist/engine.js";
+import { mkdtempSync } from "node:fs";
+
+/**
+ * P0 ISOLAMENTO DE RUNTIME: raiz de dados INJETADA num tmpdir deste ficheiro.
+ * Sem isto, qualquer `killProcess` num teste faria appendFile em
+ * `%USERPROFILE%\.cybersafe-service\logs\actions.log` — o home real do
+ * utilizador. `new ProtectionEngineService()` sem argumentos continua a
+ * significar "home real" (default de PRODUÇÃO); em teste passa-se o tmpdir.
+ * Ver test/p0-runtime-isolation.test.js.
+ */
+const TEST_BASE_DIR = mkdtempSync(path.join(os.tmpdir(), "cybersafe-p0-process-kill-"));
+
+
+/**
+ * P0 ISOLAMENTO DE RUNTIME: diretórios base injetados nos testes, para que
+ * nenhum deles escreva em `%USERPROFILE%\.cybersafe-service`. Cada teste limpa
+ * SÓ o seu próprio tmpdir. Ver test/p0-runtime-isolation.test.js.
+ */
+const engineCleanupDirs = [];
+
+after(async () => {
+  for (const dir of engineCleanupDirs) {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+});
 
 /**
  * Regressão do kill de processos no serviço.
@@ -39,7 +64,7 @@ function processEntry(overrides) {
 
 describe("killProcess — resultado estruturado e auto-proteção", () => {
   it("PID inválido → failed", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     for (const pid of [0, -3, 1.5]) {
       const result = await engine.killProcess(pid);
       assert.equal(result.success, false);
@@ -49,7 +74,7 @@ describe("killProcess — resultado estruturado e auto-proteção", () => {
   });
 
   it("o próprio serviço nunca é terminado (proteção por PID)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const result = await engine.killProcess(process.pid);
     assert.equal(result.success, false);
     assert.equal(result.status, "protected");
@@ -57,14 +82,14 @@ describe("killProcess — resultado estruturado e auto-proteção", () => {
   });
 
   it("PIDs de sistema são protegidos por limiar", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const result = await engine.killProcess(4);
     assert.equal(result.status, "protected");
     assert.equal(result.protectedReason, "system-pid");
   });
 
   it("não bloqueia globalmente o runtime partilhado (mesmo executável, sem ligação)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const dead = await deadPid();
     engine.processes = [processEntry({
       pid: dead,
@@ -77,7 +102,7 @@ describe("killProcess — resultado estruturado e auto-proteção", () => {
   });
 
   it("um processo já terminado devolve already-exited (não é erro)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const pid = await deadPid();
     const result = await engine.killProcess(pid);
     assert.equal(result.success, true);
@@ -86,7 +111,7 @@ describe("killProcess — resultado estruturado e auto-proteção", () => {
   });
 
   it("não protege por nome quando há caminho fiável, e taskkill not-found → already-exited", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const dead = await deadPid();
     engine.processes = [processEntry({
       pid: dead,
@@ -101,7 +126,7 @@ describe("killProcess — resultado estruturado e auto-proteção", () => {
 
 describe("killProcess — reconciliação autoritativa publica só após o PID desaparecer", () => {
   it("termina o processo, remove-o da lista e publica killed + exited", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = spawn("powershell", ["-NoProfile", "-Command", "Start-Sleep -Seconds 120"], {
       stdio: "ignore",
       windowsHide: true,
@@ -142,7 +167,7 @@ describe("killProcess — reconciliação autoritativa publica só após o PID d
 
 describe("componentes internos — protegidos só quando ligados ao runtime/projeto", () => {
   it("node ligado ao projeto é protegido por commandLine", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     engine.processes = [processEntry({
       pid: 61000,
       name: "node.exe",
@@ -155,7 +180,7 @@ describe("componentes internos — protegidos só quando ligados ao runtime/proj
   });
 
   it("o helper de snapshot do serviço é protegido por commandLine", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     engine.processes = [processEntry({
       pid: 61002,
       name: "powershell.exe",
@@ -166,7 +191,7 @@ describe("componentes internos — protegidos só quando ligados ao runtime/proj
   });
 
   it("node/powershell sem ligação à app NÃO são bloqueados globalmente", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const dead = await deadPid();
     engine.processes = [processEntry({
       pid: dead,
@@ -183,7 +208,7 @@ describe("componentes internos — protegidos só quando ligados ao runtime/proj
 
 describe("processMonitor — process.exited natural não duplica o kill reconciliado", () => {
   it("publica só quando o PID ainda estava no cache", () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const events = [];
     engine.eventBus.on("process.exited", () => events.push("exited"));
 
@@ -200,7 +225,7 @@ describe("processMonitor — process.exited natural não duplica o kill reconcil
   });
 
   it("lista já filtrada por um kill reconciliado não gera evento duplicado", () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const events = [];
     engine.eventBus.on("process.exited", () => events.push("exited"));
 
@@ -215,7 +240,7 @@ describe("processMonitor — process.exited natural não duplica o kill reconcil
 
 describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
   it("com >200 processos reais, o PID mais alto continua acessível (o cap de 200 matava-o)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const osTruth = [];
     for (let i = 0; i < 331; i++) osTruth.push(processEntry({ pid: 4000 + i, name: `app-${i}.exe` }));
     let enumerations = 0;
@@ -234,7 +259,7 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
   });
 
   it("refresh repetido dentro da janela de frescura não re-enumerada (a UI refresca a cada evento)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const truth = [processEntry({ pid: 11, name: "a.exe" })];
     let calls = 0;
     engine.processMonitor.list = async () => {
@@ -247,8 +272,82 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
     assert.equal(calls, 1, "dentro do TTL serve o cache recém-reconciliado");
   });
 
+  /**
+   * Este teste existe por causa de uma decisão de produto: o poll do RENDERER
+   * desceu de 10 s para 2 s (o produtor passou a 2 s, e ler 5 vezes atrasado
+   * era o furo que deixava o utilizador ver ~5 s). Antes de mudar esse numero,
+   * é preciso provar que ele NAO cria enumeracoes do SO novas — caso contrario
+   * teriamos multiplicado o preco sem ganho.
+   *
+   * O que este teste mede (e o que a medição corrigiu): o numero de
+   * enumerações numa janela NÃO é determinado pelo poll do renderer, mas
+   * pelo TTL do cache (20 s). Por isso 60 s dão ~3-4 enumerações em QUALQUER
+   * cadência de pedido. A prova que interessa é comparativa: 2 s e 10 s dão o
+   * MESMO numero. Se o poll mandasse, 2 s daria 5x mais.
+   */
+  const countEnumerationsOver = async (pollMs, windowMs) => {
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
+    const truth = [processEntry({ pid: 11, name: "a.exe" })];
+    let enumerations = 0;
+    engine.processMonitor.list = async () => {
+      enumerations += 1;
+      return truth;
+    };
+
+    // Simula a janela com o relogio do TTL andado a mao. Nao ha espera real.
+    const inicio = Date.now();
+    const relogioReal = Date.now;
+    try {
+      for (let t = 0; t <= windowMs; t += pollMs) {
+        Date.now = () => inicio + t;
+        await engine.listProcesses();
+      }
+    } finally {
+      Date.now = relogioReal;
+    }
+    return enumerations;
+  };
+
+  it("baixar o poll do renderer de 10 s para 2 s NÃO aumenta o número de enumerações", async () => {
+    const janela = 60_000;
+    const antes = await countEnumerationsOver(10_000, janela);
+    const depois = await countEnumerationsOver(2_000, janela);
+
+    assert.equal(
+      depois,
+      antes,
+      `poll a 2 s deu ${depois} enumerações e a 10 s deu ${antes}: o poll do renderer não manda no SO`,
+    );
+    assert.ok(antes <= 4, `${antes} enumerações em 60 s é o TTL de 20 s a expire, não o poll`);
+  });
+
+  it("o número de enumerações em 60 s é o TTL a expirar, não a frequência do pedido", async () => {
+    // 60 s / TTL de 20 s = 3 expiracoes (mais a inicial). Se fosse o poll a
+    // mandar, o poll de 2 s dariam 30 enumerações.
+    const enums2s = await countEnumerationsOver(2_000, 60_000);
+    assert.ok(
+      enums2s <= 4,
+      `${enums2s} enumerações em 60 s: se o poll mandasse seriam 30. O TTL é que manda.`,
+    );
+  });
+
+  it("cada pedido marca o observador (o sinal que liga a cadência adaptativa do serviço)", async () => {
+    // Sem este sinal, o serviço volta à cadência lenta de 10 s passados 15 s
+    // de inatividade e a descoberta volta a ficar lenta. Cada `processes.list`
+    // é o pedido de "há alguém a olhar".
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
+    engine.processMonitor.list = async () => [processEntry({ pid: 11, name: "a.exe" })];
+    let marked = 0;
+    engine.processMonitor.noteObserver = () => {
+      marked += 1;
+    };
+
+    for (let i = 0; i < 5; i++) await engine.listProcesses();
+    assert.equal(marked, 5, "cada pedido de lista assinala observador, mesmo quando responde de cache");
+  });
+
   it("enumeração falhou → serve o cache de eventos, nunca lista vazia silenciosa", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     engine.processes = [processEntry({ pid: 777, name: "mantido.exe" })];
     engine.processMonitor.list = async () => {
       throw new Error("PowerShell caiu");
@@ -259,7 +358,7 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
   });
 
   it("process.started já não empurra processos para fora do cache (cap de 200 removido)", () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     engine.bindWatchers();
     engine.processes = [];
     for (let i = 0; i < 210; i++) {
@@ -273,7 +372,7 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
 
 describe("killProcess — diagnóstico do taskkill propagado (P0)", () => {
   it("acesso negado (exit 5) → status/exitCode/stderr próprios, com a mensagem real, sem mexer na lista", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     engine.processes = [processEntry({
       pid: 41111,
       name: "notepad.exe",
@@ -300,7 +399,7 @@ describe("killProcess — diagnóstico do taskkill propagado (P0)", () => {
   });
 
   it("falha genérica → failed com exit code e a mensagem real (nunca error undefined)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     // O alvo tem de estar VIVO para o Windows: o engine reconcilia pelo SO, e um
     // PID que nao existe da logo success/killed, sem falhar nada. Por isso e um
     // processo real (o stub de isProcessAlive nao existe) reportado pelo CIM.
@@ -342,8 +441,13 @@ describe("killProcess — diagnóstico do taskkill propagado (P0)", () => {
   });
 
   it("actions.log fica com PID, comando, exit code, stdout e stderr", async () => {
-    const engine = new ProtectionEngineService();
-    const logsDir = path.join(os.homedir(), ".cybersafe-service", "logs");
+    // ISOLAMENTO DE RUNTIME (P0): o baseDir e injetado num tmpdir deste teste.
+    // Antes escrevia-se a vontade no logs/ do home real do utilizador.
+    // Ver test/p0-runtime-isolation.test.js.
+    const baseDir = await fs.mkdtemp(path.join(os.tmpdir(), "cybersafe-kill-log-"));
+    engineCleanupDirs.push(baseDir);
+    const engine = new ProtectionEngineService(baseDir);
+    const logsDir = path.join(baseDir, "logs");
     await fs.mkdir(logsDir, { recursive: true });
     engine.processes = [processEntry({ pid: 41112, name: "calc.exe", path: "C:\\Windows\\System32\\calc.exe" })];
     engine.runTaskkill = async (pid) => ({
@@ -378,7 +482,7 @@ describe("killProcess — diagnóstico do taskkill propagado (P0)", () => {
   });
 
   it("alvo vivo fora do cache: query-alvo ao OS alimenta classifyKillTarget sem enumerar tudo (A1)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 60_000)"], {
       stdio: "ignore",
       windowsHide: true,
@@ -436,7 +540,7 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
   }
 
   it("A1: kill de PID fora do cache usa query-alvo e não dispara enumeração completa", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
       engine.processes = [];
@@ -475,7 +579,7 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
   });
 
   it("A2: após remoção, TTL invalidado — o próximo processes.list re-enumerada e nunca devolve o morto", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const dead = processEntry({ pid: 22001, name: "morto.exe", path: "C:\\Temp\\morto.exe" });
     const alive = processEntry({ pid: 22002, name: "vivo.exe", path: "C:\\Temp\\vivo.exe" });
     let calls = 0;
@@ -510,7 +614,7 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
   });
 
   it("A3: stub/alias morto com sucesso + instância viva da mesma identidade → alias-stub com o PID real", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const stub = await spawnSleeper(); // faz de PID do launcher
     try {
       engine.processes = [processEntry({
@@ -552,7 +656,7 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
   });
 
   it("A3: not-found com OUTRA instância de identidade idêntica → alias-stub explícito", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     engine.processes = [processEntry({
       pid: 23001,
       name: "app.exe",
@@ -581,7 +685,7 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
   });
 
   it("A3: kill bem-sucedido de processo NORMAL com outra instância homónima NÃO é confundido com alias", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
       engine.processes = [processEntry({
@@ -650,7 +754,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
   });
 
   it("P1: enumeração EM VOO durante o kill não repõe o morto nem re-arman o TTL", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const dead = processEntry({ pid: 31001, name: "morto.exe", commandLine: "morto.exe" });
     const alive = processEntry({ pid: 31002, name: "vivo.exe", commandLine: "vivo.exe" });
     let enumerations = 0;
@@ -691,7 +795,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
   });
 
   it("P1: process.started de snapshot velho não re-insere; dono novo no PID passa", () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     engine.bindWatchers();
     const dead = processEntry({ pid: 32001, name: "morto.exe", commandLine: "morto.exe" });
     engine.processes = [dead, processEntry({ pid: 32002, name: "vivo.exe" })];
@@ -708,7 +812,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
   });
 
   it("P1: o tombstone barra o morto numa re-enumeração que o ainda traz", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const dead = processEntry({ pid: 33001, name: "morto.exe", commandLine: "morto.exe" });
     engine.processes = [dead];
     engine.processesEnumeratedAt = 0;
@@ -723,7 +827,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
   });
 
   it("P2: OpenProcess diz vivo, CIM já não tem o PID → morte confirmada (não é timeout)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
       engine.processes = [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
@@ -750,7 +854,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
   });
 
   it("P2: uma única ausência no CIM NÃO declara morte (falhanço transitório não mata)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
       engine.processes = [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
@@ -783,7 +887,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
   });
 
   it("P2: reconciliação não lança um PowerShell por iteração (a tempestade que fazia o kill lento)", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
       engine.processes = [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
@@ -811,7 +915,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
     }
   });
 
-  it("P3: PID reutilizado — a entrada do dono antigo sai, sem tombstone, e o TTL cai", async () => {    const engine = new ProtectionEngineService();
+  it("P3: PID reutilizado — a entrada do dono antigo sai, sem tombstone, e o TTL cai", async () => {    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
       engine.processes = [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
@@ -885,7 +989,7 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
   });
 
   it("PID que o Windows ja nao tem NAO recebe segunda tentativa", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const ghost = processEntry({ pid: 98765432, name: "fantasma.exe" });
     engine.processes = [ghost];
     engine.queryCimProcesses = async () => [];
@@ -905,7 +1009,7 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
   // Irmao do anterior: prova que um 255 nao prova nada. Mesmo com a mensagem de
   // "nao possivel terminar", quem manda e o SO, e um PID ausente e sucesso.
   it("exit 255 sem prova: o SO manda, um PID ausente da sucesso e nao repete", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const ghost = processEntry({ pid: 98765436, name: "fantasma.exe" });
     engine.processes = [ghost];
     engine.queryCimProcesses = async () => [];
@@ -922,7 +1026,7 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
   });
 
   it("acesso negado para logo: nao ha retry de recusa", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
       engine.processes = [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
@@ -949,7 +1053,7 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
   });
 
   it("vivo para o Windows = no maximo duas tentativas, e diz-no", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
       engine.processes = [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
@@ -978,7 +1082,7 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
   });
 
   it("REGRESSAO REAL: raiz morta com filho vivo — o /T nao chegava la", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const filho = await spawnSleeper();
     try {
       const rootPid = 98765433;
@@ -1019,7 +1123,7 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
   });
 
   it("a varredura nunca abate componente protegido do CyberSafe", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const rootPid = 98765434;
     engine.processes = [processEntry({ pid: rootPid, name: "launcher.exe" })];
     const systemChild = processEntry({ pid: 4, name: "System", ppid: rootPid });
@@ -1039,7 +1143,7 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
   });
 
   it("actions.log registou cada tentativa, com o comando real", async () => {
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const rootPid = 98765435;
     engine.processes = [processEntry({ pid: rootPid, name: "fantasma.exe" })];
     engine.queryCimProcesses = async () => [];

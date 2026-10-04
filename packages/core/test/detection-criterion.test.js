@@ -1,6 +1,11 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
 import { scoreThreat } from "../dist/scoring.js";
+import fs from "node:fs/promises";
+import os from "node:os";
+import path from "node:path";
+import { fileURLToPath } from "node:url";
+import { MalwareAnalyzer, SignatureDatabase, TrustEngine, YaraEngine } from "../dist/index.js";
 
 /**
  * O critério de ameaça. Regressões do P0 "scanner-detection-quality".
@@ -15,6 +20,53 @@ import { scoreThreat } from "../dist/scoring.js";
 
 const clean = { signatureMatch: false, yaraMatches: 0, rulesTriggered: [], trustDecision: "unknown" };
 
+test("P2: real YARA separates generic and explicitly strong definitions", async (t) => {
+  const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cs-quality-"));
+  t.after(() => fs.rm(dir, { recursive: true, force: true }));
+  const rules = path.join(dir, "quality.yar");
+  await fs.writeFile(rules, `
+rule generic_shell { strings: $a = "powershell.exe" condition: $a }
+rule strong_probe { meta: cybersafe_evidence = "strong" strings: $a = "CS-STRONG-PROBE-42" condition: $a }
+`);
+  const yara = new YaraEngine(rules);
+  await yara.load(rules);
+  const analyzer = new MalwareAnalyzer({ yara, signatures: new SignatureDatabase(), trust: new TrustEngine() });
+  const target = path.join(dir, "runtime.exe");
+  await fs.writeFile(target, "MZ benign runtime powershell.exe");
+  const generic = await analyzer.analyze(target);
+  assert.notEqual(generic.severity, "critical");
+  assert.notEqual(generic.recommendedAction, "quarantined");
+  assert.equal(generic.rulesTriggered.includes("unsigned_binary"), false, "missing verification is not unsigned");
+  assert.ok(generic.confidence < 0.9, "a generic string is not 92% evidence of malware");
+  const claimed = await analyzer.analyze(target, "Microsoft Corporation");
+  assert.equal(claimed.publisherTrusted, false, "a signer name alone is not verified");
+  const verified = await analyzer.analyze(target, "Microsoft Corporation", "verified");
+  assert.equal(verified.publisherTrusted, true);
+  assert.ok(verified.riskScore < generic.riskScore);
+  await fs.writeFile(target, "MZ CS-STRONG-PROBE-42");
+  const strong = await analyzer.analyze(target);
+  assert.equal(strong.severity, "critical");
+  assert.equal(strong.recommendedAction, "quarantined");
+});
+
+test("P2: EICAR hash and real YARA buffer match remain strong without writing EICAR to disk", async () => {
+  const signatures = new SignatureDatabase();
+  await signatures.load(fileURLToPath(new URL("./missing-quality-hashes.json", import.meta.url)));
+  const sha256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
+  assert.ok(signatures.match(sha256));
+  const yara = new YaraEngine();
+  await yara.load(fileURLToPath(new URL("../../../definitions/yara/default.yar", import.meta.url)));
+  const marker = Buffer.from(['X5O!P%@AP[4', '\\PZX54(P^)7CC)7}', '$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'].join(''));
+  const matches = yara.match(marker);
+  assert.equal(matches.length, 1);
+  assert.equal(matches[0].evidence, "strong");
+  for (const input of [{ ...clean, signatureMatch: true }, { ...clean, yaraMatches: matches.length, strongYaraMatches: 1 }]) {
+    const r = scoreThreat(input);
+    assert.equal(r.severity, "critical");
+    assert.equal(r.recommendedAction, "quarantined");
+  }
+});
+
 describe("critério de ameaça — evidência forte", () => {
   test("hash known bad continua a ser ameaça", () => {
     // Prova de malware pela base de assinaturas: isto é deteção, não palpite.
@@ -24,9 +76,8 @@ describe("critério de ameaça — evidência forte", () => {
     assert.equal(r.recommendedAction, "quarantined");
   });
 
-  test("YARA-X a bater é ameaça, com ou sem heurísticas", () => {
-    // Um match de YARA-X identifica o binário: sobe sozinho, sem reforco.
-    const r = scoreThreat({ ...clean, yaraMatches: 1, rulesTriggered: ["yara_match"] });
+  test("YARA explicitamente forte continua a ser ameaça", () => {
+    const r = scoreThreat({ ...clean, yaraMatches: 1, strongYaraMatches: 1, rulesTriggered: ["yara_match"] });
     assert.equal(r.verdict, "malicious");
     assert.ok(r.severity !== "low");
   });
@@ -60,6 +111,45 @@ describe("critério de ameaça — evidência forte", () => {
     });
     assert.equal(r.verdict, "safe");
     assert.equal(r.severity, "low");
+  });
+});
+
+describe("P2: evidence strength and signature neutrality", () => {
+  test("generic YARA is counted once and cannot quarantine", () => {
+    const r = scoreThreat({ ...clean, yaraMatches: 1, rulesTriggered: ["yara_match", "dangerous_file_extension", "unsigned_binary"] });
+    assert.notEqual(r.severity, "critical");
+    assert.notEqual(r.recommendedAction, "quarantined");
+    assert.equal(r.factors.filter(f => f.category === "yara").length, 1);
+    assert.equal(r.factors.filter(f => f.id === "yara_match").length, 0);
+  });
+  test("known hash is counted once and stays critical even in a trusted path", () => {
+    const r = scoreThreat({ ...clean, signatureMatch: true, trustDecision: "trusted", rulesTriggered: ["known_bad_hash", "trusted_publisher", "trusted_system_path"] });
+    assert.equal(r.factors.filter(f => f.id === "known_bad_hash").length, 0);
+    assert.equal(r.severity, "critical");
+    assert.equal(r.recommendedAction, "quarantined");
+  });
+  test("unsigned and unavailable signatures contribute zero", () => {
+    for (const signatureStatus of ["unsigned", "unavailable", "UnknownError"]) {
+      const r = scoreThreat({ ...clean, signatureStatus, rulesTriggered: ["unsigned_binary"] });
+      assert.equal(r.riskScore, 0, signatureStatus);
+    }
+  });
+  test("verified signatures reduce heuristics; proven tampering can increase risk", () => {
+    const input = { ...clean, rulesTriggered: ["dangerous_file_extension", "high_entropy"] };
+    assert.ok(scoreThreat({ ...input, signatureStatus: "verified" }).riskScore < scoreThreat(input).riskScore);
+    assert.ok(scoreThreat({ ...input, signatureStatus: "tampered" }).riskScore > scoreThreat(input).riskScore);
+  });
+  test("even many generic matches and weak signals never recommend quarantine", () => {
+    const r = scoreThreat({ ...clean, yaraMatches: 50, rulesTriggered: ["yara_match", "high_entropy", "dangerous_file_extension", "double_extension", "suspicious_location", "archive_with_exe"] });
+    assert.ok(r.riskScore <= 90);
+    assert.notEqual(r.severity, "critical");
+    assert.notEqual(r.recommendedAction, "quarantined");
+  });
+  test("strong YARA survives positive trust without duplicate points", () => {
+    const r = scoreThreat({ ...clean, yaraMatches: 1, strongYaraMatches: 1, trustDecision: "trusted", rulesTriggered: ["yara_match", "trusted_publisher"] });
+    assert.equal(r.severity, "critical");
+    assert.equal(r.recommendedAction, "quarantined");
+    assert.equal(r.factors.filter(f => f.category === "yara").length, 1);
   });
 });
 

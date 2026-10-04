@@ -21,6 +21,7 @@ import TaskManagerPage, {
   type KillState,
 } from "../src/pages/TaskManagerPage";
 import type { KillOutcome } from "../src/lib/processActions";
+import { PROCESSES_POLL_MS } from "../src/lib/processActions";
 
 // `tsx` compila o JSX do fonte com o runtime clássico (React.createElement), e
 // é o global abaixo que o satisfaz fora do Vite. Sem isto nenhum teste desta
@@ -594,7 +595,11 @@ describe("TaskManagerPage — lista viva, copy honesta e foco", () => {
   test("a copy diz actualizacao automatica e nunca tempo real", () => {
     const html = renderToStaticMarkup(createElement(TaskManagerPage, { processes: rows }));
     assert.match(html, /Actualiza..o autom.tica/, "a cadencia e' um temporizador: diz-se isso");
-    assert.match(html, /10 s/, "e diz-se a que cadencia, que e' a do servico");
+    // A cadencia saida vem da constante (PROCESSES_POLL_MS / 1000), que
+    // desceu de 10 s para 2 s em 2026-09-30 para alinhar o consumidor com o
+    // produtor. O teste compara com a constante, e nao com um numero solto,
+    // para continuar a ser verdade se o numero mudar outra vez.
+    assert.match(html, new RegExp(`${PROCESSES_POLL_MS / 1000} s`), "e diz-se a que cadencia, que e' a do servico");
     assert.doesNotMatch(html, /tempo real/i, "prometer tempo real com um timer seria mentira");
   });
 

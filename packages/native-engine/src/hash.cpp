@@ -1,6 +1,7 @@
 #include "hash.h"
 
 #include <array>
+#include <cassert>
 #include <cstring>
 #include <fstream>
 #include <iomanip>
@@ -110,9 +111,15 @@ std::string sha256_hex_file(const std::string& path, std::uint64_t* file_size) {
     }
   }
 
+  // Padding final. A base do padding e `fed` = bytes efetivamente passados por
+  // sha256_transform, e nao `total`. `total` ja inclui o leftover, e usar
+  // (total + last.size()) contava o leftover duas vezes, produciendo um bloco
+  // final de tamanho errado — por vezes zero blocos transformados, e o hash
+  // passava a ser o do estado inicial ou de um prefixo do ficheiro.
+  const std::uint64_t fed = total - static_cast<std::uint64_t>(leftover.size());
   std::vector<std::uint8_t> last = std::move(leftover);
   last.push_back(0x80);
-  while ((total + last.size()) % 64 != 56) {
+  while ((fed + last.size()) % 64 != 56) {
     last.push_back(0);
   }
   const std::uint64_t bitlen = total * 8u;
@@ -120,6 +127,11 @@ std::string sha256_hex_file(const std::string& path, std::uint64_t* file_size) {
     last.push_back(static_cast<std::uint8_t>((bitlen >> (i * 8)) & 0xffu));
   }
 
+  // Invariantes do padding: antes dos 8 bytes de comprimento, (fed + last.size())
+  // era multiplo de 64 mais 56; depois deles, last.size() e multiplo exacto de 64,
+  // pelo que o loop abaixo processa todos os blocos e nao deixa restos.
+  assert((fed + last.size() - 8) % 64 == 56);
+  assert(last.size() % 64 == 0);
   for (std::size_t i = 0; i + 64 <= last.size(); i += 64) {
     sha256_transform(state, last.data() + i);
   }

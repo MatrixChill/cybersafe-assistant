@@ -10,7 +10,7 @@
     "build": "tsc -p tsconfig.json",
     "start": "node dist/index.js",
     "lint": "tsc -p tsconfig.json --noEmit",
-    "test": "npm run build && node --test test/scan-manager.test.js test/scan-pipeline.test.js test/scan-error.test.js test/shutdown.test.js test/process-kill.test.js test/dev-canary.test.js test/log-hygiene.test.js test/scan-runtime-quality.test.js test/kill-budget.test.js test/process-truth-ttl.test.js",
+    "test": "npm run build && node --test --test-concurrency=1 test/scan-manager.test.js test/scan-pipeline.test.js test/scan-error.test.js test/shutdown.test.js test/process-kill.test.js test/kill-blocked-log.test.js test/auto-kill-guard.test.js test/dev-canary.test.js test/log-hygiene.test.js test/scan-runtime-quality.test.js test/kill-budget.test.js test/process-truth-ttl.test.js test/threat-history-storage.test.js test/detection-quality.test.js test/clamav-config.test.js test/clamav-cascade.test.js test/clamav-reprobe-after-update.test.js test/clamav-batch-progress-honest.test.js test/service-copy.test.js test/p0-runtime-isolation.test.js test/engine-health-coverage.test.js test/own-child-pid-identity.test.js test/own-child-contract-cases.test.js test/sigint-dispose.test.js test/pid-reuse-real-identity.test.js test/p1-1-clam-db-gate.test.js test/p1-1-shutdown-writer.test.js test/p1-1-error-live-child.test.js test/p1-1-f17-refusal-cause.test.js test/p1-3-prefetch-isolation.test.js test/p1-4-cancel-before-controller.test.js",
     "typecheck": "node -e \"console.log('service typecheck delegated to shared/core/native workspaces')\"",
     "service:install": "tsx src/windows-service.ts install",
     "service:uninstall": "tsx src/windows-service.ts uninstall",

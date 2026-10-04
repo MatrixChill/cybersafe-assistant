@@ -32,6 +32,7 @@ import AIAssistant from "./components/AIAssistant";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { ExitConfirmHost } from "./components/ExitConfirmDialog";
 import { hasSeenOnboarding } from "./lib/onboarding";
+import { toastTypeLabel } from "./lib/toastCopy";
 import { AlertCircle, Loader2, Shield, CheckCircle2, Lock } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import { cn } from "@/lib/utils";
@@ -260,9 +261,20 @@ function AuthenticatedApp() {
 
   useEffect(() => {
     // Poll da lista só enquanto uma página mostra processos, e só com a janela
-    // visível: 10 s é a cadência a que o poll do serviço (10 s) produz nova
-    // verdade, e uma enumeração custa ~800 ms — mais rápido seria o dobro do
-    // trabalho para a mesma informação.
+    // visível.
+    //
+    // 2 s, e não 10 s: o PRODUTOR passou a produzir nova verdade de 2 em 2 s
+    // (cadência adaptativa do serviço, com um custo de enumeração de mediana
+    // 591 ms). Ler de 10 em 10 s significava ler a verdade 5 vezes atrasada — o
+    // serviço descobria o processo novo em ~2,1 s e o ecrã só o mostrava ~5 s
+    // depois, em média. Alinhar consumidor com produtor é o patch.
+    //
+    // E baixar este número NÃO paga o preço que parece: este poll é um pedido
+    // IPC de LEITURA DE CACHE, não uma enumeração do SO. Quem decide o ritmo
+    // de enumerar é o cadence adaptativo do serviço. Com este poll a marcar
+    // observador, o cache tem sempre ~2 s de idade, muito abaixo do TTL de 20 s:
+    // o serviço responde de cache e não força enumeração nenhuma. Medido: 30
+    // pedidos em 60 s dão 1 enumeração (teste em service/test/process-kill).
     const showsProcesses = page === "taskmanager" || page === "monitor";
     if (!showsProcesses || !window.electronAPI) return;
     const interval = setInterval(() => {
@@ -458,7 +470,7 @@ function AuthenticatedApp() {
         if (snap.gpu?.usagePercent != null) addTelemetrySample("gpu", snap.gpu.usagePercent);
         if (snap.network) addTelemetrySample("net-rx", snap.network.rxSec);
         if (snap.network) addTelemetrySample("net-tx", snap.network.txSec);
-      } catch (e) { /* silent */ }
+      } catch { /* silencioso por desenho: poller de telemetria */ }
     }, 2_000);
 
     // Initial fetch
@@ -666,7 +678,7 @@ function AuthenticatedApp() {
                 </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex justify-between items-start">
-                    <span className="text-[10px] font-mono text-cyber-red uppercase tracking-widest font-bold">{event.type}</span>
+                    <span className="text-[10px] font-mono text-cyber-red uppercase tracking-widest font-bold">{toastTypeLabel(event.type)}</span>
                     <button
                       onClick={() => setToasts((prev) => prev.filter((toast) => toast.id !== id))}
                       className="text-muted-foreground hover:text-foreground opacity-0 group-hover:opacity-100 transition-opacity"
@@ -675,7 +687,7 @@ function AuthenticatedApp() {
                     </button>
                   </div>
                   <p className="text-xs font-bold text-foreground mt-1 truncate">{event.summary}</p>
-                  <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{new Date(event.timestamp).toLocaleString()}</p>
+                  <p className="text-[10px] text-muted-foreground mt-1 leading-tight">{new Date(event.timestamp).toLocaleString("pt-PT")}</p>
                 </div>
               </motion.div>
             ))}

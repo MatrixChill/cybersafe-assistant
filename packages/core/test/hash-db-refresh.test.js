@@ -13,7 +13,9 @@ const EICAR_SHA256 = crypto
   .update(Buffer.from(EICAR_CONTENT, "binary"))
   .digest("hex");
 
-// O hash fabricado que estava no default.json antigo: MD5 do EICAR + 32 zeros.
+// O hash fabricado que a base enviou no default.json antigo: os 32 hex
+// iniciais coincidem com o MD5 do texto EICAR, mas o valor completo não
+// reproduz nenhuma das derivações verificadas (ver RETIRED_HASH_SIGNATURES).
 const FABRICATED_EICAR =
   "44d88612fea8a8f36de82e1278abb02f2b8d6f66b0f0455d8f4f0d5dce9d734a";
 

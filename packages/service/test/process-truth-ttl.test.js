@@ -17,6 +17,20 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { ProtectionEngineService } from "../dist/engine.js";
 import { PROCESS_POLL_INTERVAL_MS } from "@cybersafe/native-windows";
+import { mkdtempSync } from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+
+/**
+ * P0 ISOLAMENTO DE RUNTIME: raiz de dados INJETADA num tmpdir deste ficheiro.
+ * Sem isto, qualquer `killProcess` num teste faria appendFile em
+ * `%USERPROFILE%\.cybersafe-service\logs\actions.log` — o home real do
+ * utilizador. `new ProtectionEngineService(TEST_BASE_DIR)` sem argumentos continua a
+ * significar "home real" (default de PRODUÇÃO); em teste passa-se o tmpdir.
+ * Ver test/p0-runtime-isolation.test.js.
+ */
+const TEST_BASE_DIR = mkdtempSync(path.join(os.tmpdir(), "cybersafe-p0-process-truth-ttl-"));
+
 
 function entry(overrides) {
   return {
@@ -35,7 +49,7 @@ function entry(overrides) {
 
 /** Engine com a fonte de verdade do SO controlada (nenhum PowerShell em teste). */
 function engineWithTruth(truth) {
-  const engine = new ProtectionEngineService();
+  const engine = new ProtectionEngineService(TEST_BASE_DIR);
   const calls = { enumerations: 0 };
   engine.processMonitor.list = async () => {
     calls.enumerations += 1;
@@ -93,7 +107,7 @@ describe("processes.list — cache hit e cache miss", () => {
     // O caminho real do utilizador: o monitor descobre, publica o evento, a UI
     // pede a lista. Esse pedido tem de ser um HIT: e o proprio evento que
     // acabou de meter o processo no cache.
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     let enumerations = 0;
     engine.processMonitor.list = async () => {
       enumerations += 1;
@@ -116,7 +130,7 @@ describe("processes.list — cache hit e cache miss", () => {
     // A corrida que a invalidez de frescura tentava tapar, sem a tapar bem: um
     // `process.started` que chega a meio da enumeracao e uma foto do SO que
     // ainda nao o viu. Overwrite simples apagava um processo VIVO da lista.
-    const engine = new ProtectionEngineService();
+    const engine = new ProtectionEngineService(TEST_BASE_DIR);
     let calls = 0;
     engine.processMonitor.list = async () => {
       calls += 1;

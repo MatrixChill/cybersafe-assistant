@@ -85,7 +85,7 @@ async function createHarness({ delayMs = 0, threatFiles = [] } = {}) {
         timestamp: new Date().toISOString(),
         sequence: Date.now(),
         severity: "low",
-        summary: `Scan ${scanState.status}: ${scanState.filesScanned} files, ${scanState.threatsFound} threats`,
+        summary: `Análise ${scanState.status}: ${scanState.filesScanned} ficheiros, ${scanState.threatsFound} ameaças`,
         data: scanState,
       },
     });

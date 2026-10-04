@@ -7,7 +7,11 @@ import type { FileScanResponse, ThreatEvent } from "@cybersafe/shared-types";
 
 /** Interface to avoid circular dependency with engine.ts */
 export interface ScanEngine {
-  scanArtifact(filePath: string, source: ThreatEvent["source"]): Promise<FileScanResponse | null>;
+  scanArtifact(
+    filePath: string,
+    source: ThreatEvent["source"],
+    options?: { skipVirusTotal?: boolean; origin?: string; scanId?: string },
+  ): Promise<FileScanResponse | null>;
   emitScanProgress(scanState: ScanState): void;
   /**
    * Gatekeeper de exclusões do motor. Quando implementado, o ScanManager deixa
@@ -15,6 +19,21 @@ export interface ScanEngine {
    * (sem os apresentar como "analisados").
    */
   isExcluded?(filePath: string): boolean;
+  /**
+   * Aborta o trabalho de MOTORES em curso (não o scan em si). O cancel de um
+   * scan muda o estado, mas sem isto o `clamscan` que já tinha arrancado
+   * continuava a varrer sozinho com ~1 GB de RAM, sem dono e sem forma de o
+   * travar — o cancel sóefirava a quando o loop voltasse a ver o estado.
+   */
+  abortEngineWork?(scanId: string): void;
+  /**
+   * FASE 4: corre UM clamscan para N ficheiros e guarda o veredicto de cada
+   * um. Opcional — sem isto o motor corre um clamscan por ficheiro, que e
+   * correcto e lento (o carregamento da base e pago N vezes).
+   */
+  prefetchClamav?(filePaths: string[], scanId?: string): Promise<{ spawned: boolean; error?: string }>;
+  /** Liberta o prefetch. Tem de ser chamado no `finally` do scan. */
+  clearClamavPrefetch?(scanId?: string): void;
 }
 
 /**
@@ -70,18 +89,71 @@ export class ScanManager {
   }
 
   public cancelScan(id: string) {
-    if (this.activeScans.has(id)) {
-      this.isCancelled.add(id);
-      const state = this.activeScans.get(id)!;
-      if (state.status === "running" || state.status === "queued") {
-        this.updateScan(id, { status: "cancelled", endTime: new Date().toISOString() });
-      }
+    if (!this.activeScans.has(id)) return;
+    // P1-4 — IDEMPOTENTE, e a marca entra ANTES de qualquer trabalho.
+    //
+    // O `isCancelled.add` tem de ser a PRIMEIRA coisa: um segundo `cancelScan`
+    // que chegue enquanto o primeiro está a abortar o motor encontra o estado
+    // já `cancelled` e saía pelo ramo de baixo — mas a marca de cancelamento
+    // nunca era posta se esse ramo não existisse. Por isso o guard é o estado
+    // terminal, não a ausência do registo.
+    this.isCancelled.add(id);
+    const state = this.activeScans.get(id)!;
+    if (state.status === "cancelled") {
+      // Já está cancelado: publicar outra vez seria um segundo evento com o
+      // mesmo facto, e o renderer contaria dois cancelamentos.
+      return;
+    }
+    if (state.status === "running" || state.status === "queued") {
+      // O estado muda, E o motor em curso é abortado. Cancelar sem abortar
+      // deixava o clamscan a trabalhar sozinho com quase 1 GB de RAM.
+      this.engine.abortEngineWork?.(id);
+      this.updateScan(id, { status: "cancelled", endTime: new Date().toISOString() });
     }
   }
 
   private updateScan(id: string, updates: Partial<ExtendedScanState>) {
     const current = this.activeScans.get(id);
     if (current) {
+      // P1-4 — UM ESTADO TERMINAL É TERMINAL.
+      //
+      // MEDIDO: sem esta porta, `cancelScan` escrevia `cancelled`, e o
+      // `runScanLoop` escrevia `running` logo a seguir (a linha
+      // `updateScan(id, { status: "running" })` corre depois de o cancelamento
+      // ja ter chegado). O utilizador via um scan cancelado voltar a correr, e o
+      // motor trabalhava com a memoria que o cancelamento prometeu libertar.
+      //
+      // MEDIDO (P1-4-F): esta porta so bloqueava quando o `incoming` NAO era
+      // terminal — logo um `incoming` terminal PASSAVA. `cancelled -> completed`
+      // passava, e `cancelled -> failed` passava pelo `catch` exterior do
+      // `runScanLoop` quando um erro de motor chegava depois do cancelamento. O
+      // utilizador cancelava, via "cancelado", e o scan passava a "falhou" com
+      // a mensagem do clamscan. O comentario prometia "terminal nao e revogavel"
+      // e o codigo nao cumpria.
+      //
+      // A promessa cumprida e UMA guarda: se o estado ACTUAL e terminal, NADA o
+      // substitui. As tres guardas anteriores (incoming nao-terminal, incoming
+      // igual ao corrente, e incoming ausente) eram casos particularizados deste
+      // mesmo — ficam subsumidas, e o medido de cada uma fica registado aqui:
+      //
+      //  - `updateScan` sem `status` (o `phase: "gathering"`, os contadores, o
+      //    `filesInEngineBatch`) fazia spread do estado corrente — que ja era
+      //    `cancelled` — e voltava a EMITIR. O renderer via um segundo
+      //    `cancelled` e contava dois cancelamentos para o mesmo facto. Um update
+      //    sem status nao traz nada de novo, por isso nao publica.
+      //  - `cancelScan` e `runScanLoop` escreviam ambos `cancelled`, e o renderer
+      //    via DOIS eventos para o mesmo facto. Republicar obriga o renderer a
+      //    adivinhar; um snapshot idempotente e o que lhe permite ser
+      //    idempotente.
+      //
+      // O que a guarda nao muda, porque ja estava aprovado assim: o heartbeat so
+      // escreve em `running`/`queued` (a guarda de 1 s no `runScanLoop`), logo
+      // nunca chega aqui com um scan terminal; e a revisao monotonica so sobe
+      // quando ha uma emissao a fazer, porque um terminal bloqueado nao emite.
+      const TERMINAL: ReadonlyArray<ExtendedScanState["status"]> = ["cancelled", "completed", "failed"];
+      if (TERMINAL.includes(current.status)) {
+        return;
+      }
       // Revisão monotónica: cada emissão tem uma revisão estritamente maior, para
       // que o renderer possa rejeitar um snapshot/evento atrasado (que faria os
       // contadores recuarem).
@@ -156,6 +228,10 @@ export class ScanManager {
     // UI can distinguish "engine busy" from "engine unreachable" (watchdog).
     const heartbeat = setInterval(() => {
       const state = this.activeScans.get(id);
+      // P1-4 — o heartbeat só existe para dizer "ainda estou vivo". Reemitir o
+      // ESTADO EM CACHE num scan já terminal publicava um segundo `cancelled`
+      // (MEDIDO) — e um renderer que conta eventos via dois cancelamentos para o
+      // mesmo facto. Terminal é terminal: não há nada a anunciar.
       if (!state || (state.status !== "running" && state.status !== "queued")) return;
       if (state.phase === "gathering") {
         this.updateScan(id, { filesDiscovered: files.length });
@@ -260,6 +336,55 @@ export class ScanManager {
       const perfEnabled = process.env.CYBERSAFE_DEBUG_SCAN === "1";
       let engineMs = 0;
       let zipCount = 0;
+
+      // FASE 4 (P0 CLAMAV_RESOURCE_EXHAUSTION): UM clamscan para o scan todo.
+      //
+      // O clamscan paga ~6,2 s e ~981 MB de carregamento de base POR PROCESSO.
+      // Com um spawn por ficheiro, um scan de 20 ficheiros custava ~2 minutos
+      // e ia somando hundreds de MB. Numa unica invocacao custam-se uma vez.
+      //
+      // O que continua igual: a analise por ficheiro, os threat records, a
+      // quarentena, o progresso e o cancelamento. O clamscan e o unico motor
+      // que se move, e o resultado continua a ser por ficheiro.
+      if (this.engine.prefetchClamav && !this.isCancelled.has(id)) {
+        // So os ficheiros que realmente vao aos motores: um excluido nao
+        // conta como analisado, e um ZIP e tratado pelo `scanZipWithSafety`.
+        const candidatos: string[] = [];
+        for (const file of files) {
+          if (this.isCancelled.has(id)) break;
+          if (this.engine.isExcluded?.(file)) continue;
+          const isZip =
+            path.extname(file).toLowerCase() === ".zip" || (await this.looksLikeZip(file));
+          if (isZip) continue;
+          candidatos.push(file);
+        }
+        if (candidatos.length > 0) {
+          const prefetchStarted = Date.now();
+          // O batch demora ~7,6 s (carrega ~1 GB de base) e devolve TUDO de uma
+          // vez. Sem publicar o count, a UI ficava 7 s a dizer "A verificar os
+          // ficheiros encontrados" com 0% e 0 f/s — descrevendo um trabalho que
+          // ainda não tinha começado. Isto diz a verdade: estão N ficheiros
+          // dentro do clamscan, e ainda não foi avaliado nenhum.
+          this.updateScan(id, { filesInEngineBatch: candidatos.length });
+          let outcome: { spawned: boolean; error?: string };
+          try {
+            outcome = await this.engine.prefetchClamav(candidatos, id);
+          } finally {
+            // SEMPRE, mesmo em cancelamento ou excepção: um contador que fica
+            // a dizer "20 ficheiros" quando nada está a correr é pior que
+            // não o ter.
+            this.updateScan(id, { filesInEngineBatch: 0 });
+          }
+          if (perfEnabled) {
+            console.log(
+              `[ScanPerf] prefetch files=${candidatos.length} spawned=${outcome.spawned} ` +
+                `elapsed=${Math.round((Date.now() - prefetchStarted) / 1000)}s` +
+                (outcome.error ? ` detail=${outcome.error}` : ""),
+            );
+          }
+        }
+      }
+
       for (let i = 0; i < files.length; i++) {
         if (this.isCancelled.has(id)) break;
 
@@ -282,7 +407,7 @@ export class ScanManager {
             }
 
             const fileStart = perfEnabled ? Date.now() : 0;
-            const result = await this.engine.scanArtifact(file, "system-scanner");
+            const result = await this.engine.scanArtifact(file, "system-scanner", { skipVirusTotal: true, scanId: id });
             if (perfEnabled) engineMs += Date.now() - fileStart;
             analyzed++;
             scanned++;
@@ -344,14 +469,35 @@ export class ScanManager {
       }
 
     } catch (error) {
-      console.error(`[ScanManager] Scan ${id} failed:`, error);
-      this.updateScan(id, {
-        status: "failed",
-        phase: "finalizing",
-        error: error instanceof Error ? error.message : String(error),
-        endTime: new Date().toISOString(),
-      });
+      // P1-4-F — O `catch` exterior também tem de respeitar o estado terminal.
+      //
+      // MEDIDO: o `await this.engine.prefetchClamav(...)` está dentro de um
+      // `try/finally` SEM `catch`, por isso um motor que falha a fechar DEPOIS do
+      // utilizador ter cancelado propaga para aqui. Este bloco escrevia
+      // `status: "failed"` por cima do `cancelled` — o utilizador cancelava, via
+      // "cancelado", e o scan passava a "falhou" com a mensagem do clamscan.
+      //
+      // O estado PUBLICO nao muda: um `cancelled` e `cancelled`. O erro continua
+      // registado no log, com o estado, para diagnostico. A guarda de `updateScan`
+      // e a rede de seguranca; aqui a decisao e explicita e legivel no sitio.
+      const statusAgora = this.activeScans.get(id)?.status;
+      const mensagem = error instanceof Error ? error.message : String(error);
+      if (statusAgora === "cancelled") {
+        console.error(`[ScanManager] Scan ${id} cancelado: erro tardio registado sem mudar o estado — ${mensagem}`);
+      } else {
+        console.error(`[ScanManager] Scan ${id} failed:`, error);
+        this.updateScan(id, {
+          status: "failed",
+          phase: "finalizing",
+          error: mensagem,
+          endTime: new Date().toISOString(),
+        });
+      }
     } finally {
+      // O prefetch tem de ser largado SEMPRE — scan concluído, cancelado ou
+      // com excepção. Retido, seria um Map com um veredicto por ficheiro de
+      // cada scan, a crescer sem fim num serviço de vida longa.
+      this.engine.clearClamavPrefetch?.(id);
       clearInterval(heartbeat);
       this.isCancelled.delete(id);
       resolveScan!();
@@ -489,7 +635,7 @@ export class ScanManager {
             unscannedThreats += nestedThreats;
           } else {
             // Regular file (or nested zip at max depth — treat as opaque file).
-            const res = await this.engine.scanArtifact(target, "system-scanner");
+            const res = await this.engine.scanArtifact(target, "system-scanner", { skipVirusTotal: true, scanId });
             // Contrato único de "ameaca": highRiskCount > 0 OU severity
             // high/critical/medium. O engine.ts publica threat.detected para
             // medium (finalSeverity !== "low") — o scan-manager tem de usar a

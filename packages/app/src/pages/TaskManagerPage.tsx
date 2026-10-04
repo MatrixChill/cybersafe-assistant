@@ -1,6 +1,9 @@
-import { useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { Activity, Shield, Trash2, Cpu, HardDrive, AlertTriangle, AlertCircle, Search, RefreshCw, X } from "lucide-react";
+import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
+import { Activity, Shield, Trash2, Cpu, HardDrive, AlertTriangle, AlertCircle, HelpCircle, Search, RefreshCw, X } from "lucide-react";
 import type { ProcessSnapshot, ProcessAnalysisResult, ProcessKillResult } from "@cybersafe/shared-types";
+// WS-4: a orientação do processo é pura e vive em shared-types, porque o app
+// só pode importar de lá.
+import { buildProcessGuidance, isProtectedProcess } from "@cybersafe/shared-types";
 // Import relativo de propósito: o alias `@/lib` só existe no Vite, e sem isto a
 // página não é carregável por `tsx --test` — foi por isso que nenhum teste deste
 // ficheiro conseguiu jamais renderizar o modal (o defeito de identificação vive
@@ -11,8 +14,9 @@ import {
   KILL_UNAVAILABLE_ERROR,
   pidsConfirmedGone,
   PROCESSES_POLL_MS,
-  runKillProcess,
-  shouldRefetchAfterKill,
+  processRecommendationMeta,
+  runKillRequest,
+  type KillRequestGate,
   withoutPids,
   type KillOutcome,
 } from "../lib/processActions";
@@ -46,6 +50,12 @@ export interface KillSequenceDeps {
   /** Fecha o overlay/isKilling. */
   onFinish: () => void;
   timeoutMs?: number;
+  /**
+   * Guarda síncrona do fluxo. Obrigatória em produção (é o que garante
+   * 1 confirmação = 1 request); opcional aqui só para os testes antigos
+   * puderem chamar sem a montar.
+   */
+  gate?: KillRequestGate;
 }
 
 /**
@@ -58,13 +68,26 @@ export interface KillSequenceDeps {
  *
  * Aqui o overlay fecha assim que o kill é terminal e o refetch autoritativo
  * continua em segundo plano: a UI resolve cedo, os dados corrigem-se a seguir.
+ *
+ * É agora uma delegação fina a `runKillRequest`, que é onde vive a guarda de
+ * duplo envio. Houve um momento em que esta função ficava fora do caminho real
+ * (a página chamava `runKillProcess` direto) e os testes continuavam a cobri-la
+ * — ou seja, testes a cobrir código morto. Delegar deixa UM caminho só, e os
+ * testes existentes continuam a cobrir o que a página faz.
  */
 export async function runKillSequence(deps: KillSequenceDeps): Promise<KillOutcome> {
-  const outcome = await runKillProcess({ pid: deps.pid, kill: deps.kill, timeoutMs: deps.timeoutMs });
-  deps.onOutcome(outcome);
-  deps.onFinish();
-  if (shouldRefetchAfterKill(outcome)) void deps.refresh();
-  return outcome;
+  return runKillRequest({
+    pid: deps.pid,
+    kill: deps.kill,
+    refresh: deps.refresh,
+    onOutcome: deps.onOutcome,
+    onFinish: deps.onFinish,
+    timeoutMs: deps.timeoutMs,
+    // Guarda por defeito para as chamadas sem `gate` (testes antigos). É
+    // descartada a cada chamada, logo não barra chamadas seguidas — é o
+    // `killRequestGate` partilhado da página que garante 1 = 1.
+    gate: deps.gate ?? { inFlight: false },
+  });
 }
 
 interface TaskManagerPageProps {
@@ -210,7 +233,22 @@ export default function TaskManagerPage({ processes, onRefreshProcesses }: TaskM
   const [sortBy, setSortBy] = useState<"cpu" | "mem" | "name">("cpu");
   const [analyzingPid, setAnalyzingPid] = useState<number | null>(null);
   const [analysisResult, setAnalysisResult] = useState<ProcessAnalysisResult | null>(null);
+  // Fonte única do badge (ver `processActions.ts`): "inconclusivo" nunca pode
+  // cair no ramo verde do "safe".
+  const recommendationMeta = processRecommendationMeta(analysisResult?.recommendation);
   const [isKilling, setIsKilling] = useState(false);
+  /**
+   * Guarda SÍNCRONA do pedido de kill, à parte do `isKilling` acima.
+   *
+   * `isKilling` vive no estado do React, e o estado só chega ao botão no
+   * re-render seguinte. Dois cliques no MESMO turno passam ambos pelo botão
+   * ainda habilitado e cada um despacha um pedido de kill. O `ref` não tem
+   * essa latência: escreve-se e lê-se no mesmo instante.
+   *
+   * `isKilling` continua a existir e o `disabled` continua no botão: são a
+   * segunda camada e o que o utilizador VÊ. Este ref é o que garante.
+   */
+  const killRequestGate = useRef<KillRequestGate>({ inFlight: false });
   /** Aviso da última tentativa de kill — mostrado fora do overlay (que fecha sempre). */
   const [killNotice, setKillNotice] = useState<{ message: string; ok: boolean } | null>(null);
   /** Aviso da última análise de processo — mesmo padrão que o killNotice. */
@@ -229,6 +267,8 @@ export default function TaskManagerPage({ processes, onRefreshProcesses }: TaskM
    * o comportamento honesto: só se apaga o que se sabe que já não existe.
    */
   const [removedPids, setRemovedPids] = useState<number[]>([]);
+  // WS-4: painel de detalhe por processo (expander na propria linha).
+  const [detailPid, setDetailPid] = useState<number | null>(null);
   /** Índice da linha removida: onde o foco tem de ir quando ela desaparece. */
   const pendingFocusIndex = useRef<number | null>(null);
   const rowsRef = useRef<HTMLDivElement | null>(null);
@@ -385,6 +425,7 @@ const handleAnalyze = async (pid: number) => {
       // autoritativo corre em segundo plano (ver runKillSequence).
       const outcome = await runKillSequence({
         pid: target.pid,
+        gate: killRequestGate.current,
         kill: api.killProcessTree,
         refresh: refreshProcesses,
         onOutcome: (o) => {
@@ -525,15 +566,30 @@ const handleAnalyze = async (pid: number) => {
           ) : (
             <div className="flex flex-col p-2 space-y-1">
               {filteredProcesses.map((process) => {
-                const isCritical = process.pid <= 100 || ["svchost.exe", "explorer.exe", "csrss.exe", "lsass.exe", "wininit.exe"].includes(process.name.toLowerCase());
-                
+                // R7: isto significa "protegido", nao "critico". O nome antigo
+                // dizia uma coisa que o codigo nao fazia.
+                const isProtected = isProtectedProcess(process);
+                // WS-4: a cor e o pulso vem da PRIORIDADE calculada, nunca do
+                // numero de CPU. CPU alta sozinha e trabalho normal.
+                const guidance = buildProcessGuidance(process);
+                const isDetailOpen = detailPid === process.pid;
+
                 return (
-                  <div key={process.pid} className="grid grid-cols-12 gap-4 items-center p-3 rounded-lg hover:bg-white/5 border border-transparent hover:border-white/5 transition-all group">
+                  <Fragment key={process.pid}>
+                  <div className="grid grid-cols-12 gap-4 items-center p-3 rounded-lg hover:bg-white/5 border border-transparent hover:border-white/5 transition-all group">
                     <div className="col-span-4 flex items-center gap-3 min-w-0">
-                      <div className={cn("w-2 h-2 rounded-full shrink-0", 
-                        process.cpu > 80 ? "bg-cyber-red animate-pulse" : 
-                        process.cpu > 50 ? "bg-cyber-yellow" : "bg-cyber-cyan"
-                      )} />
+                      <button
+                        onClick={() => setDetailPid(isDetailOpen ? null : process.pid)}
+                        aria-expanded={isDetailOpen}
+                        data-row-detail={process.pid}
+                        title="Ver detalhe do processo"
+                        className="shrink-0"
+                      >
+                        <span className={cn("w-2 h-2 rounded-full block",
+                          guidance.priority === "urgent" ? "bg-cyber-red animate-pulse" :
+                          guidance.priority === "worth-noting" ? "bg-cyber-yellow" : "bg-cyber-cyan"
+                        )} />
+                      </button>
                       <div className="truncate flex flex-col min-w-0">
                         <span className="font-mono text-sm text-foreground truncate">{process.name}</span>
                         {process.user && <span className="text-[10px] text-muted-foreground truncate">{process.user}</span>}
@@ -541,7 +597,11 @@ const handleAnalyze = async (pid: number) => {
                     </div>
                     <div className="col-span-2 text-center text-xs font-mono text-muted-foreground">{process.pid}</div>
                     <div className="col-span-2 text-center">
-                      <span className={cn("text-xs font-mono px-2 py-1 rounded bg-black/20", process.cpu > 80 ? "text-cyber-red" : "text-foreground")}>
+                      <span
+                        title={guidance.meaning}
+                        className={cn("text-xs font-mono px-2 py-1 rounded bg-black/20",
+                          guidance.priority === "urgent" ? "text-cyber-red" : "text-foreground")}
+                      >
                         {formatCpu(process.cpu)}%
                       </span>
                     </div>
@@ -559,16 +619,65 @@ const handleAnalyze = async (pid: number) => {
                       </button>
                       <button
                         onClick={() => selectKillTarget(process)}
-                        disabled={isCritical}
+                        disabled={isProtected}
                         data-row-action={process.pid}
                         className={cn("p-2 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
                           "bg-cyber-red/10 text-cyber-red hover:bg-cyber-red/20")}
-                        title={isCritical ? "Processo crítico protegido" : "Terminar Processo"}
+                        title={isProtected ? "Processo protegido: o Windows precisa dele" : "Terminar Processo"}
                       >
                         <Trash2 className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
+                  {isDetailOpen && (
+                    <div
+                      data-row-detail-panel={process.pid}
+                      className="mt-2 mb-3 ml-5 p-4 rounded-lg border border-white/5 bg-black/20 flex flex-col gap-3 text-xs"
+                    >
+                      <div className="flex flex-col gap-1">
+                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">O que é</span>
+                        <span className="text-foreground">{guidance.what}</span>
+                        <span className="text-muted-foreground">{guidance.role}</span>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Dado</span>
+                        {guidance.evidence.map((linha) => (
+                          <span key={linha} className="font-mono text-muted-foreground">{linha}</span>
+                        ))}
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Significado</span>
+                        <span className="text-muted-foreground">{guidance.meaning}</span>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Prioridade</span>
+                        <span className={cn(
+                          "font-mono font-bold uppercase",
+                          guidance.priority === "urgent" ? "text-cyber-red"
+                            : guidance.priority === "worth-noting" ? "text-cyber-yellow"
+                            : "text-cyber-green",
+                        )}>
+                          {guidance.priority === "urgent" ? "Atenção — sinal a rever"
+                            : guidance.priority === "worth-noting" ? "Vale a pena ver"
+                            : "Nada a assinalar"}
+                        </span>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Pode fechar</span>
+                        <span className="text-muted-foreground">{guidance.safeToCloseReason}</span>
+                      </div>
+
+                      <div className="flex flex-col gap-1">
+                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Orientação</span>
+                        <span className="text-foreground">{guidance.guidance}</span>
+                      </div>
+                    </div>
+                  )}
+                  </Fragment>
                 );
               })}
             </div>
@@ -596,17 +705,17 @@ const handleAnalyze = async (pid: number) => {
                   <h3 className="text-xl font-mono font-bold text-primary">{analysisResult.process.name}</h3>
                   <p className="text-xs font-mono text-muted-foreground mt-1">PID: {analysisResult.process.pid} | Caminho: {analysisResult.process.path}</p>
                 </div>
-                <div className={cn("px-4 py-2 rounded-lg border font-mono uppercase text-sm flex items-center gap-2", 
-                  analysisResult.recommendation === "dangerous" ? "bg-cyber-red/10 border-cyber-red/30 text-cyber-red" :
-                  analysisResult.recommendation === "suspicious" ? "bg-cyber-yellow/10 border-cyber-yellow/30 text-cyber-yellow" :
-                  "bg-cyber-green/10 border-cyber-green/30 text-cyber-green"
+                <div className={cn("px-4 py-2 rounded-lg border font-mono uppercase text-sm flex items-center gap-2",
+                  recommendationMeta.tone === "danger" ? "bg-cyber-red/10 border-cyber-red/30 text-cyber-red" :
+                  recommendationMeta.tone === "warn" ? "bg-cyber-yellow/10 border-cyber-yellow/30 text-cyber-yellow" :
+                  recommendationMeta.tone === "safe" ? "bg-cyber-green/10 border-cyber-green/30 text-cyber-green" :
+                  "bg-muted/10 border-border text-muted-foreground"
                 )}>
-                  {analysisResult.recommendation === "dangerous" && <AlertTriangle className="w-4 h-4" />}
-                  {analysisResult.recommendation === "suspicious" && <AlertCircle className="w-4 h-4" />}
-                  {analysisResult.recommendation === "safe" && <Shield className="w-4 h-4" />}
-                  {analysisResult.recommendation === "dangerous" ? "Perigoso"
-                    : analysisResult.recommendation === "suspicious" ? "Suspeito"
-                      : "Seguro"}
+                  {recommendationMeta.tone === "danger" && <AlertTriangle className="w-4 h-4" />}
+                  {recommendationMeta.tone === "warn" && <AlertCircle className="w-4 h-4" />}
+                  {recommendationMeta.tone === "safe" && <Shield className="w-4 h-4" />}
+                  {recommendationMeta.tone === "unknown" && <HelpCircle className="w-4 h-4" />}
+                  {recommendationMeta.label}
                 </div>
               </div>
 
@@ -766,8 +875,8 @@ export function KillConfirmModal({ target, isKilling, onCancel, onConfirm }: Kil
           </p>
         </div>
         {isKilling && (
-          <p className="text-xs font-mono text-muted-foreground">
-            A terminar… a lista atualiza-se sozinha a seguir; o aviso diz se o serviço não respondeu.
+          <p className="text-xs font-mono text-muted-foreground" data-testid="kill-progress">
+            A terminar processo… a lista atualiza-se sozinha a seguir; o aviso diz o que aconteceu.
           </p>
         )}
         <div className="flex gap-3 justify-center">

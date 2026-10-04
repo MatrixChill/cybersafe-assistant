@@ -25,8 +25,12 @@ import {
   scanScopeFor,
   scopeFromIntent,
   scopeTitle,
+  showNoThreatsReassurance,
   shouldAcceptScanState,
   shouldShowHydration,
+  resultFollowUpNote,
+  resultFilesWithoutDetections,
+  resultFilesWithoutDetectionsNote,
   uiStatusForState,
 } from "../src/lib/scanSession";
 
@@ -309,8 +313,8 @@ describe("truthfulness do resultado (nenhuma deteção ≠ garantia absoluta)", 
   const FORBIDDEN = [/100% seguro/i, /comprovadamente/i, /ficheiros seguros/i, /nada de suspeito/i];
 
   test("o cartão deixou de dizer \"Ficheiros Seguros\"", () => {
-    assert.equal(SCAN_RESULT_LABELS.noThreatsDetected, "Sem ameaças detetadas");
-    assert.equal(/seguro/i.test(SCAN_RESULT_LABELS.noThreatsDetected), false);
+    assert.equal(SCAN_RESULT_LABELS.filesWithoutDetections, "Ficheiros sem deteções");
+    assert.equal(/seguro/i.test(SCAN_RESULT_LABELS.filesWithoutDetections), false);
     assert.equal(SCAN_RESULT_LABELS.filesChecked, "Ficheiros Verificados");
     assert.equal(SCAN_RESULT_LABELS.threatsFound, "Ameaças Encontradas");
   });
@@ -734,5 +738,129 @@ describe("recuperação de análise — a decisão, não a tela", () => {
     assert.ok(decideScanRecovery(scanState({ ...fresh, status: "queued", phase: "preparing", filesTotal: undefined })), "queued com fase");
     // E um total real basta, sem fase.
     assert.ok(decideScanRecovery(scanState({ ...fresh, status: "running", phase: undefined, filesTotal: 7 })), "running com total");
+  });
+});
+
+/**
+ * Copy de quarentena coerente com o backend: engine.ts:1062 coloca os casos
+ * CRÍTICOS em quarentena automaticamente; medium/high ficam só na página
+ * Ameaças. O texto antigo mandava o utilizador "colocar os ficheiros em
+ * quarentena" mesmo quando os críticos já lá estavam — instrução duplicada.
+ */
+describe("resultFollowUpNote — quarentena honesta", () => {
+  test("sem ameaças: nenhuma nota de follow-up", () => {
+    assert.equal(resultFollowUpNote("completed", 0), null);
+  });
+
+  test("estados não concluídos: nenhuma nota", () => {
+    assert.equal(resultFollowUpNote("cancelled", 3), null);
+    assert.equal(resultFollowUpNote("failed", 3), null);
+    assert.equal(resultFollowUpNote("running", 3), null);
+  });
+
+  test("com ameaças: diz que críticos vão para quarentena sozinhos e aponta as restantes", () => {
+    const note = resultFollowUpNote("completed", 2);
+    assert.ok(note);
+    assert.match(note, /quarentena automaticamente/);
+    assert.match(note, /Ameaças/);
+    // Não pode mandar quarentear tudo (os críticos já estão quarentenados).
+    assert.equal(/coloca os ficheiros em quarentena\./.test(note), false, note);
+  });
+});
+
+/**
+ * O cartão de "sem deteções" do resultado. A regra do produto: nunca
+ * tranquilizar quando há ameaça, nunca dar conclusão sem análise concluída,
+ * e nunca mostrar 0 quando o valor não é conhecido. O número só pode vir de
+ * `filesAnalyzed` (os ficheiros que realmente chegaram aos motores) — usar
+ * `filesScanned` incluiria os excluídos, que nunca foram verificados.
+ */
+describe("resultFilesWithoutDetections — cartão honesto por estado", () => {
+  test("concluída: analyzed - ameaças, nunca negativo", () => {
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 100, threatsFound: 3 }), 97);
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 2, threatsFound: 5 }), 0);
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 80, threatsFound: 0 }), 80);
+  });
+
+  test("em curso, cancelada ou falhada: sem contagem (null, nunca 0)", () => {
+    assert.equal(resultFilesWithoutDetections({ status: "running", filesAnalyzed: 50, threatsFound: 1 }), null);
+    assert.equal(resultFilesWithoutDetections({ status: "cancelled", filesAnalyzed: 50, threatsFound: 1 }), null);
+    assert.equal(resultFilesWithoutDetections({ status: "failed", filesAnalyzed: 50, threatsFound: 1 }), null);
+  });
+
+  test("concluída sem filesAnalyzed reportado: dados indisponíveis, não se inventa", () => {
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: undefined, threatsFound: 0 }), null);
+  });
+
+  test("a nota explica a base quando existe e diz por que falta quando não existe", () => {
+    assert.match(
+      resultFilesWithoutDetectionsNote({ status: "completed", filesAnalyzed: 97, threatsFound: 0 }),
+      /97 ficheiros? enviados aos motores/,
+    );
+    assert.match(
+      resultFilesWithoutDetectionsNote({ status: "cancelled", filesAnalyzed: 40, threatsFound: 2 }),
+      /não foi concluída/,
+    );
+    assert.match(
+      resultFilesWithoutDetectionsNote({ status: "failed", filesAnalyzed: undefined, threatsFound: 0 }),
+      /falhou/,
+    );
+    assert.match(
+      resultFilesWithoutDetectionsNote({ status: "completed", filesAnalyzed: undefined, threatsFound: 1 }),
+      /não reportou/,
+    );
+  });
+
+  test("nenhuma tranquilização com ameaças presentes", () => {
+    // O cartão é factual ("Ficheiros sem deteções"); a frase de tranquilização
+    // só existe com 0 ameaças (gate já coberto por resultFollowUpNote/render).
+    assert.equal(/sem ameaças/i.test(SCAN_RESULT_LABELS.filesWithoutDetections), false);
+  });
+});
+
+/**
+ * A REGRA CRÍTICA, agora num único predicado usado pelo JSX
+ * (`showNoThreatsReassurance`): a tranquilização verde — avatar de sucesso,
+ * cartão e nota "não foram encontradas ameaças" — só com análise COMPLETA,
+ * dados reais do motor e zero ameaças. Os cinco cenários proibidos do
+ * sprint 02/10 estão cada um representado aqui.
+ */
+describe("showNoThreatsReassurance — gate dos 7 estados", () => {
+  const stateWith = (overrides: Record<string, unknown> = {}) =>
+    normalizeScanState(scanState({ status: "completed", phase: "finalizing", progress: 100, ...overrides }))!;
+
+  test("proibido: scan ainda não terminou (idle, preparar, gathering, scanning, finalizar)", () => {
+    const live = stateWith();
+    for (const ui of ["idle", "preparing", "gathering", "scanning", "finalizing"] as const) {
+      assert.equal(showNoThreatsReassurance(ui, live), false, `ui=${ui} não pode tranquilizar`);
+      assert.equal(showNoThreatsReassurance(ui, null), false, `ui=${ui} sem dados não pode tranquilizar`);
+    }
+  });
+
+  test("proibido: falhada", () => {
+    assert.equal(
+      showNoThreatsReassurance("failed", stateWith({ status: "failed", error: "motor caiu" })),
+      false,
+    );
+  });
+
+  test("proibido: cancelada", () => {
+    assert.equal(
+      showNoThreatsReassurance("cancelled", stateWith({ status: "cancelled" })),
+      false,
+    );
+  });
+
+  test("proibido: completada COM ameaças", () => {
+    assert.equal(showNoThreatsReassurance("completed", stateWith({ threatsFound: 1 })), false);
+    assert.equal(showNoThreatsReassurance("completed", stateWith({ threatsFound: 9 })), false);
+  });
+
+  test("proibido: sem dados suficientes (estado nulo)", () => {
+    assert.equal(showNoThreatsReassurance("completed", null), false);
+  });
+
+  test("permitido apenas: concluída, com estado e zero ameaças", () => {
+    assert.equal(showNoThreatsReassurance("completed", stateWith({ threatsFound: 0 })), true);
   });
 });

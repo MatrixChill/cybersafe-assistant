@@ -7,13 +7,17 @@ import path from "node:path";
 import {
   SignatureDatabase,
   BUILTIN_HASH_SIGNATURES,
-  DEV_CANARY_CONTENT,
   DEV_CANARY_SIGNATURE,
   MalwareAnalyzer,
   TrustEngine,
   YaraEngine,
-  ClamavBridge,
+  getDevCanaryContent,
 } from "../dist/index.js";
+import { DEV_CANARY_CONTENT, installDevCanary } from "./fixtures/dev-canary.js";
+
+// Regista o conteudo do canario no core. Em src de producao o registo fica
+// vazio, logo uma app empacotada nunca reconhece o proprio bundle como ameaca.
+installDevCanary();
 
 describe("SignatureDatabase — EICAR built-in", () => {
   it("regenerates the real EICAR SHA-256 and the DB matches it", () => {
@@ -46,7 +50,7 @@ describe("SignatureDatabase — EICAR built-in", () => {
     assert.equal(match?.severity, "critical");
   });
 
-  it("the old fabricated EICAR hash (MD5 + zeros) is NOT in the built-in DB", async () => {
+  it("the old fabricated EICAR hash (64 hex, derivacao desconhecida) is NOT in the built-in DB", async () => {
     const db = new SignatureDatabase();
     await db.load("/nonexistent/path/default.json");
     const fabricated =
@@ -63,8 +67,9 @@ describe("SignatureDatabase — EICAR built-in", () => {
 });
 
 // ── Canário dev-only para teste E2E do pipeline de deteção ──────────────
-// Conteúdo 100% benigno ("CYBERSAFE-E2E-TEST-SIGNATURE-v1"): detetado apenas
-// fora de produção; em NODE_ENV=production nunca é reconhecido como ameaça.
+// Conteúdo 100% benigno e 31 bytes, definido só na fixture de teste
+// (test/fixtures/dev-canary.js). Em NODE_ENV=production nunca é reconhecido
+// como ameaça, e nenhuma build empacotada carrega a assinatura.
 
 describe("Canário dev-only (teste E2E) — SignatureDatabase", () => {
   const CANARY_HASH = DEV_CANARY_SIGNATURE.sha256;
@@ -85,7 +90,11 @@ describe("Canário dev-only (teste E2E) — SignatureDatabase", () => {
   it("o hash do canário é o SHA-256 real do conteúdo exato (não fabricado)", () => {
     const buffer = Buffer.from(DEV_CANARY_CONTENT, "utf8");
     assert.equal(buffer.length, 31, "conteúdo do canário tem 31 bytes");
-    assert.equal(DEV_CANARY_CONTENT, "CYBERSAFE-E2E-TEST-SIGNATURE-v1");
+    assert.equal(
+      getDevCanaryContent(),
+      DEV_CANARY_CONTENT,
+      "a fixture registou o conteúdo no core (injetado, não hardcoded em src)",
+    );
     const sha256 = crypto.createHash("sha256").update(buffer).digest("hex");
     assert.equal(sha256, CANARY_HASH, "hash tem de regenerar a partir do conteúdo");
   });
@@ -142,7 +151,37 @@ describe("Canário dev-only (teste E2E) — MalwareAnalyzer (pipeline real)", ()
     }
   }
 
-  function buildAnalyzer() {
+  /**
+ * Bridge de ClamAV DETERMINISTA para o pipeline do canário.
+ *
+ * MEDIDO (2026-10-03): este suite era flaky (1/2 sob carga), e a causa não era
+ * do canário. Com um `ClamavBridge` REAL, `analyze()` faz um `clamscan
+ * --version` (tecto de 5 s) e uma recolha da base de assinaturas — que sob
+ * carga pode expirar ou falhar. Quando isso acontece o motor responde `error`,
+ * `scanInconclusive` fica verdadeiro, e o CÓDIGO DE PRODUÇÃO (analysis.ts:200)
+ * capa a confiança a 0.3. O canário continua perfeitamente detectado: o que
+ * muda é só a confiança.
+ *
+ * Ou seja: `confidence === 0.99` era uma afirmação sobre a SAÚDE DO CLAMAV DA
+ * MÁQUINA DE TESTE, não sobre o canário. Um teste de contrato que depende do
+ * estado da máquina não é um teste de contrato.
+ *
+ * O injectado aqui é um motor que responde "limpo" — o estado normal. E o
+ * comportamento de `error` fica coberto por um caso explícito e separado logo
+ * abaixo, para que a mudança não seja tapada em vez de tratada.
+ */
+function clamavRespondendo(verdict) {
+  return {
+    scanFile: async () => ({
+      detected: verdict === "detected",
+      verdict,
+      detail: verdict === "error" ? "motor indisponível (caso de teste)" : "",
+      status: { status: verdict === "error" ? "unavailable" : "active", detail: "" },
+    }),
+  };
+}
+
+function buildAnalyzer(clamavVerdict = "clean") {
     const signatures = new SignatureDatabase();
     return {
       signatures,
@@ -150,7 +189,7 @@ describe("Canário dev-only (teste E2E) — MalwareAnalyzer (pipeline real)", ()
         signatures,
         trust: new TrustEngine(),
         yara: new YaraEngine(path.join(tmpDir, "analyzer.yar")),
-        clamav: new ClamavBridge(),
+        clamav: clamavRespondendo(clamavVerdict),
       }),
     };
   }
@@ -160,7 +199,11 @@ describe("Canário dev-only (teste E2E) — MalwareAnalyzer (pipeline real)", ()
   });
 
   after(async () => {
-    await fs.rm(tmpDir, { recursive: true, force: true });
+    // Limpeza a correr mesmo se o before ou algum teste falhar: o tmpDir pode
+    // ser undefined nesse caso e o rm tem de o suportar.
+    if (tmpDir) {
+      await fs.rm(tmpDir, { recursive: true, force: true }).catch(() => {});
+    }
   });
 
   it("DEV/test: ficheiro-canário exato gera deteção de teste (medium/suspicious, sem quarentena)", async () => {
@@ -220,6 +263,43 @@ describe("Canário dev-only (teste E2E) — MalwareAnalyzer (pipeline real)", ()
       const result = await analyzer.analyze(cleanPath);
       assert.equal(result.verdict, "safe");
       assert.ok(!result.rulesTriggered.includes("dev_canary_signature"));
+    });
+  });
+
+  /**
+   * O CASO QUE O TESTE FIXO ANTES NAO AFIRMAVA.
+   *
+   * É este o comportamento que produzia o flake: com o motor indisponível, a
+   * confiança do canário é CAPADA a 0.3 pelo código de produção. É a coisa
+   * CORRETA — dizer "0.99 de certeza" sobre um ficheiro que o motor não leu é
+   * a mentira que o `clamav-inconclusive` existe para impedir.
+   *
+   * Passar a depender de um bridge injectado só é legítimo com este caso aqui:
+   * sem ele, injectar o bridge seria esconder o comportamento em vez de o
+   * tornar explícito.
+   */
+  it("motor indisponível NÃO impede a deteção do canário — só baixa a confiança", async () => {
+    const canaryPath = path.join(tmpDir, "cybersafe-e2e-canary-motor-off.txt");
+    await fs.writeFile(canaryPath, DEV_CANARY_CONTENT, "utf8");
+    const { analyzer } = buildAnalyzer("error");
+
+    await withNodeEnv("test", async () => {
+      const result = await analyzer.analyze(canaryPath);
+      assert.ok(
+        result.rulesTriggered.includes("dev_canary_signature"),
+        "o canário continua detectado: a falta do motor não desfaz uma deteção real",
+      );
+      assert.equal(result.verdict, "suspicious", "e o veredicto não degrada");
+      assert.equal(result.severity, "medium");
+      assert.equal(
+        result.confidence,
+        0.3,
+        "a confiança é capada porque o motor NÃO examinou o ficheiro — é a resposta honesta",
+      );
+      assert.ok(
+        result.factors.some((f) => f.id === "clamav-inconclusive"),
+        "e o motivo da queda de confiança fica declarado nos fatores",
+      );
     });
   });
 });

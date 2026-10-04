@@ -4,12 +4,15 @@ import { hasSeenOnboarding, markOnboardingSeen, resetOnboardingSeen } from "../s
 
 // localStorage mínimo em memória (sem depender de um browser/jsdom).
 const storage = new Map<string, string>();
-(globalThis as any).localStorage = {
-  getItem: (k: string) => storage.get(k) ?? null,
-  setItem: (k: string, v: string) => { storage.set(k, v); },
-  removeItem: (k: string) => { storage.delete(k); },
-  clear: () => storage.clear(),
-};
+Object.defineProperty(globalThis, "localStorage", {
+  configurable: true,
+  value: {
+    getItem: (k: string) => storage.get(k) ?? null,
+    setItem: (k: string, v: string) => { storage.set(k, v); },
+    removeItem: (k: string) => { storage.delete(k); },
+    clear: () => storage.clear(),
+  },
+});
 
 beforeEach(() => storage.clear());
 afterEach(() => storage.clear());
@@ -40,11 +43,14 @@ test("chave usada é distinta e estável", () => {
 });
 
 test("storage indisponível não rebenta a app", () => {
-  (globalThis as any).localStorage = {
-    getItem: () => { throw new Error("blocked"); },
-    setItem: () => { throw new Error("blocked"); },
-    removeItem: () => { throw new Error("blocked"); },
-  };
+  Object.defineProperty(globalThis, "localStorage", {
+    configurable: true,
+    value: {
+      getItem: () => { throw new Error("blocked"); },
+      setItem: () => { throw new Error("blocked"); },
+      removeItem: () => { throw new Error("blocked"); },
+    },
+  });
   assert.equal(hasSeenOnboarding(), false);
   assert.doesNotThrow(() => markOnboardingSeen());
   assert.doesNotThrow(() => resetOnboardingSeen());

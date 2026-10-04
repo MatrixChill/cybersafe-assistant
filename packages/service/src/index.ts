@@ -1,4 +1,5 @@
 import * as fs from "node:fs";
+import { installSignalHandlers } from "./signal-handlers";
 
 import "dotenv/config";
 import {
@@ -174,20 +175,16 @@ void main();
 
 // ── Graceful Shutdown ────────────────────────────────────────────────────────
 
-for (const signal of ["SIGINT", "SIGTERM"] as const) {
-  process.on(signal, () => {
-    // Em `npm run dev`, o `concurrently -k` envia SIGTERM/SIGINT a todos os
-    // watchers quando o Electron fecha. Este caminho é um encerramento
-    // esperado do dev runner (o code 1 dos scripts npm que se seguem é
-    // normal), e não uma falha do produto.
-    logToFile("INFO", `Received ${signal} — EXPECTED DEV SHUTDOWN (dev runner)`);
-    safeWrite("out", [`[Service] EXPECTED DEV SHUTDOWN (${signal})`]);
-    void service.stopProtection().finally(() => {
-      void service.dispose().finally(() => {
-        logToFile("INFO", "Service stopped.");
-        safeWrite("out", ["[Service] Service stopped"]);
-        process.exit(0);
-      });
-    });
-  });
-}
+// O código vive em `signal-handlers.ts`, e não aqui, por uma razão concreta:
+// este módulo escreve `boot-debug.log` e arranca o serviço no topo. Um teste
+// que importasse daqui para alcançar os handlers ligava o serviço inteiro e
+// escrevia no runtime REAL do utilizador — aconteceu a 2026-10-02.
+const uninstallSignals = installSignalHandlers(service, {
+  log: (message) => logToFile("INFO", message),
+  warn: () => {},
+  error: (message, err) => {
+    logToFile("CRITICAL", message, err as Error);
+    safeWrite("err", [`[Service] ${message}:`, err]);
+  },
+});
+void uninstallSignals;

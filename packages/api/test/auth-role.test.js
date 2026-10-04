@@ -45,7 +45,7 @@ legacy
 legacy.close();
 
 // A migration corre no import do db.js; o index.js exporta o app sem escutar.
-const { prisma } = await import("../dist/db.js");
+  const { prisma, closeDb } = await import("../dist/db.js");
 const { app } = await import("../dist/index.js");
 
 let server;
@@ -60,10 +60,14 @@ before(async () => {
 
 after(async () => {
   await new Promise((resolve) => server.close(resolve));
+  closeDb();
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
-  } catch {
-    // Windows pode manter o handle da DB aberto; o tmp do SO limpa o resto.
+  } catch (err) {
+    process.emitWarning(
+      `AUTH-ROLE TMPDIR LEAK: nao foi possivel remover ${tmpDir} (${err.code}), ` +
+        `mesmo depois de closeDb(). Outro handle pode estar aberto.`,
+    );
   }
 });
 
@@ -177,4 +181,18 @@ describe("bootstrap DEV promove apenas a conta dev", () => {
     assert.equal(user.role, "admin");
     assert.ok(!("passwordHash" in user));
   });
+});
+
+// Limpeza do tmpDir criado em módulo (linha 11). A DB em disco é um ficheiro
+// dentro de tmpDir; sem este after o diretório fica em %TEMP% para sempre.
+after(() => {
+  closeDb();
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch (err) {
+    process.emitWarning(
+      `AUTH-ROLE TMPDIR LEAK: nao foi possivel remover ${tmpDir} (${err.code}), ` +
+        `mesmo depois de closeDb(). Outro handle pode estar aberto.`,
+    );
+  }
 });

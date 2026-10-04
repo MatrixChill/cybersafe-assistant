@@ -3,7 +3,14 @@ export type ThreatAction = "quarantined" | "alerted" | "logged" | "allowed";
 export type ProtectionStatus = "safe" | "attention" | "critical" | "degraded";
 export type PlanType = "free" | "personal" | "business";
 export type SubscriptionTier = "free" | "pro" | "enterprise";
-export type AnalysisVerdict = "safe" | "suspicious" | "malicious";
+/**
+ * `inconclusive` NÃO é uma quarta opinião sobre o ficheiro: é a ausência de
+ * opinião. Existe porque um motor que não conseguiu abrir o ficheiro (medido:
+ * o Defender remove-o no instante em que o clamscan o abre) não pode ser
+ * reportado como "safe" — "safe" é uma afirmação sobre o ficheiro, e ninguém o
+ * examinou. Também não pode ser "suspicious": isso seria fabricar uma ameaça.
+ */
+export type AnalysisVerdict = "safe" | "suspicious" | "malicious" | "inconclusive";
 export type TrustDecision = "trusted" | "neutral" | "untrusted";
 export type EventType =
   | "artifact.discovered"
@@ -57,7 +64,8 @@ export type HeuristicRuleId =
   | "office_child_process"
   | "script_spawns_binary"
   | "rapid_process_fanout"
-  | "blocked_reexecution";
+  | "blocked_reexecution"
+  | "scan_inconclusive";
 
 export interface ThreatFactor {
   id: string;
@@ -193,9 +201,39 @@ export interface ThreatRecord {
 
 export type EngineSubsystemStatus = "active" | "degraded" | "unavailable" | "error";
 
+/**
+ * COBERTURA — o que as regras/características carregadas COBREM, independente
+ * de o motor estar a funcionar.
+ *
+ * `status` responde a "o motor carregou?". `coverage` responde a "o que ele
+ * carregou serve para alguma coisa?". Um corpus que é apenas o canário EICAR
+ * faz o motor funcionar e não detecta malware nenhum: as duas respostas são
+ * ambas verdadeiras e um só campo não chega para as dizer.
+ *
+ * A assimetria entre os três valores é deliberada e é a segurança do contrato:
+ *
+ * - `"limited"`  afirmação SEGURA. Medimos e sabemos que é pouco. É o que se
+ *                emite quando o corpus é o canário/fallback: o motor funciona,
+ *                a análise por regras de malware está inativa.
+ * - `"normal"`   afirmação FORTE. Só é emitido com evidência medida: um corpus
+ *                que NÃO é o canário compilou com sucesso e está em memória.
+ *                Nunca por presunça de caminho de código, nunca por ausência
+ *                de marker num ficheiro que não foi lido.
+ * - `"unknown"`  ausência de medição. O motor não carregou, ou o corpus não
+ *                compilou, ou o ficheiro estava vazio. Não diz "limitada"
+ *                porque isso afirmaria que medimos pouco; e sobre tudo não diz
+ *                "normal", porque isso affirmaria uma proteção que não medimos.
+ */
+export type EngineSubsystemCoverage = "normal" | "limited" | "unknown";
+
 export interface EngineSubsystemHealth {
   status: EngineSubsystemStatus;
   detail?: string;
+  /**
+   * Cobertura do que está carregado. Ausente = motor antigo que não envia o
+   * campo; o consumidor tem de o tratar como `unknown`, nunca como `normal`.
+   */
+  coverage?: EngineSubsystemCoverage;
 }
 
 export interface EngineHealth {
@@ -209,6 +247,28 @@ export interface EngineHealth {
   hashDb?: EngineSubsystemHealth;
   clamav?: EngineSubsystemHealth;
   nativeEngine?: EngineSubsystemHealth;
+  /**
+   * O filtro WFP do CyberSafe — as regras de bloqueio de IP que o produto cria
+   * (`wfp-filter.ts`, `New-NetFirewallRule -DisplayName 'CyberSafe Blocklist'`).
+   *
+   * NAO e o Firewall do Windows. O Firewall do Windows mede-se em outro sitio e
+   * com outro tipo: `WindowsHealthSnapshot.firewall: WindowsFirewallState`, que vem
+   * de `Get-NetFirewallProfile`. Os dois chamam-se "firewall" na natureza, mas aqui
+   * `wfp` diz o que e.
+   */
+  wfp?: EngineSubsystemHealth;
+  /**
+   * @deprecated Alias temporario de `wfp`. Nao significa o Firewall do Windows.
+   *
+   * Existe porque o servico de fundo e um named-pipe JSON e sobrevive ao
+   * arranque da UI: um servico de uma versao anterior pode continuar a servir
+   * `firewall` a uma UI nova. Um renderer novo tem de ler os dois; um renderer
+   * antigo so le este. Ver `wfpHealth()`, que e a unica forma de ler.
+   *
+   * REMOCAO: eliminar assim que oFloor(tabela de versoes do named-pipe) garantir
+   * servico e UI na mesma versao. Nao ha prazo automatico — remocao de contrato
+   * semelmudanca de versao maior, e nao se marca sozinha.
+   */
   firewall?: EngineSubsystemHealth;
   anyEngineDegraded?: boolean;
 }
@@ -279,6 +339,19 @@ export interface ScanState {
    * (FULL_SCAN_MAX_FILES é apenas um cap de segurança, não um total real).
    */
   filesTotal?: number;
+  /**
+   * Quantos ficheiros estão AGORA dentro do batch do ClamAV (uma única
+   * invocação para todos eles, em curso).
+   *
+   * Existe porque esse batch demora ~7,6 s a carregar a base antes de devolver
+   * qualquer coisa, e sem este campo a UI dizia "A verificar os ficheiros
+   * encontrados" durante sete segundos sem ter verificado nada. É a diferença
+   * entre "está a trabalhar em 20 ficheiros" e "está parado".
+   *
+   * NÃO é progresso: os ficheiros ainda não foram avaliados. `filesAnalyzed`
+   * só cresce quando o batch devolve. Zero quando não há batch a correr.
+   */
+  filesInEngineBatch?: number;
   /** Ficheiros que passaram pelo pipeline (analisados, excluídos ou falhados) */
   filesProcessed?: number;
   /** Ficheiros que chegaram efetivamente aos motores de análise aplicáveis */
@@ -582,6 +655,8 @@ export interface WindowsHealthSnapshot {
 export type HealthAlertSeverity = "info" | "warning" | "critical";
 
 export interface HealthAlert {
+  /** Identificador estável da recomendação de origem (ex.: "ram-high"), quando disponível. */
+  id?: string;
   severity: HealthAlertSeverity;
   title: string;
   description: string;
@@ -699,6 +774,7 @@ export function buildHealthAlertEvidence(id: string, snapshot: WindowsHealthSnap
 /** Converte as recomendações do snapshot em alertas enriquecidos com evidências e ação recomendada. */
 export function buildHealthAlertsFromSnapshot(snapshot: WindowsHealthSnapshot): HealthAlert[] {
   return snapshot.recommendations.map((rec) => ({
+    id: rec.id,
     severity: HEALTH_ALERT_SEVERITY[rec.severity] ?? "info",
     title: rec.title,
     description: rec.description,
@@ -883,7 +959,12 @@ export interface ProcessAnalysisResult {
   fileScan: FileScanResponse | null;
   virusTotal: VirusTotalResult | null;
   isCritical: boolean;
-  recommendation: "safe" | "suspicious" | "dangerous";
+  /**
+   * `inconclusive` = o motor não conseguiu avaliar o ficheiro. Não é uma
+   * opinião sobre o processo; é a ausência de opinião. A UI tem de o desenhar
+   * como tal — um badge verde com a palavra "Seguro" aqui seria uma mentira.
+   */
+  recommendation: "safe" | "suspicious" | "dangerous" | "inconclusive";
 }
 
 export interface TrainingResult {
@@ -1200,18 +1281,68 @@ export const TRAINING_SCENARIOS: TrainingScenario[] = [
   }
 ];
 
+/**
+ * Le o filtro WFP do CyberSafe, aceitando o alias antigo `firewall`.
+ *
+ * FONTE UNICA, de proposito: `engine.firewall` e `engine.wfp` significam a MESMA
+ * coisa (o filtro WFP), nunca o Firewall do Windows. Qualquer consumidor que
+ * precise do modulo passa por aqui, para o alias nao ser esquecido num sitio e a
+ * semantica nao divergir noutro.
+ */
+export function wfpHealth(
+  engine?: { wfp?: EngineSubsystemHealth; firewall?: EngineSubsystemHealth },
+): EngineSubsystemHealth | undefined {
+  return engine?.wfp ?? engine?.firewall;
+}
+
+/**
+ * Nome a MOSTRAR de cada motor, em PT-PT.
+ *
+ * Existe porque as findings do `pcstate` imprimem a chave do motor nas
+ * evidenceLines. Imprimir `firewall` ai dizia ao utilizador que a proteccao de
+ * rede do Windows estava desligada, quando o que se mediu foi o filtro WFP do
+ * CyberSafe. A chave continua interna; a palavra e o que o utilizador le.
+ */
+export const ENGINE_DISPLAY_NAME: Record<string, string> = {
+  yara: "YARA",
+  hashDb: "Base de assinaturas",
+  clamav: "ClamAV",
+  nativeEngine: "Motor nativo",
+  wfp: "Filtro WFP do CyberSafe",
+  // Chave do alias antigo, caso alguma linha antiga a passe. A mesma palavra.
+  firewall: "Filtro WFP do CyberSafe",
+};
+
 /** Verifica se algum motor de proteção está degradado ou indisponível. */
 export function hasDegradedProtections(engine: EngineHealth): boolean {
-  const engines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall];
+  const engines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)];
   return engines.some(e => e && (e.status === "degraded" || e.status === "unavailable" || e.status === "error"));
 }
 
 /** Conta motores ativos vs total reportados. */
 export function activeEngineCount(engine: EngineHealth): { active: number; total: number } {
-  const engines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall];
+  const engines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)];
   const reported = engines.filter(Boolean) as EngineSubsystemHealth[];
   return {
     active: reported.filter(e => e.status === "active").length,
     total: reported.length,
   };
 }
+
+// WS-4: orientação honesta sobre um processo (Gestao de Tarefas). Vive aqui
+// porque @cybersafe/app só pode importar de @cybersafe/shared-types, e a
+// função é pura — sem fetch, sem IPC, sem estado.
+export {
+  buildProcessGuidance,
+  isProtectedProcess,
+  PROTECTED_PROCESS_NAMES,
+} from "./process-guidance.js";
+export type { ProcessGuidance, ProcessPriority, SafeToClose } from "./process-guidance.js";
+export {
+  buildFindingGuidance,
+  buildFindingDado,
+  FINDING_SEVERITY_LABEL,
+} from "./finding-guidance.js";
+export type { FindingGuidance } from "./finding-guidance.js";
+export { engineContextCopy, engineStatusPt } from "./engine-context.js";
+export type { EngineContextCopy } from "./engine-context.js";

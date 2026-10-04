@@ -11,45 +11,107 @@ export interface SignatureRecord {
 }
 
 /** Regras mínimas embutidas para funcionar offline, mesmo sem feeds remotos.
- *  Cada sha256 aqui listado foi verificado contra a amostra real (ou, quando
- *  não há evidência pública fidedigna, marcado com TODO-EVIDENCE) — nunca
- *  inventamos hashes. O EICAR (68 bytes) é o único cujo valor é determinístico
- *  e pode ser regenerado a partir do próprio texto. */
+ *
+ *  REGRA DESTE BLOCO: um hash só entra aqui se a SUA FAMÍLIA estiver provada
+ *  por fonte pública citável, e o rótulo `family` tem de ser o que essa fonte
+ *  diz. Não inventamos hashes e não inventamos famílias. Se não for possível
+ *  provar, o hash NÃO entra — antes fica de fora.
+ *
+ *  Estado da base em 2026-09-30 (auditoria de proveniência):
+ *   - 2 hashes WannaCry, ambos com família e ficheiro confirmados por 2 fontes.
+ *   - 1 hash EICAR, que é um ficheiro de teste padronizado da indústria: valor
+ *     determinístico, deteccão legítima, e é assim que se prova o pipeline.
+ *   - 0 entradas sem prova. As duas entradas-placeholder que existiam aqui
+ *     (rotuladas "Emotet-Trojan" e "TrickBot") foram removidas/corrigidas:
+ *     a primeira era na verdade WannaCry (rótulo errado); a segunda não tem
+ *     qualquer registo público e não é sequer provado que corresponda a
+ *     TrickBot — muito menos a um ficheiro real.
+ */
 export const BUILTIN_HASH_SIGNATURES: SignatureRecord[] = [
   {
     // EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H* (68 bytes).
-    // SHA-256 verificado: 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f
-    // (MD5=44d88612fea8a8f36de82e1278abb02f — o value anterior era o MD5
-    //  concatenado com 32 hex zeros, o que é fabricado.)
+    // SHA-256 verificado localmente a partir do próprio texto, e é
+    // determinístico por construção — ver test/signatures.test.js.
+    // (MD5=44d88612fea8a8f36de82e1278abb02f. O valor de 64 hex que a base
+    //  enviou antes comecava por esse MD5, mas nao reproduz nenhuma derivacao
+    //  verificada: ver o motivo em RETIRED_HASH_SIGNATURES.)
+    // É um canário de teste, não uma ameaça real: está aqui para que o
+    // pipeline de detecção possa ser provado sem tocar em malware a sério.
     sha256: "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f",
     family: "EICAR-Test-File",
     severity: "critical",
     source: "built-in",
   },
   {
-    // TODO-EVIDENCE: o sha256 listado não foi confirmado contra uma fonte
-    // pública fidedigna (ex.: hash de ficheiro específico do WannaCry).
-    // Manter como placeholder até haver amostra concreta; não adivinhar.
+    // WannaCry / WannaCryptor — mssecsvc.exe (loader + componente worm),
+    // 3 723 264 bytes, MD5 db349b97c37d22f5ea1d1841e3c89eb4.
+    // Confirmado por 2 fontes independentes:
+    //   - VMRay "WannaCry Ransomware | Files" (WanaDecrypt0r.bin.exe)
+    //   - Mandiant "WannaCry Malware Profile" (mssecsvc.exe, mesmo MD5+tamanho)
+    // TODO-EVIDENCE removido em 2026-09-30: a proveniência está provada.
     sha256: "24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c",
     family: "WannaCry-Ransomware",
     severity: "critical",
     source: "built-in",
   },
   {
-    // TODO-EVIDENCE: sha256 não confirmado contra amostra real do Emotet.
+    // WannaCry / WannaCryptor — tasksche.exe (loader), 3 514 368 bytes,
+    // MD5 84c82835a5d21bbcf75a61706d8ab549.
+    // Confirmado por 2 fontes independentes:
+    //   - VMRay "WannaCry Ransomware | Files" (SHA-256 do tasksche.exe)
+    //   - NJCCIC/NJ.gov, folha de perfil do WannaCry (lista este SHA-256)
+    // RÓTULO CORRIGIDO em 2026-09-30: estava rotulado "Emotet-Trojan", o que
+    // era FALSO. Duas fontes identificam esta amostra como WannaCry. Não há
+    // Emotet nesta base. Manter um nome de malware errado num produto que diz
+    // medir o que detecta é exactamente o defeito que não podemos ter.
     sha256: "ed01ebfbc9eb5bbea545af4d01bf5f1071661840480439c6e5babe8e080e41aa",
-    family: "Emotet-Trojan",
+    family: "WannaCry-Ransomware",
     severity: "critical",
     source: "built-in",
   },
+  // REMOVIDO em 2026-09-30:
+  //   sha256 71b6a493388e7d0b40c83ce903bc6b04d1b59f386d5ebbf117a4c7e6c43310ce
+  //   rotulado "TrickBot", severity high
+  // Motivo: pesquisa pelo hash completo não devolve NENHUM registo de malware
+  // — nem abuse.ch/MalwareBazaar, nem VirusTotal, nem qualquer vendor. Só
+  // resultados irrelevantes (endereços Bitcoin com prefixo semelhante). Não
+  // está provado que seja TrickBot, nem que seja o ficheiro de uma amostra
+  // real. Uma entrada sem proveniência descredibiliza as que a têm, porque o
+  // utilizador não tem como distinguir as duas. Se algum dia vier de uma
+  // fonte citável, volta com a prova ao lado.
+];
+
+/**
+ * Hashes RETIRADOS da base, por SÓ: é o SHA-256 que identifica uma amostra.
+ *
+ * REGRA DESTA LISTA: um hash entra aqui quando sabemos, com prova, que NÃO
+ * representa o que a base dizia sobre ele. NUNCA entra um hash só porque "a
+ * família parece-se com uma nossa" — `family` é metadata, não identidade, e uma
+ * amostra externa legítima da mesma família tem de poder coexistir com as nossas
+ * sem ser apagada. A regra antiga apagava por coincidência de família e
+ * destruía entradas legítimas de terceiros.
+ *
+ * Retirar um hash é irreversível para o registo, por isso a lista é explícita e
+ * cada entrada tem de dizer porquê.
+ */
+export const RETIRED_HASH_SIGNATURES: { sha256: string; reason: string }[] = [
   {
-    // TODO-EVIDENCE: sha256 não confirmado contra amostra real do TrickBot.
+    // Motivo completo no comentário de remoção acima, em BUILTIN_HASH_SIGNATURES.
     sha256: "71b6a493388e7d0b40c83ce903bc6b04d1b59f386d5ebbf117a4c7e6c43310ce",
-    family: "TrickBot",
-    severity: "high",
-    source: "built-in",
+    reason:
+      "Sem proveniencia: rotulado TrickBot, mas nenhum vendor publica esse hash. Nao esta provado que seja TrickBot nem que corresponda a um ficheiro real, e uma base em que o utilizador nao distingue a prova do chute perde credibilidade.",
+  },
+  {
+    sha256: "44d88612fea8a8f36de82e1278abb02f2b8d6f66b0f0455d8f4f0d5dce9d734a",
+    reason:
+      "Valor fabricado que a base ja enviou. Verificavel: os 32 hex iniciais coincidem com o MD5 da string EICAR padrao (44d88612fea8a8f36de82e1278abb02f); o valor completo de 64 hex NAO reproduz nenhuma das derivacoes que verificamos (sha256 do hex do MD5, sha256 dos bytes do MD5, sha256 do texto EICAR, entre outras) e a sua derivacao e DESCONHECIDA. Nao corresponde a nenhum ficheiro real de amostra e nao ha proveniencia para ele. O EICAR autentico e 275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f (SHA-256 dos 68 bytes do texto EICAR).",
   },
 ];
+
+/** Conjunto de consulta dos SHA-256 retirados (normalizados para minúsculas). */
+const RETIRED_HASHES: Set<string> = new Set(
+  RETIRED_HASH_SIGNATURES.map((record) => record.sha256.toLowerCase()),
+);
 
 /**
  * Hashes que a base offline DEVE conter sempre (nomeadamente o EICAR real).
@@ -102,13 +164,30 @@ export function sanitizeSignatureRecords(raw: unknown): SignatureRecord[] {
 /**
  * Canário benigno para teste E2E do pipeline de deteção — 100% inofensivo,
  * não executa nada e substitui o EICAR real (que dispara o Windows Defender).
- * Conteúdo exato (31 bytes): "CYBERSAFE-E2E-TEST-SIGNATURE-v1"
- * SHA-256 verificado: 83787f15463e771f919b8a92ed249765d41a3a581949585bb9364d5ba7e7db06
+ * Conteúdo exato (31 bytes), SHA-256 verificado:
+ * 83787f15463e771f919b8a92ed249765d41a3a581949585bb9364d5ba7e7db06
  *
- * Ativo SOMENTE em dev/test (NODE_ENV !== "production"). Nunca entra na base
- * `records` (logo nunca é gravado no default.json nem numa build de produção).
+ * O LITERAL não vive em src de produção. Se estivesse aqui, uma build
+ * empacotada carregaria a assinatura e o scanner poderia sinalizar o próprio
+ * bundle do CyberSafe. Vive apenas em fixtures de teste
+ * (packages/core/test/fixtures/dev-canary.js e
+ * packages/service/test/fixtures/dev-canary.js), que o registam em runtime.
+ *
+ * A deteção por hash (DEV_CANARY_SIGNATURE) continua em src e não contém o
+ * literal. A deteção por conteúdo só existe depois de uma fixture registar o
+ * conteúdo, logo é inerte numa app empacotada.
  */
-export const DEV_CANARY_CONTENT = "CYBERSAFE-E2E-TEST-SIGNATURE-v1";
+let devCanaryContent = "";
+
+/** Regista o conteúdo do canário. Só fixtures de teste devem chamar isto. */
+export function setDevCanaryContent(content: string): void {
+  devCanaryContent = content;
+}
+
+/** Conteúdo do canário registado; string vazia em qualquer app empacotada. */
+export function getDevCanaryContent(): string {
+  return devCanaryContent;
+}
 
 export const DEV_CANARY_SIGNATURE: SignatureRecord = {
   sha256: "83787f15463e771f919b8a92ed249765d41a3a581949585bb9364d5ba7e7db06",
@@ -238,17 +317,25 @@ export class SignatureDatabase {
     }
   }
 
-  /** Remove hashes legados/fabricados (mesma family, sha256 diferente). */
+  /**
+   * Remove APENAS hashes que a lista de retired declara (por SHA-256, nunca por
+   * família). Regra: o SHA-256 é a identidade da amostra e a família é metadata.
+   *
+   * O que NÃO é apagado, e porquê:
+   *   - um hash exterior legítimo cuja família coincida com uma de uma amostra
+   *     nossa: nada prova que esteja errado, e apagá-lo seria destruir a
+   *     proveniência de quem o registou (duas amostras da mesma família
+   *     coexistem sem conflito);
+   *   - um hash built-in com metadata desatualizada: é corrigido em
+   *     ensureOfflineCoverage, nunca removido.
+   *
+   * Só sai daqui o que está em RETIRED_HASH_SIGNATURES, que é uma decisão com
+   * prova anexa, não uma inferência a partir de um rótulo.
+   */
   private healLegacyRecords(): boolean {
-    const freshByFamily = new Map<string, string>();
-    for (const record of BUILTIN_HASH_SIGNATURES) {
-      freshByFamily.set(record.family.toLowerCase(), record.sha256.toLowerCase());
-    }
     let healed = false;
-    for (const [hash, record] of Array.from(this.records)) {
-      const family = typeof record.family === "string" ? record.family.toLowerCase() : "";
-      const fresh = freshByFamily.get(family);
-      if (fresh && fresh !== hash) {
+    for (const hash of Array.from(this.records.keys())) {
+      if (RETIRED_HASHES.has(hash)) {
         this.records.delete(hash);
         healed = true;
       }
@@ -256,12 +343,29 @@ export class SignatureDatabase {
     return healed;
   }
 
-  /** Garante que todos os hashes built-in (EICAR real incluído) estão presentes. */
+  /**
+   * Garante que todos os hashes built-in (EICAR real incluído) estão presentes e
+   * que a IDENTIDADE de cada um é a provada. Um hash built-in rotulado com outra
+   * família (ex.: tasksche.exe como "Emotet-Trojan") é corrigido para a família
+   * que duas fontes públicas confirmam: dizer "Emotet" sobre uma amostra
+   * identificada como WannaCry é uma mentira sobre o que medimos.
+   *
+   * O `source` NÃO é tocado — é a proveniência de onde o registo veio
+   * (ex.: "malwarebazaar") e continua válida depois da correção. A `severity`
+   * também é preservada: é uma decisão local de política, não uma prova externa.
+   */
   private ensureOfflineCoverage(): boolean {
     let changed = false;
     for (const record of SignatureDatabase.builtinRecords()) {
-      if (!this.records.has(record.sha256)) {
-        this.records.set(record.sha256, record);
+      const hash = record.sha256.toLowerCase();
+      const existing = this.records.get(hash);
+      if (!existing) {
+        this.records.set(hash, record);
+        changed = true;
+        continue;
+      }
+      if (existing.family !== record.family) {
+        this.records.set(hash, { ...existing, family: record.family });
         changed = true;
       }
     }
@@ -329,11 +433,13 @@ export class SignatureDatabase {
   }
 
   /**
-   * Re-semeia o ficheiro em disco quando a base carregada contém registos
-   * legados/fabricados que não existem na base built-in actual (ex.: o hash
-   * EICAR que era o MD5 + 32 hex zeros). Substitui registos com a mesma
-   * family mas sha256 diferente pelo built-in correcto; não apaga registos
-   * válidos do utilizador que não estão na base embutida.
+   * Re-semeia o ficheiro em disco quando a base carregada precisa de
+   * reconciliação: apaga APENAS os SHA-256 da lista RETIRED_HASH_SIGNATURES
+   * (hashes que a base já enviou e não correspondem a um ficheiro real) e
+   * corrige a `family` de um hash built-in que venha rotulado com outra,
+   * preservando sempre o `source` (proveniência). Não apaga registos externos
+   * só porque a `family` coincide com a de um built-in: a identidade é o
+   * sha256, e a `family` é metadata.
    *
    * Reconcilia sempre com o estado do DISCO: se o ficheiro estiver ausente,
    * vazio, corrompido ou sem o EICAR, volta a ser semeado — mesmo que a base

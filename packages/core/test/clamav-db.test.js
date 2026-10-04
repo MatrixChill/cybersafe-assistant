@@ -369,7 +369,7 @@ describe("ClamavBridge — integração com o disco real", () => {
     const res = await bridge.scanFile(import.meta.filename);
     assert.equal(res.detected, false, "base que não carrega não detecta nada");
     assert.equal(res.status.status, "degraded", "depois de o scan falhar não pode continuar active");
-    assert.match(res.status.detail, /clamscan/);
+    assert.match(res.status.detail, /clamav/i);
     assert.match(res.status.detail, /cl_load|carregar a base/i);
   });
 

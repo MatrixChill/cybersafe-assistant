@@ -17,7 +17,46 @@
  * alias-stub/reused) obriga a um refetch: quem manda na lista é o Windows.
  */
 
-import type { ProcessKillResult, ProcessKillStatus } from "@cybersafe/shared-types";
+import type { ProcessKillResult, ProcessKillStatus, ProcessKillProtectionReason } from "@cybersafe/shared-types";
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Badge de recomendação da análise de um processo.
+//
+// P0 (CLAMAV_INCONCLUSIVE_VERDICT): o serviço devolve `inconclusive` quando o
+// motor não conseguiu avaliar o ficheiro — medido, o Defender remove-o no
+// instante em que o clamscan o abre. A UI desenhava esse caso com o `else`:
+// styling VERDE, ícone de escudo, palavra "Seguro". Era um pixels green de uma
+// mentira.
+//
+// A correção NÃO é dizer "suspeito" (fabricar uma ameaça) nem "inseguro"
+// (idem). É um quarto estado que diz "não sei", com um tom que não é o do
+// "safe". Fonte única: o badge e os testes leem os dois daqui.
+// ─────────────────────────────────────────────────────────────────────────────
+
+export type ProcessRecommendation = "safe" | "suspicious" | "dangerous" | "inconclusive";
+
+export interface ProcessRecommendationMeta {
+  label: string;
+  /** Classe de styling. `unknown` é deliberadamente distinto de `safe`. */
+  tone: "safe" | "warn" | "danger" | "unknown";
+}
+
+const RECOMMENDATION_META: Record<ProcessRecommendation, ProcessRecommendationMeta> = {
+  safe: { label: "Seguro", tone: "safe" },
+  suspicious: { label: "Suspeito", tone: "warn" },
+  dangerous: { label: "Perigoso", tone: "danger" },
+  inconclusive: {
+    label: "Inconclusivo — o motor não conseguiu avaliar o ficheiro",
+    tone: "unknown",
+  },
+};
+
+export function processRecommendationMeta(
+  recommendation: ProcessRecommendation | null | undefined,
+): ProcessRecommendationMeta {
+  if (!recommendation) return RECOMMENDATION_META.inconclusive;
+  return RECOMMENDATION_META[recommendation] ?? RECOMMENDATION_META.inconclusive;
+}
 
 /**
  * Prazo máximo para o serviço responder a um pedido de kill.
@@ -54,6 +93,35 @@ export const KILL_ERROR_ERROR = "Erro ao terminar processo.";
 export const KILL_PROTECTED_ERROR =
   "Processo protegido do CyberSafe/sistema: não pode ser terminado.";
 
+/**
+ * O que o serviço JA sabe e o renderer deitava fora.
+ *
+ * `classifyKillTarget` distingue estas cinco razões, e o contrato
+ * (`ProcessKillResult.protectedReason`) leva-as até ao renderer. Antes, as
+ * cinco chegavam ao ecrã como a MESMA frase, e o dado era descartado.
+ *
+ * A diferença é o que o utilizador pode fazer a seguir, e não é académica:
+ *   · `self`/`ancestor` — o alvo é o CyberSafe ou quem o lançou: nunca deve
+ *     ser terminado, e não há nada para repetir;
+ *   · `internal` — é um componente do próprio CyberSafe: protegê-lo é o
+ *     comportamento correto, não um erro;
+ *   · `system-pid` — é um processo de sistema do Windows: repetir não resolve,
+ *     porque a recusa é do sistema e não de uma falha pontual;
+ *   · `fallback-name` — o NOME bateu com um protegido, mas o caminho não pôde
+ *     ser confirmado: aqui a suspeita é real e o utilizador é informado.
+ *
+ * Texto PT-PT. A chave `error` que o serviço envia hoje está em inglês técnico
+ * (`Cannot terminate protected CyberSafe/system process`) e nunca é mostrada
+ * aqui: o ecrã fala português.
+ */
+export const KILL_PROTECTED_REASON_MESSAGE: Record<ProcessKillProtectionReason, string> = {
+  "self": "É o próprio serviço de proteção do CyberSafe. Nunca pode ser terminado.",
+  "ancestor": "É o processo que iniciou o CyberSafe. Nunca pode ser terminado.",
+  "internal": "É um componente do próprio CyberSafe: está protegido de propósito e não pode ser terminado.",
+  "system-pid": "É um processo de sistema do Windows: não pode ser terminado, e repetir não resolve porque a recusa é do sistema.",
+  "fallback-name": "O nome corresponde a um processo protegido do CyberSafe ou do sistema, mas o caminho não pôde ser confirmado: não pode ser terminado.",
+};
+
 export const KILL_REUSED_ERROR =
   "O PID mudou de dono (reutilizado). A terminação não foi confirmada.";
 
@@ -61,6 +129,35 @@ export const KILL_ACCESS_DENIED_ERROR =
   "O Windows recusou o término (acesso negado). Pode ser um processo protegido do sistema ou exigir privilégios elevados.";
 
 export const KILL_ALREADY_EXITED_TEXT = "O processo já não estava em execução.";
+
+/**
+ * Sucesso, sem mentira.
+ *
+ * O caminho de sucesso era o ÚNICO silencioso: `killed` devolvia `message: null`
+ * e uma tentativa de terminar processo podia acabar sem feedback nenhum. Uma
+ * falha visível é melhor do que um sucesso invisível: o utilizador carregou em
+ * "Terminar" e tem de saber o que aconteceu.
+ *
+ * A forma CURTA é a única honesta hoje. Para escrever a forma longa seria
+ * preciso provar que os FILHOS também morreram, e o contrato não traz essa
+ * prova: `ProcessKillResult` tem `success`, `status`, `pid`, `error`,
+ * `protectedReason`, `target`, `exitCode`, `stdout`, `stderr` — nenhum campo
+ * diz quantos filhos foram terminados. O `exitCode: 0` é o relatório do
+ * taskkill, não uma verificação por filho, e o serviço reapura apenas o PID
+ * alvo. Afirmar "e subprocessos" sem prova seria mentira.
+ */
+export const KILL_SUCCESS_MESSAGE = "Processo terminado com sucesso.";
+
+/**
+ * A forma longa, para quando o contrato TRANSPORTAR a prova (ex.: um campo
+ * `treeConfirmed` ou a contagem de filhos verificados). Existe para não ter de
+ * a inventar no dia em que essa prova existir — e não é usada por omissão,
+ * porque hoje não há prova. Um teste fixa que o caminho real devolve sempre a
+ * forma curta, para esta constante não entrar em produção sem o campo que a
+ * justifica.
+ */
+export const KILL_SUCCESS_MESSAGE_WITH_TREE =
+  "Processo e subprocessos terminados com sucesso.";
 
 /**
  * O serviço disse-nos que o PID que matámos era um stub/App Execution Alias
@@ -81,6 +178,12 @@ export interface KillOutcome {
   success: boolean;
   /** Mensagem pronta a mostrar (sucesso informativo ou erro); `null` se silencioso. */
   message: string | null;
+  /**
+   * Porque é que o alvo estava protegido, quando `status === "protected"`.
+   * Vem do serviço e antes era engolido aqui. `undefined` quando o serviço não
+   * disse — a UI não o deduz.
+   */
+  protectedReason?: ProcessKillProtectionReason;
 }
 
 /**
@@ -94,14 +197,28 @@ export function mapKillResult(result: ProcessKillResult | null | undefined): Kil
 
   const pid = typeof result.pid === "number" ? result.pid : 0;
   const backendError = typeof result.error === "string" && result.error ? result.error : null;
+  // Só se aceita uma razão que existe no contrato: o mapa é sobre
+  // `ProcessKillProtectionReason`, e um valor desconhecido não entra.
+  const protectedReason = result.protectedReason;
 
   switch (result.status) {
     case "killed":
-      return { status: "killed", pid, success: true, message: null };
+      return { status: "killed", pid, success: true, message: KILL_SUCCESS_MESSAGE };
     case "already-exited":
       return { status: "already-exited", pid, success: true, message: KILL_ALREADY_EXITED_TEXT };
     case "protected":
-      return { status: "protected", pid, success: false, message: KILL_PROTECTED_ERROR };
+      // A razão do serviço manda. Sem razão (`fallback-name` chega sempre
+      // acompanhada de nome), fica a frase genérica honesta — nunca uma
+      // razão adivinhada.
+      return {
+        status: "protected",
+        pid,
+        success: false,
+        message: protectedReason
+          ? KILL_PROTECTED_REASON_MESSAGE[protectedReason]
+          : KILL_PROTECTED_ERROR,
+        protectedReason,
+      };
     case "timeout":
       return { status: "timeout", pid, success: false, message: backendError ?? KILL_TIMEOUT_ERROR };
     case "reused":
@@ -124,6 +241,87 @@ export interface RunKillProcessOptions {
   kill: (pid: number) => Promise<ProcessKillResult>;
   /** Prazo antes de desistir e fechar o overlay. Default: {@link KILL_TIMEOUT_MS}. */
   timeoutMs?: number;
+}
+
+/**
+ * Estado de um pedido de kill em curso. Mutável e minúsculo de propósito: o
+ * que se precisa é de uma-bandeira que se lê e se escreve **no mesmo instante**,
+ * o que o `useState`/`disabled` de um botão não garantem (o `disabled` só
+ * chega no re-render, que em React é no turno seguinte).
+ *
+ * Um objeto por fluxo, passado por referência. O `useRef` do componente dá
+ * exatamente isto, e o que torna isto testável sem React.
+ */
+export interface KillRequestGate {
+  inFlight: boolean;
+}
+
+export function isKillRequestInFlight(gate: KillRequestGate): boolean {
+  return gate.inFlight === true;
+}
+
+/** Abre a guarda. Síncrono, no topo do handler. */
+export function beginKillRequest(gate: KillRequestGate): void {
+  gate.inFlight = true;
+}
+
+/** Fecha a guarda. Tem de correr num `finally`: uma exceção não pode deixar o gestor bloqueado. */
+export function endKillRequest(gate: KillRequestGate): void {
+  gate.inFlight = false;
+}
+
+/** O desfecho devolvido a uma confirmação que a guarda já tinha barrado. */
+export const KILL_REQUEST_ALREADY_IN_FLIGHT: KillOutcome = {
+  status: "unavailable",
+  pid: 0,
+  success: false,
+  message: null,
+};
+
+export interface RunKillRequestOptions extends RunKillProcessOptions {
+  /** Guarda síncrona do fluxo. Sem ela, cada clique no mesmo turno é um pedido. */
+  gate: KillRequestGate;
+  /** Chamado uma vez com o desfecho real (só quando o pedido saiu). */
+  onOutcome?: (outcome: KillOutcome) => void;
+  /** Fecha o overlay/estado de curso. Corre SEMPRE, mesmo em exceção. */
+  onFinish?: () => void;
+  /** Snapshot autoritativo, quando aplicável. */
+  refresh?: () => Promise<unknown> | void;
+}
+
+/**
+ * Um pedido de kill, com guarda de duplo envio.
+ *
+ * 1 confirmação = 1 request. A guarda é testada **antes** de qualquer `await`,
+ * por isso dois cliques no mesmo turno — que o `disabled` do botão não apanha,
+ * porque o re-render só chega no turno seguinte — dão um só pedido.
+ *
+ * Não é debounce: não há temporizador nem espera. É uma bandeira que se abre e
+ * se fecha no ciclo do próprio pedido.
+ *
+ * O `onFinish` corre no `finally`, para o estado de curso nunca ficar preso —
+ * nem quando o `kill` lança, nem quando o serviço devolve `timeout`.
+ */
+export async function runKillRequest(options: RunKillRequestOptions): Promise<KillOutcome> {
+  const { gate, onOutcome, onFinish, refresh, ...killOptions } = options;
+
+  if (isKillRequestInFlight(gate)) {
+    // Confirmação duplicada barrada. Não é um kill, logo não há desfecho de
+    // kill a inventar: devolve-se um `unavailable` sem mensagem, e o primeiro
+    // pedido continua a ser quem trata do resultado.
+    return { ...KILL_REQUEST_ALREADY_IN_FLIGHT, pid: killOptions.pid };
+  }
+
+  beginKillRequest(gate);
+  try {
+    const outcome = await runKillProcess(killOptions);
+    onOutcome?.(outcome);
+    if (shouldRefetchAfterKill(outcome)) void refresh?.();
+    return outcome;
+  } finally {
+    endKillRequest(gate);
+    onFinish?.();
+  }
 }
 
 const TIMEOUT_SENTINEL = { timedOut: true } as const;
@@ -179,23 +377,37 @@ export function shouldRefetchAfterKill(outcome: KillOutcome): boolean {
   );
 }
 
-// ── Actualização da LISTA de processos (medido, não chutado) ────────────────
+// ── Atualização da LISTA de processos (medido, não chutado) ──────────────────
 // Números medidos nesta máquina (Node 24, 390 processos, PowerShell + CIM):
-//   · enumeração completa (topic processes.list) = 720–1085 ms, ~800 ms
-//   · poll do ProcessMonitor do serviço = 648–747 ms, de 10 em 10 s
-//   · evento `process.started` no arranque = 177 eventos num único poll
+//   · custo de UMA enumeração do SO (snapshotProcesses) = mediana 591 ms,
+//     máximo 652 ms (medido em 2026-09-30: 652, 284, 574, 582, 591, 594 ms)
+//   · cadência de DESCOBERTA no serviço = 2 000 ms enquanto há observador,
+//     10 000 ms em repouso (cadência adaptativa, não uma constante única)
 //
 // Duas consequências, uma por constante:
-// · o poll do renderer NÃO pode ser mais rápido que o do serviço: aos 5 s
-//   custaria 2 enumerações por ciclo do monitor (15,6% de um core) para
-//   mostrar a MESMA verdade. 10 s é a cadência a que o SO dá nova informação.
+// · ESTE poll é um pedido IPC de LEITURA DE CACHE. NÃO é uma enumeração do SO.
+//   Quem decide o ritmo de enumerar é o cadence adaptativo do serviço, não a
+//   frequência com que perguntamos. Com o serviço a marcar observador a cada
+//   pedido, o cache tem sempre ~2 s de idade, muito abaixo do TTL de 20 s: o
+//   serviço responde de CACHE e não força enumeração nenhuma.
+//   Por isso baixar este número de 10 s para 2 s custa APENAS tráfego IPC de
+//   leitura (de 6 para 30 pedidos por minuto), e a custo de CPU ZERO.
+//   Se este número ficar mais lento do que o do serviço, o renderer passa a
+//   ler a verdade atrasado — que era o furo: o serviço descobria o processo em
+//   ~2,1 s e o ecrã só o mostrava ~5 s depois, em média.
 // · a janela de rajada tem de ser pequena ao ponto de ser invisível ao
-//   utilizador e pequena face a uma enumeração: 250 ms é 0,3× de uma
-//   enumeração (800 ms). Agrupa a rajada inteira (que cabe num poll de ~750 ms)
-//   em UM pedido, sem acrescentar latência que se note.
+//   utilizador e pequena face a uma enumeração: 250 ms é 0,4× de uma
+//   enumeração (591 ms). Agrupa a rajada inteira em UM pedido, sem acrescentar
+//   latência que se note.
 
-/** Cadência do poll da lista enquanto a página de processos está aberta. */
-export const PROCESSES_POLL_MS = 10_000;
+/**
+ * Cadência do poll da lista enquanto a página de processos está aberta.
+ *
+ * Alinhada com o produtor: o serviço produz nova verdade de 2 em 2 segundos
+ * enquanto há observador, e este é o único sítio onde o número vive — o App e a
+ * TaskManagerPage importam daqui, não escrevem o seu próprio.
+ */
+export const PROCESSES_POLL_MS = 2_000;
 
 /** Janela de agrupamento: uma rajada de eventos dá UM pedido de processos. */
 export const PROCESSES_REFRESH_COALESCE_MS = 250;

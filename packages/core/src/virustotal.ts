@@ -13,10 +13,35 @@ export class VirusTotalClient {
   private cache = new Map<string, CacheEntry>();
   private lastRequestAt = 0;
   private enabled: boolean;
+  private consecutiveFailures = 0;
+  private openUntil = 0;
+  private readonly rateLimitMs: number;
+  private readonly cooldownMs: number;
+  private readonly failureThreshold: number;
 
-  constructor(apiKey?: string) {
+  constructor(apiKey?: string, options?: { rateLimitMs?: number; cooldownMs?: number; failureThreshold?: number }) {
     this.apiKey = apiKey || "";
     this.enabled = this.apiKey.length > 0;
+    this.rateLimitMs = options?.rateLimitMs ?? RATE_LIMIT_MS;
+    this.cooldownMs = options?.cooldownMs ?? 5 * 60 * 1000;
+    this.failureThreshold = options?.failureThreshold ?? 3;
+  }
+
+  private isCircuitOpen(): boolean {
+    if (this.openUntil === 0) return false;
+    if (Date.now() < this.openUntil) return true;
+    this.openUntil = 0;
+    this.consecutiveFailures = 0;
+    return false;
+  }
+
+  private recordFailure(reason: string): void {
+    if (this.isCircuitOpen()) return;
+    this.consecutiveFailures++;
+    if (this.consecutiveFailures >= this.failureThreshold) {
+      this.openUntil = Date.now() + this.cooldownMs;
+      console.warn(`[VirusTotal] Circuit breaker open for ${this.cooldownMs}ms: ${reason}`);
+    }
   }
 
   private pruneCache() {
@@ -37,8 +62,12 @@ export class VirusTotalClient {
     this.enabled = key.length > 0;
   }
 
-  async scanHash(sha256: string): Promise<VirusTotalResult | null> {
+  async scanHash(sha256: string, sourceTag = "unknown"): Promise<VirusTotalResult | null> {
     if (!this.enabled) return null;
+
+    if (process.env.CYBERSAFE_DEBUG_VT === "1") {
+      console.log(`[VT_CALL] source=${sourceTag} sha8=${sha256.slice(0, 8)} ts=${Date.now()}`);
+    }
 
     const normalizedHash = sha256.toLowerCase();
 
@@ -48,11 +77,15 @@ export class VirusTotalClient {
       return { ...cached.result, cached: true };
     }
 
+    if (this.isCircuitOpen()) return null;
+
     // Rate limiting
     const now = Date.now();
     const elapsed = now - this.lastRequestAt;
-    if (elapsed < RATE_LIMIT_MS) {
-      await new Promise((resolve) => setTimeout(resolve, RATE_LIMIT_MS - elapsed));
+    if (elapsed < this.rateLimitMs) {
+      await new Promise((resolve) => setTimeout(resolve, this.rateLimitMs - elapsed));
+      // Another lookup may have opened the circuit while this one waited.
+      if (this.isCircuitOpen()) return null;
     }
 
     try {
@@ -66,6 +99,7 @@ export class VirusTotalClient {
       });
 
       if (response.status === 404) {
+        this.consecutiveFailures = 0;
         // File not in VT database — return a clean result
         const cleanResult: VirusTotalResult = {
           sha256: normalizedHash,
@@ -86,15 +120,18 @@ export class VirusTotalClient {
       if (response.status === 429) {
         // Rate limited — return null, don't cache
         console.warn("[VirusTotal] Rate limited, skipping");
+        this.recordFailure("HTTP 429");
         return null;
       }
 
       if (!response.ok) {
         console.error(`[VirusTotal] API error: ${response.status}`);
+        this.recordFailure(`HTTP ${response.status}`);
         return null;
       }
 
       const data = (await response.json()) as any;
+      this.consecutiveFailures = 0;
       const attributes = data?.data?.attributes;
 
       if (!attributes) return null;
@@ -139,6 +176,7 @@ export class VirusTotalClient {
       return vtResult;
     } catch (error) {
       console.error("[VirusTotal] Request failed:", error);
+      this.recordFailure("request exception");
       return null;
     }
   }

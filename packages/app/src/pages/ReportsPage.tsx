@@ -1,9 +1,10 @@
-import { useState, useMemo } from "react";
+﻿import { useState, useMemo } from "react";
 import { FileBarChart, Download, Filter, Calendar, AlertTriangle, Shield, Activity, ArrowUpRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 // Fonte central de textos/classes do nível de proteção (consumo READ-ONLY).
-import { levelMeta } from "@/lib/protectionHealth";
-import type { SecurityEvent, ThreatEvent, QuarantineEntry, ProtectionState, PcState, EngineSubsystemHealth, EngineHealth, ProtectionStatus, PcStateLevel } from "@cybersafe/shared-types";
+import { levelMeta, engineStatusText } from "@/lib/protectionHealth";
+import { wfpHealth } from "@cybersafe/shared-types";
+import type { SecurityEvent, ThreatEvent, QuarantineEntry, ProtectionState, PcState, EngineSubsystemHealth, EngineHealth, ProtectionStatus, PcStateLevel, EngineSubsystemStatus } from "@cybersafe/shared-types";
 
 export type ReportVerdict = "protected" | "attention" | "degraded" | "critical" | "unknown";
 export type ReportTone = "green" | "amber" | "red" | "unknown";
@@ -52,7 +53,7 @@ function protectionVerdict(
   engine: EngineHealth | null | undefined,
 ): ReportVerdict {
   if (engine && engine.serviceRunning === false) return "critical";
-  if (engine && [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall]
+  if (engine && [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)]
     .some((sub) => sub && sub.status === "error")) return "critical";
   const unhealthy = engine?.anyEngineDegraded === true;
   switch (status) {
@@ -240,14 +241,17 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
         // (engine.ts:762-765 deriva-o de wfpFilter.isActive()). O Windows
         // Firewall e outra coisa, e o produto ainda nao o consulta — por isso
         // entra como desconhecido, nunca como desligado.
-        ["Filtro WFP (CyberSafe)", engine.firewall],
+        ["Filtro WFP (CyberSafe)", wfpHealth(engine)],
       ];
       for (const [name, sub] of subsystems) {
         if (!sub) continue;
         engineEntries.push({
           name,
           status: sub.status,
-          detail: sub.detail ?? (sub.status === "active" ? "Ativo" : "Indisponível"),
+          // Passa pela fonte unica de verdade. Antes isto duplicava a copy e
+          // ainda mentia: um motor "degraded" ou "error" recebia "Indisponível",
+          // que e um estado que o servico NAO reportou.
+          detail: sub.detail ?? engineStatusText(sub.status),
         });
       }
       // Linha do Windows Firewall: o produto ainda nao o consulta, e isso e o que
@@ -265,7 +269,7 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
     const engineRows = engineEntries.map((e) => `
       <tr>
         <td>${e.name}</td>
-        <td><span class="sev sev-${subsystemTone(e.status)}">${e.status.toUpperCase()}</span></td>
+        <td><span class="sev sev-${subsystemTone(e.status)}">${engineStatusText(e.status as EngineSubsystemStatus)}</span></td>
         <td>${e.detail}</td>
       </tr>`).join("");
     const engineEmpty = engineEntries.length === 0

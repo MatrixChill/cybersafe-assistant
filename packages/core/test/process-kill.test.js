@@ -285,10 +285,17 @@ describe("classifyKillTarget — PID/ppid/path primeiro, nome só fallback", () 
     assert.equal(classifyKillTarget({ pid: 900, name: "explorer.exe" }, ctx), "ancestor");
   });
 
-  it("protege componentes internos por ppid (filhos do serviço/ancestral)", () => {
-    assert.equal(classifyKillTarget({ pid: 1234, ppid: 1000 }, ctx), "internal");
-    assert.equal(classifyKillTarget({ pid: 1234, ppid: 500 }, ctx), "internal");
-  });
+it("protege componentes internos por ppid — apenas filhos DIRECTOS do serviço", () => {
+  // Filho directo: continua protegido.
+  assert.equal(classifyKillTarget({ pid: 1234, ppid: 1000 }, ctx), "internal");
+  // Filho de um ANCESTRAL: deixa de ser "internal". Esta era a regra que
+  // classificava como componente do CyberSafe qualquer aplicacao normal aberta
+  // a partir do mesmo explorer/sessao — provado num Notepad vivo (PID 35744,
+  // ppid 1628 = explorer.exe) recusado 4x com protectedReason "internal".
+  // Um irmao de outra ramificacao do ancestral nao e um componente.
+  assert.equal(classifyKillTarget({ pid: 1234, ppid: 500 }, ctx), null);
+  assert.equal(classifyKillTarget({ pid: 1234, ppid: 900 }, ctx), null);
+});
 
   it("protege componentes internos por caminho (case-insensitive)", () => {
     assert.equal(

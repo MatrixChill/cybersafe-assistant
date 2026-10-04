@@ -1,6 +1,9 @@
 import { Shield, AlertTriangle, Download, Activity, CheckCircle2, Cpu, HardDrive, MemoryStick, Wifi, Search, Play, FolderSearch } from "lucide-react";
 import { useEffect, useState } from "react";
-import type { DashboardSummary, HardwareSnapshot, PcState, PcStateLevel, Severity, Finding } from "@cybersafe/shared-types";
+import type { DashboardSummary, EngineHealth, HardwareSnapshot, PcState, PcStateLevel, Severity, Finding } from "@cybersafe/shared-types";
+// WS-5: a escala de prioridade e a construcao do DADO/SIGNIFICADO/ORIENTACAO
+// vivem em shared-types (o motor deriva, a UI formata). Nao duplicam-se aqui.
+import { buildFindingGuidance, FINDING_SEVERITY_LABEL, wfpHealth } from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
 import { MatrixAvatar } from "../components/MatrixAvatar";
 import ProtectionDetails from "../components/ProtectionDetails";
@@ -170,7 +173,7 @@ export default function DashboardPage({ dashboard, isLoading, hardware, pcState,
             <AlertTriangle className="w-4 h-4 text-cyber-yellow" />
             <h2 className="text-sm font-mono font-bold text-foreground uppercase tracking-wider">O que precisa de atenção</h2>
           </div>
-          <PcStateAttention pcState={pcState} onShowDetails={() => setDetailsOpen(true)} />
+          <PcStateAttention pcState={pcState} engine={dashboard.engineHealth} />
         </section>
       )}
 
@@ -237,9 +240,9 @@ export default function DashboardPage({ dashboard, isLoading, hardware, pcState,
             <span className="text-[10px] font-mono text-muted-foreground">demora uns minutos; podes continuar a usar o PC</span>
           </div>
           <div className="flex flex-wrap items-center gap-2">
-            <ScanButton label="Verificação rápida" sub="Áreas onde os problemas costumam estar" icon={Search} tone="primary" scanType="quick" onScan={onScan} />
-            <ScanButton label="Verificação completa" sub="Todo o computador, ficheiro a ficheiro" icon={Play} tone="ghost" scanType="full" onScan={onScan} />
-            <ScanButton label="Analisar uma pasta" sub="Escolhes a pasta e só ela é vista" icon={FolderSearch} tone="ghost" scanType="custom" onScan={onScan} />
+            <ScanButton label="Análise Rápida" sub="Áreas onde os problemas costumam estar" icon={Search} tone="primary" scanType="quick" onScan={onScan} />
+            <ScanButton label="Análise Profunda" sub="Pastas do seu utilizador e arranques automáticos" icon={Play} tone="ghost" scanType="full" onScan={onScan} />
+            <ScanButton label="Analisar uma Pasta" sub="Escolhes a pasta e só ela é vista" icon={FolderSearch} tone="ghost" scanType="custom" onScan={onScan} />
           </div>
         </div>
 
@@ -538,14 +541,6 @@ const LEVEL_META: Record<PcStateLevel, { label: string; chipClass: string; textC
   },
 };
 
-/** Rótulos em português, sempre — a UI não mostra "URGENT"/"ATTENTION" crus. */
-const SEVERITY_LABEL: Record<Finding["severity"], string> = {
-  urgent: "AGORA",
-  attention: "PROBLEMA",
-  recommended: "MELHORIA",
-  informative: "NOTA",
-};
-
 function severityChip(f: Finding) {
   const base = "text-[9px] font-mono uppercase px-2 py-1 rounded border";
   if (f.severity === "urgent") {
@@ -560,9 +555,101 @@ function severityChip(f: Finding) {
   return cn(base, "bg-white/5 text-muted-foreground border-white/10");
 }
 
-function PcStateAttention({ pcState, onShowDetails }: { pcState: PcState; onShowDetails: () => void }) {
+/**
+ * Quantos achados partilham a prioridade de um achado. Lê `pcState.counts`,
+ * que o service derivou — a UI não conta nada, só mostra.
+ */
+function contagemPrioridade(severity: Finding["severity"], counts: PcState["counts"]): number {
+  return counts[severity];
+}
+
+/** Rótulo de um bloco, com o nome visível — o utilizador tem de saber o que lê. */function Bloco({ titulo, children }: { titulo: string; children: React.ReactNode }) {
+  return (
+    <div className="mt-1.5">
+      <div className="text-[9px] font-mono uppercase tracking-widest text-muted-foreground/70">{titulo}</div>
+      {children}
+    </div>
+  );
+}
+
+/**
+ * WS-B — DADO humano dos motores, RENDERIZADO pela página.
+ * Uma linha por componente que o serviço mediu como não-operacional: nome +
+ * estado em PT-PT + o que significa. Nenhum token interno ("degraded",
+ * "unavailable"), nenhum path do provider, nenhuma mensagem crua. As
+ * condições vêm do `engineHealth` medido — nada é afirmado sem leitura.
+ */
+function engineDadoLinhas(engine: EngineHealth): string[] {
+  const linhas: string[] = [];
+
+  if (engine.clamav && engine.clamav.status !== "active") {
+    if (engine.clamav.status === "degraded") {
+      linhas.push("ClamAV: Degradado — Motor instalado, mas a base de assinaturas antivírus ainda não está disponível.");
+      linhas.push("As assinaturas precisam de ser instaladas ou atualizadas antes de o ClamAV poder contribuir plenamente para a análise.");
+    } else if (engine.clamav.status === "unavailable") {
+      linhas.push("ClamAV: Indisponível — o motor antivírus não está disponível neste computador.");
+    } else {
+      linhas.push("ClamAV: Erro — o motor antivírus reporta um erro.");
+    }
+  }
+
+  const wfp = wfpHealth(engine);
+  if (wfp && wfp.status !== "active") {
+    if (wfp.status === "degraded") {
+      linhas.push("Filtro WFP do CyberSafe: Degradado — O filtro de rede próprio do CyberSafe não está a funcionar como esperado.");
+    } else if (wfp.status === "unavailable") {
+      linhas.push("Filtro WFP do CyberSafe: Indisponível — O filtro de rede próprio do CyberSafe não está ativo.");
+    } else {
+      linhas.push("Filtro WFP do CyberSafe: Erro — O filtro de rede próprio do CyberSafe reporta um erro.");
+    }
+    // O nosso filtro não diz nada do firewall da Microsoft — o disclaimer vai
+    // com a linha, em todos os estados.
+    linhas.push("Isto não significa que o Firewall do Windows esteja desligado.");
+  }
+
+  if (engine.yara && engine.yara.status !== "active") {
+    linhas.push(
+      engine.yara.status === "degraded"
+        ? "YARA: Degradado — o motor de análise por regras não está totalmente operacional."
+        : engine.yara.status === "unavailable"
+          ? "YARA: Indisponível — o motor de análise por regras não está ativo."
+          : "YARA: Erro — o motor de análise por regras reporta um erro.",
+    );
+  }
+
+  if (engine.hashDb && engine.hashDb.status !== "active") {
+    linhas.push(
+      engine.hashDb.status === "degraded"
+        ? "Base de assinaturas: Degradado — a base local de assinaturas não está totalmente operacional."
+        : engine.hashDb.status === "unavailable"
+          ? "Base de assinaturas: Indisponível — a base local de assinaturas não está carregada."
+          : "Base de assinaturas: Erro — a base local de assinaturas reporta um erro.",
+    );
+  }
+
+  if (engine.nativeEngine && engine.nativeEngine.status !== "active") {
+    linhas.push(
+      engine.nativeEngine.status === "degraded"
+        ? "Motor nativo: Degradado — o motor nativo de análise não está totalmente operacional."
+        : engine.nativeEngine.status === "unavailable"
+          ? "Motor nativo: Indisponível — o motor nativo de análise não está disponível."
+          : "Motor nativo: Erro — o motor nativo de análise reporta um erro.",
+    );
+  }
+
+  return linhas;
+}
+
+export function PcStateAttention({ pcState, engine }: { pcState: PcState; engine?: EngineHealth }) {
   const { principalFinding, findings } = pcState;
   const problems = findings.filter((f) => f.severity === "urgent" || f.severity === "attention");
+  const principal = principalFinding ? buildFindingGuidance(principalFinding) : null;
+  // A finding dos motores tem copy humana própria nesta página (WS-B); os
+  // restantes achados continuam pelo caminho genérico do motor.
+  const ehFindingMotores = !!principalFinding
+    && principalFinding.source === "protection-engine"
+    && String(principalFinding.id).startsWith("security:engine");
+  const dadoLinhas = engine && ehFindingMotores ? engineDadoLinhas(engine) : principal?.dado ?? [];
 
   return (
     <div className={cn(
@@ -571,7 +658,7 @@ function PcStateAttention({ pcState, onShowDetails }: { pcState: PcState; onShow
         ? "border-cyber-red/30 bg-cyber-red/[0.03]"
         : "border-cyber-yellow/30 bg-cyber-yellow/[0.03]",
     )}>
-      {principalFinding && (
+      {principalFinding && principal && (
         <div className="flex items-start gap-3">
           <div className={cn(
             "w-8 h-8 rounded-lg flex items-center justify-center shrink-0",
@@ -586,28 +673,72 @@ function PcStateAttention({ pcState, onShowDetails }: { pcState: PcState; onShow
               <span className={cn(
                 "text-[9px] font-mono font-bold uppercase tracking-widest",
                 principalFinding.severity === "urgent" ? "text-cyber-red" : "text-cyber-yellow",
-              )}>{SEVERITY_LABEL[principalFinding.severity]}</span>
+              )}>{FINDING_SEVERITY_LABEL[principalFinding.severity]}</span>
               <span className="text-xs font-mono font-semibold text-foreground">{principalFinding.title}</span>
             </div>
-            <p className="text-[11px] text-muted-foreground leading-relaxed">{principalFinding.summary}</p>
+
+            {/* DADO — só quando existe. Um bloco vazio é pior que um bloco
+                ausente: parece que falta informação quando não falta. */}
+            {dadoLinhas.length > 0 && (
+              <Bloco titulo="Dado">
+                <ul className="mt-0.5 space-y-0.5">
+                  {dadoLinhas.map((linha) => (
+                    <li key={linha} className="text-[11px] font-mono text-foreground/80">{linha}</li>
+                  ))}
+                </ul>
+              </Bloco>
+            )}
+
+            {/* SIGNIFICADO — o `summary` do motor, verbatim. */}
+            <Bloco titulo="Significado">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">{principal.significado}</p>
+            </Bloco>
+
+            {/* PRIORIDADE — o rótulo da escala do motor, e quantos achados
+                partilham essa mesma prioridade. As contagens vêm de
+                `pcState.counts` (derivadas no service); a UI não as recalcula. */}
+            <Bloco titulo="Prioridade">
+              <p className="text-[11px] text-muted-foreground leading-relaxed">
+                {principal.prioridade} — {contagemPrioridade(principalFinding.severity, pcState.counts)} achado(s) com esta prioridade.
+              </p>
+            </Bloco>
+
+            {/* ORIENTAÇÃO — o que o produto sabe mesmo fazer, e nada mais.
+                O antigo botão "Ver detalhes" foi removido de propósito: sugeria
+                que havia algo a resolver ao alcance do utilizador e abria um
+                estado geral que não é uma solução. */}
+            {principal.orientacao && (
+              <Bloco titulo="Orientação">
+                <p className="text-[11px] text-muted-foreground leading-relaxed">{principal.orientacao}</p>
+              </Bloco>
+            )}
           </div>
-          <button
-            onClick={onShowDetails}
-            className="text-[10px] font-mono text-primary hover:text-primary/80 shrink-0 uppercase tracking-wider"
-          >
-            Ver detalhes
-          </button>
         </div>
       )}
 
       {problems.length > 1 && (
         <div className="space-y-1.5 pl-11">
-          {problems.filter((f) => f.id !== principalFinding?.id).slice(0, 3).map((f) => (
-            <div key={f.id} className="flex items-center justify-between p-2 rounded-lg bg-white/[0.03] border border-white/[0.06]">
-              <span className="text-[11px] font-mono text-foreground truncate">{f.title}</span>
-              <span className={severityChip(f)}>{SEVERITY_LABEL[f.severity]}</span>
-            </div>
-          ))}
+          {problems.filter((f) => f.id !== principalFinding?.id).slice(0, 3).map((f) => {
+            const g = buildFindingGuidance(f);
+            return (
+              <div key={f.id} className="p-2 rounded-lg bg-white/[0.03] border border-white/[0.06] space-y-1">
+                <div className="flex items-center justify-between gap-2">
+                  <span className="text-[11px] font-mono text-foreground truncate">{f.title}</span>
+                  <span className={severityChip(f)}>{FINDING_SEVERITY_LABEL[f.severity]}</span>
+                </div>
+                {g.dado.length > 0 && (
+                  <ul className="space-y-0.5">
+                    {g.dado.map((linha) => (
+                      <li key={linha} className="text-[10px] font-mono text-foreground/70">{linha}</li>
+                    ))}
+                  </ul>
+                )}
+                {g.orientacao && (
+                  <p className="text-[10px] text-muted-foreground leading-relaxed">{g.orientacao}</p>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
     </div>

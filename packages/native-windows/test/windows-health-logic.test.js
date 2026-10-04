@@ -192,11 +192,41 @@ test("buildRecommendations flags unavailable critical service", () => {
 
 test("buildWindowsHealthSnapshot composes status, score and recommendations", () => {
   const input = makeInput();
-  const snap = buildWindowsHealthSnapshot(input, "2025-01-01T00:00:00.000Z", ["cmdlet unavailable"]);
+  const snap = buildWindowsHealthSnapshot(input, "2025-01-01T00:00:00.000Z", []);
   assert.equal(snap.overallStatus, "good");
   assert.equal(snap.score, 100);
-  assert.deepEqual(snap.errors, ["cmdlet unavailable"]);
+  assert.deepEqual(snap.errors, []);
   assert.equal(snap.collectedAt, "2025-01-01T00:00:00.000Z");
+});
+
+// ─── HONESTIDADE (WS-1): errors sem recomendação -> unknown ──────────────
+// Antes: errors vazio ou com entradas, sem recs, dava sempre good + score 100.
+// Agora: errors não vazio e sem recs críticas/attention -> unknown. critical e
+// attention mantêm precedência. O score NAO muda (computeScore inalterado).
+
+test("errors vazio, sem recomendacoes -> good, score 100 (comportamento actual)", () => {
+  const snap = makeSnapshot();
+  assert.equal(snap.overallStatus, "good");
+  assert.equal(snap.score, 100);
+});
+
+test("errors com entradas, sem recomendacoes -> unknown", () => {
+  const snap = buildWindowsHealthSnapshot(makeInput(), "2025-01-01T00:00:00.000Z", ["cmdlet unavailable"]);
+  assert.equal(snap.overallStatus, "unknown");
+  assert.equal(snap.score, 100);
+  assert.deepEqual(snap.errors, ["cmdlet unavailable"]);
+});
+
+test("errors com entradas E uma recomendacao critical -> critical (precedencia)", () => {
+  const input = makeInput({ system: { ...makeInput().system, ramUsagePercent: 92 } });
+  const snap = buildWindowsHealthSnapshot(input, "2025-01-01T00:00:00.000Z", ["cmdlet unavailable"]);
+  assert.equal(snap.overallStatus, "critical");
+});
+
+test("errors com entradas E uma recomendacao attention -> attention (precedencia)", () => {
+  const input = makeInput({ system: { ...makeInput().system, ramUsagePercent: 80 } });
+  const snap = buildWindowsHealthSnapshot(input, "2025-01-01T00:00:00.000Z", ["cmdlet unavailable"]);
+  assert.equal(snap.overallStatus, "attention");
 });
 
 test("buildHealthAlerts returns empty array for no recommendations", () => {

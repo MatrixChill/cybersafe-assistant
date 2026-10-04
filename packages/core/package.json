@@ -8,7 +8,7 @@
   "scripts": {
     "build": "tsc -p tsconfig.json",
     "dev": "tsc -p tsconfig.json --watch",
-    "test": "npm run build && node --test test/engine-integrity.test.js test/signatures.test.js test/pcstate.test.js test/stress-index.test.js test/exclusions.test.js test/hardware-gpu.test.js test/temperature-providers.test.js test/process-kill.test.js test/clamav-db.test.js test/detection-criterion.test.js",
+    "test": "npm run build && node --test test/engine-integrity.test.js test/signatures.test.js test/pcstate.test.js test/stress-index.test.js test/exclusions.test.js test/hardware-gpu.test.js test/temperature-providers.test.js test/process-kill.test.js test/kill-guard-internal.test.js test/clamav-db.test.js test/clamav-resource-cap.test.js test/clamav-cap-review.test.js test/clamav-kill-grace-cap.test.js test/clamav-evidence-attribution.test.js test/clamav-result-model.test.js test/clamav-batch.test.js test/clamav-pid-identity.test.js test/clamav-unknown-never-kills.test.js test/clamav-contract-cases.test.js test/batch-result-integrity.test.js test/error-never-verdict-safe.test.js test/detection-criterion.test.js test/virustotal.test.js test/hash-db-migration.test.js test/hash-db-refresh.test.js test/wfp-vs-windows-firewall.test.js test/yara-coverage-contract.test.js test/factor-labels-ptpt.test.js test/clamav-db-lease-death.test.js test/clamav-db-lease-no-hook.test.js test/clamav-error-death.test.js test/eicar-manual-opt-in.test.js",
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {

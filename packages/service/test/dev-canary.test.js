@@ -20,9 +20,13 @@ import {
   TrustEngine,
   YaraEngine,
   ClamavBridge,
-  DEV_CANARY_CONTENT,
 } from "@cybersafe/core";
+import { DEV_CANARY_CONTENT, installDevCanary } from "./fixtures/dev-canary.js";
 import { ScanManager } from "../dist/scan-manager.js";
+
+// Regista o conteudo do canario no core. Em runtime empacotado nada regista
+// o conteudo e o detector por conteudo fica inerte.
+installDevCanary();
 
 const tempDirs = [];
 
@@ -61,13 +65,13 @@ async function withNodeEnv(value, fn) {
 }
 
 /** Analyzer real do core (as mesmas dependências que o serviço injeta). */
-function createRealAnalyzer(yaraRulesPath) {
+function createRealAnalyzer(yaraRulesPath, clamav) {
   const signatures = new SignatureDatabase();
   return new MalwareAnalyzer({
     signatures,
     trust: new TrustEngine(),
     yara: new YaraEngine(yaraRulesPath),
-    clamav: new ClamavBridge(),
+    clamav,
   });
 }
 
@@ -75,10 +79,37 @@ function createRealAnalyzer(yaraRulesPath) {
  * Adapter com o MESMO contrato de ameaça do ProtectionEngineService.scanArtifact:
  * threat.detected quando severity !== "low"; highRiskCount quando score > monitorMax.
  */
-function createEngineAdapter(analyzer, threatEvents) {
+function createEngineAdapter(analyzer, threatEvents, clamav) {
+  // FASE 4: o adapter tem de implementar o contrato NOVO do motor, senao o
+  // ScanManager salta o batch e cada ficheiro corre o seu proprio clamscan
+  // (2 ficheiros x ~6,2 s > o limite de 10 s do `waitFor`). Nao e o timeout
+  // que esta mal: e o duplo a nao saber falar a lingua do motor real.
+  const prefetchKey = (file) => file.replace(/\//g, "\\").toLowerCase();
+  let prefetch = null;
+
   return {
+    prefetchClamav: async (filePaths) => {
+      if (filePaths.length === 0) return { spawned: false };
+      try {
+        // UM clamscan para todos os ficheiros, exactamente como o motor real.
+        const batch = await clamav.scanFiles(filePaths);
+        prefetch = new Map(batch.files.map((f) => [prefetchKey(f.file), f]));
+        return {
+          spawned: true,
+          error: batch.status.status === "degraded" ? batch.status.detail : undefined,
+        };
+      } catch (err) {
+        // Sem batch, `scanArtifact` volta ao caminho de um ficheiro de cada vez.
+        prefetch = null;
+        return { spawned: false, error: (err && err.message) || String(err) };
+      }
+    },
+    clearClamavPrefetch: () => {
+      prefetch = null;
+    },
     scanArtifact: async (filePath, source) => {
-      const analysis = await analyzer.analyze(filePath);
+      const clamavOutcome = prefetch ? prefetch.get(prefetchKey(filePath)) : undefined;
+      const analysis = await analyzer.analyze(filePath, undefined, undefined, { clamavOutcome });
       if (analysis.severity !== "low") {
         threatEvents.push({
           type: "threat.detected",
@@ -130,8 +161,9 @@ describe("Canário dev-only — pipeline E2E scan → detection → threat event
 
     const result = await withNodeEnv("test", async () => {
       const threatEvents = [];
-      const analyzer = createRealAnalyzer(path.join(dir, "analyzer.yar"));
-      const mgr = new ScanManager(createEngineAdapter(analyzer, threatEvents));
+      const clamav = new ClamavBridge();
+      const analyzer = createRealAnalyzer(path.join(dir, "analyzer.yar"), clamav);
+      const mgr = new ScanManager(createEngineAdapter(analyzer, threatEvents, clamav));
       const finalState = await scanDir(mgr, dir);
       return { finalState, threatEvents };
     });
@@ -170,8 +202,9 @@ describe("Canário dev-only — pipeline E2E scan → detection → threat event
 
     const result = await withNodeEnv("production", async () => {
       const threatEvents = [];
-      const analyzer = createRealAnalyzer(path.join(dir, "analyzer.yar"));
-      const mgr = new ScanManager(createEngineAdapter(analyzer, threatEvents));
+      const clamav = new ClamavBridge();
+      const analyzer = createRealAnalyzer(path.join(dir, "analyzer.yar"), clamav);
+      const mgr = new ScanManager(createEngineAdapter(analyzer, threatEvents, clamav));
       const finalState = await scanDir(mgr, dir);
       return { finalState, threatEvents };
     });

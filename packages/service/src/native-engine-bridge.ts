@@ -33,13 +33,18 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
 export class NativeEngineBridge {
-  private static _health: EngineSubsystemHealth = { status: "unavailable", detail: "Not checked" };
+  private static _health: EngineSubsystemHealth = { status: "unavailable", detail: "Ainda não verificado" };
   private static binaryPath: string | null = null;
   private static checked = false;
 
   private static getBinaryPath(): string {
+    // Build empacotado: o electron-builder copia o binario via extraResources para
+    // <resources>/scan-engine.exe (fora do asar). Em dev resourcesPath nao existe
+    // e os 4 candidatos de arvore de repo abaixo continuam a resolver.
+    const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
     // Check multiple potential locations for the binary
     const possiblePaths = [
+      ...(resourcesPath ? [path.resolve(resourcesPath, "scan-engine.exe")] : []),
       path.resolve(__dirname, "../../native-engine/build/Release/scan-engine.exe"),
       path.resolve(process.cwd(), 'packages/native-engine/build/Release/scan-engine.exe'),
       path.resolve(process.cwd(), 'packages/native-engine/build/scan-engine.exe'),
@@ -59,7 +64,7 @@ export class NativeEngineBridge {
     this.binaryPath = this.getBinaryPath();
     this.checked = true;
     if (fs.existsSync(this.binaryPath)) {
-      this._health = { status: "active", detail: `Native engine at ${this.binaryPath}` };
+      this._health = { status: "active", detail: `Motor nativo ativo (${this.binaryPath})` };
     } else {
       this._health = { status: "unavailable", detail: "scan-engine.exe não foi encontrado (não integrado)" };
     }
@@ -152,7 +157,7 @@ export class NativeEngineBridge {
         clearTimeout(timeout);
         this.activeProcesses.delete(child);
         console.error(`[NativeEngine] Failed to start process:`, err);
-        this._health = { status: "error", detail: `Native engine spawn falhou: ${err.message}` };
+        this._health = { status: "error", detail: `O arranque do motor nativo falhou: ${err.message}` };
         resolve({ ok: false, result: null, error: err.message });
       });
     });

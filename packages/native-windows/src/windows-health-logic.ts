@@ -35,9 +35,17 @@ export interface WindowsHealthInput {
 export { buildHealthAlerts, buildHealthAlertEvidence, buildHealthAlertsFromSnapshot } from "@cybersafe/shared-types";
 export type { HealthAlert, HealthAlertSeverity } from "@cybersafe/shared-types";
 
-export function overallStatus(recommendations: WindowsHealthRecommendation[]): WindowsHealthStatus {
+export function overallStatus(
+  recommendations: WindowsHealthRecommendation[],
+  errors: string[] = [],
+): WindowsHealthStatus {
   if (recommendations.some((r) => r.status === "critical")) return "critical";
   if (recommendations.some((r) => r.status === "attention")) return "attention";
+  // Quando a medição falhou (errors não vazio) e não há nenhuma
+  // recomendação critical nem attention, o estado é unknown em vez de good:
+  // dizer BOM com Score 100 quando nada foi medido é a pior ilusão de
+  // saúde. critical e attention continuam a ganhar dos errors.
+  if (errors.length > 0) return "unknown";
   return "good";
 }
 
@@ -122,7 +130,7 @@ export function buildRecommendations(input: WindowsHealthInput): WindowsHealthRe
       status: "attention",
       title: "Muitos processos com CPU elevada",
       description: `${heavyCpu.length} processos estão a consumir mais de 50% de CPU.`,
-      suggestion: heavyCpu.map((p) => `${p.name} (${p.cpuPercent}%)`).join(", "),
+      suggestion: "Ver os processos com maior utilização de CPU e fechar os que não precisar.",
     });
   }
 
@@ -158,7 +166,7 @@ export function buildWindowsHealthSnapshot(
     users: input.users,
     disks: input.disks,
     firewall: input.firewall,
-    overallStatus: overallStatus(recommendations),
+    overallStatus: overallStatus(recommendations, errors),
     score: computeScore(recommendations),
     recommendations,
     collectedAt,

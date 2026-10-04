@@ -37,13 +37,55 @@ function statusMeta(status: WindowsHealthStatus) {
 function alertMeta(severity: HealthAlertSeverity) {
   switch (severity) {
     case "critical":
-      return { color: "text-cyber-red", bg: "bg-cyber-red/10", border: "border-cyber-red/30", Icon: CircleAlert };
+      return { label: "CRÍTICO", color: "text-cyber-red", bg: "bg-cyber-red/10", border: "border-cyber-red/30", Icon: CircleAlert };
     case "warning":
-      return { color: "text-cyber-yellow", bg: "bg-cyber-yellow/10", border: "border-cyber-yellow/30", Icon: AlertTriangle };
+      return { label: "ATENÇÃO", color: "text-cyber-yellow", bg: "bg-cyber-yellow/10", border: "border-cyber-yellow/30", Icon: AlertTriangle };
     default:
-      return { color: "text-cyber-cyan", bg: "bg-cyber-cyan/10", border: "border-cyber-cyan/30", Icon: Info };
+      return { label: "INFORMAÇÃO", color: "text-cyber-cyan", bg: "bg-cyber-cyan/10", border: "border-cyber-cyan/30", Icon: Info };
   }
 }
+
+// Frase de impacto para leitura humana; nunca recalcula health, so traduz o alerta ja derivado.
+const ALERT_MEANING: Record<string, string> = {
+  "ram-high": "O PC pode ficar lento ou bloquear porque a RAM está quase toda ocupada.",
+  "ram-attention": "Aplicações pesadas podem começar a ficar mais lentas.",
+  "disk-critical": "Sem espaço livre, o Windows e as aplicações podem falhar ou não se atualizar.",
+  "disk-attention": "Ainda há espaço, mas pode faltar para atualizações e novos ficheiros.",
+  "firewall-disabled": "O PC está exposto a tentativas de acesso pela rede sem proteção.",
+  "many-cpu-processes": "O processador está saturado; janelas e jogos podem correr aos soluços.",
+  "service-down": "Funções como impressão, atualizações ou proteção podem deixar de funcionar.",
+};
+
+function alertMeaning(alert: HealthAlert): string {
+  if (alert.id && ALERT_MEANING[alert.id]) return ALERT_MEANING[alert.id];
+  switch (alert.severity) {
+    case "critical": return "Pode afetar seriamente a utilização normal do PC.";
+    case "warning": return "Pode causar lentidão ou falhas se nada for feito.";
+    default: return "Detalhe do sistema a ter em conta, sem urgência.";
+  }
+}
+
+// Rotulos PT-PT para strings de estado vindas do backend (evita ingles visivel).
+const TCP_STATE_PT: Record<string, string> = {
+  Established: "Estabelecida",
+  Listen: "À escuta",
+  SynSent: "A conectar",
+  SynReceived: "A conectar",
+  FinWait1: "A fechar",
+  FinWait2: "A fechar",
+  LastAck: "Último reconhecimento",
+  Closing: "A fechar",
+  Closed: "Fechada",
+  TimeWait: "Em espera de fecho",
+  CloseWait: "Aguarda fecho",
+};
+
+const FIREWALL_PROFILE_PT: Record<string, string> = {
+  Domain: "Domínio",
+  Private: "Privada",
+  Public: "Pública",
+  All: "Todos",
+};
 
 function HealthAlertsSection({ alerts }: { alerts: HealthAlert[] }) {
   if (alerts.length === 0) {
@@ -80,28 +122,24 @@ function HealthAlertsSection({ alerts }: { alerts: HealthAlert[] }) {
           const meta = alertMeta(alert.severity);
           const Icon = meta.Icon;
           return (
-            <div key={i} className={cn("p-3 rounded-lg border", meta.bg, meta.border)}>
+            <div key={alert.id ?? i} className={cn("p-3 rounded-lg border", meta.bg, meta.border)}>
               <div className="flex items-start gap-3">
                 <Icon className={cn("w-4 h-4 mt-0.5 flex-shrink-0", meta.color)} />
                 <div className="flex-grow min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <span className={cn("text-sm font-semibold", meta.color)}>{alert.title}</span>
+                    <span className="text-xs uppercase tracking-wider font-mono px-1.5 py-0.5 rounded bg-secondary/50 text-foreground/80">{meta.label}</span>
                     <span className="text-xs text-muted-foreground font-mono px-1.5 py-0.5 rounded bg-secondary/50">{alert.category}</span>
                   </div>
                   <p className="text-xs text-muted-foreground mt-1 leading-relaxed">{alert.description}</p>
-                  <div className="mt-2 flex items-start gap-2">
-                    <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-primary" />
-                    <p className="text-xs text-foreground/80 leading-relaxed">
-                      <span className="font-semibold text-foreground">Ação recomendada: </span>
-                      {alert.recommendedAction}
-                    </p>
-                  </div>
+                  <p className="text-xs text-foreground/80 mt-2 leading-relaxed">
+                    <span className="font-semibold text-foreground">O que significa: </span>
+                    {alertMeaning(alert)}
+                  </p>
                   {alert.evidence.length > 0 && (
-                    <details className="mt-2">
-                      <summary className="cursor-pointer text-xs font-mono text-muted-foreground hover:text-foreground transition-colors select-none">
-                        Ver evidências
-                      </summary>
-                      <ul className="mt-1.5 space-y-1 px-1">
+                    <div className="mt-2">
+                      <span className="text-xs font-semibold text-foreground">Evidência:</span>
+                      <ul className="mt-1 space-y-1 px-1">
                         {alert.evidence.map((line, j) => (
                           <li key={j} className="text-xs text-muted-foreground font-mono flex items-start gap-2">
                             <span className={cn("mt-1.5 inline-block w-1 h-1 rounded-full flex-shrink-0", meta.color)} />
@@ -109,8 +147,15 @@ function HealthAlertsSection({ alerts }: { alerts: HealthAlert[] }) {
                           </li>
                         ))}
                       </ul>
-                    </details>
+                    </div>
                   )}
+                  <div className="mt-2 flex items-start gap-2">
+                    <CheckCircle2 className="w-3.5 h-3.5 mt-0.5 flex-shrink-0 text-primary" />
+                    <p className="text-xs text-foreground/80 leading-relaxed">
+                      <span className="font-semibold text-foreground">O que fazer: </span>
+                      {alert.recommendedAction}
+                    </p>
+                  </div>
                 </div>
               </div>
             </div>
@@ -225,7 +270,6 @@ export default function PCHealthSection() {
       stopOnShutdown();
       clearInterval(interval);
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   if (loading && !health) {
@@ -321,7 +365,7 @@ export default function PCHealthSection() {
           icon={Wifi}
           label="Firewall"
           value={health.firewall.available ? (health.firewall.enabled ? "Ativo" : "Desligado") : "—"}
-          sub={health.firewall.available ? health.firewall.profiles.map((p) => `${p.name}:${p.enabled ? "on" : "off"}`).join(" · ") : "indisponível"}
+          sub={health.firewall.available ? health.firewall.profiles.map((p) => `${FIREWALL_PROFILE_PT[p.name] ?? p.name}:${p.enabled ? "ativo" : "desligado"}`).join(" · ") : "indisponível"}
           color={!health.firewall.available ? undefined : health.firewall.enabled ? "text-cyber-green" : "text-cyber-red"}
         />
       </div>
@@ -389,7 +433,7 @@ export default function PCHealthSection() {
                     </td>
                     <td className="px-3 py-2 font-mono text-muted-foreground">{c.localAddress}:{c.localPort}</td>
                     <td className="px-3 py-2 font-mono text-muted-foreground">{c.remoteAddress}:{c.remotePort}</td>
-                    <td className="px-3 py-2 font-mono">{c.state}</td>
+                    <td className="px-3 py-2 font-mono">{TCP_STATE_PT[c.state] ?? c.state}</td>
                   </tr>
                 ))}
               </tbody>

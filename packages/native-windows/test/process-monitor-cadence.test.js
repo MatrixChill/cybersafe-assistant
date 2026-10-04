@@ -8,7 +8,12 @@
  */
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { ProcessMonitor, PROCESS_POLL_INTERVAL_MS } from "../dist/index.js";
+import {
+  ProcessMonitor,
+  PROCESS_POLL_INTERVAL_MS,
+  PROCESS_FAST_POLL_INTERVAL_MS,
+  PROCESS_OBSERVER_IDLE_MS,
+} from "../dist/index.js";
 
 /** Mapa de processos para o seam do poll. */
 function world(entries) {
@@ -19,6 +24,13 @@ function world(entries) {
     ]),
   );
 }
+
+/**
+ * Relogio injetado nos testes de janela de inatividade. Nao usa o relogio real:
+ * um teste de inatividade nao pode esperar segundos, e o packet proibe
+ * transformar um teste num poll de segundos.
+ */
+const relogio = { agora: 1_000_000 };
 
 describe("cadencia do ProcessMonitor — o preco, medido", () => {
   it("a cadencia nao pode descer abaixo do que o custo medido permite", () => {
@@ -169,5 +181,178 @@ describe("diff do poll — rajadas de eventos", () => {
     await first;
     await monitor.poll();
     assert.equal(calls, 2, "depois de livre, volta a correr");
+  });
+});
+
+/**
+ * P0 de latencia: a espera por um processo novo nao e um bug de cache nem de
+ * UI, e um relogio. O mecanismo de descoberta e um poll, nao um evento: o SO
+ * pode nascer no proximo tick. Com o intervalo de 10 s, o utilizador espera
+ * entre 0 e 10 s — a media sao os ~5 s que ele reportou.
+ *
+ * Baixar o intervalo a MTUDO e REFUTADO pela medicao: uma enumeracao custa
+ * ~591 ms de mediana nesta maquina (medida pelo Maestro), logo 1,5 s de
+ * intervalo seriam 39% de um nucleo. O caminho e CADENCE ADAPTATIVA: rapida
+ * so enquanto alguem pede a lista, lenta quando ninguem olha.
+ */
+describe("cadencia adaptativa — rapida so enquanto ha observador", () => {
+  it("o intervalo lento e o valor actual de hoje: 10 000 ms, sem retrocesso", () => {
+    assert.equal(PROCESS_POLL_INTERVAL_MS, 10_000);
+  });
+
+  it("o intervalo rapido tem como contrato 2 000 ms e nunca menos", () => {
+    // 591 ms por enumeracao: 2000 ms sao 29,6% de um nucleo enquanto se olha.
+    // Abaixo disso o preco sobe depressa demais sem ganho medido.
+    assert.equal(PROCESS_FAST_POLL_INTERVAL_MS, 2_000);
+    assert.ok(PROCESS_FAST_POLL_INTERVAL_MS >= 2_000, "o piso de 2 000 ms nunca e furado");
+    assert.ok(PROCESS_FAST_POLL_INTERVAL_MS < PROCESS_POLL_INTERVAL_MS, "a rapida tem de ser mais rapida");
+  });
+
+  it("o intervalo de inatividade e maior que a cadencia rapida (senao oscila)", () => {
+    assert.ok(
+      PROCESS_OBSERVER_IDLE_MS > PROCESS_FAST_POLL_INTERVAL_MS,
+      `inatividade de ${PROCESS_OBSERVER_IDLE_MS} ms tem de ser maior que a cadencia rapida de ${PROCESS_FAST_POLL_INTERVAL_MS} ms`,
+    );
+    assert.ok(
+      PROCESS_OBSERVER_IDLE_MS >= PROCESS_FAST_POLL_INTERVAL_MS * 2,
+      "uma unica janela de inatividade nao pode chegar aCause a oscilar",
+    );
+  });
+
+  it("sem observador o intervalo em vigor e o lento", () => {
+    const monitor = new ProcessMonitor(async () => world([]));
+    assert.equal(monitor.currentIntervalMs(), PROCESS_POLL_INTERVAL_MS);
+  });
+
+  it("com observador o intervalo em vigor passa a ser o rapido", () => {
+    const monitor = new ProcessMonitor(async () => world([]));
+    monitor.noteObserver();
+    assert.equal(monitor.currentIntervalMs(), PROCESS_FAST_POLL_INTERVAL_MS);
+  });
+
+  it("varios pedidos de lista no mesmo instante nao mudam o intervalo duas vezes", () => {
+    const monitor = new ProcessMonitor(async () => world([]));
+    for (let i = 0; i < 50; i++) monitor.noteObserver();
+    assert.equal(monitor.currentIntervalMs(), PROCESS_FAST_POLL_INTERVAL_MS);
+    assert.equal(monitor.hasObserver(), true);
+  });
+
+  it("apos a inatividade volta ao lento", () => {
+    const monitor = new ProcessMonitor(async () => world([]), { now: () => relogio.agora });
+    monitor.noteObserver();
+    assert.equal(monitor.currentIntervalMs(), PROCESS_FAST_POLL_INTERVAL_MS);
+
+    relogio.agora += PROCESS_OBSERVER_IDLE_MS + 1;
+    assert.equal(monitor.hasObserver(), false, "a janela de inatividade expirou");
+    assert.equal(monitor.currentIntervalMs(), PROCESS_POLL_INTERVAL_MS);
+  });
+
+  it("o observador nao expira enquanto os pedidos continuam a chegar", () => {
+    const monitor = new ProcessMonitor(async () => world([]), { now: () => relogio.agora });
+    monitor.noteObserver();
+    for (let i = 0; i < 10; i++) {
+      relogio.agora += PROCESS_OBSERVER_IDLE_MS / 2;
+      monitor.noteObserver();
+      assert.equal(monitor.hasObserver(), true, `pedido ${i} devia re-armar a janela`);
+      assert.equal(monitor.currentIntervalMs(), PROCESS_FAST_POLL_INTERVAL_MS);
+    }
+  });
+
+  it("um round lento nunca salta mais que um ciclo ao mudar de estado", () => {
+    // Contrato: mudar de intervalo reinicia o timer. Sem isso, um observador
+    // aparecia a meio de um round lento e ficava ate 10 s sem ver nada.
+    const monitor = new ProcessMonitor(async () => world([]), { now: () => relogio.agora });
+    const primeiro = monitor.scheduleDelayMs();
+    assert.equal(primeiro, PROCESS_POLL_INTERVAL_MS, "sem observador, o proximo round e o lento");
+
+    monitor.noteObserver();
+    assert.equal(
+      monitor.scheduleDelayMs(),
+      PROCESS_FAST_POLL_INTERVAL_MS,
+      "com observador, o proximo round e o rapido — o lento nao se cumpre inteiro",
+    );
+
+    monitor.noteObserver();
+    relogio.agora += PROCESS_OBSERVER_IDLE_MS + 1;
+    assert.equal(monitor.scheduleDelayMs(), PROCESS_POLL_INTERVAL_MS, "depois de inativo, volta ao lento");
+  });
+});
+
+/**
+ * O buraco de concidencia do ponto 4 do packet: havia DOIS guards em objectos
+ * diferentes a proteger a MESMA funcao cara. `pollInFlight` protege o timer;
+ * `engine.processesEnumerating` protege `listProcesses()`. E o
+ * `ProcessMonitor.list()` chamava `snapshotProcesses()` DIRECTAMENTE, sem
+ * passar pelo primeiro guard — um tick do timer e um pedido da UI podiam
+ * correr DUAS enumeracoes do SO em paralelo.
+ *
+ * Este teste falha com o codigo antigo porque `list()` nunca passa pelo seam
+ * nem pelo guard: conta as chamadas ao snapshot.
+ */
+describe("single-flight partilhado — nunca duas enumeracoes do SO ao mesmo tempo", () => {
+  it("list() usa o mesmo seam de snapshot (antes chamava snapshotProcesses directo)", async () => {
+    let calls = 0;
+    const monitor = new ProcessMonitor(async () => {
+      calls += 1;
+      return world([[1, "a.exe"]]);
+    });
+    await monitor.list();
+    assert.equal(calls, 1, "list() tem de usar a funcao injetada, nao a enumeração real do SO");
+  });
+
+  it("dois pedidos de lista em simultaneo nao produzem duas enumeracoes", async () => {
+    let calls = 0;
+    let release;
+    const gate = new Promise((r) => {
+      release = r;
+    });
+    const monitor = new ProcessMonitor(async () => {
+      calls += 1;
+      if (calls === 1) await gate;
+      return world([[1, "a.exe"]]);
+    });
+
+    const primeiro = monitor.list();
+    const segundo = monitor.list();
+    const terceiro = monitor.list();
+    assert.equal(calls, 1, "tres pedidos em simultaneo = UMA enumeracao do SO");
+    release();
+    await Promise.all([primeiro, segundo, terceiro]);
+  });
+
+  it("um tick do poll e um pedido de lista ao mesmo tempo = UMA enumeracao", async () => {
+    // Este e o bug exacto do packet: os dois guards diziam "estou ocupado" a si
+    // proprios e nao se viam. O objectivo nao e que os DOIS avancem, e que nunca
+    // existam DUAS enumeracoes do SO ao mesmo tempo. Com o poll a sair quando
+    // ja ha enumeracao em curso (a cadencia degrada, a fila nao cresce) e o
+    // list() a partilhar a promessa, o total e sempre 1.
+    let calls = 0;
+    let release;
+    const gate = new Promise((r) => {
+      release = r;
+    });
+    const monitor = new ProcessMonitor(async () => {
+      calls += 1;
+      await gate;
+      return world([[1, "a.exe"]]);
+    });
+
+    const tick = monitor.poll();
+    const pedido = monitor.list();
+    assert.equal(calls, 1, "o timer e a UI nao podem enumerar o SO em paralelo");
+    release();
+    await Promise.all([tick, pedido]);
+    assert.equal(calls, 1, "nem depois de livre ha uma segunda enumeracao deste par");
+  });
+
+  it("depois de livre, uma enumeracao nova pode correr", async () => {
+    let calls = 0;
+    const monitor = new ProcessMonitor(async () => {
+      calls += 1;
+      return world([[1, "a.exe"]]);
+    });
+    await monitor.list();
+    await monitor.list();
+    assert.equal(calls, 2, "o single-flight nao pode colar nem travar o monitor para sempre");
   });
 });

@@ -13,31 +13,42 @@ import {
   SCAN_STALL_MS,
   ZIP_CONTENT_NOTE,
   activeScanDetail,
+  cancelButtonState,
   decideScanRecovery,
   activeScanTitle,
   buildResultSummary,
   decideScanEvent,
+  filesExcludedFooterLabel,
+  filesFailedFooterLabel,
   formatEta,
+  formatScanDurationLabel,
   isActiveUiStatus,
   isTerminalScanStatus,
   isTerminalUiStatus,
   mergeScanState,
+  noDetectionsTone,
   normalizeScanState,
   normalizeScanType,
+  resultFilesWithoutDetections,
+  resultFilesWithoutDetectionsNote,
+  resultFollowUpNote,
+  scanElapsedSeconds,
   scanEtaSeconds,
   scanProgressPercent,
   scanRateLabel,
   scanScopeFor,
   scopeTitle,
+  showNoThreatsReassurance,
   shouldAcceptScanState,
   shouldShowHydration,
+  terminalScanLogMessage,
   uiStatusForState,
   type ScanIntentKind,
   type ScanScope,
   type ScanUiStatus,
 } from "@/lib/scanSession"
 
-const DEV = import.meta.env.DEV
+const DEV = import.meta.env?.DEV === true
 
 /** Logs de diagnóstico concisos e apenas em desenvolvimento. */
 function devLog(message: string, extra?: unknown) {
@@ -48,15 +59,6 @@ function devLog(message: string, extra?: unknown) {
 
 function logStamp(): string {
   return `[${new Date().toLocaleTimeString()}]`
-}
-
-function elapsedSeconds(state: ScanState | null): number {
-  if (!state?.startTime) return 0
-  const started = new Date(state.startTime).getTime()
-  if (!Number.isFinite(started)) return 0
-  const end = state.endTime ? new Date(state.endTime).getTime() : Date.now()
-  if (!Number.isFinite(end)) return 0
-  return Math.max(0, Math.floor((end - started) / 1000))
 }
 
 function targetNameOf(state: ScanState | null): string | undefined {
@@ -94,6 +96,12 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
   const [scanProgress, setScanProgress] = useState<ScanState | null>(null)
   const [scanLog, setScanLog] = useState<string[]>([])
   const [stalled, setStalled] = useState(false)
+  /**
+   * Pedido de cancelamento já enviado e ainda não confirmado por um evento
+   * terminal do motor. Enquanto verdadeiro o botão deixa de oferecer o que
+   * já aconteceu — um segundo clique só reenviaria o mesmo cancelamento.
+   */
+  const [cancelRequested, setCancelRequested] = useState(false)
   /**
    * Só é verdadeiro depois de uma sessão VIVA ter sido comprovada, nunca por
    * omissão. Antes vinha `true` desde o mount, e isso prometia no ecrã
@@ -143,13 +151,7 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
     })
 
     if (isTerminalScanStatus(merged.status)) {
-      const message =
-        merged.status === "completed"
-          ? `Análise concluída: ${merged.filesScanned} ficheiros analisados, ${merged.threatsFound} ameaças`
-          : merged.status === "cancelled"
-            ? `Análise cancelada: ${merged.filesScanned} ficheiros analisados`
-            : `Análise falhada${merged.error ? `: ${merged.error}` : ""}`
-      setScanLog(prev => [...prev, `${logStamp()} ${message}`])
+      setScanLog(prev => [...prev, `${logStamp()} ${terminalScanLogMessage(merged)}`])
       return
     }
 
@@ -321,6 +323,7 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
     scanProgressRef.current = null
     setError("")
     setStalled(false)
+    setCancelRequested(false)
     devLog(`launch requested type=${type} intent=${intent} target=${targetPath ?? ""}`)
 
     try {
@@ -350,11 +353,11 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
         // Não temos ainda progresso, mas o scan existe: nunca ficar num spinner mudo.
         setUiStatus("gathering")
       }
-    } catch (err: any) {
+    } catch (err) {
       if (!mountedRef.current) return
       devLog("start failed", err)
       setUiStatus("idle")
-      setError("Erro ao iniciar análise: " + (err?.message ?? String(err)))
+      setError("Erro ao iniciar análise: " + (err instanceof Error ? err.message : String(err)))
     } finally {
       launchLockRef.current = false
     }
@@ -398,8 +401,8 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
       if (!filePath) return
       const name = filePath.split(/[/\\]/).pop() || filePath
       launchScan("custom", filePath, `Análise do ficheiro: ${name}`, "file")
-    } catch (err: any) {
-      setError("Erro ao abrir diálogo: " + err.message)
+    } catch (err) {
+      setError("Erro ao abrir diálogo: " + (err instanceof Error ? err.message : String(err)))
     }
   }, [launchScan, uiStatus])
 
@@ -414,8 +417,8 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
       if (!folderPath) return
       const name = folderPath.split(/[/\\]/).pop() || folderPath
       launchScan("custom", folderPath, `Análise da pasta: ${name} (todos os ficheiros dentro da pasta)`, "folder")
-    } catch (err: any) {
-      setError("Erro ao abrir diálogo: " + err.message)
+    } catch (err) {
+      setError("Erro ao abrir diálogo: " + (err instanceof Error ? err.message : String(err)))
     }
   }, [launchScan, uiStatus])
 
@@ -426,10 +429,12 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
     try {
       devLog(`cancel requested id=${id}`)
       await api.cancelScan(id)
+      // O pedido foi aceite; o estado terminal só é assumido quando o backend
+      // confirma (evento cancelled). Até lá o botão mostra o que aconteceu.
+      setCancelRequested(true)
       setScanLog(prev => [...prev, `${logStamp()} Cancelamento pedido ao motor`])
-      // O estado terminal só é assumido quando o backend confirma (evento cancelled).
-    } catch (err: any) {
-      setError("Erro ao cancelar: " + err.message)
+    } catch (err) {
+      setError("Erro ao cancelar: " + (err instanceof Error ? err.message : String(err)))
     }
   }, [])
 
@@ -443,6 +448,7 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
     setHydrating(false)
     setError("")
     setStalled(false)
+    setCancelRequested(false)
     expectedScanIdRef.current = null
     activeScanIdRef.current = null
     intentRef.current = null
@@ -468,7 +474,7 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
     if (!files || files.length === 0) return
     const file = files[0]
     // Electron 32+ removeu `File.path`: o caminho real só existe no preload.
-    const filePath = window.electronAPI?.getPathForFile?.(file) || (file as any).path
+    const filePath = window.electronAPI?.getPathForFile?.(file) || (file as File & { path?: string }).path
     if (!filePath) {
       setError("Não foi possível obter o caminho do ficheiro largado.")
       return
@@ -479,6 +485,7 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
 
   const isActive = isActiveUiStatus(uiStatus)
   const isTerminal = isTerminalUiStatus(uiStatus)
+  const cancel = cancelButtonState(uiStatus, !!activeScanId, cancelRequested)
 
   const effectiveType = normalizeScanType(scanProgress?.type ?? scanType)
   const scope: ScanScope = scanScopeFor(
@@ -491,11 +498,11 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
   const discovered = scanProgress?.filesDiscovered ?? scanProgress?.filesScanned ?? 0
   const totalCandidates = scanProgress?.filesTotal ?? scanProgress?.filesDiscovered ?? 0
   const analyzed = scanProgress?.filesScanned ?? 0
-  const analyzedByEngines = scanProgress?.filesAnalyzed ?? scanProgress?.filesScanned ?? 0
   const currentFile = scanProgress?.currentFile
   const hasFileActivity = analyzed > 0 || (scanProgress?.progress ?? 0) > 0
   const progressPercent = scanProgressPercent(scanProgress)
   const etaLabel = formatEta(scanEtaSeconds(scanProgress))
+  const noDetectionsCount = scanProgress ? resultFilesWithoutDetections(scanProgress) : null
 
   return (
     <div className="p-8 space-y-8 animate-in fade-in duration-500 overflow-y-auto max-h-[calc(100vh-100px)]">
@@ -564,11 +571,11 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
             </div>
             <button
               onClick={handleCancel}
-              disabled={!activeScanId}
+              disabled={!cancel.enabled}
               className="px-4 py-2 bg-cyber-red/20 text-cyber-red border border-cyber-red/50 font-mono text-xs rounded-lg hover:bg-cyber-red/30 transition-all flex items-center gap-2 disabled:opacity-50"
             >
               <X className="w-4 h-4" />
-              Cancelar
+              {cancel.label}
             </button>
           </div>
 
@@ -607,7 +614,7 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
               )}
             </div>
             <p className="text-xs text-muted-foreground mt-2">
-              {activeScanDetail(scope, effectiveType, uiStatus, targetName)}
+              {activeScanDetail(scope, effectiveType, uiStatus, targetName, scanProgress?.filesInEngineBatch ?? 0)}
               {etaLabel ? ` ${etaLabel}.` : ""}
             </p>
           </div>
@@ -647,7 +654,7 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
               <div className="text-xs text-muted-foreground uppercase mb-1">Tempo Decorrido</div>
               <div className="text-xl font-mono font-bold text-foreground flex items-center gap-1">
                 <Clock className="w-4 h-4 text-primary" />
-                {elapsedSeconds(scanProgress)}s
+                {scanElapsedSeconds(scanProgress)}s
               </div>
             </div>
           </div>
@@ -700,11 +707,11 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
               <div className="text-3xl font-mono font-bold text-foreground">{scanProgress.filesScanned}</div>
             </div>
             <div className="bg-black/20 rounded-lg p-4 border border-white/5 text-center">
-              <div className="text-xs text-muted-foreground uppercase mb-2">{SCAN_RESULT_LABELS.noThreatsDetected}</div>
-              <div className="text-3xl font-mono font-bold text-cyber-green">
-                {uiStatus === "failed" ? "—" : Math.max(0, analyzedByEngines - scanProgress.threatsFound)}
+              <div className="text-xs text-muted-foreground uppercase mb-2">{SCAN_RESULT_LABELS.filesWithoutDetections}</div>
+              <div className={cn("text-3xl font-mono font-bold", scanProgress && noDetectionsTone(scanProgress) === "green" ? "text-cyber-green" : "text-muted-foreground")}>
+                {noDetectionsCount ?? "—"}
               </div>
-              <div className="text-[10px] text-muted-foreground mt-1">ficheiros sem deteções</div>
+              <div className="text-[10px] text-muted-foreground mt-1">{scanProgress ? resultFilesWithoutDetectionsNote(scanProgress) : ""}</div>
             </div>
             <div className="bg-black/20 rounded-lg p-4 border border-white/5 text-center">
               <div className="text-xs text-muted-foreground uppercase mb-2">{SCAN_RESULT_LABELS.threatsFound}</div>
@@ -715,13 +722,13 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
           {/* Frase-resumo explícita */}
           <div className={cn(
             "flex items-start gap-4 p-4 rounded-xl mb-4 border",
-            uiStatus === "completed" && scanProgress.threatsFound === 0
+            showNoThreatsReassurance(uiStatus, scanProgress)
               ? "bg-cyber-green/5 border-cyber-green/20"
               : uiStatus === "completed"
                 ? "bg-cyber-red/5 border-cyber-red/20"
                 : "bg-black/20 border-white/5"
           )}>
-            {uiStatus === "completed" && scanProgress.threatsFound === 0 ? (
+            {showNoThreatsReassurance(uiStatus, scanProgress) ? (
               <MatrixAvatar mood="success" size="sm" />
             ) : uiStatus === "failed" || scanProgress.threatsFound > 0 ? (
               <MatrixAvatar mood="alert" size="sm" />
@@ -743,12 +750,12 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
                   error: scanProgress.error,
                 })}
               </p>
-              {uiStatus === "completed" && scanProgress.threatsFound > 0 && (
+              {resultFollowUpNote(uiStatus, scanProgress.threatsFound) && (
                 <p className="text-xs text-muted-foreground mt-2">
-                  Revisa os detalhes na página <span className="font-mono text-primary">Ameaças</span> e coloca os ficheiros em quarentena.
+                  {resultFollowUpNote(uiStatus, scanProgress.threatsFound)}
                 </p>
               )}
-              {uiStatus === "completed" && (
+              {showNoThreatsReassurance(uiStatus, scanProgress) && (
                 <p className="text-xs text-muted-foreground/80 mt-2">{NO_DETECTIONS_NOTE}</p>
               )}
             </div>
@@ -756,18 +763,13 @@ export default function FileScannerPage({ pendingScan, onScanConsumed }: FileSca
 
           <div className="flex flex-wrap items-center justify-between gap-2 text-xs font-mono text-muted-foreground mb-6">
             <span>
-              Duração: {elapsedSeconds(scanProgress)}s
-              {scanProgress.startTime && scanProgress.endTime && ` (${
-                new Date(scanProgress.endTime).getTime() - new Date(scanProgress.startTime).getTime() < 1000
-                  ? "menos de 1 segundo"
-                  : `${Math.floor((new Date(scanProgress.endTime).getTime() - new Date(scanProgress.startTime).getTime()) / 1000)} segundos`
-              })`}
+              Duração: {formatScanDurationLabel(scanProgress) ?? `${scanElapsedSeconds(scanProgress)}s`}
             </span>
             {(scanProgress.filesFailed ?? 0) > 0 && (
-              <span>{scanProgress.filesFailed} ficheiro(s) não puderam ser analisados.</span>
+              <span>{filesFailedFooterLabel(scanProgress.filesFailed ?? 0)}.</span>
             )}
             {(scanProgress.filesExcluded ?? 0) > 0 && (
-              <span>{scanProgress.filesExcluded} ficheiro(s) ignorados por exclusões.</span>
+              <span>{filesExcludedFooterLabel(scanProgress.filesExcluded ?? 0)}.</span>
             )}
             {targetName && <span className="truncate">Alvo: {targetName}</span>}
           </div>

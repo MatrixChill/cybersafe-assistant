@@ -314,6 +314,7 @@ async function updateServiceStatus() {
 
       // Usa fs para checar se as imagens específicas existem, senão faz fallback pro ícone padrão
       let iconPathToUse = defaultIconPath;
+      let dedicated = false; // PNG dedicado ao slot: 1:1, sem resize
 
       if (isServiceRunning && fs.existsSync(assetsPath("tray-icon-active.png"))) {
         iconPathToUse = assetsPath("tray-icon-active.png");
@@ -321,10 +322,20 @@ async function updateServiceStatus() {
         iconPathToUse = assetsPath("tray-icon-warning.png");
       }
 
+      // Variante B (tray): símbolo transparente com tamanho dedicado ao slot
+      // (100%→16, 125%→20, 150%→24, 200%→32 — mesma tabela de trayIconSizePx).
+      // Se o ficheiro do tamanho não existir, mantém o tile de cima: nunca tray vazio.
+      const slotPx = trayIconSizePx();
+      const symbolPath = assetsPath("cybersafe", `tray-symbol-${isServiceRunning ? "active" : "warning"}-${slotPx}.png`);
+      if (fs.existsSync(symbolPath)) {
+        iconPathToUse = symbolPath;
+        dedicated = true;
+      }
+
       const image = nativeImage.createFromPath(iconPathToUse);
       if (!image.isEmpty()) {
         const size = trayIconSizePx();
-        tray.setImage(image.resize({ width: size, height: size }));
+        tray.setImage(dedicated ? image : image.resize({ width: size, height: size }));
       }
     } catch (e) {
       console.error("Erro ao atualizar icone", e);
@@ -530,9 +541,16 @@ const exitConfirmation = createExitConfirmation({
 });
 
 function createTray() {
-  const image = nativeImage.createFromPath(resolveTrayIconPath());
   const size = trayIconSizePx();
-  tray = new Tray(image.isEmpty() ? nativeImage.createEmpty() : image.resize({ width: size, height: size }));
+  // Variante B: PNG dedicado ao slot (16/20/24/32), 1:1 sem resize; fallback
+  // para o tile atual se o ficheiro não existir (nunca tray vazio).
+  const dedicatedPath = assetsPath("cybersafe", `tray-symbol-${isServiceRunning ? "active" : "warning"}-${size}.png`);
+  const dedicated = fs.existsSync(dedicatedPath) ? nativeImage.createFromPath(dedicatedPath) : null;
+  const fallback = nativeImage.createFromPath(resolveTrayIconPath());
+  const trayImage = dedicated && !dedicated.isEmpty()
+    ? dedicated
+    : (fallback.isEmpty() ? nativeImage.createEmpty() : fallback.resize({ width: size, height: size }));
+  tray = new Tray(trayImage);
 
   updateTrayMenu();
 

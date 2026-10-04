@@ -5,8 +5,10 @@ import type {
   ProtectionState,
   QuarantineEntry,
   SecurityEvent,
+  EngineSubsystemStatus,
 } from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
+import { engineStatusText } from "@/lib/protectionHealth";
 
 interface MonitorPageProps {
   events: SecurityEvent[];
@@ -21,6 +23,9 @@ const EVENT_LABELS: Record<string, { label: string; icon: typeof Info; tone: "da
   "threat.detected": { label: "Ameaça detetada", icon: AlertTriangle, tone: "danger" },
   "process.blocked": { label: "Processo bloqueado", icon: Lock, tone: "danger" },
   "process.killed": { label: "Processo encerrado", icon: Lock, tone: "danger" },
+  // WS-2B: sinal heuristico de command line — NAO e ameaca confirmada, e um
+  // sinal a rever. Sem kill automatico. Tone de atencao, nao info.
+  "process.suspicious": { label: "Sinal a rever", icon: AlertTriangle, tone: "warning" },
   "process.started": { label: "Processo iniciado", icon: Activity, tone: "info" },
   "persistence.detected": { label: "Persistência suspeita", icon: AlertTriangle, tone: "warning" },
   "artifact.analyzed": { label: "Ficheiro analisado", icon: FileSearch, tone: "info" },
@@ -57,7 +62,11 @@ export default function MonitorPage({ events, processes, connections, protection
         <div className="flex items-center gap-2 px-4 py-2 bg-secondary rounded-lg">
           <Clock className="w-4 h-4 text-muted-foreground" />
           <span className="text-sm font-mono text-muted-foreground">Estado:</span>
-          <span className="text-sm font-mono text-foreground font-bold">{protection?.status ?? "degraded"}</span>
+          <span className="text-sm font-mono text-foreground font-bold">
+            {protection?.status
+              ? engineStatusText(protection.status as EngineSubsystemStatus)
+              : "Sem dados do serviço"}
+          </span>
         </div>
       </div>
 

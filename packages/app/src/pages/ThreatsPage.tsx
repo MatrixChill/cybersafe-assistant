@@ -1,7 +1,8 @@
-import { AlertTriangle, Shield, Search, ChevronDown, Clock, Trash2, CheckCircle2, XCircle, AlertCircle, Globe, FileCode } from "lucide-react"
+import { AlertTriangle, Shield, Search, ChevronDown, Clock, Trash2, XCircle, AlertCircle, Globe, FileCode } from "lucide-react"
 import { useState } from "react"
 import type { ThreatEvent } from "@cybersafe/shared-types"
 import { cn } from "@/lib/utils"
+import { classifyThreatOrigin } from "@/lib/threatOrigins"
 
 interface ThreatsPageProps {
   events: ThreatEvent[]
@@ -23,27 +24,29 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
 
   const formatTime = (iso: string) => {
     try {
-        return new Date(iso).toLocaleString("pt-BR", { 
-            day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit" 
+        return new Date(iso).toLocaleString("pt-PT", {
+            day: "2-digit", month: "2-digit", hour: "2-digit", minute: "2-digit", second: "2-digit"
         })
     } catch { return iso }
   }
 
   const getSeverityColor = (severity: string) => {
+    // Verde está reservado a "verificado limpo": nenhuma ameaça, nem "Baixa",
+    // se pinta de cyber-green. Baixa = neutra; Média = âmbar; Alta/ Crítica = vermelho.
     switch (severity) {
       case "critical": return "text-cyber-red bg-cyber-red/10 border-cyber-red/30"
-      case "high": return "text-cyber-yellow bg-cyber-yellow/10 border-cyber-yellow/30"
-      case "medium": return "text-cyber-cyan bg-cyber-cyan/10 border-cyber-cyan/30"
-      default: return "text-cyber-green bg-cyber-green/10 border-cyber-green/30"
+      case "high": return "text-cyber-red bg-cyber-red/10 border-cyber-red/30"
+      case "medium": return "text-cyber-yellow bg-cyber-yellow/10 border-cyber-yellow/30"
+      default: return "text-muted-foreground bg-muted/40 border-border"
     }
   }
 
   const getStatusIcon = (severity: string) => {
     switch (severity) {
       case "critical": return <XCircle className="w-5 h-5 text-cyber-red" />
-      case "high": return <AlertCircle className="w-5 h-5 text-cyber-yellow" />
-      case "medium": return <AlertCircle className="w-5 h-5 text-cyber-cyan" />
-      default: return <CheckCircle2 className="w-5 h-5 text-cyber-green" />
+      case "high": return <AlertCircle className="w-5 h-5 text-cyber-red" />
+      case "medium": return <AlertCircle className="w-5 h-5 text-cyber-yellow" />
+      default: return <AlertCircle className="w-5 h-5 text-muted-foreground" />
     }
   }
 
@@ -53,7 +56,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-bold font-mono tracking-tight">
-            Ameaças <span className="text-primary">Detectadas</span>
+            Ameaças <span className="text-primary">Detetadas</span>
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
             Histórico de ameaças identificadas e bloqueadas
@@ -81,7 +84,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
           <Search className="absolute left-4 top-1/2 -translate-y-1/2 w-4 h-4 text-muted-foreground" />
           <input
             type="text"
-            placeholder="Buscar ameaças..."
+            placeholder="Pesquisar ameaças..."
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
             className="w-full bg-secondary border border-border rounded-lg pl-11 pr-4 py-3 text-sm font-mono placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-primary/50 focus:border-primary transition-all"
@@ -116,9 +119,9 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
                 <div className="flex items-start gap-4">
                   <div className={cn(
                       "w-10 h-10 rounded-lg flex items-center justify-center border",
-                      threat.severity === 'critical' ? "bg-cyber-red/10 border-cyber-red/30" : 
-                      threat.severity === 'high' ? "bg-cyber-yellow/10 border-cyber-yellow/30" : 
-                      "bg-cyber-cyan/10 border-cyber-cyan/30"
+                      threat.severity === 'critical' || threat.severity === 'high' ? "bg-cyber-red/10 border-cyber-red/30" :
+                      threat.severity === 'medium' ? "bg-cyber-yellow/10 border-cyber-yellow/30" :
+                      "bg-muted/40 border-border"
                   )}>
                     {getStatusIcon(threat.severity)}
                   </div>
@@ -205,7 +208,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
             <Globe className="w-5 h-5 text-cyber-cyan" />
           </div>
           <div className="text-3xl font-bold font-mono text-cyber-cyan mb-2">
-            {events.filter(e => e.source === 'extension').length}
+            {events.filter(e => classifyThreatOrigin(e.source) === 'web').length}
           </div>
           <div className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
             Origens Web
@@ -217,7 +220,7 @@ export default function ThreatsPage({ events, onClear, isClearing }: ThreatsPage
             <FileCode className="w-5 h-5 text-cyber-yellow" />
           </div>
           <div className="text-3xl font-bold font-mono text-cyber-yellow mb-2">
-            {events.filter(e => e.source === 'dashboard' || e.source === 'download-monitor').length}
+            {events.filter(e => classifyThreatOrigin(e.source) === 'local').length}
           </div>
           <div className="text-xs font-mono text-muted-foreground uppercase tracking-wider">
             Origens Locais

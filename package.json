@@ -14,6 +14,7 @@
     "dev": "concurrently --kill-others \"npm run dev:service\" \"npm run dev:api\" \"npm run dev:app\" \"npm run dev:desktop\"",
     "build:all": "npm run build --workspaces",
     "build:native": "cmake -S packages/native-engine -B packages/native-engine/build && cmake --build packages/native-engine/build --config Release",
+    "test:native": "node --test packages/native-engine/test/hash-vectors.test.js",
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "memory:report": "node scripts/memory-report.mjs",

@@ -1,9 +1,10 @@
-import { IMPORTANT_WINDOWS_SERVICES } from "@cybersafe/shared-types";
+import { IMPORTANT_WINDOWS_SERVICES, wfpHealth, ENGINE_DISPLAY_NAME, engineContextCopy } from "@cybersafe/shared-types";
 import type {
   Finding,
   FindingCategory,
   FindingEvidence,
   FindingSeverity,
+  EngineSubsystemHealth,
   HardwareSnapshot,
   PcState,
   PcStateCounts,
@@ -97,12 +98,26 @@ const IMPERATIVE_ENGINES: Array<"yara" | "hashDb" | "clamav" | "nativeEngine"> =
   "nativeEngine",
 ];
 
-type EngineStatusName = "yara" | "hashDb" | "clamav" | "nativeEngine" | "firewall";
+type EngineStatusName = "yara" | "hashDb" | "clamav" | "nativeEngine" | "wfp";
 
-const UNAVAILABLE_ENGINES: EngineStatusName[] = [...IMPERATIVE_ENGINES, "firewall"];
+const UNAVAILABLE_ENGINES: EngineStatusName[] = [...IMPERATIVE_ENGINES, "wfp"];
+
+/**
+ * Le um motor pelo nome interno, resolvendo o `wfp` pelos DOIS nomes.
+ *
+ * Sem isto, um servico que so publique o alias antigo `firewall` deixava de ser
+ * contado, e o WFP em falta desaparecia das findings em silencio. Indexar
+ * `engine["wfp"]` direto e o bug que o helper existe para evitar.
+ */
+function readEngine(
+  name: EngineStatusName,
+  engine: ProtectionState["engine"] | undefined,
+): EngineSubsystemHealth | undefined {
+  return name === "wfp" ? wfpHealth(engine) : engine?.[name];
+}
 
 function engineNeedsAttention(name: EngineStatusName, engine: ProtectionState["engine"] | undefined): boolean {
-  const status = engine?.[name]?.status;
+  const status = readEngine(name, engine)?.status;
   return status === "unavailable" || status === "degraded";
 }
 
@@ -179,7 +194,7 @@ function securityCandidates(input: PcStateEngineInput): Candidate[] {
   }
 
   if (engine) {
-    const errored = IMPERATIVE_ENGINES.filter((name) => engine[name]?.status === "error");
+    const errored = IMPERATIVE_ENGINES.filter((name) => readEngine(name, engine)?.status === "error");
     if (errored.length > 0) {
       out.push({
         key: "security:engine-error",
@@ -191,22 +206,28 @@ function securityCandidates(input: PcStateEngineInput): Candidate[] {
         evidence: {
           engine: errored.join(", "),
           engineStatus: "error",
-          evidenceLines: errored.map((name) => `${name}: ${engine[name]?.detail ?? "error"}`),
+          evidenceLines: errored.map((name) => {
+            const copy = engineContextCopy(name, readEngine(name, engine));
+            return `${ENGINE_DISPLAY_NAME[name] ?? name}: ${copy.estado} — ${copy.texto}`;
+          }),
         },
         minSamples: 1,
         actionable: false,
       });
     }
 
-    if (engine.firewall?.status === "error") {
+    if (wfpHealth(engine)?.status === "error") {
       out.push({
         key: "security:firewall-error",
         category: "security",
         severity: "attention",
-        title: "Erro no firewall",
-        summary: "A proteção de firewall do sistema reporta um erro.",
+        // "Erro no firewall" e "A proteccao de firewall do SISTEMA" eram as duas
+        // metades da mesma mentira: o que reportou erro foi o filtro WFP do
+        // CyberSafe, e nada disto diz o que o Windows Firewall esta a fazer.
+        title: "Erro no filtro WFP do CyberSafe",
+        summary: "O filtro de bloqueio de rede do CyberSafe reporta um erro. Nada disto diz respeito ao Firewall do Windows.",
         source: "protection-engine",
-        evidence: { engine: "firewall", engineStatus: "error", status: engine.firewall.detail },
+        evidence: { engine: "wfp", engineStatus: "error", status: wfpHealth(engine)?.detail },
         minSamples: 1,
         actionable: false,
       });
@@ -224,15 +245,18 @@ function securityCandidates(input: PcStateEngineInput): Candidate[] {
             ? "Um componente de proteção não está totalmente disponível."
             : `${attentionEngines.length} componentes de proteção precisam de atenção.`,
         source: "protection-engine",
-        evidence: {
-          engine: attentionEngines.map((name) => `${name} (${engine[name]?.status ?? "unknown"})`).join(", "),
-          engineStatus: attentionEngines.map((name) => engine[name]?.status ?? "unknown").join(", "),
-          evidenceLines: attentionEngines.map((name) => {
-            const sub = engine[name];
-            const status = sub?.status ?? "unknown";
-            return `${name}: ${status}${sub?.detail ? ` — ${sub.detail}` : ""}`;
-          }),
-        },
+          evidence: {
+            // Nomes sem tokens: "(degraded)" no DADO do painel era o estado
+            // interno do servico a aparecer como copy de ecra. O estado PT-PT
+            // vem por linha, e o detail cru fica so nos detalhes tecnicos.
+            engine: attentionEngines.map((name) => ENGINE_DISPLAY_NAME[name] ?? name).join(", "),
+            engineStatus: attentionEngines.map((name) => readEngine(name, engine)?.status ?? "unknown").join(", "),
+            evidenceLines: attentionEngines.flatMap((name) => {
+              const copy = engineContextCopy(name, readEngine(name, engine));
+              const linha = `${ENGINE_DISPLAY_NAME[name] ?? name}: ${copy.estado} — ${copy.texto}`;
+              return copy.contexto ? [linha, copy.contexto] : [linha];
+            }),
+          },
         minSamples: 1,
         actionable: false,
       });
@@ -240,6 +264,17 @@ function securityCandidates(input: PcStateEngineInput): Candidate[] {
 
     const specificSecurity = out.some((c) => c.severity === "urgent" || c.severity === "attention");
     if (!specificSecurity && (p.status === "attention" || p.status === "degraded")) {
+      // Fallback do estado geral: as `degradedReasons` cruas trazem tokens e
+      // paths do provider. Aqui so sai copy humana, linha por motor.
+      const unhealthyLines = UNAVAILABLE_ENGINES
+        .filter((name) => {
+          const status = readEngine(name, engine)?.status;
+          return status === "degraded" || status === "unavailable" || status === "error";
+        })
+        .map((name) => {
+          const copy = engineContextCopy(name, readEngine(name, engine));
+          return `${ENGINE_DISPLAY_NAME[name] ?? name}: ${copy.estado} — ${copy.texto}`;
+        });
       out.push({
         key: "security:protection-attention",
         category: "security",
@@ -247,7 +282,7 @@ function securityCandidates(input: PcStateEngineInput): Candidate[] {
         title: "Proteção requer atenção",
         summary: "O estado geral de proteção indica degradação ou necessidade de atenção.",
         source: "protection-engine",
-        evidence: { status: p.status, evidenceLines: engine.degradedReasons ?? [] },
+        evidence: { status: p.status, evidenceLines: unhealthyLines.length > 0 ? unhealthyLines : (engine.degradedReasons ?? []) },
         minSamples: 1,
         actionable: false,
       });
@@ -447,23 +482,45 @@ const WINDOWS_RECS_COVERED_BY_HARDWARE: Record<string, true> = {
   "ram-attention": true,
 };
 
-/** Serviço do Windows que o estado do firewall da proteção já representa. */
-const FIREWALL_SERVICE = "mpssvc";
+/**
+ * NOTA sobre `mpssvc` (o servico do Firewall do Windows).
+ *
+ * Este ficheiro chegou a ter `firewallCoveredByProtection()`, que devolvia
+ * `true` quando o filtro WFP do CyberSafe estava INACTIVO, e usava esse `true`
+ * para REMOVER o `mpssvc` de "servicos importantes em baixo". E o contrario do
+ * nome e o contrario da seguranca: quando o CyberSafe estava mais fraco, o
+ * achado de rede desprotegida era silenciado. O `mpssvc` parado e um problema do
+ * Windows Firewall, exista ou nao exista filtro do CyberSafe.
+ *
+ * O estado do Windows Firewall tem fonte propria e com dado real:
+ * `WindowsHealthSnapshot.firewall` (`Get-NetFirewallProfile`), e e essa que
+ * produz a finding `firewall-disabled`.
+ */
 
 function downImportantServices(health: WindowsHealthSnapshot): WindowsHealthSnapshot["services"] {
   return health.services.filter((s) => IMPORTANT_WINDOWS_SERVICES.includes(s.name) && !s.running);
 }
 
-function firewallCoveredByProtection(input: PcStateEngineInput): boolean {
-  const firewall = input.protection?.engine?.firewall;
-  return firewall !== undefined && firewall.status !== "active";
-}
+/**
+ * O filtro WFP do CyberSafe e o Firewall do Windows sao coisas diferentes, e por
+ * isso esta funcao deixou de existir.
+ *
+ * A versao anterior devolvia `true` quando o filtro WFP estava INACTIVO, e esse
+ * `true` servia para filtrar o servico `mpssvc` (o Firewall do Windows) de
+ * "servicos importantes em baixo". E o contrario do nome e o contrario da
+ * seguranca: quando o CyberSafe esta mais fraco, o achado de rede desprotegida
+ * era silenciado. E o `mpssvc` parado mantem-se um problema do Windows Firewall
+ * com ou sem filtro do CyberSafe.
+ *
+ * O estado do Windows Firewall tem a sua propria fonte, com dado real:
+ * `WindowsHealthSnapshot.firewall` (`Get-NetFirewallProfile`), e e essa que
+ * produz a finding `firewall-disabled`.
+ */
 
 function windowsRecommendationsCandidates(input: PcStateEngineInput, config: PcStateConfig): Candidate[] {
   const health = input.windowsHealth;
   if (!health) return [];
 
-  const firewallCovered = firewallCoveredByProtection(input);
   const downServices = downImportantServices(health);
 
   const out: Candidate[] = [];
@@ -478,11 +535,11 @@ function windowsRecommendationsCandidates(input: PcStateEngineInput, config: PcS
     let summary = rec.description;
 
     if (rec.id === "service-down") {
-      const remaining = firewallCovered
-        ? downServices.filter((s) => s.name !== FIREWALL_SERVICE)
-        : downServices;
-      if (remaining.length === 0) continue;
-      summary = remaining.map((s) => s.displayName || s.name).join(", ");
+      // Sem filtro do `mpssvc`: o Windows Firewall parado e um problema do
+      // Windows Firewall, e nao se esconde por o CyberSafe ter (ou nao ter) o
+      // filtro WFP activo.
+      if (downServices.length === 0) continue;
+      summary = downServices.map((s) => s.displayName || s.name).join(", ");
     }
 
     out.push({

@@ -8,14 +8,21 @@ import type {
   ThreatFactor,
   TrustDecision,
 } from "@cybersafe/shared-types";
+import { wfpHealth } from "@cybersafe/shared-types";
 import { DEFAULT_SETTINGS, scoreToStatus, trustReduction } from "./definitions.js";
 
 export interface ScoringInput {
   signatureMatch: boolean;
   yaraMatches: number;
+  /** Only rules explicitly classified as strong by the definition author. */
+  strongYaraMatches?: number;
+  signatureStatus?: AuthenticodeStatus;
   rulesTriggered: HeuristicRuleId[];
   trustDecision: TrustDecision;
 }
+
+/** invalid/tampered require cryptographic evidence, not a verification error. */
+export type AuthenticodeStatus = "verified" | "trusted" | "unsigned" | "unavailable" | "UnknownError" | "invalid" | "tampered";
 
 export interface ScoreResult {
   riskScore: number;
@@ -33,7 +40,7 @@ const RULE_WEIGHTS: Partial<Record<HeuristicRuleId, number>> = {
   executable_signature: 25,
   archive_with_exe: 30,
   magic_number_mismatch: 30,
-  high_entropy: 5, // Reduzido drasticamente (era 20)
+  high_entropy: 5, // Pode ocorrer em executáveis legítimos comprimidos/empacotados.
   process_injection_indicator: 30,
   suspicious_location: 15,
   persistence_attempt: 30,
@@ -41,29 +48,96 @@ const RULE_WEIGHTS: Partial<Record<HeuristicRuleId, number>> = {
   // Canário dev-only: banda "medium" (41–70) — gera deteção/teste real sem
   // quarentena nem bloqueio; nunca em NODE_ENV=production.
   dev_canary_signature: 55,
-  yara_match: 85,
+  yara_match: 20,
   known_malware: 95,
   allowlisted_hash: -60,
   trusted_publisher: -30, // Aumentado (era -20)
   trusted_system_path: -25, // Aumentado (era -15)
-  unsigned_binary: 10, // Reduzido (era 15)
+  unsigned_binary: 0,
   office_child_process: 20,
   script_spawns_binary: 20,
   rapid_process_fanout: 20,
   blocked_reexecution: 95,
+  // Peso ZERO de propósito, e é a decisão mais importante desta tabela.
+  //
+  // "Não conseguimos avaliar" não é evidência de perigo. Somar-lhe pontos
+  // seria fabricar uma ameaça que não existe; subtrair-lhe seria fabricar uma
+  // garantia que também não existe. O que faz é CONTINUAR VISÍVEL: a regra
+  // entra em `rulesTriggered` e no `summary` que o utilizador lê, para que
+  // "limpo" nunca seja uma palavra que o produto disse sem ter analisado.
+  scan_inconclusive: 0,
 };
 
 /**
- * Evidência FORTE: identifica o binário. Só isto, ou uma combinação
- * deliberadamente reforçada de heurísticas, pode chamar "malware" a algo.
+ * ROTULOS DOS FACTOS — PT-PT, e a unica coisa que este `id` faz no ecra.
  *
- * Tudo o resto — estar numa pasta Temperada, ter entropia alta, ser um arquivo
- * que contém um .exe, não ter signer — é SINAL HEURÍSTICO. Um VSIX legítimo
- * do Visual Studio podia reunir três deles e era anunciado como ameaça.
+ * `factors[].label` nao e um campo interno: o servico junta os labels num
+ * `summary` e publica-o no evento `artifact.analyzed`
+ * (packages/service/src/engine.ts:1082), e esse summary chega ao toast e ao
+ * relatorio. O label e a unica explicacao que o produto da de porque
+ * classificou o ficheiro, e o utilizador le-o em portugues.
+ *
+ * Antes disto o rotulo era `rule.replaceAll("_", " ")` — a chave tecnica com
+ * os underscores virados em espacos, em ingles. Nao e um detalhe de estilo: o
+ * score e correcto, mas o utilizador lia "dangerous file extension" no meio de
+ * uma frase portuguesa e nao sabia o que aquilo queria dizer.
+ *
+ * `id` e `weight` NAO mudam. O `id` e a chave de dados — varios testes e
+ * consumidores filtram por ele (`f.id === "yara_match"`) — e mudar a copy nunca
+ * justifica mudar a chave. O `label` e que e自由度 de traducao.
+ *
+ * O fallback nunca mostra a forma crua. Uma regra nova que nao entre aqui
+ * mostra o identificador com os underscores virados em palavras, capitalizado:
+ * legivel e honesto ("Regra desconhecida"), nunca "regra_desconhecida" nem uma
+ * frase inventada. Um factor com nome mau e melhor do que um factor sem nome.
+ * Guard: packages/core/test/factor-labels-ptpt.test.js.
+ */
+const RULE_LABELS: Partial<Record<HeuristicRuleId, string>> = {
+  dangerous_file_extension: "Extensão de ficheiro perigosa",
+  social_engineering_filename_pattern: "Nome de ficheiro com padrão de engenharia social",
+  suspicious_download_type: "Tipo de transferências suspeito",
+  double_extension: "Extensão dupla",
+  executable_signature: "Assinatura de executável",
+  archive_with_exe: "Ficheiro comprimido que contém um executável",
+  magic_number_mismatch: "Cabeçalho do ficheiro não corresponde ao formato",
+  high_entropy: "Conteúdo com entropia elevada",
+  process_injection_indicator: "Indício de injeção de processos",
+  suspicious_location: "Localização suspeita",
+  persistence_attempt: "Tentativa de persistência",
+  known_bad_hash: "Hash conhecido como malicioso",
+  dev_canary_signature: "Assinatura de canário de teste",
+  yara_match: "Correspondência de regra YARA",
+  known_malware: "Malware conhecido",
+  allowlisted_hash: "Hash na lista de permissões",
+  trusted_publisher: "Editor de confiança",
+  trusted_system_path: "Caminho de sistema confiável",
+  unsigned_binary: "Executável sem assinatura",
+  office_child_process: "Processo filho de uma aplicação do Office",
+  script_spawns_binary: "Script que lança um executável",
+  rapid_process_fanout: "Processos abertos em sequência rápida",
+  blocked_reexecution: "Tentativa de voltar a executar depois de bloqueado",
+  scan_inconclusive: "Análise não concluída — o motor não conseguiu avaliar o ficheiro",
+};
+
+/**
+ * Rotulo legivel para um factor. Uma regra sem traducao propria nao fica com
+ * underscores no ecra: `id.replaceAll("_", " ")` com a primeira letra maiuscula
+ * e' o piso de honestidade — mostra a identificacao real em vez de a esconder.
+ */
+function rotuloDeRegra(rule: HeuristicRuleId): string {
+  const proprio = RULE_LABELS[rule];
+  if (proprio) return proprio;
+  const legivel = rule.replaceAll("_", " ");
+  return legivel.charAt(0).toUpperCase() + legivel.slice(1);
+}
+
+/**
+ * Evidência forte autoriza a classificação crítica. Localização, entropia e
+ * estrutura do ficheiro são heurísticas; ausência de assinatura é neutra.
+ * YARA só é forte com classificação explícita da definição.
  */
 const STRONG_RULES = new Set<HeuristicRuleId>([
   "known_bad_hash",
-  "yara_match",
   "known_malware",
   "blocked_reexecution",
 ]);
@@ -88,37 +162,54 @@ export function scoreThreat(input: ScoringInput): ScoreResult {
   /** Soma só das heurísticas (sem evidência forte, sem confiança negativa). */
   let heuristicScore = 0;
 
-  if (input.signatureMatch) {
+  const hasKnownHash = input.signatureMatch || input.rulesTriggered.includes("known_bad_hash");
+  const hasYara = input.yaraMatches > 0 || input.rulesTriggered.includes("yara_match");
+  const hasStrongYara = input.yaraMatches > 0 && (input.strongYaraMatches ?? 0) > 0;
+  const hasStrongEvidence = hasKnownHash || hasStrongYara || input.rulesTriggered.some(r => STRONG_RULES.has(r));
+
+  if (hasKnownHash) {
     score += 95;
     factors.push({
       id: "known-bad-hash",
-      label: "Known bad hash",
+      label: "Hash conhecido como malicioso",
       weight: 95,
       category: "signature",
     });
   }
 
-  if (input.yaraMatches > 0) {
-    const weight = Math.min(95, 75 + input.yaraMatches * 5);
+  if (hasYara) {
+    // Match count is not independent corroboration: rules can share strings.
+    const weight = hasStrongYara ? 95 : 20;
     score += weight;
+    if (!hasStrongYara) heuristicScore += weight;
     factors.push({
       id: "yara-match",
-      label: "YARA match",
+      label: hasStrongYara ? "YARA: evidência forte" : "YARA: heurística genérica sem corroboração",
       weight,
       category: "yara",
     });
   }
 
-  for (const rule of input.rulesTriggered) {
+  for (const rule of new Set(input.rulesTriggered)) {
+    if (rule === "yara_match" || rule === "known_bad_hash") continue;
     const weight = RULE_WEIGHTS[rule] ?? 10;
     score += weight;
     if (!STRONG_RULES.has(rule) && weight > 0) heuristicScore += weight;
     factors.push({
       id: rule,
-      label: rule.replaceAll("_", " "),
+      label: rotuloDeRegra(rule),
       weight,
       category: weight < 0 ? "trust" : STRONG_RULES.has(rule) ? "signature" : "heuristic",
     });
+  }
+
+  const signatureWeight = input.signatureStatus === "verified" || input.signatureStatus === "trusted"
+    ? -20
+    : input.signatureStatus === "invalid" || input.signatureStatus === "tampered" ? 25 : 0;
+  if (signatureWeight !== 0) {
+    score += signatureWeight;
+    if (signatureWeight > 0) heuristicScore += signatureWeight;
+    factors.push({ id: "authenticode", label: `Authenticode: ${input.signatureStatus}`, weight: signatureWeight, category: signatureWeight < 0 ? "trust" : "heuristic" });
   }
 
   const trustWeight = trustReduction(input.trustDecision);
@@ -132,26 +223,32 @@ export function scoreThreat(input: ScoringInput): ScoreResult {
     });
   }
 
-  score = Math.max(0, Math.min(100, Math.round(score)));
+  // Trust cannot cancel a known detection; weak evidence cannot authorize
+  // destructive action, even when many correlated heuristics accumulate.
+  const boundedScore = hasStrongEvidence ? Math.max(95, Math.min(100, Math.round(score)))
+    : Math.max(0, Math.min(DEFAULT_SETTINGS.thresholds.alertMax, Math.round(score)));
+  if (boundedScore !== score) {
+    const label = hasStrongEvidence && score < 95 ? "Mínimo por evidência forte"
+      : !hasStrongEvidence && score > DEFAULT_SETTINGS.thresholds.alertMax ? "Limite de risco sem evidência forte"
+      : "Normalização do risco para 0–100";
+    factors.push({ id: "evidence-bound", label, weight: boundedScore - score, category: hasStrongEvidence ? "signature" : "heuristic" });
+    score = boundedScore;
+  }
   const recommendedAction = actionFromScore(score);
 
   // ── A DECISÃO ────────────────────────────────────────────────────────────
   // O score sozinho nunca diz "isto é malware": uma soma de sinais fracos
   // alcanca 50 só porque o ficheiro está em \Temp\, tem entropia alta e é um
-  // ZIP com um .exe lá dentro — e isso descreve metade do software instalado
-  // neste pc. O que separa uma deteção de um palpite é a EVIDÊNCIA.
+  // ZIP com um .exe lá dentro. Esses sinais também ocorrem em software legítimo.
   //
-  //  · evidência forte (hash DB, YARA-X, ClamAV, reexecução bloqueada) decide
-  //    pelo score, como sempre;
+  //  · evidência forte (hash DB, YARA classificado, ClamAV, reexecução bloqueada)
+  //    mantém o nível crítico, mesmo com fatores de confiança;
   //  · sem evidência forte, as heurísticas só promovem a "suspicious" quando
   //    estão REFORÇADAS entre si (atingem monitorMax) — aí é finding de
   //    atenção, não malware;
   //  · heurísticas isoladas ou fracas ficam "safe" e "low": continuam listadas
   //    como FINDING (fatores + ação recommended/logged), mas o serviço deixa de
   //    as anunciar como "Threat detected", porque isso exige severity != low.
-  const hasStrongEvidence =
-    input.signatureMatch || input.yaraMatches > 0 || input.rulesTriggered.some((r) => STRONG_RULES.has(r));
-
   let verdict: AnalysisVerdict;
   let severity: ScoreResult["severity"];
   if (hasStrongEvidence) {
@@ -246,7 +343,7 @@ function protectionVerdict(
   if (engine && engine.serviceRunning === false) return "critical";
   if (
     engine &&
-    [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall]
+    [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)]
       .some((sub) => sub && sub.status === "error")
   ) {
     return "critical";

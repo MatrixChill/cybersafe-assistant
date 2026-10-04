@@ -26,7 +26,15 @@
     },
     "files": [
       "dist/**/*",
-      "package.json"
+      "package.json",
+      "!**/*.log",
+      "!node_modules/@cybersafe/service/logs/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../native-engine/build/Release/scan-engine.exe",
+        "to": "scan-engine.exe"
+      }
     ],
     "win": {
       "target": [

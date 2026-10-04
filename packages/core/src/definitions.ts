@@ -3,6 +3,7 @@ import type {
   ProtectionStatus,
   TrustDecision,
 } from "@cybersafe/shared-types";
+import { wfpHealth } from "@cybersafe/shared-types";
 
 export interface RiskThresholds {
   safeMax: number;
@@ -66,13 +67,13 @@ export function effectiveRiskScore(maxRisk: number, engine?: EngineHealth): numb
 
 export function engineIsDegraded(engine?: EngineHealth): boolean {
   if (!engine) return false;
-  const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall];
+  const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)];
   return subEngines.some((e) => e && e.status !== "active");
 }
 
 export function activeEngineCount(engine?: EngineHealth): number {
   if (!engine) return 0;
-  const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, engine.firewall];
+  const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)];
   return subEngines.filter((e): boolean => e?.status === "active").length;
 }
 

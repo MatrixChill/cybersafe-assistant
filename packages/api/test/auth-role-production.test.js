@@ -44,7 +44,7 @@ legacy
   );
 legacy.close();
 
-const { prisma } = await import("../dist/db.js");
+  const { prisma, closeDb } = await import("../dist/db.js");
 const { app } = await import("../dist/index.js");
 
 let server;
@@ -59,10 +59,14 @@ before(async () => {
 
 after(async () => {
   await new Promise((resolve) => server.close(resolve));
+  closeDb();
   try {
     fs.rmSync(tmpDir, { recursive: true, force: true });
-  } catch {
-    // Windows pode manter o handle da DB aberto; o tmp do SO limpa o resto.
+  } catch (err) {
+    process.emitWarning(
+      `AUTH-ROLE-PROD TMPDIR LEAK: nao foi possivel remover ${tmpDir} (${err.code}), ` +
+        `mesmo depois de closeDb(). Outro handle pode estar aberto.`,
+    );
   }
 });
 
@@ -120,4 +124,18 @@ describe("NODE_ENV=production — bootstrap DEV inacessível", () => {
     const user = await prisma.user.findUnique({ where: { email: DEV_EMAIL } });
     assert.equal(user.role, "user");
   });
+});
+
+// Limpeza do tmpDir criado em módulo (linha 12). A DB em disco é um ficheiro
+// dentro de tmpDir; sem este after o diretório fica em %TEMP% para sempre.
+after(() => {
+  closeDb();
+  try {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  } catch (err) {
+    process.emitWarning(
+      `AUTH-ROLE-PROD TMPDIR LEAK: nao foi possivel remover ${tmpDir} (${err.code}), ` +
+        `mesmo depois de closeDb(). Outro handle pode estar aberto.`,
+    );
+  }
 });

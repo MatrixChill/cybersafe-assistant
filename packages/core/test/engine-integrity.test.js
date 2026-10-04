@@ -7,6 +7,7 @@ import {
   ClamavBridge,
   classifyClamavHealth,
   MalwareAnalyzer,
+  BUILTIN_HASH_SIGNATURES,
   SignatureDatabase,
   TrustEngine,
   YaraEngine,
@@ -15,17 +16,48 @@ import {
   scoreToStatus,
 } from "../dist/index.js";
 
-const EICAR_BUFFER = Buffer.from(
-  "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*",
-  "utf8",
-);
+// Marker benigno, sem assinatura conhecida pelo Windows Defender.
+// O teste prova o carregamento e a execucao de regras YARA, nao uma deteccao
+// de malware real: escrever aqui a assinatura EICAR fez o Defender bloquear
+// ficheiros de teste na maquina do utilizador a cada npm test.
+const PROBE_MARKER = "CYBERSAFE-INTEGRITY-PROBE-OMEGA";
+const PROBE_BUFFER = Buffer.from(PROBE_MARKER, "utf8");
+
+// SHA-256 real do EICAR de 68 bytes. E um hash hexadecimal, nao uma assinatura:
+// nao e detetado pelo Antivirus e nao e escrito em disco como conteudo de
+// ficheiro. Serve so para afirmar o invariante do produto (a base embutida
+// contem o hash real do EICAR).
 const EICAR_HASH = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
 
-const EICAR_RULE = `
-rule eicar
+const PROBE_RULE = `
+rule cs_probe_omega
 {
   strings:
-    $s1 = "X5O!P%@AP[4\\\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*" fullword ascii
+    $s1 = "${PROBE_MARKER}" ascii
+  condition:
+    all of them
+}
+`;
+
+/**
+ * Segunda regra, que NÃO casa com o buffer de sonda.
+ *
+ * Porque existe: `PROBE_RULE` sozinho é um corpus de UMA regra. O contrato de
+ * cobertura classifica um corpus de uma só regra como `limited`/`degraded` —
+ * uma regra não é uma base de deteção, e `Cobertura normal: 1 regra
+ * carregada.` seria uma afirmação que o corpus não sustenta.
+ *
+ * Este teste quer provar outra coisa — que o motor carrega e que a regra deteta
+ * — e essa prova é feita por `scanFile` e `match`, não por `status`. Assim o
+ * corpus que alimenta o teste passa a justificar `active`/`normal` por
+ * qualquer das duas vias, e a regra que não casa garante que
+ * `matches.length === 1` continua a ser uma afirmação sobre a sonda.
+ */
+const PROBE_RULE_SECUNDARIA = `
+rule cs_probe_beta
+{
+  strings:
+    $s2 = "CyberSafeSondaSigmaQueNaoEstaNoBuffer" ascii
   condition:
     all of them
 }
@@ -42,26 +74,30 @@ after(async () => {
 });
 
 describe("YARA engine integrity", () => {
-  test("carrega um ficheiro de regras válido como ativo e deteta EICAR", async () => {
+  test("carrega um ficheiro de regras válido como ativo e deteta o marker de teste", async () => {
     const rulesPath = path.join(tmpDir, "valid.yar");
-    await fs.writeFile(rulesPath, EICAR_RULE, "utf-8");
-    const eicarPath = path.join(tmpDir, "eicar.bin");
-    await fs.writeFile(eicarPath, EICAR_BUFFER, "utf-8");
+    await fs.writeFile(rulesPath, PROBE_RULE + PROBE_RULE_SECUNDARIA, "utf-8");
+    const probePath = path.join(tmpDir, "probe.bin");
+    await fs.writeFile(probePath, PROBE_BUFFER, "utf-8");
 
     const engine = new YaraEngine(rulesPath);
     await engine.load(rulesPath);
 
     assert.equal(engine.health.status, "active");
+    assert.equal(engine.health.coverage, "normal", "duas regras, uma delas deteta malware: cobertura normal");
     assert.equal(engine.isAvailable, true);
-    assert.equal(engine.ruleCount, 1);
+    // Mecanismo, não contagem exacta: interessa que o corpus foi contado como
+    // tendo regras, não quantas. O scan abaixo é o que prova que a regra
+    // carregou e está a funcionar.
+    assert.ok(engine.ruleCount >= 1, `ruleCount esperado >= 1, veio ${engine.ruleCount}`);
 
-    const matches = await engine.scanFile(eicarPath);
+    const matches = await engine.scanFile(probePath);
     assert.equal(matches.length, 1);
-    assert.equal(matches[0].ruleId, "eicar");
+    assert.equal(matches[0].ruleId, "cs_probe_omega");
 
-    const bufferMatches = engine.match(EICAR_BUFFER);
+    const bufferMatches = engine.match(PROBE_BUFFER);
     assert.equal(bufferMatches.length, 1);
-    assert.equal(bufferMatches[0].ruleId, "eicar");
+    assert.equal(bufferMatches[0].ruleId, "cs_probe_omega");
   });
 
   test("ficheiro corrompido (JSON) reporta degradado e usou fallback, nunca falha em silêncio", async () => {
@@ -74,13 +110,234 @@ describe("YARA engine integrity", () => {
     assert.equal(engine.health.status, "degraded");
     assert.equal(engine.isAvailable, true, "fallback mantém scanner funcional");
 
+    // Contrato do fallback, por comportamento e não pelo nome de uma regra:
+    // um teste acoplado ao nome parte assim que alguém corrige a regra, e quem
+    // a corrigir vai concluir que o motor se avariou.
     const onDisk = await fs.readFile(badPath, "utf-8");
-    assert.ok(onDisk.includes("Basic_Suspicious_Check"), "fallback deve ser escrito ao disco");
+    assert.ok(onDisk.includes("rule "), "fallback deve ser escrito em disco");
+    assert.ok(
+      /^\s*rule\s+[A-Za-z_]/m.test(onDisk),
+      "o fallback tem de conter pelo menos uma declaração de regra válida"
+    );
+    // Contagem por intervalo, não por valor: o contrato é "o canário carrega e
+    // é sintaticamente válido", não "o canário tem este número de regras".
+    assert.ok(
+      engine.ruleCount >= 1,
+      `o fallback tem de carregar pelo menos uma regra; carregou ${engine.ruleCount}`
+    );
+    assert.match(
+      engine.health.detail ?? "",
+      /inativ|inactive/i,
+      "o detalhe tem de dizer que a análise por regras de malware está inativa"
+    );
 
-    const hit = engine.match(Buffer.from("nvoking powershell.exe"));
-    assert.ok(hit.length >= 0);
+    // O fallback não pode disparar sobre material legítimo: é uma regra de teste.
+    const benign = engine.match(
+      Buffer.from('powershell.exe -enc SQBFAFgA cmd.exe /c dir')
+    );
+    assert.equal(
+      benign.length,
+      0,
+      `o fallback não pode sinalizar ficheiros legítimos; matchou: ${benign.map((m) => m.ruleId).join(", ")}`
+    );
+
+    // ...mas tem de continuar funcional sobre o que realmente deve detectar.
+    const eicarFile = Buffer.from(
+      "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+    );
+    assert.equal(engine.match(eicarFile).length, 1, "o scanner tem de funcionar sobre o canário");
+
+    // E o detalhe tem de dizer que está em modo canário, para que "a analisar
+    // com regras de teste" nunca seja lido como "a analisar com regras de malware".
+    //
+    // O restart é a parte que faltava. O fallback é gravado no path do corpus
+    // real, por isso no arranque seguinte o motor lê um ficheiro YARA válido e
+    // reporta "active" — o canário apresentado como corpus de produção. Este
+    // teste falha se isso voltar a acontecer.
+    const afterRestart = new YaraEngine(badPath);
+    await afterRestart.load(badPath);
+    assert.equal(
+      afterRestart.health.status,
+      "degraded",
+      "após um restart, o canário escrito no path do corpus não pode ser apresentado como corpus de produção"
+    );
+    assert.ok(
+      afterRestart.ruleCount >= 1,
+      `após um restart o canário tem de continuar carregado; carregou ${afterRestart.ruleCount}`
+    );
+    // O scanner tem de continuar a funcionar depois do restart, não apenas
+    // reportar um estado. Um motor degradado que deixou de analisar não é
+    // "degradado", é avariado com uma etiqueta mais simpática.
+    assert.equal(afterRestart.match(eicarFile).length, 1, "o scanner tem de funcionar após o restart");
+    assert.equal(
+      afterRestart.match(Buffer.from("powershell.exe -enc SQBFAFgA cmd.exe /c dir")).length,
+      0,
+      "após o restart o canário continua a não sinalizar material legítimo"
+    );
+    assert.match(
+      afterRestart.health.detail ?? "",
+      /inativ|inactive/i,
+      "após um restart o detalhe tem de continuar a dizer que a análise por regras está inativa"
+    );
     assert.equal(typeof engine.health.detail, "string");
-    assert.match(engine.health.detail ?? "", /fallback/i);
+    assert.match(engine.health.detail ?? "", /canário|canarios/i);
+    assert.match(engine.health.detail ?? "", /inativ|inactive/i);
+  });
+
+  test("YARA sintaticamente inválido mas contendo 'rule' cai para o canário em vez de error", async () => {
+    // Passa a verificação textual ("contém 'rule '") mas não compila. O
+    // comportamento antigo aceitava-o como corpus de produção e só descobria o
+    // problema ao compilar, deixando o motor em "error" — sem corpus e sem
+    // canário. Um motor morto é pior do que um canário declarado.
+    const invalidPath = path.join(tmpDir, "invalid-syntax.yar");
+    await fs.writeFile(
+      invalidPath,
+      [
+        "rule cs_broken {",
+        "  strings:",
+        "    $a = ", // condição truncada: sintaxe inválida, mas "rule " presente
+        "",
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const engine = new YaraEngine(invalidPath);
+    await engine.load(invalidPath);
+
+    assert.notEqual(
+      engine.health.status,
+      "error",
+      "YARA inválido não pode deixar o motor em error; deve degradar com o canário"
+    );
+    assert.equal(engine.health.status, "degraded", "YARA inválido tem de degradar");
+    assert.equal(engine.isAvailable, true, "o canário tem de manter o scanner funcional");
+    assert.ok(engine.ruleCount >= 1, "o canário tem de ser carregado");
+
+    const rewritten = await fs.readFile(invalidPath, "utf-8");
+    assert.ok(
+      /^\s*rule\s+[A-Za-z_]/m.test(rewritten),
+      "o corpus inválido tem de ser substituído em disco por um fallback válido"
+    );
+
+    assert.equal(
+      engine.match(Buffer.from("powershell.exe -enc SQBFAFgA cmd.exe /c dir")).length,
+      0,
+      "o canário não pode sinalizar material legítimo"
+    );
+    assert.match(
+      engine.health.detail ?? "",
+      /inativ|inactive/i,
+      "o detalhe tem de dizer que a análise por regras de malware está inativa"
+    );
+  });
+
+  test("canário persistido com marker e sintaxe corrompida recupera do canário canónico", async () => {
+    // O caso que faltava. Num arranque anterior o motor escreveu o canário em
+    // disco. O utilizador, um sincronizador, ou um disco com sectores maus
+    // corrompem esse ficheiro: o marker do canário sobrevive, a sintaxe não.
+    //
+    // O comportamento antigo classificava marker + conteúdo inválido como se o
+    // canário fosse bom, tentava compilá-lo, falhava, e devolvia error com
+    // isAvailable=false — ou seja, um ficheiro de teste corrompido matava a
+    // análise por regras do utilizador. O motor tem de reconstruir a partir da
+    // constante canónica, que se sabe que compila, e continuar degradado.
+    const persisted = path.join(tmpDir, "persisted-canary.yar");
+    await fs.writeFile(
+      persisted,
+      "// cybersafe-fallback-canary\nrule Persisted_Canary {\n  strings:\n    $a = \"x\"\n}\n",
+      "utf-8"
+    );
+
+    const engine = new YaraEngine(persisted);
+    await engine.load(persisted);
+
+    assert.equal(
+      engine.health.status,
+      "degraded",
+      "um canário corrompido continua a ser canário: tem de ficar degradado"
+    );
+    assert.equal(engine.isAvailable, true, "um canário corrompido não pode matar o scanner");
+    assert.ok(
+      engine.ruleCount >= 1,
+      `o canário reconstruído tem de carregar pelo menos uma regra; carregou ${engine.ruleCount}`
+    );
+    assert.match(
+      engine.health.detail ?? "",
+      /inativ|inactive/i,
+      "o detalhe tem de continuar a dizer que a análise por regras de malware está inativa"
+    );
+
+    // Recuperou para o canónico, logo tem de funcionar — e continuar cego ao
+    // material legítimo, que era o defeito do fallback genérico anterior.
+    const eicarFile = Buffer.from(
+      "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
+    );
+    assert.equal(engine.match(eicarFile).length, 1, "o canário reconstruído tem de funcionar");
+    assert.equal(
+      engine.match(Buffer.from("powershell.exe -enc SQBFAFgA cmd.exe /c dir")).length,
+      0,
+      "o canário reconstruído não pode sinalizar material legítimo"
+    );
+
+    // E o arranque seguinte tem de ficar degradado outra vez: o ficheiro
+    // reescrito é válido, e um válido sem Cormarker de canário seria lido como
+    // corpus de produção.
+    const afterRestart = new YaraEngine(persisted);
+    await afterRestart.load(persisted);
+    assert.equal(
+      afterRestart.health.status,
+      "degraded",
+      "depois de reconstruir o canário, o restart não pode promovê-lo a corpus de produção"
+    );
+    assert.equal(afterRestart.isAvailable, true);
+  });
+
+  test("pseudo-regra dentro de comentário de bloco não promove o canário a corpus de produção", async () => {
+    // A proveniência nunca pode depender de contar texto "rule". Um bloco de
+    // comentário com uma declaração de regra ao início da linha contava como
+    // regra, e o canário passava aActive — o canário de teste apresentado como
+    // corpus real, que é exactamente o que este mecanismo existe para impedir.
+    const commented = path.join(tmpDir, "comment-pseudo.yar");
+    await fs.writeFile(
+      commented,
+      [
+        "// cybersafe-fallback-canary",
+        "/*",
+        "rule Real_Looking_Rule_Name",
+        "*/",
+        "rule Test_Only_Corpus_Rule",
+        "{",
+        "  strings:",
+        '    $probe = "PROBE-MARKER-TEXT-ONLY" ascii',
+        "  condition:",
+        "    $probe",
+        "}",
+        ""
+      ].join("\n"),
+      "utf-8"
+    );
+
+    const engine = new YaraEngine(commented);
+    await engine.load(commented);
+
+    assert.equal(
+      engine.health.status,
+      "degraded",
+      "um marker de canário tem de continuar degradado, mesmo com texto que parece regra real"
+    );
+    assert.match(
+      engine.health.detail ?? "",
+      /inativ|inactive/i,
+      "o detalhe tem de dizer que a análise por regras de malware está inativa"
+    );
+
+    const afterRestart = new YaraEngine(commented);
+    await afterRestart.load(commented);
+    assert.equal(
+      afterRestart.health.status,
+      "degraded",
+      "a pseudo-regra em comentário não pode ser promovida a corpus pelo restart"
+    );
   });
 
   test("conteúdo HTML corrupto também é tratado como degradado", async () => {
@@ -106,8 +363,8 @@ describe("YARA engine integrity", () => {
   });
 
   test("scan de conteúdo limpo não produz falsos positivos", async () => {
-    const rulesPath = path.join(tmpDir, "eicar-only.yar");
-    await fs.writeFile(rulesPath, EICAR_RULE, "utf-8");
+    const rulesPath = path.join(tmpDir, "probe-only.yar");
+    await fs.writeFile(rulesPath, PROBE_RULE, "utf-8");
 
     const cleanPath = path.join(tmpDir, "clean.txt");
     await fs.writeFile(cleanPath, "hello world, nothing suspicious here", "utf-8");
@@ -147,7 +404,20 @@ describe("Hash DB integrity", () => {
     await db.load(path.join(tmpDir, "no-such-feed", "default.json"));
 
     assert.equal(db.health.status, "degraded");
-    assert.equal(db.size, 4, "base embutida deve estar disponível offline");
+    // Conta derivada do conjunto embutido, e nao um literal: a base muda
+    // quando a proveniencia e revista, e um 4 fixo aqui passava a mentir
+    // sobre o produto sem nada ter mudado no motor.
+    assert.equal(
+      db.size,
+      BUILTIN_HASH_SIGNATURES.length,
+      "a base offline tem de trazer exatamente o conjunto embutido",
+    );
+    for (const record of BUILTIN_HASH_SIGNATURES) {
+      assert.ok(
+        db.match(record.sha256),
+        `a base offline perdeu a assinatura ${record.family}`,
+      );
+    }
     const eicar = db.match(EICAR_HASH);
     assert.ok(eicar);
     assert.equal(eicar.family, "EICAR-Test-File");

@@ -1,18 +1,23 @@
-import { describe, it, beforeEach } from "node:test";
+import { describe, it, beforeEach, after } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
 import AdmZip from "adm-zip";
 import { ScanManager } from "../dist/scan-manager.js";
+import { ProtectionEngineService } from "../dist/engine.js";
+import { NativeEngineBridge } from "../dist/native-engine-bridge.js";
 
 /** Minimal mock engine that tracks scanned files and optionally flags threats */
 function createMockEngine(opts = {}) {
   const scannedFiles = [];
+  const scannedCalls = [];
   return {
     scannedFiles,
-    scanArtifact: async (filePath, _source) => {
+    scannedCalls,
+    scanArtifact: async (filePath, source, options) => {
       scannedFiles.push(filePath);
+      scannedCalls.push({ filePath, source, options });
       if (opts.threatFiles && opts.threatFiles.includes(path.basename(filePath))) {
         return { highRiskCount: 1, overallSeverity: "high" };
       }
@@ -23,8 +28,11 @@ function createMockEngine(opts = {}) {
 }
 
 /** Create a temp directory tree for testing */
+const createdTrees = [];
+
 async function createTestTree(baseName, structure) {
   const base = path.join(os.tmpdir(), `cybersafe-test-${baseName}-${Date.now()}`);
+  createdTrees.push(base);
   await fs.mkdir(base, { recursive: true });
 
   async function build(node, spec) {
@@ -517,87 +525,93 @@ async function waitForScan(mgr, id, timeoutMs = 30_000) {
 describe("Deep scan progress model", () => {
   it("usa o número REAL de candidatos como denominador (nunca o cap de 50.000)", async () => {
     const base = await fs.mkdtemp(path.join(os.tmpdir(), "cybersafe-progress-"));
-    for (let i = 0; i < 899; i++) {
-      await fs.writeFile(path.join(base, `f${i}.txt`), "x");
+    try {
+      for (let i = 0; i < 899; i++) {
+        await fs.writeFile(path.join(base, `f${i}.txt`), "x");
+      }
+
+      const seen = [];
+      const engine = createMockEngine();
+      engine.emitScanProgress = (state) => seen.push({ ...state });
+      const mgr = new ScanManager(engine);
+
+      const id = await mgr.startScan("custom", base);
+      const state = await waitForScan(mgr, id);
+
+      assert.equal(state.status, "completed");
+      assert.equal(state.filesTotal, 899, "o total deve ser o nº real de candidatos");
+      assert.notEqual(state.filesTotal, 50000, "o cap de segurança nunca é o total");
+      assert.equal(state.filesScanned, 899);
+      assert.equal(state.progress, 100);
+
+      // Cada evento de scanning usa floor(filesScanned / filesTotal * 100).
+      const scanning = seen.filter((s) => s.phase === "scanning" && typeof s.filesTotal === "number");
+      assert.ok(scanning.length > 0, "deve haver eventos de scanning");
+      for (const s of scanning) {
+        assert.equal(
+          s.progress,
+          Math.floor((s.filesScanned / s.filesTotal) * 100),
+          `progress inconsistente em filesScanned=${s.filesScanned}/${s.filesTotal}`,
+        );
+      }
+
+      // Num ponto avançado (~885/899) a UI mostra ~98%, não 1%.
+      const near = scanning.filter((s) => s.filesScanned >= 885);
+      const at885 = near[0] ?? scanning[scanning.length - 1];
+      assert.ok(at885.progress >= 97, `885/899 deve estar ~98% (recebido ${at885.progress}%)`);
+    } finally {
+      await cleanup(base);
     }
-
-    const seen = [];
-    const engine = createMockEngine();
-    engine.emitScanProgress = (state) => seen.push({ ...state });
-    const mgr = new ScanManager(engine);
-
-    const id = await mgr.startScan("custom", base);
-    const state = await waitForScan(mgr, id);
-
-    assert.equal(state.status, "completed");
-    assert.equal(state.filesTotal, 899, "o total deve ser o nº real de candidatos");
-    assert.notEqual(state.filesTotal, 50000, "o cap de segurança nunca é o total");
-    assert.equal(state.filesScanned, 899);
-    assert.equal(state.progress, 100);
-
-    // Cada evento de scanning usa floor(filesScanned / filesTotal * 100).
-    const scanning = seen.filter((s) => s.phase === "scanning" && typeof s.filesTotal === "number");
-    assert.ok(scanning.length > 0, "deve haver eventos de scanning");
-    for (const s of scanning) {
-      assert.equal(
-        s.progress,
-        Math.floor((s.filesScanned / s.filesTotal) * 100),
-        `progress inconsistente em filesScanned=${s.filesScanned}/${s.filesTotal}`,
-      );
-    }
-
-    // Num ponto avançado (~885/899) a UI mostra ~98%, não 1%.
-    const near = scanning.filter((s) => s.filesScanned >= 885);
-    const at885 = near[0] ?? scanning[scanning.length - 1];
-    assert.ok(at885.progress >= 97, `885/899 deve estar ~98% (recebido ${at885.progress}%)`);
-
-    await cleanup(base);
   });
 
   it("os contadores nunca recuam dentro do mesmo scan", async () => {
     const base = await fs.mkdtemp(path.join(os.tmpdir(), "cybersafe-monotonic-"));
-    for (let i = 0; i < 120; i++) await fs.writeFile(path.join(base, `f${i}.txt`), "x");
+    try {
+      for (let i = 0; i < 120; i++) await fs.writeFile(path.join(base, `f${i}.txt`), "x");
 
-    const seen = [];
-    const engine = createMockEngine();
-    engine.emitScanProgress = (state) => seen.push({ ...state });
-    const mgr = new ScanManager(engine);
+      const seen = [];
+      const engine = createMockEngine();
+      engine.emitScanProgress = (state) => seen.push({ ...state });
+      const mgr = new ScanManager(engine);
 
-    const id = await mgr.startScan("custom", base);
-    await waitForScan(mgr, id);
+      const id = await mgr.startScan("custom", base);
+      await waitForScan(mgr, id);
 
-    let lastScanned = -1;
-    let lastDiscovered = -1;
-    for (const s of seen) {
-      assert.ok(s.filesScanned >= lastScanned, "filesScanned não pode diminuir");
-      lastScanned = s.filesScanned;
-      assert.ok((s.filesDiscovered ?? 0) >= lastDiscovered, "filesDiscovered não pode diminuir");
-      lastDiscovered = s.filesDiscovered ?? lastDiscovered;
+      let lastScanned = -1;
+      let lastDiscovered = -1;
+      for (const s of seen) {
+        assert.ok(s.filesScanned >= lastScanned, "filesScanned não pode diminuir");
+        lastScanned = s.filesScanned;
+        assert.ok((s.filesDiscovered ?? 0) >= lastDiscovered, "filesDiscovered não pode diminuir");
+        lastDiscovered = s.filesDiscovered ?? lastDiscovered;
+      }
+    } finally {
+      await cleanup(base);
     }
-
-    await cleanup(base);
   });
 
   it("a revisão é monotónica em cada emissão", async () => {
     const base = await fs.mkdtemp(path.join(os.tmpdir(), "cybersafe-revision-"));
-    await fs.writeFile(path.join(base, "a.txt"), "x");
+    try {
+      await fs.writeFile(path.join(base, "a.txt"), "x");
 
-    const seen = [];
-    const engine = createMockEngine();
-    engine.emitScanProgress = (state) => seen.push({ ...state });
-    const mgr = new ScanManager(engine);
+      const seen = [];
+      const engine = createMockEngine();
+      engine.emitScanProgress = (state) => seen.push({ ...state });
+      const mgr = new ScanManager(engine);
 
-    const id = await mgr.startScan("custom", base);
-    await waitForScan(mgr, id);
+      const id = await mgr.startScan("custom", base);
+      await waitForScan(mgr, id);
 
-    let lastRev = 0;
-    for (const s of seen) {
-      assert.equal(typeof s.revision, "number");
-      assert.ok(s.revision > lastRev, `revisão deve crescer (${s.revision} > ${lastRev})`);
-      lastRev = s.revision;
+      let lastRev = 0;
+      for (const s of seen) {
+        assert.equal(typeof s.revision, "number");
+        assert.ok(s.revision > lastRev, `revisão deve crescer (${s.revision} > ${lastRev})`);
+        lastRev = s.revision;
+      }
+    } finally {
+      await cleanup(base);
     }
-
-    await cleanup(base);
   });
 });
 
@@ -605,25 +619,27 @@ describe("Deep scan progress model", () => {
 describe("Excluded files are counted truthfully", () => {
   it("an excluded file increments filesExcluded, not filesAnalyzed", async () => {
     const base = await fs.mkdtemp(path.join(os.tmpdir(), "cybersafe-excluded-"));
-    await fs.writeFile(path.join(base, "keep.txt"), "x");
-    await fs.writeFile(path.join(base, "skip.log"), "x");
+    try {
+      await fs.writeFile(path.join(base, "keep.txt"), "x");
+      await fs.writeFile(path.join(base, "skip.log"), "x");
 
-    const engine = createMockEngine();
-    engine.isExcluded = (filePath) => filePath.endsWith(".log");
-    const mgr = new ScanManager(engine);
+      const engine = createMockEngine();
+      engine.isExcluded = (filePath) => filePath.endsWith(".log");
+      const mgr = new ScanManager(engine);
 
-    const id = await mgr.startScan("custom", base);
-    const state = await waitForScan(mgr, id);
+      const id = await mgr.startScan("custom", base);
+      const state = await waitForScan(mgr, id);
 
-    assert.equal(state.status, "completed");
-    assert.equal(state.filesTotal, 2);
-    assert.equal(state.filesScanned, 2, "o progresso cobre todos os candidatos");
-    assert.equal(state.filesExcluded, 1, "o ficheiro excluído é contado como excluído");
-    assert.equal(state.filesAnalyzed, 1, "só o ficheiro não excluído vai aos motores");
-    assert.equal(engine.scannedFiles.length, 1, "o motor nunca vê o ficheiro excluído");
-    assert.equal(engine.scannedFiles[0], path.join(base, "keep.txt"));
-
-    await cleanup(base);
+      assert.equal(state.status, "completed");
+      assert.equal(state.filesTotal, 2);
+      assert.equal(state.filesScanned, 2, "o progresso cobre todos os candidatos");
+      assert.equal(state.filesExcluded, 1, "o ficheiro excluído é contado como excluído");
+      assert.equal(state.filesAnalyzed, 1, "só o ficheiro não excluído vai aos motores");
+      assert.equal(engine.scannedFiles.length, 1, "o motor nunca vê o ficheiro excluído");
+      assert.equal(engine.scannedFiles[0], path.join(base, "keep.txt"));
+    } finally {
+      await cleanup(base);
+    }
   });
 });
 
@@ -924,4 +940,136 @@ describe("Nested ZIP scan", () => {
 
     await cleanup();
   });
+});
+
+describe("VirusTotal scope policy", () => {
+  for (const type of ["quick", "full", "custom"]) {
+    it(`${type} skips VT for every main-loop file and retains local threat counts`, async () => {
+      const dir = await createTestTree(`vt-${type}`, { "local-threat.txt": "benign fixture", "clean.txt": "clean" });
+      const engine = createMockEngine({ threatFiles: ["local-threat.txt"] });
+      const manager = new ScanManager(engine);
+      // Bound quick/full to this tiny fixture; never enumerate the real machine.
+      manager.resolvePathsForScan = async () => [dir];
+      const id = await manager.startScan(type, dir);
+      await manager.currentScanPromise;
+      const state = manager.getScan(id);
+      assert.equal(state.status, "completed");
+      assert.equal(state.filesScanned, 2);
+      assert.equal(state.filesAnalyzed, 2);
+      assert.equal(state.filesFailed, 0);
+      assert.equal(state.threatsFound, 1);
+      assert.equal(engine.scannedCalls.length, 2);
+      for (const call of engine.scannedCalls) {
+        assert.equal(call.source, "system-scanner");
+        // `scanId` viaja com o pedido para que `cancelScan` possa abortar o
+        // clamscan EM CURSO, e não só mudar o estado do scan. Sem ele,
+        // cancelar deixava o motor a varrer sozinho com ~1 GB de RAM.
+        assert.equal(call.options.skipVirusTotal, true);
+        assert.equal(call.options.scanId, id, "cada ficheiro sabe a que scan pertence");
+      }
+    });
+  }
+
+  it("ZIP entries and the outer archive both skip VT, retaining a single local threat", async () => {
+    const dir = await createTestTree("vt-zip", {});
+    const archive = new AdmZip();
+    archive.addFile("local-threat.txt", Buffer.from("benign fixture"));
+    const target = path.join(dir, "archive.zip");
+    await fs.writeFile(target, archive.toBuffer());
+    const engine = createMockEngine({ threatFiles: ["local-threat.txt"] });
+    const manager = new ScanManager(engine);
+    const id = await manager.startScan("custom", target);
+    await manager.currentScanPromise;
+    assert.equal(manager.getScan(id).status, "completed");
+    assert.equal(manager.getScan(id).threatsFound, 1);
+    assert.equal(engine.scannedCalls.length, 2);
+    assert.ok(engine.scannedCalls.some((call) => path.basename(call.filePath) === "local-threat.txt"));
+      for (const call of engine.scannedCalls) {
+        assert.equal(call.options.skipVirusTotal, true);
+        assert.equal(call.options.scanId, id);
+      }
+  });
+
+  function artifactEngine(t, positives) {
+    // Run the real methods without starting monitors, persistence, native binaries or networking.
+    const engine = Object.create(ProtectionEngineService.prototype);
+    const events = [];
+    const vtCalls = [];
+    Object.assign(engine, {
+      exclusions: { exclusionReason: () => null },
+      analyzer: { analyze: async () => ({
+        fileName: "fixture.txt", size: 10, sha256: "fixture-hash", riskScore: 55,
+        severity: "low", confidence: 0.8, verdict: "safe", rulesTriggered: [],
+        factors: [], scanTimestamp: "2026-09-28T00:00:00.000Z", recommendedAction: "logged",
+      }) },
+      vt: {
+        isEnabled: () => true,
+        scanHash: async (hash) => {
+          vtCalls.push(hash);
+          return { positives, total: 10, detectionRatio: `${positives}/10` };
+        },
+      },
+      eventBus: { publish: (type, severity, summary, data) => events.push({ type, severity, summary, data }) },
+      threats: [], blockedHashes: new Set(), blockedPaths: new Set(),
+      quarantine: { quarantine: async () => null },
+      logHistory: async () => {}, actionsLog: { write: () => {} },
+    });
+    t.mock.method(NativeEngineBridge, "scan", async () => ({ ok: false }));
+    return { engine, events, vtCalls };
+  }
+
+  for (const [positives, score, severity] of [[4, 75, "high"], [8, 95, "critical"]]) {
+    it(`accepted sensitivity loss: bulk skips VT boost and ${severity} escalation with a healthy key`, async (t) => {
+      const { engine, events, vtCalls } = artifactEngine(t, positives);
+      // Product decision: quick/deep/custom lose min(40, positives * 5), unlike single-file scans.
+      const bulk = await engine.scanArtifact("fixture.txt", "system-scanner", { skipVirusTotal: true });
+      assert.equal(vtCalls.length, 0, "bulk must never call the VT client");
+      assert.equal(bulk.riskScore, 55);
+      assert.equal(bulk.overallSeverity, "low");
+      assert.equal(bulk.highRiskCount, 0);
+      assert.equal(engine.threats.length, 0);
+      assert.equal(events.filter((event) => event.type === "threat.detected").length, 0);
+      assert.equal(events[0].data.vtResult, null);
+
+      const single = await engine.dispatch("scan.artifact", { path: "fixture.txt" });
+      assert.deepEqual(vtCalls, ["fixture-hash"]);
+      assert.equal(single.riskScore, score);
+      assert.equal(single.overallSeverity, severity);
+      assert.equal(single.highRiskCount, 1);
+      assert.equal(single.totalFiles, 1);
+      const threats = events.filter((event) => event.type === "threat.detected");
+      assert.equal(threats.length, 1);
+      assert.equal(threats[0].severity, severity);
+      assert.equal(engine.threats.length, 1);
+      assert.equal(engine.threats[0].source, "dashboard");
+    });
+  }
+
+  it("single-file IPC leaves skipVirusTotal unset", async () => {
+    const engine = Object.create(ProtectionEngineService.prototype);
+    let received;
+    const expected = { totalFiles: 1 };
+    engine.scanArtifact = async (...args) => { received = args; return expected; };
+    assert.equal(await engine.dispatch("scan.artifact", { path: "single.txt" }), expected);
+    assert.deepEqual(received, ["single.txt", "dashboard"]);
+  });
+
+  it("explicit false and default realtime/process calls retain VT", async (t) => {
+    const { engine, vtCalls } = artifactEngine(t, 4);
+    for (const [source, options] of [["dashboard", { skipVirusTotal: false }], ["service", undefined], ["system-scanner", undefined]]) {
+      const result = await engine.scanArtifact("fixture.txt", source, options);
+      assert.equal(result.overallSeverity, "high");
+      assert.equal(result.riskScore, 75);
+    }
+    assert.equal(vtCalls.length, 3);
+  });
+});
+
+// Limpeza global de safety-net: qualquer árvore criada por createTestTree que
+// o teste não tenha limpado a tempo (ex.: throw antes do cleanup) é removida
+// aqui, mesmo em caso de falha de teste.
+after(async () => {
+  for (const dir of createdTrees) {
+    await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
 });

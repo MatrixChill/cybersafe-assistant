@@ -292,16 +292,91 @@ export class NativeWindowsWatcher extends EventEmitter {
  *     demorar 8-12 s o `pollInFlight` salta o round seguinte de qualquer
  *     maneira: o que manda é o CUSTO DA ENUMERAÇÃO, não o intervalo.
  *
+/**
+ * Cadencia de DESCOBERTA de processos em REPOUSO (sem ninguem a olhar).
+ * É o número que governa a fase da latência com que um processo novo aparece
+ * na lista quando ninguem pediu a lista, e é a fonte de verdade que o
+ * `PROCESS_TRUTH_TTL_MS` do serviço tem de seguir.
+ *
+ * Escolhido por medição, e a medição disse para NÃO mexer. Numa máquina com
+ * 355+ processos:
+ *   - uma enumeração CIM completa custa 338-364 ms de wall e 266-297 ms de CPU
+ *     do próprio PowerShell (medido), dos quais ~204 ms/~188 ms são só o
+ *     arranque do `powershell.exe` — o arranque, não a consulta, é o custo;
+ *   - `tasklist` nativo, alternativa sem PowerShell, mede 376-403 ms: É MAIS
+ *     LENTO, portanto não serve;
+ *   - `systeminformation.processes()` devolve 0 ms em 4 de 5 chamadas: é um
+ *     cache, não uma fonte de verdade;
+ *   - A/B medido (5 s contra 10 s, mesma máquina, mesmo método, com a app a
+ *     pedir a lista de 10 em 10 s): 2 enumerações em 30 s NAS DUAS configs, e
+ *     CPU de máquina de 25,6% contra 28,2% — dentro do ruido. Encurtar o
+ *     intervalo não compra latência nenhuma, porque com uma enumeração a
+ *     demorar 8-12 s o `pollInFlight` salta o round seguinte de qualquer
+ *     maneira: o que manda é o CUSTO DA ENUMERAÇÃO, não o intervalo.
+ *
+ * NOTA DE MEDIÇÃO (2026-09-30): oMaster mediu `snapshotProcesses()` em
+ * 652, 284, 574, 582, 591, 594 ms — MEDIANA 591 ms, MAX 652 ms, com 355+
+ * processos. Isto CONTRADIZ os 0,3 s citados acima e nas Medidas acima: o
+ * custo real é ~0,6 s, não ~0,3 s. Onde este comentario e o do serviço dizem
+ * 0,3 s, o número certo hoje é 0,6 s. Se um dia o custo mudar, mede-se e
+ * actualiza-se — nunca por palpite.
+ *
  * Passa a 5 s só quando a enumeração ficar ordens de grandeza mais barata (uma
  * sessão CIM persistente, por exemplo) — e nesse dia o número sai da medição
  * outra vez, não de um palpite.
  */
 export const PROCESS_POLL_INTERVAL_MS = 10_000;
 
+/**
+ * Cadencia de DESCOBERTA enquanto alguém está a olhar (o serviço recebeu um
+ * pedido `processes.list` nos últimos `PROCESS_OBSERVER_IDLE_MS`).
+ *
+ * O piso de 2000 ms sai da conta, não de uma preferência:
+ *   591 ms por enumeração / 2000 ms = 29,6% de um núcleo, e é esse preço que
+ *   compra ver o processo novo em menos de 2 s (um ciclo) em vez de esperar
+ *   até 10 s (média 5 s).
+ * A 1500 ms seriam 39,4% de um núcleo — daí o piso.
+ *
+ * NOTA: o intervalo não é a fase dominante quando a enumeração é cara; é
+ * exatamente por isso que o ganho só compensa enquanto há observador. Em
+ * repouso, pagar 29,6% de um núcleo a toda a hora seria absurdo.
+ */
+export const PROCESS_FAST_POLL_INTERVAL_MS = 2_000;
+
+/**
+ * Janela de inatividade sem pedidos de lista antes de voltar à cadência
+ * lenta. Tem de ser MAIOR que a cadência rápida, senão oscila entre os dois
+ * estados a cada round.
+ */
+export const PROCESS_OBSERVER_IDLE_MS = 15_000;
+
+/** Opções do `ProcessMonitor` (seam de teste; produção não passa nada). */
+export interface ProcessMonitorOptions {
+  /** Relógio injetável, para testar a janela de inatividade sem esperar. */
+  now?: () => number;
+}
+
 export class ProcessMonitor extends EventEmitter {
   private timer: NodeJS.Timeout | null = null;
   private previous = new Map<number, ProcessSnapshot>();
-  private pollInFlight = false;
+  /**
+   * Promessa da enumeração do SO EM CURSO, partilhada por TODOS os caminhos
+   * (o tick do timer E `list()`).
+   *
+   * Antes havia dois guards independentes — `pollInFlight` aqui e
+   * `processesEnumerating` no serviço — e o `list()` chamava
+   * `snapshotProcesses()` DIRECTAMENTE, sem passar por nenhum deles. Um tick do
+   * timer e um pedido da UI podiam então correr DUAS enumerações do SO em
+   * paralelo, porque cada guard dizia "estou ocupado" apenas a si próprio. É
+   * o padrão que produziu a tempestade de WMI descrita no serviço.
+   *
+   * Agora existe uma única promessa em curso: nunca há duas enumerações do SO
+   * ao mesmo tempo, venha ela de onde vier.
+   */
+  private enumerationInFlight: Promise<Map<number, ProcessSnapshot>> | null = null;
+  /** Ultimo instante em que alguem pediu a lista de processos. */
+  private lastObserverAt: number | null = null;
+  private readonly now: () => number;
 
   /**
    * Seam de teste, mesmo padrão do `SnapshotProcessesDeps` abaixo e do
@@ -311,63 +386,117 @@ export class ProcessMonitor extends EventEmitter {
    */
   constructor(
     private readonly snapshot: () => Promise<Map<number, ProcessSnapshot>> = snapshotProcesses,
+    options: ProcessMonitorOptions = {},
   ) {
     super();
+    this.now = options.now ?? Date.now;
   }
 
   async start() {
     await this.poll();
-    this.timer = setInterval(() => {
-      void this.poll();
-    }, PROCESS_POLL_INTERVAL_MS);
+    this.schedule();
+  }
+
+  /**
+   * Marca "há alguém a olhar". Chamado pelo serviço a cada pedido de lista.
+   * Reinicia a janela de inatividade, de propósito.
+   */
+  noteObserver() {
+    this.lastObserverAt = this.now();
+  }
+
+  /** Há observador dentro da janela? (público para o teste) */
+  hasObserver(): boolean {
+    if (this.lastObserverAt === null) return false;
+    return this.now() - this.lastObserverAt < PROCESS_OBSERVER_IDLE_MS;
+  }
+
+  /** O intervalo em vigor neste instante (público para o teste). */
+  currentIntervalMs(): number {
+    return this.hasObserver() ? PROCESS_FAST_POLL_INTERVAL_MS : PROCESS_POLL_INTERVAL_MS;
+  }
+
+  /**
+   * O atraso até ao próximo round. Reinicia o timer de propósito: mudar de
+   * intervalo não pode deixar um round lento de 10 s a meio da visualização.
+   */
+  scheduleDelayMs(): number {
+    return this.currentIntervalMs();
+  }
+
+  /**
+   * Agenda o próximo round com o intervalo em vigor. Usa `setTimeout` e não
+   * `setInterval` porque é a única forma de reiniciar o atraso quando o
+   * intervalo muda a meio do caminho.
+   */
+  private schedule() {
+    if (this.timer) clearTimeout(this.timer);
+    this.timer = setTimeout(() => {
+      void this.poll().finally(() => this.schedule());
+    }, this.scheduleDelayMs());
+    // Não segura o processo vivo só por causa do timer do poll.
+    this.timer.unref?.();
   }
 
   async stop() {
     if (this.timer) {
-      clearInterval(this.timer);
+      clearTimeout(this.timer);
       this.timer = null;
     }
   }
 
+  /**
+   * Enumeração do SO, single-flight partilhada. Todos os chamadores (o poll e
+   * `list()`) partilham a mesma promessa enquanto ela estiver em curso.
+   */
+  private async enumerate(): Promise<Map<number, ProcessSnapshot>> {
+    if (this.enumerationInFlight) return this.enumerationInFlight;
+    this.enumerationInFlight = this.snapshot().finally(() => {
+      this.enumerationInFlight = null;
+    });
+    return this.enumerationInFlight;
+  }
+
   async list(): Promise<ProcessSnapshot[]> {
-    return Array.from((await snapshotProcesses()).values());
+    // Passa pelo single-flight partilhado, e já não pela enumeração directa:
+    // dois pedidos simultâneos são UMA enumeração do SO, não duas.
+    return Array.from((await this.enumerate()).values());
   }
 
   /**
    * Um round de descoberta. Público (e não `private`) só para o seam de teste
    * poder correr rounds sem esperar pela cadência de produção.
+   *
+   * Um round que chega enquanto outro está em curso SAI (não espera, não
+   * enfileira, não duplica). É o que o `pollInFlight` fazia antes, e continua
+   * a ser o certo para um timer: a cadência degrada, a fila não cresce. O que
+   * mudou é que a enumeração por baixo é agora a mesma promessa partilhada
+   * com `list()`, portanto "sair" nunca significa "deixar passar" uma segunda
+   * enumeração do SO.
    */
   async poll() {
-    if (this.pollInFlight) return;
-    this.pollInFlight = true;
+    if (this.enumerationInFlight) return;
+    let current: Map<number, ProcessSnapshot>;
     try {
-      // Enumeração indisponível ≠ "todos os processos saíram". Mantemos o
-      // `previous` intacto e saltamos o round: emitir diff contra uma lista
-      // vazia seria inventar a morte de todos os processos do SO.
-      let current: Map<number, ProcessSnapshot>;
-      try {
-        current = await this.snapshot();
-      } catch (error) {
-        console.warn("[ProcessMonitor] Round de poll ignorado (enumeração indisponível):", error);
-        return;
-      }
-
-      for (const [pid, processInfo] of current.entries()) {
-        if (!this.previous.has(pid)) {
-          this.emit("process.started", processInfo);
-        }
-      }
-
-      for (const [pid, processInfo] of this.previous.entries()) {
-        if (!current.has(pid)) {
-          this.emit("process.exited", processInfo);
-        }
-      }
-
-      this.previous = current;
-    } finally {
-      this.pollInFlight = false;
+      current = await this.enumerate();
+    } catch (error) {
+      console.warn("[ProcessMonitor] Round de poll ignorado (enumeração indisponível):", error);
+      return;
     }
+
+    for (const [pid, processInfo] of current.entries()) {
+      if (!this.previous.has(pid)) {
+        this.emit("process.started", processInfo);
+      }
+    }
+
+    for (const [pid, processInfo] of this.previous.entries()) {
+      if (!current.has(pid)) {
+        this.emit("process.exited", processInfo);
+      }
+    }
+
+    this.previous = current;
   }
 }
 
@@ -401,7 +530,7 @@ export async function snapshotProcesses(
       const execAsync = promisify(exec);
       // Saída JSON (a versão CSV anterior partia campos com vírgulas e gerava dados corrompidos).
       const { stdout } = await execAsync(
-        'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine | ConvertTo-Json -Compress"',
+        'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine, @{n=\'CreatedIso\';e={$_.CreationDate.ToUniversalTime().ToString(\'o\')}} | ConvertTo-Json -Compress"',
         { windowsHide: true }
       );
       return stdout;
@@ -432,7 +561,19 @@ export async function snapshotProcesses(
       user: undefined,
       cpu: 0,
       memoryMb: 0,
-      startedAt: now,
+      // A IDENTIDADE DE CRIAÇÃO do processo, não a hora do poll.
+      //
+      // Isto era `now` — o instante da enumeração — e é o que tornava a defesa
+      // de ownership (P1-6) um placebo: todos os processos de um snapshot
+      // partilhavam a mesma data, logo comparar "a identidade registada" com a
+      // "identidade observada" nunca podia bater certo, e o registo era
+      // descartado a cada poll — devolvendo a cascata do P0.
+      //
+      // O CIM devolve CreationDate em formato DMTF; pedimos o ISO já formatado
+      // para não interpretar DMTF em TypeScript. Sem CreationDate (CIM antigo,
+      // acesso parcial) caímos em `now`, que é o comportamento antigo — degradado,
+      // mas honesto: sem identidade não há prova de ownership.
+      startedAt: String(raw.CreatedIso || now),
       signer: undefined,
       trusted: "neutral",
     });

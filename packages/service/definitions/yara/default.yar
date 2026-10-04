@@ -1,4 +1,11 @@
-rule eicar 
+// cybersafe-fallback-canary
+// EICAR-only test corpus - NOT production malware coverage.
+// The single rule below detects only the EICAR test string, so a scan using it
+// proves the pipeline works and nothing more. Reported as degraded, not active,
+// so the product does not imply rule-based protection it does not have.
+// CyberSafe_Canary_EICAR in packages/core/src/yara.ts is the canonical form.
+
+rule eicar
 {
 	meta:
 		description = "Rule to detect Eicar pattern"

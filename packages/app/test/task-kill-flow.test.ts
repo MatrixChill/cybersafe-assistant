@@ -9,6 +9,8 @@ import {
   KILL_ACCESS_DENIED_ERROR,
   KILL_FAILED_ERROR,
   KILL_PROTECTED_ERROR,
+  KILL_SUCCESS_MESSAGE,
+  KILL_PROTECTED_REASON_MESSAGE,
   KILL_REUSED_ERROR,
   KILL_TIMEOUT_ERROR,
   KILL_TIMEOUT_MS,
@@ -45,11 +47,17 @@ const result = (overrides: Partial<ProcessKillResult>): ProcessKillResult => ({
 });
 
 describe("mapKillResult — status estruturado vira mensagem específica", () => {
-  test("killed → sucesso silencioso", () => {
+  test("killed → sucesso COM feedback (uma tentativa nunca acaba em silêncio)", () => {
     const outcome = mapKillResult(result({ status: "killed", success: true }));
     assert.equal(outcome.status, "killed");
     assert.equal(outcome.success, true);
-    assert.equal(outcome.message, null);
+    // Este teste fixava `message === null` e o próprio nome dizia "sucesso
+    // silencioso". Era o bug: o utilizador carregava em Terminar e o caminho
+    // de sucesso não devolvia feedback nenhum. A expectativa mudou; a dureza
+    // não — agora é igualdade EXATA com a mensagem de sucesso, o que apanha
+    // tanto uma mensagem vazia como uma que volte a prometer subprocessos.
+    assert.equal(outcome.message, KILL_SUCCESS_MESSAGE);
+    assert.doesNotMatch(outcome.message ?? "", /subprocess/i, "sem prova por filho, não se afirma");
   });
 
   test("already-exited → sucesso informativo (o objetivo foi atingido)", () => {
@@ -63,8 +71,20 @@ describe("mapKillResult — status estruturado vira mensagem específica", () =>
     const outcome = mapKillResult(result({ status: "protected", protectedReason: "self" }));
     assert.equal(outcome.status, "protected");
     assert.equal(outcome.success, false);
+    // KILL-UX: com `protectedReason` conhecido, a mensagem é a DA razão
+    // (`self`), não a frase genérica. Esta asserção fixava antes
+    // `KILL_PROTECTED_ERROR` mesmo com a razão no contrato — era a prova
+    // escrita de que o dado chegava e era deitado fora. Passou a exigir o
+    // texto específico: mesma dureza, EXPECTativa nova.
+    assert.equal(outcome.message, KILL_PROTECTED_REASON_MESSAGE.self);
+    assert.notEqual(outcome.message, KILL_PROTECTED_ERROR);
+    assert.match(outcome.message ?? "", /próprio serviço de proteção/i);
+  });
+
+  test("protected SEM protectedReason → frase genérica honesta (não inventa razão)", () => {
+    const outcome = mapKillResult(result({ status: "protected" }));
     assert.equal(outcome.message, KILL_PROTECTED_ERROR);
-    assert.match(outcome.message ?? "", /protegido/i);
+    assert.equal(outcome.protectedReason, undefined, "não pode inventar uma razão");
   });
 
   test("timeout → usa a mensagem do backend quando existe", () => {
@@ -170,7 +190,9 @@ describe("runKillProcess — sempre devolve um desfecho (nunca deixa o overlay p
     });
     assert.equal(outcome.status, "killed");
     assert.equal(outcome.success, true);
-    assert.equal(outcome.message, null);
+    // "Tal como vem" passou a incluir a mensagem de sucesso: o `status` e o
+    // `success` propagam-se como antes, e o que faltava era o feedback.
+    assert.equal(outcome.message, KILL_SUCCESS_MESSAGE);
   });
 
   test("protected do backend chega à UI com a mensagem certa", async () => {
@@ -179,7 +201,10 @@ describe("runKillProcess — sempre devolve um desfecho (nunca deixa o overlay p
       kill: async () => result({ pid: 7, status: "protected", protectedReason: "ancestor" }),
     });
     assert.equal(outcome.status, "protected");
-    assert.equal(outcome.message, KILL_PROTECTED_ERROR);
+    // KILL-UX: `ancestor` diz "é o processo que iniciou o CyberSafe". A
+    // frase genérica deixava de distinguir isto do resto.
+    assert.equal(outcome.message, KILL_PROTECTED_REASON_MESSAGE.ancestor);
+    assert.equal(outcome.protectedReason, "ancestor");
   });
 
   test("alias-stub do backend chega à UI como alias-stub (não como failed)", async () => {
@@ -327,18 +352,32 @@ describe("actualização da lista de processos — sem tempestade, sem trabalho 
     );
   });
 
-  test("a cadencia nao pode ser mais rapida que a do servico", () => {
-    // O servico descobre as mudancas de 10 em 10 s (ProcessMonitor.poll). Um
-    // poll mais rapido no renderer pagaria enumeracoes (~800 ms cada) para
-    // mostrar exatamente a mesma verdade.
-    assert.ok(PROCESSES_POLL_MS >= 10_000, `cadencia ${PROCESSES_POLL_MS} ms e mais rapida que a do servico`);
+  test("a cadencia esta alinhada com a do servico, e um poll mais rapido nao paga enumeracoes", () => {
+    // REGRA INVERTIDA em 2026-09-30, com medicao. A versao anterior deste teste
+    // exigia `PROCESSES_POLL_MS >= 10 000` com a razao "o poll do renderer nao
+    // pode ser mais rapido que o do servico, senao paga enumeracoes (~800 ms
+    // cada) para mostrar a mesma verdade".
+    //
+    // A PREMISA estava errada, e e a premissa que caiu, nao a prudencia:
+    //  1. o poll do renderer e um pedido IPC de LEITURA DE CACHE. Nao e uma
+    //     enumeracao do SO. Quem enumera e o cadence adaptativo do servico;
+    //  2. com o poll a marcar observador, o cache fica com ~2 s de idade, muito
+    //     abaixo do TTL de 20 s: o servico responde de cache e nao forca SO.
+    //     Medido em service/test/process-kill.test.js: 2 s e 10 s dao o MESMO
+    //     numero de enumeracoes em 60 s (o TTL e que manda, nao o poll);
+    //  3. o custo real de uma enumeracao e mediana 591 ms, nao ~800 ms.
+    //
+    // E o ganho era real: com o poll a 10 s, o servico descobria o processo em
+    // ~2,1 s mas o ecra so o mostrava ~5 s depois, em media. Ler atrasado da
+    // verdade e o que o utilizador sentiu.
+    assert.ok(PROCESSES_POLL_MS <= 2_000, `cadencia ${PROCESSES_POLL_MS} ms volta a ler a verdade atrasada`);
     // E a janela de rajada tem de ser pequena face a uma enumeracao: 250 ms
-    // contra 720-1085 ms medidos, ou seja ~35% da mais rapida. Uma janela que
+    // contra mediana 591 ms medida, ou seja ~42% da mais rapida. Uma janela que
     // se aproximasse de uma enumeracao esconderia mudancas que o utilizador
-    // sente (uma saida de processo demoraria ate 800 ms a aparecer).
+    // sente (uma saida de processo demoraria ate 591 ms a aparecer).
     assert.ok(
-      PROCESSES_REFRESH_COALESCE_MS <= 720 * 0.35,
-      `janela de ${PROCESSES_REFRESH_COALESCE_MS} ms ja tapa uma enumeracao (720-1085 ms)`,
+      PROCESSES_REFRESH_COALESCE_MS <= 591 * 0.5,
+      `janela de ${PROCESSES_REFRESH_COALESCE_MS} ms ja tapa uma enumeracao (mediana 591 ms)`,
     );
   });
 

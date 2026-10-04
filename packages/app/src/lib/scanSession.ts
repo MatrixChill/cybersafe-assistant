@@ -79,7 +79,9 @@ export const ZIP_CONTENT_NOTE = "Ficheiros ZIP são inspecionados pelo conteúdo
 export const SCAN_RESULT_LABELS = {
   analysisType: "Tipo de Análise",
   filesChecked: "Ficheiros Verificados",
-  noThreatsDetected: "Sem ameaças detetadas",
+  // Factual por construção: conta ficheiros SEM deteção; nunca promete
+  // "sem ameaças" quando o scan não terminou ou a base não é conhecida.
+  filesWithoutDetections: "Ficheiros sem deteções",
   threatsFound: "Ameaças Encontradas",
 } as const;
 
@@ -156,6 +158,7 @@ export function normalizeScanState(raw: unknown): ScanState | null {
     filesTotal: asOptionalNumber(source.filesTotal),
     filesProcessed: asOptionalNumber(source.filesProcessed),
     filesAnalyzed: asOptionalNumber(source.filesAnalyzed),
+    filesInEngineBatch: asOptionalNumber((source as { filesInEngineBatch?: unknown }).filesInEngineBatch),
     filesExcluded: asOptionalNumber(source.filesExcluded),
     filesFailed: asOptionalNumber(source.filesFailed),
     revision: asOptionalNumber(source.revision),
@@ -200,6 +203,10 @@ export function mergeScanState(current: ScanState | null, next: ScanState): Scan
     filesExcluded: keepMax(current.filesExcluded, next.filesExcluded) || undefined,
     filesFailed: keepMax(current.filesFailed, next.filesFailed) || undefined,
     filesDiscovered: keepMax(current.filesDiscovered, next.filesDiscovered) || undefined,
+    // NÃO é keepMax: o batch tem começos e fins. Sobe para N e volta a 0, e um
+    // `keepMax` deixaria a UI presa em "20 ficheiros" para sempre — a mentira
+    // que este campo existe para evitar. O snapshot mais recente manda.
+    filesInEngineBatch: next.filesInEngineBatch,
     threatsFound: keepMax(current.threatsFound, next.threatsFound),
   };
 }
@@ -248,6 +255,38 @@ export function formatEta(seconds: number | null): string | null {
 }
 
 /**
+ * Segundos reais passados desde o início do scan. Conta tempo de relógio —
+ * inclui por isso os ~7,6 s de carga da base do ClamAV, em que
+ * `filesAnalyzed` é 0. É exatamente por isso que a velocidade se mostra
+ * como "—" (ver `scanRateLabel`): o tempo avança, a análise ainda não.
+ */
+export function scanElapsedSeconds(state: ScanState | null, now: number = Date.now()): number {
+  if (!state?.startTime) return 0;
+  const started = Date.parse(state.startTime);
+  if (!Number.isFinite(started)) return 0;
+  const end = state.endTime ? Date.parse(state.endTime) : now;
+  if (!Number.isFinite(end)) return 0;
+  return Math.max(0, Math.floor((end - started) / 1000));
+}
+
+/**
+ * Duração final legível a partir dos carimbos do motor. Sem os dois
+ * carimbos devolve null — o rodapé mostra então o tempo decorrido medido,
+ * mas nunca inventa uma duração que o motor não carimbou.
+ */
+export function formatScanDurationLabel(state: Pick<ScanState, "startTime" | "endTime">): string | null {
+  if (!state.startTime || !state.endTime) return null;
+  const started = Date.parse(state.startTime);
+  const ended = Date.parse(state.endTime);
+  if (!Number.isFinite(started) || !Number.isFinite(ended)) return null;
+  const ms = ended - started;
+  if (ms < 0) return null;
+  if (ms < 1000) return "menos de 1 segundo";
+  const seconds = Math.floor(ms / 1000);
+  return seconds === 1 ? "1 segundo" : `${seconds} segundos`;
+}
+
+/**
  * Decide o que fazer com um evento. Sem scan esperado, o evento é guardado
  * num buffer: o serviço emite o primeiro progresso ANTES de a resposta de
  * `startScan` chegar ao renderer (start → evento → resposta).
@@ -267,6 +306,23 @@ export function isTerminalUiStatus(status: ScanUiStatus): boolean {
 
 export function isActiveUiStatus(status: ScanUiStatus): boolean {
   return status === "preparing" || status === "gathering" || status === "scanning" || status === "finalizing";
+}
+
+/**
+ * O botão de cancelar só oferece o que pode acontecer:
+ * - sem scan id (preparing antes da resposta do serviço) não há o que cancelar;
+ * - depois do pedido e antes do evento terminal do motor, o pedido já foi
+ *   feito — insistir seria enviar o mesmo cancelamento repetidas vezes;
+ * - em estado terminal (incluindo durante um batch que já acabou) não há scan.
+ */
+export function cancelButtonState(
+  ui: ScanUiStatus,
+  hasScanId: boolean,
+  cancelRequested: boolean,
+): { enabled: boolean; label: string } {
+  if (!isActiveUiStatus(ui) || !hasScanId) return { enabled: false, label: "Cancelar" };
+  if (cancelRequested) return { enabled: false, label: "Cancelamento pedido..." };
+  return { enabled: true, label: "Cancelar" };
 }
 
 /**
@@ -464,6 +520,7 @@ export function activeScanDetail(
   type: ScanType,
   ui: ScanUiStatus,
   targetName?: string,
+  filesInEngineBatch = 0,
 ): string {
   switch (ui) {
     case "preparing":
@@ -477,6 +534,15 @@ export function activeScanDetail(
         ? "A percorrer as pastas do seu utilizador e os arranques automáticos."
         : "A percorrer as áreas prioritárias (Downloads, Desktop, Documentos, Arranque/Temporários).";
     case "scanning":
+      // O batch do ClamAV é UMA invocação para N ficheiros e demora ~7,6 s a
+      // carregar a base antes de devolver qualquer coisa. Dizer "A verificar os
+      // ficheiros encontrados" durante esse tempo descreve trabalho que ainda
+      // não começou. Dizer a verdade é melhor que dizer nada de diferente.
+      if (filesInEngineBatch > 0) {
+        return filesInEngineBatch === 1
+          ? "O motor de assinaturas está a verificar 1 ficheiro de uma vez."
+          : `O motor de assinaturas está a verificar ${filesInEngineBatch} ficheiros de uma só vez.`;
+      }
       if (scope === "file") return "A carregar e verificar o conteúdo do ficheiro.";
       if (scope === "folder") return "A verificar os ficheiros encontrados na pasta.";
       return "A verificar os ficheiros encontrados.";
@@ -510,6 +576,97 @@ function verifiedSentence(count: number): string {
 function threatSentence(count: number): string {
   if (count === 0) return "não foram encontradas ameaças";
   return count === 1 ? "foi encontrada 1 ameaça" : `foram encontradas ${count} ameaças`;
+}
+
+/**
+ * Nota de follow-up sob o resumo de uma análise CONCLUÍDA com ameaças.
+ * O motor quarentena automaticamente os casos críticos (engine.ts:1062);
+ * dizer ao utilizador que "coloque os ficheiros em quarentena" era mandar
+ * fazer algo que já foi feito a metade. Só resta o que o motor não travou.
+ */
+export function resultFollowUpNote(status: ScanStatus | string, threatsFound: number): string | null {
+  if (status !== "completed" || threatsFound <= 0) return null;
+  return "As ameaças críticas são colocadas em quarentena automaticamente pelo motor. Revisa as restantes na página Ameaças e coloca-as em quarentena.";
+}
+
+/**
+ * Linha terminal do registo visível do Scanner. Vive aqui (e não embrulhada
+ * no componente) porque é copy do produto: os Plurais têm de ser os mesmos
+ * que o resto da UI — "1 ficheiro analisado", nunca "1 ficheiros".
+ */
+export function terminalScanLogMessage(
+  state: Pick<ScanState, "status" | "filesScanned" | "threatsFound" | "error">,
+): string {
+  const files = state.filesScanned === 1 ? "1 ficheiro analisado" : `${state.filesScanned} ficheiros analisados`;
+  if (state.status === "completed") {
+    const threats =
+      state.threatsFound === 0
+        ? "sem ameaças encontradas"
+        : state.threatsFound === 1
+          ? "1 ameaça encontrada"
+          : `${state.threatsFound} ameaças encontradas`;
+    return `Análise concluída: ${files}, ${threats}`;
+  }
+  if (state.status === "cancelled") return `Análise cancelada: ${files}`;
+  return state.error ? `Análise falhada: ${state.error}` : "Análise falhada";
+}
+
+/** Rodapé do resultado — nunca "ficheiro(s)": ou é 1, ou são N. */
+export function filesFailedFooterLabel(count: number): string {
+  return count === 1 ? "1 ficheiro não pôde ser analisado" : `${count} ficheiros não puderam ser analisados`;
+}
+
+export function filesExcludedFooterLabel(count: number): string {
+  return count === 1 ? "1 ficheiro ignorado por exclusões" : `${count} ficheiros ignorados por exclusões`;
+}
+
+type NoDetectionsInput = Pick<ScanState, "status" | "threatsFound"> & { filesAnalyzed?: number };
+
+/**
+ * Quantos ficheiros chegaram aos motores sem qualquer deteção. Só uma análise
+ * CONCLUÍDA tem esse direito; a base é `filesAnalyzed` (os que passaram pelos
+ * motores) — nunca `filesScanned`, que inclui os excluídos que ninguém
+ * verificou. Sem base conhecida devolve null: a UI mostra "—" e não 0.
+ */
+export function resultFilesWithoutDetections(state: NoDetectionsInput): number | null {
+  if (state.status !== "completed") return null;
+  if (typeof state.filesAnalyzed !== "number" || !Number.isFinite(state.filesAnalyzed)) return null;
+  return Math.max(0, state.filesAnalyzed - state.threatsFound);
+}
+
+/**
+ * A REGRA CRÍTICA do Scanner, num só sítio: a tranquilização "sem ameaças"
+ * (cartão verde, avatar de sucesso, nota de ausência de deteções) só é
+ * permitida quando a análise TERMINOU a sério, há dados reais e o número de
+ * ameaças é zero. Em preparo/análise, cancelada, falhada, com ameaças ou sem
+ * estado do motor, nada é afirmado.
+ */
+export function showNoThreatsReassurance(ui: ScanUiStatus, state: ScanState | null): boolean {
+  return ui === "completed" && state !== null && state.threatsFound === 0;
+}
+
+/**
+ * O tom do cartão "Ficheiros sem deteções". O verde é EXCLUSIVO de
+ * "análise concluída, base conhecida, zero ameaças". Com ameaças, a contagem
+ * é real mas não é um veredicto limpo; cancelada/falhada/sem base
+ * (inconclusiva) é cinzenta — estado incerto nunca pode parecer "safe".
+ */
+export function noDetectionsTone(state: NoDetectionsInput): "green" | "neutral" {
+  if (resultFilesWithoutDetections(state) === null) return "neutral";
+  return state.threatsFound === 0 ? "green" : "neutral";
+}
+
+/** Linha por baixo do número: qual a base, ou por que não há contagem fiável. */
+export function resultFilesWithoutDetectionsNote(state: NoDetectionsInput): string {
+  if (state.status === "completed") {
+    if (typeof state.filesAnalyzed === "number" && Number.isFinite(state.filesAnalyzed)) {
+      return `de ${state.filesAnalyzed} ${state.filesAnalyzed === 1 ? "ficheiro enviado" : "ficheiros enviados"} aos motores`;
+    }
+    return "o motor não reportou quantos ficheiros chegaram aos motores";
+  }
+  if (state.status === "failed") return "a análise falhou; não há contagem fiável";
+  if (state.status === "cancelled") return "a análise não foi concluída; não há contagem fiável";
+  return "a análise ainda não terminou";
 }
 
 /** Frase-resumo explícita mostrada no fim de cada análise. */

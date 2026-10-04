@@ -447,6 +447,16 @@ export interface KillProtectionContext {
   fallbackNames: readonly string[];
   /** PIDs de sistema (<= limiar) sempre protegidos. */
   systemPidThreshold?: number;
+  /**
+   * Mapa `pid -> ppid`, para subir a partir de um ALVO e perguntar
+   * "o serviço está no meu ancestry?".
+   *
+   * É o inverso direcional de `ancestorPids`: aquele diz quem LANÇOU o
+   * CyberSafe, este diz de quem o CyberSafe é pai. Sem ele, um descendente a
+   * profundidade > 1 (serviço -> helper -> worker) não é reconhecido — e a
+   * proteção de dois níveis desaparece.
+   */
+  parentOf?: Readonly<Record<number, number>>;
 }
 
 /** Normaliza caminhos para comparação (case-insensitive, sem prefixo \\?\). */
@@ -478,6 +488,35 @@ export function killTargetIdentity(target: Pick<KillTargetInfo, "name" | "comman
 }
 
 /**
+ * O `fromPid` tem o `selfPid` algures ACIMA dele na cadeia de pais?
+ *
+ * Sobe a partir de `fromPid` (o pai do alvo), com os mesmos limites da cadeia
+ * de ancestrais do serviço: profundidade 16 e guarda de ciclo, porque um
+ * snapshot do Windows pode ter um pai malformado e um ciclo a subir daria
+ * `RangeError` dentro de um handler de pedido.
+ *
+ * Sem `parentOf` (ou com o pai fora do snapshot) a resposta é `false`: não se
+ * assume proteção que não se provou. É o sentido seguro — no pior caso
+ * LIBERTA-SE um kill, nunca BLOQUEIA-SE um processo legítimo.
+ */
+function isDescendantOf(fromPid: number | undefined, selfPid: number, parentOf: Readonly<Record<number, number>> | undefined): boolean {
+  if (!Number.isInteger(fromPid) || (fromPid as number) <= 0) return false;
+  if (!parentOf || selfPid <= 0) return false;
+
+  let cursor = fromPid as number;
+  const vistos = new Set<number>();
+  for (let depth = 0; depth < 16 && cursor > 0; depth += 1) {
+    if (cursor === selfPid) return true;
+    if (vistos.has(cursor)) return false;
+    vistos.add(cursor);
+    const parent = parentOf[cursor];
+    if (!Number.isInteger(parent) || parent <= 0) return false;
+    cursor = parent;
+  }
+  return false;
+}
+
+/**
  * Decide se um alvo de kill está protegido. A identidade é resolvida por PID e
  * ppid (serviço/ancestrais/filhos internos), depois por caminho de executável
  * interno; o **nome é só fallback**, e apenas quando não há caminho fiável.
@@ -499,9 +538,33 @@ export function classifyKillTarget(
   // 3. Ancestrais do serviço — por PID.
   if (context.ancestorPids.includes(pid)) return "ancestor";
 
-  // 4. Componentes internos — por ppid (filhos do serviço/ancestral) ou caminho.
-  const ppid = target.ppid;
-  if (ppid && ppid > 0 && (ppid === context.selfPid || context.ancestorPids.includes(ppid))) {
+  // 4. Descendentes do serviço — DIRECIONAL: o selfPid está na cadeia de
+  //    ancestrais DO TARGET (ppid -> ppid -> ...), a qualquer profundidade.
+  //
+  //    A regra anterior era "filho de um ancestral" (`ancestorPids.includes(ppid)`)
+  //    e era um falso positivo COMPROVADO: `ancestorPids` sobe a cadeia até 16
+  //    níveis a partir de `process.ppid`, e num ambiente de desenvolvimento
+  //    essa cadeia inclui o `explorer.exe`. Qualquer aplicação que o utilizador
+  //    abrisse pelo Start menu (ppid = explorer.exe) era classificada
+  //    "internal" — observado num Notepad vivo (PID 35744, ppid 1628 =
+  //    explorer.exe), recusado 4x com `protectedReason: "internal"`.
+  //
+  //    A correção estreita para `ppid === selfPid` também estava ERRADA, pelo
+  //    motivo oposto: só cobria profundidade 1, e um descendente real a dois
+  //    níveis (serviço -> helper -> worker) ficava DESPROTEGIDO.
+  //
+  //    A forma certa é direcional: o ancestral partilhado (explorer, terminal)
+  //    é ancestral NOS DOIS LADOS e não protege nada; o selfPid só protege quem
+  //    tem o selfPid ACIMA dele.
+  //
+  //    Profundidade 1 (`target.ppid === selfPid`) é provável só com o alvo, sem
+  //    mapa nenhum, e por isso verificada à parte: sem ela, um `parentOf`
+  //    ausente (alvo fora do snapshot) desprotejia o filho direto. A
+  //    profundidade > 1 é o que precisa da caminhada.
+  if (target.ppid && target.ppid > 0 && target.ppid === context.selfPid) {
+    return "internal";
+  }
+  if (isDescendantOf(target.ppid, context.selfPid, context.parentOf)) {
     return "internal";
   }
   const targetPath = normalizeProcessPath(target.path);

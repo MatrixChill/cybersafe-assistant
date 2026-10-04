@@ -30,19 +30,29 @@ ICON_SIZES = [16, 20, 24, 32, 48, 64, 128, 256]
 # sidebar o logo tem de ter o mesmo peso visual do monograma flat.
 ICON_SAFE_MARGIN = 0.04  # 4% por lado -> a arte passa a preencher ~92%
 
+# Bandeja/tray: os vizinhos (NVIDIA/Razer/Windows Security) desenham a arte
+# quase edge-to-edge no popup. A 150% (slot 24 px) os 4% por lado = ~2.3 px
+# de glyph perdidos. Para as variantes de bandeja recorta-se ao bbox de alpha e
+# re-centra-se com margem de 1% por lado -> glyph ~98% linear do canvas.
+# A variante warning é, por agora, idêntica à active: a diferença de estado
+# (ativo vs aviso) é tratada pelo produto depois. Arte nova NÃO: é o mesmo
+# tile, recortado, exatamente como icon-*.png.
+TRAY_SAFE_MARGIN = 0.01  # 1% por lado
+TRAY_SIZES = (32, 16)    # main.ts faz o resize para os slots 16/20/24/32
+
 
 def downscale(master: Image.Image, size: int) -> Image.Image:
     """Reduz o canvas quadrado do mestre para `size`, LANCZOS, mantendo alpha."""
     if size > master.size[0]:
-        raise SystemExit('pedido de upscale: %s > %s' % (size, master.size[0]))
+        raise SystemExit('pedaco de upscale: %s > %s' % (size, master.size[0]))
     return master.resize((size, size), Image.LANCZOS)
 
 
-def tight_icon(master: Image.Image, size: int) -> Image.Image:
-    """Recorta ao bounding box de alpha e re-centra com ICON_SAFE_MARGIN."""
+def tight_icon(master: Image.Image, size: int, margin: float = ICON_SAFE_MARGIN) -> Image.Image:
+    """Recorta ao bounding box de alpha e re-centra com `margin` por lado."""
     alpha = master.getchannel('A').point(lambda v: 255 if v > 8 else 0)
     art = master.crop(alpha.getbbox())
-    inner = round(size * (1 - 2 * ICON_SAFE_MARGIN))
+    inner = round(size * (1 - 2 * margin))
     scale = inner / max(art.size)
     if scale > 1:
         raise SystemExit('upscale nao permitido: %s -> %s' % (art.size, inner))
@@ -99,6 +109,23 @@ def main():
     tight_icon(tile, 256).save(ico, format='ICO',
                                sizes=[(16, 16), (24, 24), (32, 32), (48, 48), (64, 64), (128, 128), (256, 256)])
     made.append(ico)
+
+    # Variantes de bandeja (tray): mesmo tile, recortado ao bbox de alpha e
+    # re-centrado com TRAY_SAFE_MARGIN=0.01 (1% por lado). A variante warning é,
+    # por agora, idêntica à active: a diferença de estado é tratada pelo
+    # produto depois. main.ts:316-320 procura os nomes SEM sufixo
+    # (assetsPath('tray-icon-active.png')), por isso gera-se um ficheiro de
+    # 32 px com esse nome exato — o main.ts faz o resize para os slots
+    # 16/20/24/32. Os sufixados -16/-32 mantêm-se como fonte de resize.
+    for size in TRAY_SIZES:
+        for stem in ('tray-icon-active', 'tray-icon-warning'):
+            out = GEN / f'{stem}-{size}.png'
+            tight_icon(tile, size, TRAY_SAFE_MARGIN).save(out, 'PNG', optimize=True)
+            made.append(out)
+    for stem in ('tray-icon-active', 'tray-icon-warning'):
+        out = GEN / f'{stem}.png'
+        tight_icon(tile, 32, TRAY_SAFE_MARGIN).save(out, 'PNG', optimize=True)
+        made.append(out)
     print('gerados %d ficheiros em %s' % (len(made), GEN))
     for p in made:
         print('   ', p.name, Image.open(p).size)
@@ -111,7 +138,10 @@ def main():
     app_want = {f'symbol-flat-{s}.png' for s in SIZES} | {f'tile-{s}.png' for s in SIZES} | {
         'favicon-tile-32.png', 'favicon-tile-48.png', 'apple-touch-icon-180.png'}
     # O shell so usa icones de SO: janela, bandeja e o logo do splash.
-    desk_want = {f'icon-{s}.png' for s in (16, 24, 32, 48, 256)} | {'tile-128.png'}
+    desk_want = {f'icon-{s}.png' for s in (16, 24, 32, 48, 256)} | {'tile-128.png'} | {
+        'tray-icon-active-32.png', 'tray-icon-active-16.png',
+        'tray-icon-warning-32.png', 'tray-icon-warning-16.png',
+        'tray-icon-active.png', 'tray-icon-warning.png'}
     for d, want in ((app_dir, app_want), (desk_dir, desk_want)):
         d.mkdir(parents=True, exist_ok=True)
         for stale in list(d.glob('*.png')) + list(d.glob('*.ico')):

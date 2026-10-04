@@ -164,26 +164,29 @@ describe("explainProtectionScore — fórmula real do Dashboard", () => {
  * e o motivo "ClamAV instalado mas sem base de assinaturas ... corre freshclam".
  */
 describe("honestidade do estado de cada motor", () => {
-  test("o ClamAV sem base de assinaturas mostra DEGRADED, nunca ACTIVE", () => {
-    // Motor instalado mas inerte NAO e motor operacional. Se isto virar ACTIVE,
+  // A copy passou de tokens crus ("DEGRADED") para PT-PT ("Degradado").
+  // O INVARIANTE nao muda: um motor inerte continua a nao poder aparecer como
+  // operacional. E o invariante que se prova, nao a grafia do token.
+  test("o ClamAV sem base de assinaturas mostra Degradado, nunca Ativo", () => {
+    // Motor instalado mas inerte NAO e motor operacional. Se isto virar "Ativo",
     // a UI passa a afirmar que o ClamAV protege, e ele nao analisa nada.
-    assert.equal(engineStatusText("degraded"), "DEGRADED");
-    assert.notEqual(engineStatusText("degraded"), "ACTIVE");
+    assert.equal(engineStatusText("degraded"), "Degradado");
+    assert.notEqual(engineStatusText("degraded"), engineStatusText("active"));
   });
 
-  test("um motor indisponivel mostra UNAVAILABLE, nunca ACTIVE", () => {
+  test("um motor indisponivel mostra Indisponível, nunca Ativo", () => {
     // O mesmo princípio para o firewall (WFP filter not started).
-    assert.equal(engineStatusText("unavailable"), "UNAVAILABLE");
-    assert.notEqual(engineStatusText("unavailable"), "ACTIVE");
+    assert.equal(engineStatusText("unavailable"), "Indisponível");
+    assert.notEqual(engineStatusText("unavailable"), engineStatusText("active"));
   });
 
-  test("só o estado 'active' é apresentado como ACTIVE", () => {
-    // ACTIVE é uma afirmação: o motor viu os ficheiros. Só o serviço a pode fazer.
-    assert.equal(engineStatusText("active"), "ACTIVE");
+  test("só o estado 'active' é apresentado como Ativo", () => {
+    // "Ativo" é uma afirmação: o motor viu os ficheiros. Só o serviço a pode fazer.
+    assert.equal(engineStatusText("active"), "Ativo");
   });
 
-  test("um motor em erro mostra ERROR", () => {
-    assert.equal(engineStatusText("error"), "ERROR");
+  test("um motor em erro mostra Erro", () => {
+    assert.equal(engineStatusText("error"), "Erro");
   });
 
   test("a telemetria real do ClamAV degrada o nivel, nao o mantem protegido", () => {
@@ -230,18 +233,23 @@ describe("honestidade do firewall", () => {
     for (const entrada of [null, undefined, { enabled: false, available: false, profiles: [] }]) {
       const win = windowsFirewallDisplay(entrada as never);
       assert.equal(win.status, "unknown");
-      assert.equal(win.text, "NAO VERIFICADO");
+      assert.equal(win.text, "Não verificado");
       assert.notEqual(win.text, "DESATIVADO");
       assert.doesNotMatch(win.text, /desligad/i, "desconhecido nunca se escreve como desligado");
     }
   });
 
-  test("modulo WFP inativo mostra o estado real e o motivo acionavel", () => {
-    // Payload exacto do servico nesta maquina.
+  test("modulo WFP inativo mostra o estado real e o disclaimer do Windows", () => {
+    // Payload exacto do servico nesta maquina. WS-B: a copy antiga prometia
+    // "Arranca quando ligado a Proteção" sem prova no codigo/runtime — essa
+    // afirmacao passou a ser proibida. O que se exige agora e o disclaimer
+    // honesto de que o estado do nosso filtro nada diz do Firewall do Windows.
     const wfp = wfpModuleDisplay({ status: "unavailable", detail: "WFP filter not started" });
-    assert.equal(wfp.text, "UNAVAILABLE");
-    assert.match(wfp.detail, /WFP/i);
-    assert.match(wfp.detail, /Protecao/i, "o motivo diz o que fazer: arranca com a Protecao");
+    assert.equal(wfp.text, "Indisponível");
+    assert.match(wfp.detail, /filtro de rede próprio do CyberSafe/i, wfp.detail);
+    assert.match(wfp.detail, /Isto não significa que o Firewall do Windows esteja desligado\./, wfp.detail);
+    assert.doesNotMatch(wfp.detail, /arranca quando/i, "nao se afirma um comportamento nao provado");
+    assert.doesNotMatch(wfp.detail, /\bmodulo\b/i, "PT-PT corrente: 'módulo', nao 'modulo'");
   });
 
   test("nenhum estado do modulo WFP se escreve como protecao desligada", () => {
