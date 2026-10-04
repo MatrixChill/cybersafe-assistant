@@ -1,0 +1,21 @@
+{
+ "TYPE": "delivery",
+ "TASK": "Packet invalido para testar o gate",
+ "WRITER": "OpenCode",
+ "SCOPE": "qualquer",
+ "REQUIRED_SKILLS": [
+  "systematic-debugging",
+  "skill-que-nao-existe",
+  "thinking-toolkit",
+  "secpriv",
+  "react-best-practices"
+ ],
+ "SKILLS_DELIVERY": "MAESTRO_INJECTION",
+ "SKILLS_LOADED": "NO",
+ "START_ALLOWED": "YES",
+ "ACCEPTANCE": "nada",
+ "TESTS": "",
+ "VERIFICATION_EVIDENCE": "",
+ "DONE_ALLOWED": "YES",
+ "CREATED_AT": "2026-10-01T19:50:00Z"
+}

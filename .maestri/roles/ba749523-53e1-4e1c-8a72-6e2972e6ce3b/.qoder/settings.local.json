@@ -1,0 +1,7 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cd \"C:\\\\Users\\\\caioc\\\\Desktop\\\\Caio\\\\garoto de programa\\\\cybersafe-assistant\" && grep -n \"getProcesses\\\\|fetchSnapshot\\\\|setInterval\\\\|REFRESH\" packages/app/src/App.tsx | head -20)"
+    ]
+  }
+}

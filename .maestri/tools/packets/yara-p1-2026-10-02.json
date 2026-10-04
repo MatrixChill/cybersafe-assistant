@@ -1,0 +1,38 @@
+{
+ "TYPE": "feature_p1",
+ "TASK": "YARA P1: tornar a cobertura YARA explicitamente representavel (campo coverage) sem confundir motor ativo com cobertura suficiente",
+ "WRITER": "OpenCode",
+ "REVIEWER": "Kilo Builder",
+ "SCOPE": "packages/shared-types/src/index.ts + packages/core/src/yara.ts + packages/app/src/components/ProtectionDetails.tsx (+ testes novos/afectados)",
+ "PRIORITY": "P1",
+ "REQUIRED_SKILLS": [
+  "test-driven-development",
+  "systematic-debugging",
+  "verification-before-completion",
+  "cybersafe-delivery"
+ ],
+ "SKILLS_DELIVERY": "MAESTRO_INJECTION",
+ "INJECTED_SECTIONS": {
+  "test-driven-development": "teste vermelho ANTES do patch; casos A-D tem de falhar sem o campo coverage",
+  "verification-before-completion": "gate: so DONE com comando real + output colado; teste nao executado = NOT_EXECUTED",
+  "cybersafe-delivery": "motor ativo != cobertura suficiente; honestidade de estado e contrato de produto",
+  "systematic-debugging": "confirmar o diagnostico actual antes de patchar; se ja for Verdade, patching e scope inverso"
+ },
+ "SKILLS_LOADED": "PENDING (confirmar no receipt)",
+ "START_ALLOWED": "YES",
+ "CONTEXT_VERIFIED_BY_MAESTRO": {
+  "status_active_em": "packages/core/src/yara.ts:297 -> { status: 'active', detail: 'Loaded N rule(s) from file' }",
+  "publicado_em": "packages/service/src/engine.ts:887 -> yara: this.yara.health",
+  "marker": "FALLBACK_MARKER = 'cybersafe-fallback-canary' (yara.ts:44), testado em yara.ts:145",
+  "repos_3_default_yar_tem_marker": "definitions/yara/default.yar, packages/service/definitions/yara/default.yar, packages/core/definitions/yara/default.yar -> TODOS contem o marker (grep -c = 1)",
+  "estado_real_hoje": "degraded (nao active) enquanto o corpus for o canario EICAR",
+  "contrato": "packages/shared-types/src/index.ts:196 EngineSubsystemHealth = { status, detail? }",
+  "ui": "ProtectionDetails.tsx:87 contexto 'Cobertura de regras atualmente limitada.'; contagem via contagemRegras L33; linha em L198/L237"
+ },
+ "ACCEPTANCE": "1) NOVO campo opcional coverage: 'normal' | 'limited' | 'unknown' em EngineSubsystemHealth, com doc que diga que status mede o MOTOR e coverage mede o CORPUS; 2) CASO A: corpus so fallback/canario => coverage = 'limited' (teste vermelho antes do patch); 3) CASO B: motor unavailable/error => coverage = 'unknown', NUNCA 'normal' e NUNCA 'limited' (porque nao ha corpus medido); 4) CASO C: motor active com corpus valido nao-canario => status e coverage semanticamente distintos, coverage = 'normal' SO com evidencia (compilou e nao tem o marker); 5) 'normal' nunca e inventado por default, nunca inferido por ausencia de marker num ficheiro vazio; 6) CASO D: UI em PT-PT mostra cobertura explicitamente (ex. 'Cobertura limitada: apenas regras de canário de teste (1).') e mantem os estados atuais; 7) testes de regressao verdes; 8) typecheck + build limpos; 9) se ao rever o diagnostico concluires que o contract actual JA satisfaz A-D, NAO patches: devolve PROPOSTA com evidencia.",
+ "TESTS": "npm test -w @cybersafe/core; npm test -w @cybersafe/app; npm run typecheck -w @cybersafe/core; npm run build -w @cybersafe/core; git diff --check (NAO tocar no trailing whitespace preexistente de ThreatsPage.tsx:27)",
+ "VERIFICATION_EVIDENCE": "PENDING",
+ "DONE_ALLOWED": "NO",
+ "GIT": "sem commit, sem push, sem reset/restore/checkout --/clean/stash; nao tocar em packages/service, packages/api, Hash DB; nao freshclam; nao deep scan; nao redesign da Protection page",
+ "CREATED_AT": "2026-10-02T07:30:00Z"
+}

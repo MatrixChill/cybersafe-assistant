@@ -1,0 +1,375 @@
+{
+  "generatedAt": "2026-10-01T20:24:28Z",
+  "canonical": "C:\\Users\\caioc/.agents/skills",
+  "agent_skill_matrix": {
+    "Freebuff Builder": [
+      "writing-plans",
+      "executing-plans",
+      "context-optimization",
+      "context-compression",
+      "thinking-toolkit",
+      "cybersafe-delivery",
+      "verification-before-completion",
+      "skill-security-review"
+    ],
+    "OpenCode": [
+      "systematic-debugging",
+      "code-review-and-quality",
+      "code-simplification",
+      "requesting-code-review",
+      "verification-before-completion",
+      "source-driven-development",
+      "executing-plans",
+      "cybersafe-ipc-contract",
+      "cybersafe-windows-native"
+    ],
+    "qoder": [
+      "react-best-practices",
+      "impeccable",
+      "apple-design-principles",
+      "cybersafe-design-system",
+      "cybersafe-ptpt-ui",
+      "test-driven-development",
+      "systematic-debugging",
+      "verification-before-completion"
+    ],
+    "Kilo Builder": [
+      "systematic-debugging",
+      "cybersafe-windows-native",
+      "cybersafe-ipc-contract",
+      "electron-best-practices",
+      "secpriv",
+      "test-driven-development",
+      "verification-before-completion"
+    ],
+    "Continue Worker": [
+      "systematic-debugging",
+      "test-driven-development",
+      "executing-plans",
+      "verification-before-completion"
+    ],
+    "Codex Lead": [
+      "systematic-debugging",
+      "doubt-driven-development",
+      "thinking-toolkit",
+      "secpriv",
+      "electron-best-practices",
+      "cybersafe-ipc-contract",
+      "verification-before-completion",
+      "code-review-and-quality"
+    ],
+    "Antigravity": [
+      "thinking-toolkit",
+      "doubt-driven-development",
+      "secpriv",
+      "writing-plans",
+      "cybersafe-design-system",
+      "verification-before-completion"
+    ],
+    "Luna External": [
+      "context-optimization",
+      "context-compression"
+    ],
+    "Shell": [],
+    "kiro": [
+      "systematic-debugging",
+      "test-driven-development",
+      "verification-before-completion"
+    ]
+  },
+  "native_loaders": {
+    "OpenCode": {
+      "kind": "NATIVE",
+      "path": "C:\\Users\\caioc/.config/opencode/skills"
+    },
+    "Codex Lead": {
+      "kind": "PARTIAL",
+      "path": "C:\\Users\\caioc/.codex/skills"
+    },
+    "Antigravity": {
+      "kind": "UNVERIFIED",
+      "path": "agy suporta --disable-slash-commands (skill expansion) mas nao ha diretorio de skills"
+    },
+    "qoder": {
+      "kind": "MAESTRO_INJECTION",
+      "path": "-"
+    },
+    "Kilo Builder": {
+      "kind": "MAESTRO_INJECTION",
+      "path": "-"
+    },
+    "kiro": {
+      "kind": "MAESTRO_INJECTION",
+      "path": "-"
+    },
+    "Continue Worker": {
+      "kind": "MAESTRO_INJECTION",
+      "path": "-"
+    }
+  },
+  "external_not_routed": {
+    "task-observer": "SAFE_WITH_RESTRICTIONS (2 scripts python locais, sem rede/git destrutivo) mas description broad demais: excluido do routing",
+    "project-quality": "externa, sem audit trail: NAO roteada",
+    "skill-observations": "logs/artefactos de observacao: NAO roteada"
+  },
+  "skills": [
+    {
+      "name": "apple-design-principles",
+      "sha256": "d6996f0bcb4b848d",
+      "lines": 72,
+      "description_chars": 231,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "code-review-and-quality",
+      "sha256": "d4ec6843e78a8ab2",
+      "lines": 396,
+      "description_chars": 325,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "code-simplification",
+      "sha256": "f0c5ed754057eb0c",
+      "lines": 331,
+      "description_chars": 244,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "context-compression",
+      "sha256": "ff98436a94d5927f",
+      "lines": 48,
+      "description_chars": 236,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "context-optimization",
+      "sha256": "4a436fa240edc1f6",
+      "lines": 46,
+      "description_chars": 247,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "cybersafe-delivery",
+      "sha256": "ecd29324c0b873f8",
+      "lines": 75,
+      "description_chars": 253,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "cybersafe-design-system",
+      "sha256": "8e0c8802ad534f92",
+      "lines": 44,
+      "description_chars": 253,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "cybersafe-ipc-contract",
+      "sha256": "9308f35ea45355e1",
+      "lines": 85,
+      "description_chars": 211,
+      "spec": "OK",
+      "opencode_mirror": "IN_SYNC"
+    },
+    {
+      "name": "cybersafe-ptpt-ui",
+      "sha256": "4a869c11fdecc86b",
+      "lines": 90,
+      "description_chars": 183,
+      "spec": "OK",
+      "opencode_mirror": "IN_SYNC"
+    },
+    {
+      "name": "cybersafe-windows-native",
+      "sha256": "3bb882f1318244ac",
+      "lines": 76,
+      "description_chars": 216,
+      "spec": "OK",
+      "opencode_mirror": "IN_SYNC"
+    },
+    {
+      "name": "doubt-driven-development",
+      "sha256": "6fa1fcd8420c28da",
+      "lines": 243,
+      "description_chars": 487,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "electron-best-practices",
+      "sha256": "46e06667013d99cc",
+      "lines": 103,
+      "description_chars": 232,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "executing-plans",
+      "sha256": "528b3962fa8790d1",
+      "lines": 54,
+      "description_chars": 290,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "find-skills",
+      "sha256": "c00eeea0e13e74fe",
+      "lines": 141,
+      "description_chars": 303,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "impeccable",
+      "sha256": "0bbe34f33f12944e",
+      "lines": 77,
+      "description_chars": 194,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "maestri",
+      "sha256": "0cce0554fe10c971",
+      "lines": 53,
+      "description_chars": 336,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "maestri-chat",
+      "sha256": "cbe27030f3ff2699",
+      "lines": 65,
+      "description_chars": 143,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "maestri-manager",
+      "sha256": "ef5f3e571c2c5ba8",
+      "lines": 172,
+      "description_chars": 268,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "maestri-portal",
+      "sha256": "88e490f9f4bf8141",
+      "lines": 121,
+      "description_chars": 221,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "maestri-portal-devices",
+      "sha256": "19e17bca858bedf8",
+      "lines": 69,
+      "description_chars": 239,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "maestri-routines",
+      "sha256": "7e12febe139f929d",
+      "lines": 80,
+      "description_chars": 233,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "maestri-workspace",
+      "sha256": "246825512d1fb295",
+      "lines": 82,
+      "description_chars": 261,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "react-best-practices",
+      "sha256": "8930e6bdb3f618dc",
+      "lines": 77,
+      "description_chars": 232,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "requesting-code-review",
+      "sha256": "cfcee1b06774e7c0",
+      "lines": 95,
+      "description_chars": 107,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "secpriv",
+      "sha256": "eb0e0b62b672371e",
+      "lines": 93,
+      "description_chars": 228,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "skill-security-review",
+      "sha256": "3a91e05f83ccc837",
+      "lines": 57,
+      "description_chars": 310,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "source-driven-development",
+      "sha256": "c59faf851377f0ee",
+      "lines": 216,
+      "description_chars": 308,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "systematic-debugging",
+      "sha256": "808fc5717aa88ad6",
+      "lines": 283,
+      "description_chars": 91,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "test-driven-development",
+      "sha256": "64b03fce4aee5a97",
+      "lines": 330,
+      "description_chars": 79,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "thinking-toolkit",
+      "sha256": "05448412b7747fa2",
+      "lines": 39,
+      "description_chars": 263,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "verification-before-completion",
+      "sha256": "2befe7fc55bcadaa",
+      "lines": 120,
+      "description_chars": 225,
+      "spec": "OK",
+      "opencode_mirror": null
+    },
+    {
+      "name": "writing-plans",
+      "sha256": "a6c67c1900064347",
+      "lines": 204,
+      "description_chars": 84,
+      "spec": "OK",
+      "opencode_mirror": null
+    }
+  ],
+  "spec_problems": [],
+  "stale_mirrors": []
+}

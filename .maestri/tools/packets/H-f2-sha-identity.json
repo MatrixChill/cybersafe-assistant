@@ -1,0 +1,27 @@
+{
+ "TYPE": "bug_fix_p0",
+ "TASK": "F2: healLegacyRecords deve reconciliar por SHA-256, nunca apagar entrada externa por colisao de family",
+ "WRITER": "OpenCode",
+ "REVIEWER": "Kilo Builder",
+ "SCOPE": "packages/core/src/signatures.ts (healLegacyRecords) + packages/core/test/hash-db-migration.test.js",
+ "REQUIRED_SKILLS": [
+  "test-driven-development",
+  "verification-before-completion",
+  "cybersafe-delivery"
+ ],
+ "SKILLS_DELIVERY": "MAESTRO_INJECTION",
+ "INJECTED_SECTIONS": {
+  "test-driven-development": "teste que falha antes do fix; os 4 casos tem de ser vermelhos primeiro",
+  "verification-before-completion": "gate: so DONE com comando real + output colado",
+  "cybersafe-delivery": "SHA-256 = identidade primaria; family = metadata; provenance nunca se perde"
+ },
+ "SKILLS_LOADED": "PENDING (confirmar no receipt)",
+ "START_ALLOWED": "YES",
+ "ACCEPTANCE": "1) entrada externa com SHA diferente preservada mesmo se family colide com built-in; 2) built-in conhecido com metadata antiga e SHA igual = metadata CORRIGIDA (nao apagado); 3) hash retired 71b6a493... REMOVIDO por lista explicita de SHA, nao por familia; 4) 2a execucao = delta zero; 5) duas entradas da mesma family coexistem; 6) source/provenance nunca rebaixado",
+ "TESTS": "npm test em packages/core (gate completo) + typecheck + git diff --check",
+ "VERIFICATION_EVIDENCE": "PENDING",
+ "DONE_ALLOWED": "NO",
+ "GIT": "sem commit, sem push, sem reset/restore/checkout --/clean/stash",
+ "PRIORITY": "P0",
+ "CREATED_AT": "2026-10-01T23:10:00Z"
+}

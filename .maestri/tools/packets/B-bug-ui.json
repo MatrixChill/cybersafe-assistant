@@ -1,0 +1,22 @@
+{
+ "TYPE": "bug_ui",
+ "TASK": "Read-only: estado de loading infinito numa pagina React",
+ "WRITER": "qoder",
+ "SCOPE": "NENHUM (read-only: analise)",
+ "REQUIRED_SKILLS": [
+  "systematic-debugging",
+  "react-best-practices"
+ ],
+ "SKILLS_DELIVERY": "MAESTRO_INJECTION",
+ "INJECTED_SECTIONS": {
+  "systematic-debugging": "hipoteses concorrentes",
+  "react-best-practices": "effects e estados"
+ },
+ "SKILLS_LOADED": "YES (injecao real: 2 secoes)",
+ "START_ALLOWED": "YES",
+ "ACCEPTANCE": "causa identificada com file:line e correccao proposta",
+ "TESTS": "leitura de codigo; nenhum teste executado",
+ "VERIFICATION_EVIDENCE": "PENDING",
+ "DONE_ALLOWED": "NO",
+ "CREATED_AT": "2026-10-01T19:50:00Z"
+}

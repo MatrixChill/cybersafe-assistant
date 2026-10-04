@@ -1,0 +1,1 @@
+{"task":"Hash DB freeze review","scope":"definitions/hashes/*.json + packages/service/definitions/hashes/*.json + packages/core/src/signatures.ts","writer":"OpenCode","reviewer":"Kilo","files":["definitions/hashes/default.json","packages/service/definitions/hashes/default.json","packages/core/src/signatures.ts"],"status":"CLAIMED"}

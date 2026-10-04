@@ -1,0 +1,10 @@
+{
+  "task": "Hash DB freeze F1: ligar suites ao gate npm test",
+  "scope": "packages/core/package.json (scripts.test)",
+  "writer": "OpenCode",
+  "reviewer": "Kilo Builder",
+  "files": [
+    "packages/core/package.json"
+  ],
+  "reason": "F1 (P1) confirmado pelo reviewer Kilo e verificado independentemente pelo Maestro: hash-db-migration.test.js nao corre no gate"
+}

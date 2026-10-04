@@ -1,0 +1,22 @@
+{
+ "TYPE": "security_review",
+ "TASK": "Read-only: rever se o renderer alcanca Node",
+ "WRITER": "Antigravity",
+ "SCOPE": "NENHUM (read-only: review)",
+ "REQUIRED_SKILLS": [
+  "secpriv",
+  "verification-before-completion"
+ ],
+ "SKILLS_DELIVERY": "MAESTRO_INJECTION",
+ "INJECTED_SECTIONS": {
+  "secpriv": "IPC trust boundaries",
+  "verification-before-completion": "gate"
+ },
+ "SKILLS_LOADED": "YES (injecao real: 2 secoes)",
+ "START_ALLOWED": "YES",
+ "ACCEPTANCE": "achados com file:line, sem alterar codigo",
+ "TESTS": "nenhum (review)",
+ "VERIFICATION_EVIDENCE": "PENDING",
+ "DONE_ALLOWED": "NO",
+ "CREATED_AT": "2026-10-01T19:50:00Z"
+}

@@ -1,0 +1,24 @@
+{
+ "TYPE": "long_context",
+ "TASK": "Read-only: reconciliar 10+ notes e roles com fontes canonicas",
+ "WRITER": "Luna External",
+ "SCOPE": "FORA DO SCOPE: hash DB e packages/*/src",
+ "REQUIRED_SKILLS": [
+  "context-optimization",
+  "context-compression"
+ ],
+ "SKILLS_DELIVERY": "MAESTRO_INJECTION",
+ "INJECTED_SECTIONS": {
+  "context-optimization": "progressive disclosure",
+  "context-compression": "handoff"
+ },
+ "SKILLS_LOADED": "YES (injecao real: 2 secoes)",
+ "START_ALLOWED": "NO",
+ "ACCEPTANCE": "HANDOFF.md com lista ficheiro:linha:claim",
+ "TESTS": "nenhum (leitura)",
+ "VERIFICATION_EVIDENCE": "PENDING",
+ "DONE_ALLOWED": "NO",
+ "NOTE": "START_ALLOWED=NO ate o utilizador fazer trigger manual da Luna",
+ "CREATED_AT": "2026-10-01T19:50:00Z",
+ "LUNA_CANDIDATE": "YES"
+}
