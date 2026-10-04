@@ -1,6 +1,12 @@
 # 06 — AGENT ROLES
 
-## Estado Maestri preservado (antes de qualquer alteração — 2026-09-23)
+> **ATUALIZADO 2026-10-01 — DOCUMENTO HISTÓRICO (não-LIVE).**
+> Autoridade canónica actual: USER → FREEBUFF = MAESTRO PRINCIPAL → workers/reviewers (decisão do utilizador, 2026-10-01).
+> Handoff transfere contexto, NÃO concede autoridade.
+> Papéis LIVE: OpenCode = Senior Builder / Reviewer; Antigravity = Architect / Strategic Reviewer (READ-ONLY).
+> A constituição viva vive na Note AGENT ROLES; as secções abaixo preservam o estado de 2026-09-23/24 apenas como história.
+
+## Estado Maestri preservado (antes de qualquer alteração — 2026-09-23 — HISTÓRICO)
 
 Obtido com `maestri roles list` / `maestri agents` / `maestri preset list` — configuração existente NÃO foi alterada, apenas documentada.
 
@@ -12,7 +18,7 @@ Obtido com `maestri roles list` / `maestri agents` / `maestri preset list` — c
 
 | Role | Naixa atual | Proposta de preenchimento | Custo |
 |---|---|---|---|
-| **Maestro / Lead** | existe (`Maestro temporario`, Antigravity, Technical Lead) | OpenCode (confirmado) | €0 |
+| **Maestro / Lead** | existe (`Maestro temporario`, Antigravity, Technical Lead) | OpenCode (confirmado) — **HISTÓRICO**: substituído por Freebuff em 2026-10-01 | €0 |
 | **Builder** | existe (`Builder — CyberSafe`) | Kilo | €0 |
 | **Alternative Builder** | **criar** | OpenClaude / Goose / Claude Code (backend local) | €0 |
 | **Reviewer** | existe (`Reviewer — CyberSafe`) | Goose (`goose review`) ou Crush (quando reposto) | €0 |

@@ -128,6 +128,12 @@
     margin-top:18px;padding:14px 16px;border:1px solid var(--border);
     background:#081316;border-radius:12px;color:var(--muted);font-size:12px;line-height:1.5
   }
+  .local-note{margin-top:10px;padding:9px 11px;border:1px dashed var(--border);border-radius:9px;line-height:1.55}
+  .local-note code{color:var(--cyan,#22d3ee)}
+  .local-tag{
+    display:inline-block;margin-left:6px;padding:1px 6px;border:1px dashed var(--border);
+    border-radius:6px;font-size:10px;color:var(--muted);font-weight:600;vertical-align:middle
+  }
   .footer-actions{display:flex;gap:8px;flex-wrap:wrap;margin-top:12px}
   .footer-actions button{
     background:transparent;border:1px solid var(--border);color:var(--muted);
@@ -158,7 +164,7 @@
       <h1>CyberSafe Assistant — Organizador da PAP</h1>
       <p class="subtitle">Mapa vivo das ideias, funcionalidades, correções e próximos passos do Centro Inteligente de Segurança e Saúde do PC.</p>
     </div>
-    <div class="stamp">Estado base: 25/09/2026<br>Os estados podem ser alterados com um clique.</div>
+    <div class="stamp">Estado base: 28/09/2026<br>Os estados podem ser alterados com um clique.</div>
   </div>
 
   <div class="overall">
@@ -171,6 +177,19 @@
       <div class="stat"><b id="progressCount">0</b><span>Em curso</span></div>
       <div class="stat"><b id="plannedCount">0</b><span>Planeadas</span></div>
       <div class="stat"><b id="blockedCount">0</b><span>Bloqueadas</span></div>
+    </div>
+  </div>
+
+  <div class="overall">
+    <div>
+      <div class="overall-title"><strong>PAP / Release Readiness</strong><span id="papPct">0%</span></div>
+      <div class="bar-track"><div class="bar-fill" id="papBar"></div></div>
+    </div>
+    <div class="overall-right">
+      <div class="stat"><b id="papDone">0</b><span>PAP concluídas</span></div>
+      <div class="stat"><b id="papProgress">0</b><span>PAP em curso</span></div>
+      <div class="stat"><b id="papPlanned">0</b><span>PAP por fazer</span></div>
+      <div class="stat"><b id="postPapCount">0</b><span>Pós-PAP / backlog</span></div>
     </div>
   </div>
 
@@ -200,6 +219,13 @@
 
   <div class="footer-note">
     <b>Regra do CyberSafe:</b> só marcar como concluído aquilo que está realmente implementado/testado. Ideias futuras ficam como Planeado; funcionalidades que já existem mas ainda precisam de teste manual ou correção ficam Em curso.
+    <div class="local-note">
+      <b>Notas locais: <span id="localCount">0</span>.</b> Tarefas criadas aqui neste browser com «+ Nova tarefa».
+      Ficam visíveis e são exportadas, mas <b>não contam</b> no ROADMAP TOTAL nem na PAP
+      (esses números são os do ficheiro, e é isso que faz o contador bater certo com o
+      <code>CYBERSAFE_ORGANIZADOR.md</code>). Para entrar no mapa oficial têm de ser
+      adicionadas aos dois ficheiros.
+    </div>
     <div class="footer-actions">
       <button id="exportBtn">Exportar estado (JSON)</button>
       <button id="resetBtn">Repor estado inicial</button>
@@ -251,7 +277,13 @@ const CUSTOM_TASKS_KEY = 'cybersafe-pap-organizer-custom-tasks-v2';
 // Versao dos dados do organizador: subir sempre que o ficheiro for sincronizado
 // no fecho de uma sprint, para descartar estados antigos guardados no browser.
 const DATA_VERSION_KEY = 'cybersafe-pap-organizer-data-version';
-const DATA_VERSION = '2026-09-26-p0a-rootcause-v2';
+const DATA_VERSION = '2026-09-30-maestro-freebuff-v17';
+
+// Tarefas criadas no browser com "+ Nova tarefa" sao NOTAS LOCAIS: nao fazem
+// parte do mapa oficial, por isso NAO entram no ROADMAP TOTAL nem na PAP (senao
+// os contadores mudam conforme a sessao do browser e deixao de bater certo com
+// o ficheiro e com o MD). Continuam visiveis na lista e no export.
+function isLocal(t){ return !!(t && t.custom); }
 
 function loadCustomTasks(){
   try{
@@ -262,6 +294,20 @@ function loadCustomTasks(){
 }
 function saveCustomTasks(items){
   localStorage.setItem(CUSTOM_TASKS_KEY, JSON.stringify(items));
+}
+// Re-hidrata as notas locais do browser no arranque. Sem isto elas desapareciam
+// de cada reload (estavam so em memoria) e o total saltava de sessao para sessao.
+function attachLocalTasks(){
+  const known = new Set(sections.flatMap(s => s.tasks.filter(Boolean).map(t => t.id)));
+  let added = 0;
+  loadCustomTasks().forEach(t => {
+    if (!t || !t.id || known.has(t.id)) return;
+    const section = sections.find(s => s.id === t.sectionId) || sections[0];
+    section.tasks.push({ ...t, custom:true });
+    known.add(t.id);
+    added++;
+  });
+  return added;
 }
 
 const sections = [
@@ -277,9 +323,12 @@ const sections = [
       {id:'arch-packages',label:'Packages app, desktop, service, core, api, native-windows, native-engine, shared-types e extension',status:'done'},
       {id:'arch-truth',label:'Princípio de verdade: indisponível/degradado/erro quando um motor ou sensor não funciona',status:'done'},
       {id:'arch-personal-business',label:'Distinção de conta Personal vs Business',status:'done'},
-      {id:'arch-build',label:'Build, typecheck e suites de testes como gate de qualidade',status:'progress',note:'Typecheck, build e suites por workspace funcionam como gate (Maestro corre-o centralmente; 2026-09-26: typecheck verde, app 182/182, core 179/179, service 110/110). DIVIDAS PRE-EXISTENTES registadas sem suprimir regras: (a) npm run lint na raiz falhava porque packages/desktop nao tinha script lint, ou seja o gate de lint estava incompleto e nao era um problema do codigo; (b) packages/app tem 13 erros eslint pre-existentes (8 no-explicit-any, 3 react-hooks comportamentais, 1 no-unused-vars, 1 no-empty), ficam como follow-up e nenhuma regra foi desligada.'},
+      {id:'arch-build',label:'Build, typecheck e suites de testes como gate de qualidade',status:'progress',note:'Build, typecheck e testes principais funcionam. O lint do app continua vermelho por dívida conhecida em hooks/react-refresh; o lint do desktop ainda é cosmético. Correção adiada para depois dos itens críticos da PAP.'},
       {id:'arch-clean',label:'Eliminar warnings/runtime noise recorrente que atrapalha diagnóstico (watchers EPERM, etc.)',status:'progress',note:'Não bloqueia o produto, mas ainda aparece no runtime.'},
-      {id:'arch-log-hygiene',label:'NOVO (2026-09-25) — Higiene dos logs de runtime do serviço (rotação/limite de tamanho)',status:'done',note:'Descoberta 2026-09-25: error.log com 3,4 GB e boot-debug.log com 3,2 GB em ~/.cybersafe-service, sem rotação. Risco de disco e de diagnóstico. 2026-09-25 (Qoder): delegada a Kilo Builder após recovery do pool (Kilo = Auto, gateway free); write scope log-writer/index/engine (só logging), proibido scan-manager (kiro). DONE (Kilo entregou, Qoder reviu): causa raiz = appendFileSync cru SEM rotação + ciclo de realimentação EPIPE (console.error dentro do handler de uncaughtException reentrava no próprio handler, ~600B de stack por iteração); fix = LogWriter/SyncLogWriter com rotação por tamanho + retenção real (unlink .maxFiles), safeWrite + guarda inCrashHandler, reclaim de emergência no próximo boot (trunca 3,3/3,1 GB para cauda dentro do orçamento — único ponto de perda de histórico, só acima de maxBytes*maxFiles), dedupe xN, orçamento 8MBx3 + 4MBx3 = 32MB (era 6,4GB); 24 testes novos em log-hygiene.test.js; 3 bugs reais caçados pelos próprios testes; service 95/95, typecheck/lint/build:all OK.'},
+      {id:'arch-log-hygiene',label:'Higiene dos logs de runtime do serviço (rotação/limite de tamanho)',status:'done',note:'Logs do serviço com rotação por tamanho e retenção real; o passivo de 6,4 GB foi reduzido para 32 MB. 24 testes novos cobrem o comportamento.'},
+      {id:'test-tmpdir-leak',label:'API temp DB leak: ligação sqlite singleton a vazar diretorios em %TEMP%',status:'done',note:'Corrigido o leak de ligação sqlite que vazava diretórios em %TEMP% por execução de teste. Zero diretórios vazados depois da correção.'},
+      {id:'iso-runtime',label:'P0 isolamento de runtime: nenhuma escrita em %USERPROFILE%\\.cybersafe-service nos testes',status:'done',note:'baseDir injectado por tmpdir em todos os testes do serviço. Verificado por impressão digital do home real (190 ficheiros) antes/depois de suites completas: idêntica. Guard G do p0-runtime-isolation.test.js impede a reintrodução.'},
+      {id:'shutdown-p1',label:'P1 shutdown: recursos críticos de IPC fechados quando shutdown() resolve',status:'done',note:'Quando await shutdown() resolve, server/clientes/sockets já estão fechados e o stop dos subsistemas foi tentado dentro de orçamento limitado. Dois bugs reais corrigidos: (1) WfpFilter.stop() fazia spawn de PowerShell (~1100 ms) mesmo sem start(); (2) dispose() usava Promise.allSettled global, e um único .stop() pendurado impedia o fecho dos sockets para sempre. Guard falha no código antigo. Dívida P2 registada em output/shutdown-p1/DEBT.md.'}
     ]
   },
   {
@@ -302,14 +351,23 @@ const sections = [
       {id:'scan-exclusions',label:'Corrigir exclusões perigosas: .exe/.dll/.zip/.lnk/.msi/.sys/.ps1 chegam aos motores; Downloads não é trusted',status:'done'},
       {id:'scan-quick-scope',label:'Quick Scan por risco/recência, depth 2, budget 800 e diretórios prioritários',status:'done'},
       {id:'scan-file-targetkind',label:'targetKind file/directory + nome do ficheiro disponível desde o início',status:'done'},
-      {id:'scan-file-runtime',label:'Confirmação visual manual final do scan de ficheiro único no Electron',status:'done',note:'Concluído 2026-09-25: manual test PASS na UI (1 ficheiro verificado, 1 ameaça, toast THREAT.DETECTED, sem quarentena), confirmado por threat.detected no log. Alvo usado: canário dev.'},
-      {id:'scan-threat-counter',label:'NOVO (2026-09-25) — Coerência entre o toast THREAT.DETECTED e o contador threatsFound (P0-A)',status:'done',note:'Causa raiz: engine.ts publicava medium e o scan-manager.ts só contava high/critical → toast 1, contador 0. Corrigido com um critério único (highRiskCount > 0 || severity high/critical/medium) alinhado entre os dois. Validado manualmente e por testes.'},
-      {id:'scan-deep-scope',label:'Auditar/ajustar scope real da Análise Profunda para que a copy não prometa “todo o computador” sem ser verdade',status:'progress',note:'Precisamos confirmar volumes/paths/limites reais antes de fechar.'},
-      {id:'scan-safe-copy',label:'Trocar “Ficheiros Seguros” por copy mais honesta (“Sem ameaças detetadas” / “Sem deteções”)',status:'progress'},
-      {id:'scan-full-smoke',label:'Smoke test manual final: Rápida → Profunda → Ficheiro → Pasta → ZIP → Cancelar → navegar e voltar',status:'progress',note:'Falta o manual test com o EICAR real (eicar_com2.zip): a deteção do EICAR real ainda não foi observada ao vivo (só o canário dev).'},
-      {id:'scan-runtime-quality',label:'Corrigir progresso, contadores e desempenho da Análise Profunda',status:'done',note:'Contadores fechados em scan-threat-counter (2026-09-25). DONE 2026-09-26 com audit via teste em vez de patch especulativo: 8 testes novos em packages/service/test/scan-runtime-quality.test.js registados no script test do service; service 110/110. Nenhuma alteracao em scan-manager, engine nem analysis porque a evidencia nao a pediu. O que falta e manual (scan completo e cancelamento ao vivo) e pertence a scan-full-smoke, que continua progress.'},
-      {id:'scan-zip-nested-count',label:'NOVO (2026-09-25) — Corrigir contagem em ZIPs aninhados',status:'done',note:'A recursão conta as entradas internas e o próprio ZIP aninhado (possível contagem dupla) e nestingDepth > ZIP_MAX_NESTING com guarda < permite 4 níveis (off-by-one). Descoberta da revisão independente. 2026-09-25 (Qoder): delegada a kiro (builder auto) — scope limitado a service/scan-manager.ts + test/scan-manager.test.js. DONE (kiro entregou, Qoder reviu): dupla contagem corrigida (scanArtifact só no else quando NÃO há recursão; ZIP exterior conta como 1); off-by-one (guarda >= ZIP_MAX_NESTING consistente com a recursão <); params mortos baseScanned/startTime removidos; 5 testes novos (fixtures AdmZip in-memory, sem zip bomb); verificação combinada Qoder: service 95/95, git diff --check limpo.'},
-      {id:'scan-observability',label:'NOVO (2026-09-25) — Tornar a sessão de scan observável (persistir/registar progresso e resultado terminal)',status:'done',note:'scan.progress e o payload completed são IPC-only e nunca são persistidos: o contador threatsFound não é auditável e o sintoma P0-A era invisível nos logs. DONE (com arch-log pela Kilo): scanId no topo do scan.progress e nas linhas de scan; só eventos úteis persistidos em security-events.log (file.created/modified, process.started/exited, scan.progress deixam de ir a disco mas mantêm broadcast à UI); log por ficheiro excluído exige CYBERSAFE_DEBUG_BRIDGE=1.'},
+      {id:'scan-file-runtime',label:'Confirmação visual manual final do scan de ficheiro único no Electron',status:'done',note:'Validação manual na UI passou: 1 ficheiro, 1 ameaça, toast de deteção e sem quarentena.'},
+      {id:'scan-threat-counter',label:'Coerência entre o toast THREAT.DETECTED e o contador threatsFound (P0-A)',status:'done',note:'Toast e contador usam agora o mesmo critério de ameaça. Validado em scan real na UI: 800 verificados, 3 ameaças, e a página Ameaças devolve as 3.'},
+      {id:'scan-copy-grammar',label:'Copy PT-PT do resumo do scanner (excluídos pelos motores de análise)',status:'done',note:'Frase do resumo do scanner corrigida (verbo concordado) e validada manualmente no plural. Nada alterado em scoring, motores ou contagens.'},
+      {id:'scan-enum-perf',label:'Performance da enumeração no scan (aberto, arquitetural)',status:'progress',note:'A enumeração não é o gargalo: 800 ficheiros são selecionados em menos de 0,25 s. O principal problema de performance estava no VirusTotal síncrono e já foi separado dos scans em massa. Falta apenas validação final de performance.'},
+      {id:'scan-vt-blocking',label:'Gancho do VirusTotal sincrono no caminho do scan: ~15,5 s por ficheiro, o gargalo real da performance',status:'done',note:'VirusTotal deixou de bloquear Quick/Deep/Custom scans. A separação foi confirmada em runtime: zero chamadas VT originadas pelo scanner. Regressão refeita e re-fechada: scan-manager voltou a chamar sem options e foi corrigido com skipVirusTotal=true em massa (Quick/Deep/Custom/Pasta/ZIP); service 143/143. DONE.'},
+      {id:'vt-enrichment-design',label:'Enriquecimento VirusTotal: chave invalida (401) e throttle de 15,5 s por ficheiro mesmo com chave saudavel',status:'planned',note:'Decisão de produto pendente sobre o enriquecimento VirusTotal: a chave é inválida (401) e o limite de 4 pedidos/minuto manteria 15,5 s por ficheiro mesmo com chave saudável. Nada implementado.'},
+      {id:'scan-pk-over500-coverage',label:'Cobertura zero nos contentores PK com mais de 500 entradas (expansao abortada)',status:'planned',note:'Contentores com mais de 500 entradas são abortados pelo guard e o interior nunca é analisado. Decisão de produto: subir o limite ou dizer honestamente na UI que o interior não foi inspecionado.'},
+      {id:'scan-lnk-analyze-fail',label:'analyze() a lancar em alguns .lnk (contados em filesFailed) — a confirmar',status:'planned',note:'Erro de analyze() em alguns .lnk observado numa probe, ainda não confirmado no serviço real. Falta reproduzir pelo caminho real e ler filesFailed antes de corrigir.'},
+      {id:'scan-engine-batch-mode',label:'Modo batch/residente do motor nativo (scan-engine) para eliminar o spawn por artefacto, _PÓS-PAP / BACKLOG._',status:'planned',note:'Modo batch/residente do motor nativo foi medido e não implementado; o teto de ganho é ~10-13% num quick scan. Exige alterar o binário e uma decisão explícita de produto.'},
+      {id:'scan-deep-scope',label:'Auditar/ajustar scope real da Análise Profunda para que a copy não prometa “todo o computador” sem ser verdade',status:'progress',note:'Falta confirmar volumes, paths e limites reais da Análise Profunda antes de fechar.'},
+      {id:'ui-dead-riskgauge',label:'Componente morto RiskGauge.tsx que diz Seguro e nao e importado por ninguem',status:'planned',note:'Componente morto que diz Seguro, sem nenhum import. Falta remover ou religar com copy honesta.'},
+      {id:'scan-native-spawn-monitor-loop',label:'Monitor de processos pode reanalisar cada scan-engine.exe e pagar VT por spawn',status:'done',note:'Hipótese refutada em runtime: scan-engine.exe não cria loop VT. O tráfego observado vinha do watcher e do monitor de processos. Investigação encerrada.'},
+      {id:'scan-safe-copy',label:'Trocar “Ficheiros Seguros” por copy mais honesta (“Sem ameaças detetadas” / “Sem deteções”)',status:'progress',note:'Copy honesta já implementada no código; só falta a validação humana no ecrã.'},
+      {id:'scan-full-smoke',label:'Smoke test manual final: Rápida → Profunda → Ficheiro → Pasta → ZIP → Cancelar → navegar e voltar',status:'progress',note:'Falta o smoke test manual com o EICAR real; a deteção do EICAR ainda não foi observada ao vivo.'},
+      {id:'scan-runtime-quality',label:'Corrigir progresso, contadores e desempenho da Análise Profunda',status:'done',note:'Auditado com testes em vez de patch; 8 testes novos no service. Nenhuma alteração em scan-manager, engine ou analysis porque a evidência não a pediu.'},
+      {id:'scan-zip-nested-count',label:'Corrigir contagem em ZIPs aninhados',status:'done',note:'Dupla contagem em ZIP aninhado e off-by-one de profundidade corrigidos, com 5 testes novos. service 95/95 e diff limpo.'},
+      {id:'scan-observability',label:'Tornar a sessão de scan observável (persistir/registar progresso e resultado terminal)',status:'done',note:'scanId nos eventos de progresso e só eventos úteis persistidos em disco; o contador de ameaças passou a ser auditável. Log por ficheiro excluído atrás de flag de debug.'}
     ]
   },
   {
@@ -318,20 +376,26 @@ const sections = [
     desc:'Camadas reais do antivírus e respetivo estado de saúde.',
     tasks:[
       {id:'prot-yara',label:'YARA-X funcional com regras válidas e testes',status:'done'},
-      {id:'prot-hash',label:'Hash DB com SHA-256 e fallback offline',status:'done',note:'2026-09-25: hash EICAR fabricado (MD5+zeros) substituído pelo SHA-256 real (275a021b…) e base empacotada pela primeira vez em packages/service/definitions/hashes/default.json.'},
-      {id:'prot-clam-state',label:'ClamAV reporta degraded/unavailable quando não está funcional',status:'done'},
+      {id:'prot-hash',label:'Hash DB com SHA-256 e fallback offline',status:'done',note:'Hash EICAR real (SHA-256) e base de hashes empacotada pela primeira vez.'},
+      {id:'hashdb-runtime-gate',label:'Gate runtime do Hash DB: base em disco reflete a base de código',status:'done',note:'PASS em 2026-10-02 com a app DEV reaberta apos o sync: COUNT=3, EICAR presente (275a021b…, built-in), ed01 e 24d ambos family=WannaCry-Ransomware (malwarebazaar), 71b6 AUSENTE — esperado, foi retirado deliberadamente por falta de proveniencia. O 71b6 nao foi reintroduzido: esta em RETIRED_HASH_SIGNATURES (signatures.ts) e healLegacyRecords() apaga-o de qualquer base que o traga. Suites: core 332/333, service 218/218, app 453/453.'},
+      {id:'prot-clam-state',label:'ClamAV reporta degraded/unavailable quando não está funcional',status:'done',note:'Estado degradado do ClamAV validado como honesto: motor instalado não é motor operacional.'},
       {id:'prot-native-state',label:'Native Engine reporta unavailable quando não está disponível',status:'done'},
-      {id:'prot-firewall',label:'Estado do Firewall integrado no ProtectionHealth',status:'done'},
+      {id:'prot-firewall',label:'Estado do Firewall integrado no ProtectionHealth',status:'done',note:'Separação honesta entre estado do Windows Firewall e módulo WFP validada; estado desconhecido nunca é apresentado como proteção desligada.'},
       {id:'prot-health',label:'ProtectionHealth centralizado sem fingir motores ativos',status:'done'},
-      {id:'ui-degraded-copy',label:'Copy "Degradada" removida da UI visível (tray + ReportsPage); enum técnico interno mantido',status:'done',note:'2026-09-25 (Qoder): tray "Proteção: Precisa de atenção · N/100" e relatório "Proteção precisa de atenção"; desktop 29/29 PASS.'},
-      {id:'entitlement-premium-leak',label:'NOVO (2026-09-25) — Personal premium recebe features business-only (leak em getUserFeatures)',status:'done',note:'Confirmado por leitura + teste mental do ramo premium (...Object.values(FEATURES) sem filtro). Delegado a kiro após NON-DELIVERY da Continue Worker (reportou "completed / tests passed" sem alterar getUserFeatures — local Qwen2.5 atrás do alias qwen3-coder não entregou; verificado diff). DONE (kiro): premium filtra BUSINESS_SPECIFIC_FEATURES para contas não-business (Set para dedupe); 4 testes novos; gate final Qoder: core 140, service 95, app 151, desktop 29 — 0 falhas; typecheck PASS; git diff --check limpo.'},
+      {id:'ui-degraded-copy',label:'Copy "Degradada" removida da UI visível (tray + ReportsPage); enum técnico interno mantido',status:'done',note:'Degradada removido da UI visível (tray e relatório); o enum técnico interno mantém-se.'},
+      {id:'entitlement-premium-leak',label:'Personal premium recebe features business-only (leak em getUserFeatures)',status:'done',note:'Conta Personal premium deixou de receber features business-only, com 4 testes novos. Nenhuma feature foi removida das contas Business.'},
       {id:'prot-score',label:'Separação correta Protection Score ≠ PcState',status:'done'},
       {id:'prot-eicar',label:'Testes de integridade com EICAR / regras YARA',status:'done'},
+      {id:'yara-coverage-visual',label:'Gate visual YARA: corpus limitado nunca apresentado como "cobertura normal"',status:'done',note:'PASS em teste manual do utilizador (2026-10-02): app DEV reaberta mostra YARA DEGRADADO + cobertura limitada, sem "Cobertura normal". Causa raiz: o criterio era a AUSENCIA do FALLBACK_MARKER, nao a cobertura real; o updater tinha descarregado 1 de 4 fontes (MALW_Eicar.yar, 317 B) e classificava-a "file"/normal. Correccao (Kilo Builder): classifyCoverage decide pelo CONTEUDO. Verificado com o ficheiro REAL copiado byte-a-byte (sha256 1ba3175c…): degraded/limited. Suites: core 332/333, service 218/218, app 453/453.'},
+      {id:'yara-corpus-curated',label:'YARA: corpus curado próprio com proveniência e licença por regra (estratégia C)',status:'planned',note:'DECISAO DO UTILIZADOR 2026-10-02: opção C (curado), NÃO juntar as 4 fontes. Motivos: packer/crypto geram falsos positivos em software legitimo; nao ha merge nem dedup hoje; licencas nao verificadas; mais regras != melhor proteccao. Plano escrito em output/yara-corpus-plan/CURATED_CORPUS_PLAN.md (3 fases: separar canario / manifest com proveniencia / corpus real). IMPLEMENTACAO NAO AUTORIZADA nesta sessao.'},
       {id:'prot-quarantine',label:'Quarentena: mover, restaurar, apagar e metadados/manifest',status:'done'},
       {id:'prot-defs',label:'Updater/scheduler de definições',status:'done'},
-      {id:'prot-clam-config',label:'Fechar configuração/distribuição do ClamAV para funcionar sem setup manual frágil',status:'progress',note:'DIAGNOSTICO FECHADO 2026-09-26 (honesto): nao existe base de assinaturas em lado nenhum - definitions/clamav vazio, diretorio do Chocolatey vazio e C:\\ProgramData\\ClamAV vazio, e o freshclam nao popula. O binario existe, mas sem base nao ha varrimento, portanto o estado degraded reportado pelos motores ESTA CORRETO (prot-clam-state continua done). Falta para FECHAR esta tarefa: distribuir as definitions no pacote ou correr freshclam com rede; so ai clamav passa a active.'},
-      {id:'prot-hash-update',label:'Robustecer atualização da base de hashes / tratamento de falhas do feed',status:'done',note:'2026-09-25: refreshBuiltinIfStale() re-semeia a base em disco no init(); migração confirmada no ambiente real. DONE 2026-09-26: a base offline de referencia (EICAR) nunca desaparece com feed parcial ou invalido - o refresh so substitui quando o payload e valido e nao retira registos embutidos. Evidencia: hash-db-refresh 18/18, regressao combinada engine-integrity + signatures 29/29, tsc do core exit 0. Pendente e registado a parte: applyRemoteRecords() existe mas nao e chamado por engine.ts nem updater.ts, ou seja o feed remoto ainda nao aplica registos; provada esta a defesa contra feed mau.'},
-      {id:'prot-history',label:'Histórico consolidado de deteções, ações e quarentena',status:'progress'},
+      {id:'prot-clam-config',label:'Fechar configuração/distribuição do ClamAV para funcionar sem setup manual frágil',status:'done',note:'DONE 2026-10-02. BUG DE CONFIG CORRIGIDO (P1) e confirmado em runtime. O gate manual do utilizador revelou: freshclam abortava com "Parse error ... Unknown option MaxRetry" e nao descarregava base. CAUSA: buildFreshclamConfig (service/src/clamav-config.ts) escrevia `MaxRetry 2`, que NAO e uma directiva do freshclam — o .sample oficial do ClamAV 1.5.2 documenta so `MaxAttempts`. Pior: o produto reescrevia o mesmo ficheiro invalido a cada update, por isso o estado nao se desfazia sozinho. FIX: directiva removida do GERADOR (nao do ficheiro em disco); config runtime regenerada pela propria funcao de producao (reason=invalido). GATE DE PARSE NOVO em clamav-config.test.js valida cada directiva gerada contra o .sample REAL instalado (uma lista escrita a mao voltaria a envelhecer mal); 3 testes provados RED contra o codigo com o bug. GATES MANUAIS PASS: config, download e runtime. Base em disco: daily.cvd 23 MB + main.cvd 89 MB + bytecode.cvd. App DEV: ClamAV ATIVO, "Motor antivírus ativo e com base de assinaturas disponível", 3 de 4 motores ativos, score 80/100. Suites: service 222/222, app 453/453.'},
+      {id:'prot-hash-update',label:'Robustecer atualização da base de hashes / tratamento de falhas do feed',status:'done',note:'A base offline de referência nunca desaparece com feed parcial ou inválido; provado por testes. O applyRemoteRecords() continua por ligar — o feed remoto ainda não aplica registos.'},
+      {id:'prot-history',label:'Histórico consolidado de deteções, ações e quarentena',status:'done',note:'Fechado com validação manual: o histórico devolve de imediato as deteções do scan real, sem divergência entre o Scanner e a página Ameaças.'},
+      {id:'prot-detection-quality',label:'Qualidade das deteções: limpeza dos fixtures/probes de desenvolvimento',status:'done',note:'Causa corrigida: dedup de YARA, assinatura ausente = 0 pontos, heuristica generica isolada limitada; bun.exe real 100/critical -> 35/low/safe e EICAR mantem critical/quarantine. Suites: service 143/143, core 233/233, app 283/283.'},
+      {id:'prot-native-hash-trust',label:'Native engine hash divergence (confiança no hashDB)',status:'planned',note:'Motor nativo devolveu SHA-256 7f489a66... para o bun.exe cujo hash real é 15277c59... (confirmado por Node e Get-FileHash). Provar a causa antes de confiar em decisões hashDB neste caminho. OPEN / PRÓXIMA SESSÃO.'},
+      {id:'prot-engine-context',label:'Dashboard/Protection Details: contexto dos motores em linguagem humana (WS-B)',status:'done',note:'WS-B validado por humano: Dashboard mostra ClamAV/WFP em PT-PT sem degraded/unavailable crus nem paths na copy principal; Protection Details mostra YARA Ativo (1 regra carregada, cobertura limitada), Hash DB Ativo (4 assinaturas, cobertura limitada), ClamAV com explicação humana da base ausente, Native Engine em texto humano com path só nos detalhes técnicos, Windows Firewall separado de WFP; score "3 estão ativos" com cobertura real. Detalhes técnicos crus só com a área técnica expandida (aceitável). Audit: output/sprint-audit-cde/RESULT.md.'}
     ]
   },
   {
@@ -346,10 +410,10 @@ const sections = [
       {id:'rt-health',label:'Windows Health: serviços, firewall, processos, rede, discos, utilizadores e registo',status:'done'},
       {id:'rt-epperm',label:'Tratar junctions/reparse points e reduzir spam EPERM dos watchers',status:'progress'},
       {id:'rt-defender',label:'Estado do antivírus/Windows Security via SecurityCenter/Defender quando aplicável',status:'planned'},
-      {id:'rt-events',label:'Auditoria de eventos críticos do Windows (energia, disco, sistema)',status:'planned'},
+      {id:'rt-events',label:'Auditoria de eventos críticos do Windows (energia, disco, sistema), _PÓS-PAP / BACKLOG._',status:'planned'},
       {id:'rt-filearrival',label:'Detetar novos ficheiros fora do browser com monitorização nativa e analisar quando relevante',status:'progress'},
-      {id:'rt-motw',label:'Usar Mark of the Web (Zone.Identifier) quando disponível como contexto de risco',status:'planned'},
-      {id:'rt-lowlevel-validation',label:'Validar ETW, AMSI e WFP com testes controlados',status:'planned',note:'ETW/AMSI podem ser testados no PC real; WFP preferencialmente em VM quando houver bloqueio real.'},
+      {id:'rt-motw',label:'Usar Mark of the Web (Zone.Identifier) quando disponível como contexto de risco, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'rt-lowlevel-validation',label:'Validar ETW, AMSI e WFP com testes controlados',status:'planned',note:'ETW/AMSI podem ser testados no PC real; WFP preferencialmente em VM quando houver bloqueio real.'}
     ]
   },
   {
@@ -366,13 +430,13 @@ const sections = [
       {id:'health-pccenter',label:'PC Center: hardware, processos, rede, sensores e saúde do sistema',status:'done'},
       {id:'health-findings',label:'PcState/findings com severidades e categorias',status:'done'},
       {id:'health-temp',label:'Temperaturas reais CPU/GPU/NVMe/board/fans via provider robusto',status:'progress',note:'Prioridade seguinte após fechar o Scanner.'},
-      {id:'health-lhm',label:'Helper persistente LibreHardwareMonitor, cache curto e lifecycle limpo',status:'planned'},
+      {id:'health-lhm',label:'Helper persistente LibreHardwareMonitor, cache curto e lifecycle limpo, _PÓS-PAP / BACKLOG._',status:'planned'},
       {id:'health-temp-bundle',label:'Bundlar helper/sensores no CyberSafe sem download silencioso nem instalação manual',status:'planned'},
-      {id:'health-smart',label:'S.M.A.R.T. de SSD/HDD (vida útil, health/warnings)',status:'planned'},
+      {id:'health-smart',label:'S.M.A.R.T. de SSD/HDD (vida útil, health/warnings), _PÓS-PAP / BACKLOG._',status:'planned'},
       {id:'health-stress',label:'Rever Stress Index para representar pressão instantânea real e explicar “Como é calculado?”',status:'progress'},
       {id:'health-diskfinding',label:'Pouco espaço em disco como finding de saúde, separado de stress instantâneo',status:'done'},
-      {id:'health-thermal-actions',label:'Alertas térmicos + ação segura/opt-in em vez de desligamento automático por defeito',status:'planned'},
-      {id:'health-taskmanager',label:'NOVO (2026-09-25) — Task Manager (PC Center): lista de processos e terminação de processos',status:'progress',note:'PATCH FEITO (qoder, 2026-09-25), READY FOR MANUAL TEST. Causa LIST confirmada: processes.list devolvia só o cache de eventos com cap silencioso de 200 — ~139 de 331-339 processos invisíveis; agora listProcesses() reconcilia on-demand com a verdade do SO (TTL 2s, fallback cache, sem cap). Causa KILL confirmada: taskkill corria com stdio ignore (stdout/stderr descartados) e só mapeava 0/128 — exit 5 vira access-denied com a mensagem real; exitCode/stdout/stderr propagados até à UI; actions.log com Cmd/Status/Exit/Stdout/Stderr. Live no pipe real: 339 processos com proteção OFF; notepad (WMI) visível → killed exit 0 → PID ausente no tasklist → sem stale; System#4 e explorer recusados ANTES do taskkill. Testes: core 136/136, service 61/61 (8 novos), app 147/147 (3 novos), desktop 29/29, typecheck PASS, git diff --check limpo. Falta: validação manual na UI (terminar um notepad; tentar matar um serviço protegido e ver a mensagem de acesso negado com o diagnóstico real). REVISÃO QODER 2026-09-25: diff confirmado sem regressão (chain access-denied core→types→service→app com testes); focados core 140/140, service 66/66, app 147/147, desktop 29/29 PASS. P0-A 2026-09-26 (Fast Builder/qoder) - READY FOR MANUAL TEST: P1 tombstones + epoca no servico, um PID confirmado morto nunca volta por enumeracao em voo nem por process.started velho e o TTL so re-arma se nada mudou; P2 probe pelo CIM, o OpenProcess diz vivo a um processo ja terminado enquanto houver handles (caso classico do Notepad), a morte confirma-se por duas ausencias consecutivas no Win32_Process e a query-alvo passou a ser rate-limited (antes ate 33 PowerShell num kill lento); P3 desfecho terminal invalida sempre a janela de frescura (reused tira a entrada do dono antigo sem tombstone, still-running nao mente para baixo mas forca nova leitura); P5 alias-stub no renderer, o desfecho existia no servico e nos tipos mas caia no erro generico e nao fazia refetch (era o um run nunca acabou). Evidencia: service 110/110, app 182/182, process-kill 32/32, typecheck verde, git diff --check limpo. Pendentes: P4 ja foi entregue a 2026-09-26 (orcamento total de 12 s no servico, abaixo dos 15 s do renderer), restando P6 a P9 (sequenciacao de snapshots no App e PC Center, polling do Gestor de Tarefas, head-of-line no socket, timeout no ServiceClient), P11 (identidade com CreationDate) e os 4 passos de validacao manual do utilizador. REABERTO 2026-09-26 com bug reproduzido: o caminho sem pesquisa (U) divergia do caminho com pesquisa (F) - no U a area principal ficava quase vazia/escura, o clique respondia de forma inconsistente, havia muito loading e num caso o processo nem morreu; no F (pesquisa notepad) o fluxo era normal. RAIZ EM DUAS CAMADAS: (1) snapshotProcesses engolia o erro da enumeracao e devolvia mapa vazio, entao listProcesses() esvaziava o cache, carimbarva-o como fresco e mostrava lista vazia enquanto o aviso do kill dizia sucesso; (2) o modal de confirmacao nao identificava o processo e a lista reordenava por CPU a cada refresh, as linhas mudavam de sitio sob o cursor e o utilizador confirmava um PID que nunca viu. FIXES: a fronteira passou a lancar no falhanco da enumeracao primaria e o servico serve o cache em vez de lista vazia; modal com nome, PID, utilizador e memoria; ordenacao deterministica (metrica, nome, PID); overlay fecha com o resultado terminal do kill e o refetch corre em segundo plano. Prova do defeito: git show HEAD do modal nao tinha qualquer ocorrencia de nome ou PID, e no handleKill o await refreshProcesses() ficava dentro do try antes do finally que fechava o overlay. KILL-BUDGET ENTREGUE (correcao a esta nota, que estava errada): um unico orcamento total de 12 s no servico (KILL_TOTAL_BUDGET_MS, engine.ts:188) com remaining() por etapa - killDeadline na linha 1368, step(ceiling) na 1371, orcamento esgotado devolve timeout sem chegar a disparar o taskkill nas linhas 1403-1408, runTaskkill recebe timeoutMs com remaining() na 1412 e o reap e limitado por Math.min(killReapDeadlineMs, remaining()) com piso nas 1509-1510; 12 s fica abaixo dos 15 s do prazo do renderer, que era exatamente o objectivo do P4. AINDA EM ABERTO: P6 e P7 (o refetch ainda e o fetchSnapshot de 7 pedidos do App.tsx e um snapshot velho pode sobrepor-se a um novo), e a validacao manual do caminho sem pesquisa. Testes da ronda: task-manager-page 16 novos mais task-kill-flow = 38/38, service 110/110, typecheck verde.'},
+      {id:'health-thermal-actions',label:'Alertas térmicos + ação segura/opt-in em vez de desligamento automático por defeito, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'health-taskmanager',label:'Task Manager (PC Center): lista de processos e terminação de processos',status:'done',note:'Gestor de Tarefas validado manualmente: lista, terminação e tombstone funcionam. Refinamentos internos restantes não bloqueiam a PAP.'}
     ]
   },
   {
@@ -389,7 +453,7 @@ const sections = [
       {id:'mx-model',label:'Provider Groq / groq/compound integrado',status:'done'},
       {id:'mx-onboarding',label:'Onboarding overlay em 3 passos com persistência',status:'done'},
       {id:'mx-moods',label:'Assets/moods Matrix (safe/guide/alert/success/happy/defender/avatar/mini)',status:'done'},
-      {id:'mx-business',label:'Matrix Business para explicar eventos de rede e anomalias de egress',status:'planned'},
+      {id:'mx-business',label:'Matrix Business para explicar eventos de rede e anomalias de egress, _PÓS-PAP / BACKLOG._',status:'planned'}
     ]
   },
   {
@@ -403,23 +467,23 @@ const sections = [
       {id:'biz-dest',label:'Métrica “Destinos únicos” sem fingir que todos são externos',status:'done'},
       {id:'biz-tcp-map',label:'Corrigir/validar mapeamento real Get-NetTCPConnection (state, ::, listeners, portas)',status:'progress'},
       {id:'biz-proc',label:'Correlação PID → processo confiável',status:'progress'},
-      {id:'biz-inventory',label:'Network Inventory de dispositivos da rede',status:'planned'},
-      {id:'biz-iphelper',label:'Usar IP Helper API / GetIpNetTable2 / GetExtendedTcpTable/GetExtendedUdpTable',status:'planned'},
-      {id:'biz-etw',label:'ETW para telemetria/fluxos de rede em tempo real',status:'planned'},
-      {id:'biz-baseline',label:'Traffic Baseline por dispositivo/processo',status:'planned'},
-      {id:'biz-egress',label:'Egress Anomaly Detection sem afirmar “data theft” com um único sinal',status:'planned'},
-      {id:'biz-wfp',label:'WFP para controlo/bloqueio de tráfego no endpoint',status:'planned'},
-      {id:'biz-downloads',label:'Associar downloads/eventos ao deviceId do endpoint',status:'planned'},
-      {id:'biz-agentconsole',label:'Arquitetura Agent por PC → Business Console',status:'planned'},
-      {id:'biz-multi',label:'Gestão de múltiplos endpoints',status:'planned'},
-      {id:'biz-policies',label:'Políticas centrais e alertas empresariais',status:'planned'},
-      {id:'biz-rgpd',label:'Privacy-by-design: local-first, minimização, metadata-first, sem payload por defeito',status:'planned'},
-      {id:'biz-deviceid',label:'deviceId pseudónimo + separação opcional da identidade do funcionário',status:'planned'},
-      {id:'biz-retention',label:'Retenção configurável + limpeza automática de dados empresariais',status:'planned'},
-      {id:'biz-rbac',label:'RBAC e audit log para consola Business',status:'planned'},
-      {id:'biz-mtls',label:'Canal seguro Agent ↔ Console (TLS/mTLS quando multi-endpoint existir)',status:'planned'},
-      {id:'biz-onprem',label:'Opção on-premise para clientes empresariais',status:'planned'},
-      {id:'biz-networkwide',label:'Integrações futuras com routers/firewalls (UniFi/pfSense/OPNsense/Fortinet/Cisco/MikroTik)',status:'planned'},
+      {id:'biz-inventory',label:'Network Inventory de dispositivos da rede, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-iphelper',label:'Usar IP Helper API / GetIpNetTable2 / GetExtendedTcpTable/GetExtendedUdpTable, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-etw',label:'ETW para telemetria/fluxos de rede em tempo real, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-baseline',label:'Traffic Baseline por dispositivo/processo, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-egress',label:'Egress Anomaly Detection sem afirmar “data theft” com um único sinal, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-wfp',label:'WFP para controlo/bloqueio de tráfego no endpoint, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-downloads',label:'Associar downloads/eventos ao deviceId do endpoint, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-agentconsole',label:'Arquitetura Agent por PC → Business Console, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-multi',label:'Gestão de múltiplos endpoints, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-policies',label:'Políticas centrais e alertas empresariais, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-rgpd',label:'Privacy-by-design: local-first, minimização, metadata-first, sem payload por defeito, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-deviceid',label:'deviceId pseudónimo + separação opcional da identidade do funcionário, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-retention',label:'Retenção configurável + limpeza automática de dados empresariais, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-rbac',label:'RBAC e audit log para consola Business, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-mtls',label:'Canal seguro Agent ↔ Console (TLS/mTLS quando multi-endpoint existir), _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-onprem',label:'Opção on-premise para clientes empresariais, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'biz-networkwide',label:'Integrações futuras com routers/firewalls (UniFi/pfSense/OPNsense/Fortinet/Cisco/MikroTik), _PÓS-PAP / BACKLOG._',status:'planned'}
     ]
   },
   {
@@ -434,7 +498,7 @@ const sections = [
       {id:'ext-badge',label:'Badge por severidade',status:'done'},
       {id:'ext-privacy',label:'Privacidade: sem recolha sensível por defeito',status:'done'},
       {id:'ext-agent',label:'Ligação robusta extensão → agente CyberSafe para analisar downloads no endpoint',status:'progress'},
-      {id:'ext-business',label:'Eventos de browser minimizados para o Business Center (domínio/origem em vez de conteúdo)',status:'planned'},
+      {id:'ext-business',label:'Eventos de browser minimizados para o Business Center (domínio/origem em vez de conteúdo), _PÓS-PAP / BACKLOG._',status:'planned'}
     ]
   },
   {
@@ -447,20 +511,23 @@ const sections = [
       {id:'ux-matrix',label:'Tema Matrix Terminal',status:'done'},
       {id:'ux-red',label:'Tema Red Belbete (dark burgundy/ruby + light rose/ice)',status:'done'},
       {id:'ux-lightfix',label:'Correção de accent no Light Mode',status:'done'},
-      {id:'ux-liquid',label:'Tema CyberSafe Liquid experimental',status:'progress'},
+      {id:'ux-typography-stable',label:'Tipografia estável: Light/Dark mudam só cor, nunca font-family',status:'done',note:'Light/Dark passou a mudar só cor; a família tipográfica deixou de variar entre modos. Regressão coberta por teste novo e validada manualmente.'},
+      {id:'ux-tray-dpi',label:'Ícone da bandeja dimensionado ao DPI real do Windows',status:'progress',note:'Taskbar PASS. Variante B entregue: 8 tray-symbol-{active,warning}-{16,20,24,32}.png (símbolo transparente, sem placa) com escolha por slot no main.ts e fallback seguro. Validação humana: 100% PASS, 125% e 150% pendentes.'},
+      {id:'ux-liquid',label:'Tema CyberSafe Liquid experimental, _PÓS-PAP / BACKLOG._',status:'progress'},
+      {id:'ux-protection-copy-polish',label:'Polish de copy em Protection Details, _PÓS-PAP / BACKLOG._',status:'planned',note:'"Cobertura atual: YARA: ..." pode ser melhorado estilisticamente; a frase "A nota é o contrário do risco" pode ser simplificada. Registado pelo utilizador na validação WS-B; não reabrir WS-B por polish.'},
       {id:'ux-semantic',label:'Cores semânticas independentes do tema',status:'done'},
-      {id:'ux-dashboard-polish',label:'NOVO (2026-09-26) — Painel: pergunta central, hierarquia de estado e menos ruido visual',status:'progress',note:'Sem redesign, sobre a versao atual. Hero compactado (padding, anel de 28 para 68 px, Matrix de xl para md, categorias em linha) a responder a uma so pergunta: O meu computador esta bem? com resposta curta por nivel (answer/answerDetail em protectionHealth); Protection Score com numero, estado e nota de definicoes em hierarquia clara; CPU/RAM/Disco/Rede como metricas principais e GPU/VRAM reduzidas a uma linha secundaria; disco a mostrar espaco LIVRE, o que significa e o que fazer (describeDiskSpace, duas regras: GB absolutos e percentagem); acoes do Scanner agrupadas com uma primaria e duas secundarias; empty states de ameacas e alertas de uma linha; fim das repeticoes de aviso (o hero nao repete a lista de prioridades, os cartoes de metrica deixaram de imprimir o alerta vermelho que ja la estava, rotulos de severidade em PT); menos cyan decorativo (icones para muted, glow da Sidebar removido, hexagonos 0.03 para 0.02 e cyber-grid 4 por cento para 3, scrollbar global fina coerente com o ProtectionDetails). BUG REAL CORRIGIDO: o cartao Quarentena mostrava pcState.findings.length (recomendacoes, nao quarentena) e passou a chamar-se Recomendacoes; nao se inventou contagem de quarentena porque DashboardSummary nao traz esse campo. Evidencia: dashboard-layout 14/14 e protection-health 13/13, gate do Maestro com typecheck verde e app 182/182. Falta: validacao visual em 3 larguras (o hero usa flex-wrap com order) e a contagem real de quarentena exige campo novo no DashboardSummary (backend).'},
-      {id:'ux-scanner-steps',label:'Adaptar Multi Step Loader/step indicator para fases reais do Scanner',status:'planned'},
-      {id:'ux-statebutton',label:'Stateful Button para ações assíncronas (quarentena, corrigir, restaurar, atualizar)',status:'planned'},
-      {id:'ux-circular',label:'Circular Progress para Protection Score / métricas quando fizer sentido',status:'planned'},
-      {id:'ux-alertlist',label:'Animated List / Central de Alertas',status:'planned'},
-      {id:'ux-expand',label:'Expandable Cards para mostrar detalhes técnicos só quando o utilizador pedir',status:'planned'},
-      {id:'ux-filetree',label:'File Tree para resultado de pasta/ZIP quando útil',status:'planned'},
-      {id:'ux-dragdrop',label:'Drag & drop para analisar ficheiros, mantendo picker nativo',status:'planned'},
-      {id:'ux-notificationbell',label:'Notification Bell com contador e histórico',status:'planned'},
-      {id:'ux-numberticker',label:'Number Ticker discreto para métricas que não atualizam freneticamente',status:'planned'},
-      {id:'ux-glow',label:'Border Beam / Glow apenas para estados ativos ou urgentes',status:'planned'},
-      {id:'ux-reducedmotion',label:'prefers-reduced-motion / acessibilidade das animações',status:'planned'},
+      {id:'ux-dashboard-polish',label:'Painel: pergunta central, hierarquia de estado e menos ruido visual',status:'progress',note:'Painel reorganizado para responder a uma só pergunta, com hierarquia de estado e menos ruído; corrigido o cartão Quarentena que mostrava recomendações. Falta validação visual em 3 larguras e um campo real de contagem de quarentena no backend.'},
+      {id:'ux-scanner-steps',label:'Adaptar Multi Step Loader/step indicator para fases reais do Scanner, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-statebutton',label:'Stateful Button para ações assíncronas (quarentena, corrigir, restaurar, atualizar), _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-circular',label:'Circular Progress para Protection Score / métricas quando fizer sentido, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-alertlist',label:'Animated List / Central de Alertas, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-expand',label:'Expandable Cards para mostrar detalhes técnicos só quando o utilizador pedir, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-filetree',label:'File Tree para resultado de pasta/ZIP quando útil, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-dragdrop',label:'Drag & drop para analisar ficheiros, mantendo picker nativo, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-notificationbell',label:'Notification Bell com contador e histórico, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-numberticker',label:'Number Ticker discreto para métricas que não atualizam freneticamente, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-glow',label:'Border Beam / Glow apenas para estados ativos ou urgentes, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'ux-reducedmotion',label:'prefers-reduced-motion / acessibilidade das animações, _PÓS-PAP / BACKLOG._',status:'planned'}
     ]
   },
   {
@@ -469,14 +536,14 @@ const sections = [
     desc:'O CyberSafe não deve apenas mostrar dados; deve orientar e agir com controlo do utilizador.',
     tasks:[
       {id:'not-toggle',label:'Toggle de notificações',status:'done'},
-      {id:'not-scan',label:'Notificação de scan concluído',status:'planned'},
-      {id:'not-protection',label:'Notificação quando ProtectionHealth fica degradado',status:'planned'},
-      {id:'not-extension',label:'Alertas vindos da extensão',status:'planned'},
-      {id:'not-business',label:'Alertas Business (novo dispositivo, egress anómalo, etc.)',status:'planned'},
-      {id:'not-thermal',label:'Alerta térmico sustentado antes de qualquer ação automática',status:'planned'},
-      {id:'not-shutdown',label:'Encerramento por temperatura apenas opt-in e com critérios seguros',status:'planned'},
-      {id:'not-smart',label:'SMART warning → recomendar backup, sem upload automático sem consentimento',status:'planned'},
-      {id:'not-center',label:'Central de Alertas com prioridade e histórico',status:'planned'},
+      {id:'not-scan',label:'Notificação de scan concluído, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'not-protection',label:'Notificação quando ProtectionHealth fica degradado, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'not-extension',label:'Alertas vindos da extensão, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'not-business',label:'Alertas Business (novo dispositivo, egress anómalo, etc.), _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'not-thermal',label:'Alerta térmico sustentado antes de qualquer ação automática, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'not-shutdown',label:'Encerramento por temperatura apenas opt-in e com critérios seguros, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'not-smart',label:'SMART warning → recomendar backup, sem upload automático sem consentimento, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'not-center',label:'Central de Alertas com prioridade e histórico, _PÓS-PAP / BACKLOG._',status:'planned'}
     ]
   },
   {
@@ -487,8 +554,8 @@ const sections = [
       {id:'auth-register',label:'Register/Login/Me local com bcrypt/JWT/Prisma',status:'done'},
       {id:'auth-pages',label:'Páginas Login/Register',status:'done'},
       {id:'auth-accounttype',label:'Tipo de conta Personal/Business no modelo e registo',status:'done'},
-      {id:'auth-email',label:'Confirmação por e-mail',status:'planned',note:'Não implementada atualmente; não deve ser descrita como pronta.'},
-      {id:'auth-business-rbac',label:'Permissões Business/RBAC futuras',status:'planned'},
+      {id:'auth-email',label:'Confirmação por e-mail, _PÓS-PAP / BACKLOG._',status:'planned',note:'Não implementada atualmente; não deve ser descrita como pronta.'},
+      {id:'auth-business-rbac',label:'Permissões Business/RBAC futuras, _PÓS-PAP / BACKLOG._',status:'planned'}
     ]
   },
   {
@@ -498,12 +565,13 @@ const sections = [
     tasks:[
       {id:'dist-electron',label:'Desktop Electron funcional em desenvolvimento',status:'done'},
       {id:'dist-autostart',label:'Autostart com Windows / iniciar minimizado',status:'progress',note:'Implementado, mas falta validação final em build empacotado.'},
-      {id:'dist-installer',label:'Gerar instalador final CyberSafe-Setup.exe',status:'planned'},
+      {id:'dist-installer',label:'Gerar instalador final CyberSafe-Setup.exe',status:'planned',note:'Build de diretório validado em runtime (win-unpacked): logs privados fora do pacote (asar 276 MB → 6,87 MB), scan-engine.exe empacotado e nativeEngine=active provado. NSIS final congelado até gates A (tray 125/150) e B (scan full smoke) fecharem.'},
       {id:'dist-helper',label:'Bundlar temperature helper/dependências necessárias no instalador',status:'planned'},
       {id:'dist-clam',label:'Bundlar/configurar motores externos necessários sem downloads silenciosos em runtime',status:'planned'},
       {id:'dist-cleanvm',label:'Teste de instalação e primeiro arranque em Windows/VM limpa',status:'planned'},
       {id:'dist-upgrade',label:'Estratégia de atualização do aplicativo e definições',status:'progress'},
-      {id:'dist-sign',label:'Assinatura de código/installer para distribuição real',status:'planned'},
+      {id:'dist-sign',label:'Assinatura de código/installer para distribuição real, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'rel-selfdetect-canary',label:'Release self-detection: dev canário dentro do bundle',status:'done',note:'O CyberSafe empacotado detetava-se a si próprio; o literal do canário saiu do src de produção e foi medido com zero ocorrências no app.asar novo.'}
     ]
   },
   {
@@ -512,11 +580,11 @@ const sections = [
     desc:'Relatórios A4, dados técnicos explicados e evidências úteis para utilizador e PAP.',
     tasks:[
       {id:'rep-a4',label:'Relatório A4 com cabeçalho, ameaças, quarentena, motores, hardware e findings',status:'done'},
-      {id:'rep-score',label:'Garantir que relatório consome PcState/ProtectionHealth corretos em vez de score próprio antigo',status:'progress',note:'READY FOR MANUAL TEST 2026-09-26: o relatorio interno consome PcState e ProtectionHealth em vez de calcular score proprio; nao ha metrica paralela; a ausencia de dados aparece como indisponivel e nunca como zero nem como saudavel. Evidencia: 17/17 testes focados. Falta: validar o PDF A4 impresso (layout) e confirmar que o espelho do build reflete o core dist.'},
+      {id:'rep-score',label:'Garantir que relatório consome PcState/ProtectionHealth corretos em vez de score próprio antigo',status:'progress',note:'O relatório consome PcState e ProtectionHealth em vez de score próprio; falta validar o PDF A4 impresso.'},
       {id:'rep-export',label:'Impressão/PDF do relatório',status:'done'},
-      {id:'rep-e2e-canary',label:'NOVO (2026-09-25) — Teste E2E do pipeline de deteção sem EICAR real (canário dev-only)',status:'done',note:'packages/service/test/dev-canary.test.js: scan real → deteção → threat.detected → threatsFound, com o mesmo contrato do engine.ts, e o caso inverso em NODE_ENV=production (0 deteções). Permite validar o pipeline sem disparar o Windows Defender.'},
-      {id:'rep-business',label:'Relatório Business de eventos/risco de rede',status:'planned'},
-      {id:'rep-privacy',label:'Relatório/explicação “o que o CyberSafe monitoriza” para transparência Business',status:'planned'},
+      {id:'rep-e2e-canary',label:'Teste E2E do pipeline de deteção sem EICAR real (canário dev-only)',status:'done',note:'Teste E2E do pipeline de deteção sem EICAR real, com canário só de teste e caso inverso em produção.'},
+      {id:'rep-business',label:'Relatório Business de eventos/risco de rede, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'rep-privacy',label:'Relatório/explicação “o que o CyberSafe monitoriza” para transparência Business, _PÓS-PAP / BACKLOG._',status:'planned'}
     ]
   },
   {
@@ -534,7 +602,7 @@ const sections = [
       {id:'pap-matrix',label:'Capítulo Matrix AI e tradução de dados técnicos',status:'progress'},
       {id:'pap-business',label:'Business: separar claramente Phase 1 implementada de funções futuras',status:'progress'},
       {id:'pap-privacy',label:'Privacidade/RGPD Business: local-first, minimização, transparência e limitações',status:'planned'},
-      {id:'pap-testing',label:'Reunir evidências de testes, probes, builds e screenshots finais',status:'progress',note:'2026-09-25: nova evidência disponível (manual test do canário + suites core 128/128, service 53/53, typecheck limpo) e o registo da Sprint 3 no topo do ficheiro CYBERSAFE_ORGANIZADOR.md. SPRINT 4 GATE FINAL (Qoder, após kiro+Kilo): core 140/140, service 95/95, app 151/151, desktop 29/29, typecheck PASS, git diff --check limpo; + scripts/protection-state-probe.mjs (live pipe: yara active, hashDb active, native active, clamav degraded-freshclam, firewall unavailable-dev). Falta: manual test Task Manager (Notepad) pelo utilizador.'},
+      {id:'pap-testing',label:'Teste estruturado com utilizadores reais: tarefas propostas, tempo, dificuldades, feedback e melhorias',status:'progress',note:'Teste estruturado com utilizadores reais antes da PAP: tarefas propostas, tempo, dificuldades, feedback e melhorias. Ainda não correu, porque depende de pessoas e de agenda.'},
       {id:'pap-usability',label:'Realizar testes estruturados com utilizadores reais e documentar os resultados',status:'planned',note:'Orientação do Professor Edgar Costa: tarefas reais, tempos, dificuldades, feedback e melhorias.'},
       {id:'pap-manual',label:'Manual do utilizador',status:'planned'},
       {id:'pap-diagrams',label:'Diagramas de arquitetura e fluxos',status:'planned'},
@@ -542,7 +610,7 @@ const sections = [
       {id:'pap-docx',label:'Documento final da PAP em DOCX baseado no modelo da escola',status:'progress'},
       {id:'pap-presentation',label:'Apresentação final da PAP',status:'planned'},
       {id:'pap-demo',label:'Roteiro de demonstração ao vivo com fallback para imprevistos',status:'planned'},
-      {id:'pap-screens',label:'Capturas finais do Dashboard, Protection, Scanner, PC Center, Matrix e Business',status:'planned'},
+      {id:'pap-screens',label:'Capturas finais do Dashboard, Protection, Scanner, PC Center, Matrix e Business',status:'planned'}
     ]
   },
   {
@@ -550,13 +618,13 @@ const sections = [
     title:'Ideias Futuras / Parking Lot',
     desc:'Boas ideias que não devem roubar prioridade aos bugs e funções essenciais.',
     tasks:[
-      {id:'future-router',label:'Integração opcional com router/firewall para visibilidade além dos endpoints Windows',status:'planned'},
-      {id:'future-onprem',label:'Business Console on-premise',status:'planned'},
-      {id:'future-multios',label:'Agentes para outros sistemas operativos (se a PAP evoluir após Windows)',status:'planned'},
-      {id:'future-home',label:'Inspiração de automação tipo Home Assistant sem transformar isso em dependência',status:'planned'},
-      {id:'future-grafana',label:'Usar ideias de Grafana/Prometheus como referência de observabilidade, sem obrigar o utilizador a instalá-los',status:'planned'},
-      {id:'future-smartactions',label:'Ações automáticas seguras e opt-in baseadas em risco/saúde',status:'planned'},
-      {id:'future-motion',label:'Microinterações MotionSites / Rare UI / Magic UI / Aceternity depois da funcionalidade estar fechada',status:'planned'},
+      {id:'future-router',label:'Integração opcional com router/firewall para visibilidade além dos endpoints Windows, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'future-onprem',label:'Business Console on-premise, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'future-multios',label:'Agentes para outros sistemas operativos (se a PAP evoluir após Windows), _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'future-home',label:'Inspiração de automação tipo Home Assistant sem transformar isso em dependência, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'future-grafana',label:'Usar ideias de Grafana/Prometheus como referência de observabilidade, sem obrigar o utilizador a instalá-los, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'future-smartactions',label:'Ações automáticas seguras e opt-in baseadas em risco/saúde, _PÓS-PAP / BACKLOG._',status:'planned'},
+      {id:'future-motion',label:'Microinterações MotionSites / Rare UI / Magic UI / Aceternity depois da funcionalidade estar fechada, _PÓS-PAP / BACKLOG._',status:'planned'}
     ]
   }
 ];
@@ -567,8 +635,10 @@ customTasks.forEach(t=>{
   if(section && !section.tasks.some(x=>x.id===t.id)) section.tasks.push(t);
 });
 
+const localTasksAdded = attachLocalTasks();
+
 const initialState = {};
-sections.forEach(s => s.tasks.forEach(t => initialState[t.id] = t.status));
+sections.forEach(s => s.tasks.forEach(t => { if(t) initialState[t.id] = t.status; }));
 
 function loadState(){
   try{
@@ -598,17 +668,39 @@ function cycleStatus(id){
 }
 
 function calcSection(s){
+  const official = s.tasks.filter(t => !isLocal(t));
+  if(!official.length) return 0;
   let score=0;
-  s.tasks.forEach(t => score += STATUS[state[t.id] || t.status].weight);
-  return Math.round((score/s.tasks.length)*100);
+  official.forEach(t => score += STATUS[state[t.id] || t.status].weight);
+  return Math.round((score/official.length)*100);
 }
+// Contadores oficiais: so tarefas do ficheiro. As notas locais do browser ficam
+// de fora para os numeros baterem certo com o ficheiro e com o MD.
 function calcOverall(){
-  let total=0, score=0, counts={done:0,progress:0,planned:0,blocked:0};
+  let total=0, score=0, counts={done:0,progress:0,planned:0,blocked:0}, local=0;
   sections.forEach(s => s.tasks.forEach(t=>{
+    if(!t) return;
+    if(isLocal(t)){ local++; return; }
     const st=state[t.id]||t.status;
     total++; score+=STATUS[st].weight; counts[st]++;
   }));
-  return {pct:Math.round(score/total*100),counts};
+  return {pct:Math.round(score/total*100),counts,local,total};
+}
+
+// PAP / RELEASE READINESS (2026-09-28): responde a "quanto falta para a PAP".
+// So contam as tarefas NECESSARIAS para a apresentacao; as marcadas com o
+// sufixo "PÓS-PAP / BACKLOG" no label ficam de fora do denominador (pesos
+// iguais aos do progresso geral: done=1, progress=0.5, planned/blocked=0).
+function calcPap(){
+  let total=0, score=0, done=0, progress=0, planned=0, post=0;
+  sections.forEach(s => s.tasks.forEach(t=>{
+    if(!t || isLocal(t)) return;
+    const st=state[t.id]||t.status;
+    if(String(t.label).includes('PÓS-PAP / BACKLOG')){ post++; return; }
+    total++; score+=STATUS[st].weight;
+    if(st==='done') done++; else if(st==='progress') progress++; else planned++;
+  }));
+  return {pct: total?Math.round(score/total*100):0, done, progress, planned, post};
 }
 
 function render(){
@@ -619,6 +711,7 @@ function render(){
 
   sections.forEach(s=>{
     const visibleTasks = s.tasks.filter(t=>{
+      if(!t) return false;
       const st=state[t.id]||t.status;
       const text=(t.label+' '+(t.note||'')+' '+s.title+' '+s.desc).toLowerCase();
       return (!query || text.includes(query)) && (filter==='all'||st===filter);
@@ -626,6 +719,7 @@ function render(){
     if(!visibleTasks.length) return;
 
     const pct=calcSection(s);
+    const official = s.tasks.filter(t => t && !isLocal(t));
     const el=document.createElement('section');
     el.className='section';
     el.dataset.section=s.id;
@@ -641,7 +735,7 @@ function render(){
         <div class="section-meta">
           <div style="font-size:12px;color:${s.color};font-weight:800">${pct}%</div>
           <div class="mini-track"><div class="mini-fill" style="width:${pct}%;background:${s.color}"></div></div>
-          <div class="count">${s.tasks.filter(t=>state[t.id]==='done').length}/${s.tasks.length} concluídas</div>
+          <div class="count">${official.filter(t=>state[t.id]==='done').length}/${official.length} concluídas</div>
         </div>
       </div>
       <div class="tasks"></div>`;
@@ -653,7 +747,7 @@ function render(){
       row.innerHTML=`
         <button class="status-btn" title="Alterar estado">${STATUS[st].symbol}</button>
         <div>
-          <div class="task-label">${t.label}</div>
+          <div class="task-label">${t.label}${isLocal(t)?' <span class="local-tag">nota local</span>':''}</div>
           ${t.note?`<div class="task-note">${t.note}</div>`:''}
         </div>
         <span class="state">${STATUS[st].label}</span>`;
@@ -667,13 +761,21 @@ function render(){
     root.appendChild(el);
   });
 
-  const {pct,counts}=calcOverall();
+  const {pct,counts,local,total}=calcOverall();
   document.getElementById('overallPct').textContent=pct+'%';
   document.getElementById('overallBar').style.width=pct+'%';
   document.getElementById('doneCount').textContent=counts.done;
   document.getElementById('progressCount').textContent=counts.progress;
   document.getElementById('plannedCount').textContent=counts.planned;
   document.getElementById('blockedCount').textContent=counts.blocked;
+  document.getElementById('localCount').textContent=local;
+  const pap=calcPap();
+  document.getElementById('papPct').textContent=pap.pct+'%';
+  document.getElementById('papBar').style.width=pap.pct+'%';
+  document.getElementById('papDone').textContent=pap.done;
+  document.getElementById('papProgress').textContent=pap.progress;
+  document.getElementById('papPlanned').textContent=pap.planned;
+  document.getElementById('postPapCount').textContent=pap.post;
 }
 
 document.getElementById('search').addEventListener('input',render);

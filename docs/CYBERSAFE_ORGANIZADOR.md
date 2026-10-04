@@ -1,6 +1,7 @@
 # CyberSafe Assistant — Organizador
 
-> **Fonte:** espelho em Markdown de `docs/cybersafe-organizador-pap-v2-editavel.html` (a lista de tarefas e os `id` são exatamente os mesmos, para não haver duplicação) **+ atualizações confirmadas da Sprint 3 (2026-09-25)**.
+> **Fonte:** espelho em Markdown de `docs/cybersafe-organizador-pap-v2-editavel.html` (mesma lista de tarefas, mesmos `id`, para não haver duplicação). Atualizado em 2026-09-29.
+> Regra do cartão: cada tarefa tem no máximo 1-2 frases (2-3 se estiver Em curso), com só o estado atual e o que falta. Cronologia, nomes de agentes, números de testes e tentativas falhadas não vivem aqui: estão no Git, nos testes e em [`ORGANIZADOR_HISTORICO.md`](ORGANIZADOR_HISTORICO.md).
 > Regra editorial: só fica marcado como concluído aquilo que está implementado e testado (manual quando necessário). Tarefa implementada mas ainda à espera de validação manual fica **Em curso**. Não se descreve como pronto o que não existe.
 
 ## Legenda
@@ -14,49 +15,54 @@
 
 ---
 
-## Registo da Sprint 3 — 2026-09-25
+## Números (2026-09-30, revisão 3)
 
-**Foco:** P0-A (bug do scanner: toast `THREAT.DETECTED` mas "0 ameaças").
-
-**Causa raiz confirmada** (evidência: `~/.cybersafe-service/logs/security-events.log`, 2026-09-24 21:34):
-
-- **D2 — contrato inconsistente:** `engine.ts` publica `threat.detected` sempre que `finalSeverity !== "low"` (inclui `medium`), mas `scan-manager.ts` só contava ameaça se `highRiskCount > 0 || severity high/critical` → toast sim, contador 0.
-- **D1 — base de hashes em disco estagnada:** `~/.cybersafe-service/definitions/hashes/default.json` tinha um hash EICAR **fabricado** (`44d88612…`, MD5+zeros) e `ensureFile()`/`seedDefinitions()` só semeiam se o ficheiro **faltar**, logo a correção nunca chegava ao runtime. O EICAR real nunca dava match.
-
-**Correções entregues (builder) e verificadas de forma independente (Maestro):**
-
-- **D2:** critério único de "ameaça" no loop principal e em `scanZipWithSafety` — `highRiskCount > 0 || severity ∈ {high, critical, medium}` — alinhado com o `engine.ts`. Regra documentada em comentário no código.
-- **D1:** `BUILTIN_HASH_SIGNATURES` com o SHA-256 **real** do EICAR (`275a021b…`); novo `refreshBuiltinIfStale()` chamado no `init()` do serviço (re-semeia a base em disco quando contém registos legados); `packages/service/definitions/hashes/default.json` empacotado pela primeira vez.
-- **Infra de teste:** canário dev-only (`DEV_CANARY_SIGNATURE` / `DEV_CANARY_CONTENT`, `family: CyberSafe-Test-File`, severidade `medium`, ativo só fora de `NODE_ENV=production`) para testar o pipeline E2E **sem depender do EICAR real** (que dispara o Windows Defender).
-
-**Validação manual (utilizador) — PASS:** scan de `test-canary/cybersafe-e2e-canary.txt` na UI → 1 ficheiro verificado, 1 ameaça encontrada, toast `THREAT.DETECTED`, scan terminou normalmente, **sem quarentena** (comportamento pretendido: `medium`/`logged`).
-
-**Verificação de logs pelo Maestro (2026-09-25 07:45:56Z / 08:45:56 local):**
-
-- `threat.detected` emitido — confirmado (`evt-1790322356449-292`, `severity medium`, `confidence 0.99`, `riskScore 55`, `action logged`), também em `history.jsonl`.
-- Deteção por `dev_canary_signature` com o SHA-256 real do ficheiro.
-- **Importante:** a deteção valida o **canário dev**, não o EICAR real. A deteção do EICAR real ponta-a-ponta ainda **não foi observada** (a base em disco já foi migrada, o que valida a migração do D1).
-- **Limitação de observabilidade descoberta:** `scan.progress` / payload `completed` são IPC-only e **nunca** são persistidos (0 eventos `scan.*` em 72 634 linhas de log) — por isso o contador `threatsFound` não é verificável a partir dos logs; o sintoma P0-A era invisível na evidência persistida.
-
-**Delta revisto depois da primeira revisão** (o builder continuou a trabalhar): `shared-types` (nova regra `dev_canary_signature`), `core/signatures.ts`, `core/scoring.ts` (peso 55 → banda `medium`), `core/analysis.ts` (deteção do canário também por conteúdo e exclusão do `known_bad_hash`), `desktop/main.ts` (`NODE_ENV=production` no spawn do serviço), `service/package.json`, novo `packages/service/test/dev-canary.test.js`.
-
-**Testes (corridos pelo Maestro sobre o código atual):**
-
-| Comando | Resultado |
+| Métrica | Valor |
 |---|---|
-| `npm test -w @cybersafe/core` | ✅ 128/128 PASS |
-| `npm test -w @cybersafe/service` | ✅ 53/53 PASS (inclui 2 E2E do canário) |
-| `node --test packages/service/test/dev-canary.test.js` | ✅ 2/2 PASS |
-| `npm run typecheck` | ✅ PASS (todos os workspaces) |
-| `git diff --check` | ✅ limpo |
+| Tarefas | **206** = 102 concluídas + 27 em curso + 77 planeadas + 0 bloqueadas |
+| ROADMAP TOTAL | **56,1 %** (115,5/206) |
+| PAP / Release Readiness | **77,7 %** (115/148) |
+| PAP | 102 concluídas + 26 em curso + 20 por fazer |
+| Pós-PAP / backlog | **58** (57 planeadas + 1 em curso) |
 
-**Estado:** D1 e D2 marcados como concluídos. Sem commit e sem push (a pedido). WIP não commitado preservado; branch `main`, HEAD `5e276aa`, ahead 5.
+Pesos: DONE = 1, PROGRESS = 0,5, PLANNED/BLOCKED = 0. As tarefas marcadas
+**PÓS-PAP / BACKLOG** ficam visíveis mas fora do denominador da PAP. O marcador
+pode estar no subtítulo da secção ou no fim do rótulo da tarefa.
 
-**Alterações feitas neste ficheiro nesta sprint:** `scan-file-runtime` → Concluído; `scan-threat-counter` (nova) → Concluído; `rep-e2e-canary` (nova) → Concluído; `scan-zip-nested-count` (nova), `scan-observability` (nova), `arch-log-hygiene` (nova), `health-taskmanager` (nova) → Em curso; notas atualizadas em `scan-runtime-quality`, `scan-full-smoke`, `prot-hash`, `prot-hash-update`, `pap-testing`. Nada foi removido.
+Mudança nesta revisão: 10 tarefas passaram para PÓS-PAP / BACKLOG sem mudar de
+estado (a PAP subiu de 72,8 % para 78,1 % porque 9 zeros saíram do denominador),
+`scan-native-spawn-monitor-loop` passou a DONE, e `prot-detection-quality` voltou
+de DONE para EM CURSO depois de se provar um falso positivo real.
 
-O organizador visual oficial é `docs/cybersafe-organizador-pap-v2-editavel.html`; a partir desta sprint toda a mudança de tarefa (nova tarefa, estado ou nota) é aplicada **nos dois ficheiros** com os mesmos ids. Sprint P0 Gestor de Tarefas (2026-09-25, builder qoder): `health-taskmanager` mantém-se Em curso com o patch pronto e à espera de validação manual (nenhuma tarefa nova criada — a existente foi atualizada). O HTML mantém-se funcional e editável e o seu layout não foi alterado. Ao sincronizar, subir também o `DATA_VERSION` no HTML: os estados são guardados por `id` no `localStorage` do browser e, sem isso, o browser continua a mostrar estados antigos mesmo com o ficheiro correto. Validação de fecho de sprint: comparar nº de tarefas, ids (comuns/faltantes/duplicados) e estados/rótulos/notas entre os dois ficheiros, e reportar o bloco `ORGANIZADOR SYNC` (detalhe na nota Maestri "REGRA ORGANIZADOR (PERMANENTE)").
+Mudança em 2026-09-30 (revisão 3, Maestro Freebuff): `prot-engine-context` (WS-B)
+adicionada como concluída após validação humana do utilizador; `ux-protection-copy-polish`
+adicionada ao PÓS-PAP / BACKLOG com os 2 apontamentos de copy da mesma validação.
+Contagens recalculadas a partir da estrutura de dados do HTML (fonte de verdade):
+206 ids = 102 done + 27 progress + 77 planned + 0 blocked — corrigida a inconsistência
+anterior da revisão 2 (203 = 100+28+75, soma sem coerência com os ids do ficheiro).
 
-**Sprint 4 (2026-09-25, maestro Qoder):** **Nota honesta sobre o backend local:** o alias `qwen3-coder` foi criado com `ollama cp qwen2.5-coder:latest qwen3-coder` — é **Qwen 2.5 Coder atrás de um alias de compatibilidade**, não evidência de Qwen 3 real. `health-taskmanager` revisto — diff confirmado sem regressão, testes focados verdes (core 140, service 66, app 147, desktop 29), mantém **READY FOR MANUAL TEST** (validação manual do utilizador pendente). Nova `ui-degraded-copy` concluída (tray + ReportsPage sem "Degradada" visível). `scan-zip-nested-count` delegada a **kiro** (builder auto; aprovações de leitura confiadas por diretório). `arch-log-hygiene`/`scan-observability` ficam sem builder esta sprint: Aider/Goose/Continue dependem do provider local `127.0.0.1:11434` (em baixo), Kilo presa num diálogo de update, Freebuff/Crush/OpenCode/Codex/Antigravity indisponíveis. **Shell Tester** operacional como executor de probes. Estado real ProtectionHealth (LIVE probe 2026-09-25 via `scripts/protection-state-probe.mjs` com serviço dev ativo): yara=**active** (1 regra), hashDb=**active** (4 assinaturas), nativeEngine=**active** (scan-engine.exe), clamav=**degraded** — instalado via Chocolatey mas database dir ilegível (correr `freshclam`; corrigir leitura da pasta em `C:\ProgramData\chocolatey\lib\clamav\...\database`), firewall=**unavailable** (WFP filter não arrancado — esperado sem serviço elevado a admin). *Correção honesta à nota anterior da Sprint 4: o binário ClamAV EXISTE (via choco); o que falha é a base de assinaturas.*
+Os contadores acima são os **do ficheiro**. As notas locais criadas no browser
+pelo botão «+ Nova tarefa» aparecem no HTML marcadas como `nota local` e ficam
+de fora destes números, para o ecrã não divergir do ficheiro. Para entrarem no
+mapa oficial têm de ser adicionadas aos dois ficheiros.
+
+Os contadores acima são os **do ficheiro**. As notas locais criadas no browser
+pelo botão «+ Nova tarefa» aparecem no HTML marcadas como `nota local` e ficam
+de fora destes números, para o ecrã não divergir do ficheiro. Para entrarem no
+mapa oficial têm de ser adicionadas aos dois ficheiros.
+
+## Registo
+
+O histórico de sprints e rondas e a nota técnica integral de cada tarefa foram
+movidos para [`ORGANIZADOR_HISTORICO.md`](ORGANIZADOR_HISTORICO.md) na compactação
+de 2026-09-29. Aqui fica só o mapa visual: estado atual e o que falta. Estados e
+ids não mudaram; a informação única continua no sítio, só que noutro ficheiro.
+
+Este ficheiro e `cybersafe-organizador-pap-v2-editavel.html` são o organizador
+oficial e têm de estar sincronizados: mesmos ids, estados, rótulos e notas.
+
+Regra de sincronização: ao mudar uma tarefa nos dois ficheiros, subir o
+`DATA_VERSION` do HTML, para o browser descartar os estados guardados.
 
 ---
 
@@ -70,9 +76,10 @@ _Arquitetura & Base do Produto — estrutura técnica que sustenta o CyberSafe._
 - ✅ `arch-packages` — Packages app, desktop, service, core, api, native-windows, native-engine, shared-types e extension
 - ✅ `arch-truth` — Princípio de verdade: indisponível/degradado/erro quando um motor ou sensor não funciona
 - ✅ `arch-personal-business` — Distinção de conta Personal vs Business
-- 🟡 `arch-build` — Build, typecheck e suites de testes como gate de qualidade — _Typecheck, build e as suites por workspace estao a funcionar como gate (o Maestro corre-o centralmente; 2026-09-26: typecheck verde, app 182/182, core 179/179, service 110/110). **Duas dividas pre-existentes registadas sem suprimir regras:** (a) `npm run lint` na raiz falhava porque `packages/desktop` nao tinha script `lint` - o gate de lint estava incompleto, nao era um problema do codigo; (b) `packages/app` tem 13 erros eslint pre-existentes (8 `no-explicit-any`, 3 `react-hooks` comportamentais, 1 `no-unused-vars`, 1 `no-empty`) - ficam como follow-up, nenhuma regra foi desligada nem escondida._
+- 🟡 `arch-build` — Build, typecheck e suites de testes como gate de qualidade — _Build, typecheck e testes principais funcionam. O lint do app continua vermelho por dívida conhecida em hooks/react-refresh; o lint do desktop ainda é cosmético. Correção adiada para depois dos itens críticos da PAP._
 - 🟡 `arch-clean` — Eliminar warnings/runtime noise recorrente que atrapalha diagnóstico (watchers EPERM, etc.) — _Não bloqueia o produto, mas ainda aparece no runtime._
-- ✅ `arch-log-hygiene` — NOVO (2026-09-25) — Higiene dos logs de runtime do serviço (rotação/limite de tamanho) — _Descoberta 2026-09-25: `error.log` com 3,4 GB e `boot-debug.log` com 3,2 GB em `~/.cybersafe-service`, sem rotação. Risco de disco e de diagnóstico. 2026-09-25 (Qoder): delegada a Kilo Builder após recovery do pool (Matrix Local reanimado via Ollama + alias `qwen3-coder`; Kilo auto no free gateway); write scope `log-writer`/`index`/`engine` (só logging), proibido `scan-manager` (kiro). DONE (Kilo entregou, Qoder reviu): causa raiz = `appendFileSync` cru sem rotação + ciclo de realimentação EPIPE (`console.error` dentro do handler de `uncaughtException` reentrava no próprio handler, ~600 B de stack por iteração); fix = rotação por tamanho + retenção real (unlink), `safeWrite` + guarda `inCrashHandler`, reclaim de emergência no próximo boot (trunca 3,3/3,1 GB para a cauda — único ponto de perda de histórico, só acima do orçamento), dedupe `xN`, orçamento 32 MB; 24 testes novos; service 95/95, typecheck/lint/build:all OK._
+- ✅ `arch-log-hygiene` — Higiene dos logs de runtime do serviço (rotação/limite de tamanho) — _Logs do serviço com rotação por tamanho e retenção real; o passivo de 6,4 GB foi reduzido para 32 MB. 24 testes novos cobrem o comportamento._
+- ✅ `test-tmpdir-leak` — API temp DB leak: ligação sqlite singleton a vazar diretórios em `%TEMP%` — _Corrigido o leak de ligação sqlite que vazava diretórios em %TEMP% por execução de teste. Zero diretórios vazados depois da correção._
 
 ## Antivírus & Análise de Segurança
 _Scanner real, análise rápida/profunda, ficheiro, pasta e ZIP._
@@ -92,33 +99,49 @@ _Scanner real, análise rápida/profunda, ficheiro, pasta e ZIP._
 - ✅ `scan-exclusions` — Corrigir exclusões perigosas: .exe/.dll/.zip/.lnk/.msi/.sys/.ps1 chegam aos motores; Downloads não é trusted
 - ✅ `scan-quick-scope` — Quick Scan por risco/recência, depth 2, budget 800 e diretórios prioritários
 - ✅ `scan-file-targetkind` — targetKind file/directory + nome do ficheiro disponível desde o início
-- ✅ `scan-file-runtime` — Confirmação visual manual final do scan de ficheiro único no Electron — _Concluído 2026-09-25: manual test PASS na UI (1 ficheiro verificado, 1 ameaça, toast `THREAT.DETECTED`, sem quarentena), confirmado por `threat.detected` no log. Alvo usado: canário dev._
-- ✅ `scan-threat-counter` — NOVO (2026-09-25) — Coerência entre o toast `THREAT.DETECTED` e o contador `threatsFound` (P0-A) — _Causa raiz: `engine.ts` publicava `medium` e o `scan-manager.ts` só contava `high/critical` → toast 1, contador 0. Corrigido com um critério único (`highRiskCount > 0 || severity high/critical/medium`) alinhado entre os dois. Validado manualmente e por testes._
-- 🟡 `scan-deep-scope` — Auditar/ajustar scope real da Análise Profunda para que a copy não prometa “todo o computador” sem ser verdade — _Precisamos confirmar volumes/paths/limites reais antes de fechar._
-- 🟡 `scan-safe-copy` — Trocar “Ficheiros Seguros” por copy mais honesta (“Sem ameaças detetadas” / “Sem deteções”)
-- 🟡 `scan-full-smoke` — Smoke test manual final: Rápida → Profunda → Ficheiro → Pasta → ZIP → Cancelar → navegar e voltar — _Falta o manual test com o EICAR real (`eicar_com2.zip`): a deteção do EICAR real ainda não foi observada ao vivo (só o canário dev)._
-- ✅ `scan-runtime-quality` — Corrigir progresso, contadores e desempenho da Análise Profunda — _A parte dos contadores foi fechada em `scan-threat-counter` (2026-09-25). **DONE 2026-09-26:** auditado com teste em vez de patch - 8 testes novos em `packages/service/test/scan-runtime-quality.test.js`, registados no script `test` do service; service 110/110. A evidencia nao pediu alteracao em `scan-manager`, `engine` nem `analysis`, por isso nao foram tocados (nada de patch especulativo). **O que fica por validar manualmente pertence a `scan-full-smoke`** (scan completo + cancelamento ao vivo), que se mantem Em curso._
-- ✅ `scan-zip-nested-count` — NOVO (2026-09-25) — Corrigir contagem em ZIPs aninhados — _A recursão conta as entradas internas **e** o próprio ZIP aninhado (possível contagem dupla) e `nestingDepth > ZIP_MAX_NESTING` com guarda `<` permite 4 níveis (off-by-one). Descoberta da revisão independente. 2026-09-25 (Qoder): delegada a kiro (builder auto) — scope limitado a `service/scan-manager.ts` + `test/scan-manager.test.js`. DONE (kiro entregou, Qoder reviu): dupla contagem corrigida (scanArtifact só no else quando não há recursão), guarda `>= ZIP_MAX_NESTING` consistente, params mortos removidos, 5 testes novos (AdmZip in-memory, sem zip bomb); verificação combinada: service 95/95, `git diff --check` limpo._
-- ✅ `scan-observability` — NOVO (2026-09-25) — Tornar a sessão de scan observável (persistir/registar progresso e resultado terminal) — _`scan.progress` e o payload `completed` são IPC-only e nunca são persistidos: o contador `threatsFound` não é auditável e o sintoma P0-A era invisível nos logs. DONE (com arch-log pela Kilo): `scanId` no topo do `scan.progress` e nas linhas de scan; só eventos úteis em `security-events.log` (file.*/process.*/scan.progress fora do disco, broadcast à UI mantido); log por ficheiro excluído exige `CYBERSAFE_DEBUG_BRIDGE=1`._
+- ✅ `scan-file-runtime` — Confirmação visual manual final do scan de ficheiro único no Electron — _Validação manual na UI passou: 1 ficheiro, 1 ameaça, toast de deteção e sem quarentena._
+- ✅ `scan-threat-counter` — Coerência entre o toast `THREAT.DETECTED` e o contador `threatsFound` (P0-A) — _Toast e contador usam agora o mesmo critério de ameaça. Validado em scan real na UI: 800 verificados, 3 ameaças, e a página Ameaças devolve as 3._
+- ✅ `scan-copy-grammar` — Copy PT-PT do resumo do scanner (excluídos pelos motores de análise) — _Frase do resumo do scanner corrigida (verbo concordado) e validada manualmente no plural. Nada alterado em scoring, motores ou contagens._
+- 🟡 `scan-enum-perf` — Performance da enumeração no scan (aberto, arquitetural) — _A enumeração não é o gargalo: 800 ficheiros são selecionados em menos de 0,25 s. O principal problema de performance estava no VirusTotal síncrono e já foi separado dos scans em massa. Falta apenas validação final de performance._
+- ✅ `scan-vt-blocking` — Gancho do VirusTotal síncrono no caminho do scan: ~15,5 s por ficheiro, o gargalo real da performance — _VirusTotal deixou de bloquear Quick/Deep/Custom scans. A separação foi confirmada em runtime: zero chamadas VT originadas pelo scanner. Regressão refeita e re-fechada: scan-manager voltou a chamar sem options e foi corrigido com skipVirusTotal=true em massa (Quick/Deep/Custom/Pasta/ZIP); service 143/143. DONE._
+- ⚪ `vt-enrichment-design` — Enriquecimento VirusTotal: chave inválida (401) e throttle de 15,5 s por ficheiro mesmo com chave saudável — _Decisão de produto pendente sobre o enriquecimento VirusTotal: a chave é inválida (401) e o limite de 4 pedidos/minuto manteria 15,5 s por ficheiro mesmo com chave saudável. Nada implementado._
+- ⚪ `scan-pk-over500-coverage` — Cobertura zero nos contentores PK com mais de 500 entradas (expansão abortada) — _Contentores com mais de 500 entradas são abortados pelo guard e o interior nunca é analisado. Decisão de produto: subir o limite ou dizer honestamente na UI que o interior não foi inspecionado._
+- ⚪ `scan-lnk-analyze-fail` — `analyze()` a lançar em alguns `.lnk` (contados em `filesFailed`) — a confirmar — _Erro de analyze() em alguns .lnk observado numa probe, ainda não confirmado no serviço real. Falta reproduzir pelo caminho real e ler filesFailed antes de corrigir._
+- ⚪ `scan-engine-batch-mode` — Modo batch/residente do motor nativo (`scan-engine`) para eliminar o spawn por artefacto, _PÓS-PAP / BACKLOG._ — _Modo batch/residente do motor nativo foi medido e não implementado; o teto de ganho é ~10-13% num quick scan. Exige alterar o binário e uma decisão explícita de produto._
+- 🟡 `scan-deep-scope` — Auditar/ajustar scope real da Análise Profunda para que a copy não prometa “todo o computador” sem ser verdade — _Falta confirmar volumes, paths e limites reais da Análise Profunda antes de fechar._
+- 🟡 `scan-safe-copy` — Trocar “Ficheiros Seguros” por copy mais honesta (“Sem ameaças detetadas” / “Sem deteções”) — _Copy honesta já implementada no código; só falta a validação humana no ecrã._
+- ⚪ `ui-dead-riskgauge` — Componente morto `RiskGauge.tsx` que diz "Seguro" e não é importado por ninguém — _Componente morto que diz Seguro, sem nenhum import. Falta remover ou religar com copy honesta._
+- ✅ `scan-native-spawn-monitor-loop` — Monitor de processos pode reanalisar cada scan-engine.exe e pagar VT por spawn — _Hipótese refutada em runtime: scan-engine.exe não cria loop VT. O tráfego observado vinha do watcher e do monitor de processos. Investigação encerrada._
+- 🟡 `scan-full-smoke` — Smoke test manual final: Rápida → Profunda → Ficheiro → Pasta → ZIP → Cancelar → navegar e voltar — _Falta o smoke test manual com o EICAR real; a deteção do EICAR ainda não foi observada ao vivo._
+- ✅ `scan-runtime-quality` — Corrigir progresso, contadores e desempenho da Análise Profunda — _Auditado com testes em vez de patch; 8 testes novos no service. Nenhuma alteração em scan-manager, engine ou analysis porque a evidência não a pediu._
+- ✅ `scan-zip-nested-count` — Corrigir contagem em ZIPs aninhados — _Dupla contagem em ZIP aninhado e off-by-one de profundidade corrigidos, com 5 testes novos. service 95/95 e diff limpo._
+- ✅ `clamav-resource-exhaustion` — **P0** ClamAV esgota RAM e congela o PC durante o scan (clamscan em cascata + órfãos) — _**DONE (gate automático fechado)**. Causa raiz: o ProcessMonitor via o `clamscan.exe` que o próprio CyberSafe lançava e o motor voltava a analisá-lo, nascendo outro clamscan; cada volta segurava ~981 MB. Fase 3 (cap global de 1, `killTree` real, `dispose`, cancel, identidade por ancestralidade de PID) e Fase 4 (batch: 1 invocação para N ficheiros) implementadas._ _**Sprint 2026-10-02 (3 h)**: `dev-canary` RED (10 017 ms) → GREEN (6 741 ms) **sem mexer no timeout de 10 s**; batch result integrity A–I 20/20; caracterização de recursos **medida**, não estimada: 5 ficheiros e 20 ficheiros dão ambos **RSS de pico ~960 MB (rácio 1,00x)** e **wall 7,6 s (rácio 1,00x)**, com 1 spawn e 0 órfãos. É UM processo pesado, não uma multiplicação. Gate largo: core 417 testes / 0 falhas, service 243 / 0, app 458 / 0, typecheck limpo nos 6 pacotes, `REAL_HOME_WRITES_DURING_TEST = 0`._ _**P0 adicional encontrado e corrigido na sprint**: um `error` do ClamAV era publicado como `verdict: "safe"` com badge verde e escudo na app. Agora existe `inconclusive`. **P1 adicional**: um `exit 2` por UM ficheiro ilegível marcava os restantes como error, com o detalhe do erro de outro ficheiro copiado — corrigido pela aritmética do resumo do clamscan. **P0 adicional (TASK J)**: `isAvailable(force)` — o re-probe que existe para depois do `freshclam` — nunca era chamado; depois de uma actualização bem-sucedida o serviço continuava a reportar o motor degradado até ao reinício. Corrigido._ _**Fica pendente apenas o gate manual do utilizador** (`scanner-manual-gate`), que é uma decisão dele e não nossa. Detalhe: output/p0-clamav-resource-exhaustion/._
+- ✅ `clamav-eicdar-exit2` — **P1** Um ficheiro EICAR dava `exit 2` e era reportado como limpo — _**Causa raiz provada, com duas causas — uma delas nossa**._ _(1) **O fixture de teste nunca foi EICAR.** Escrevia `"...\PZX54..."`; em JavaScript `\P` não é um escape válido, a barra invertida era descartada, e o ficheiro ficava com **67 bytes em vez de 68**. O ClamAV respondia `clean` com toda a razão. Corrigido para `Buffer.from(hex)` com três asserções de guarda por byte (`length === 68`, `bytes[11] === 0x5c`, `bytes.subarray(12,20) === "PZX54(P^"`)._ _(2) **Quem apaga o ficheiro é o Windows Defender**, no instante em que o clamscan o abre. Prova causal por `Get-MpThreatDetection` lido antes e depois: `ThreatID 2147519003`, `ProcessName=...\clamscan.exe`, `Resource=<o ficheiro>`, `ActionSuccess: True`. O clamscan dá exit 2, stdout com `Scanned files: 0`, stderr `Can't open file ...: 225 / Invalid argument`, **com a base carregada** (3 628 114 virus, 6,485 s)._ _**O diagnóstico anterior era falso**: `code === 2` era lido como "não conseguiu carregar a base", numa máquina com a base impecável. É o caso genérico de ExitCode para "algo correu mal", lido como se fosse um código de diagnóstico._ _**Fix**: o veredicto passa a vir do **output**, nunca do exit code (`parseClamavOutput`), com três estados DETECTED / CLEAN / ERROR. Ordem das regras: `FOUND` no stdout (ganha sempre) → falha de base no stderr → `Can't open file X` (error, distinguindo `file-removed-during-scan` de `file-unreadable` via `fileExists`) → `Infected files>0` sem FOUND → timeout/abort → exit 0 limpo → resto error. Separador de path = **último** `": "`, porque uma regex preguiçosa parte o `C:` do Windows e atribui a detecção ao ficheiro errado. `--no-summary` foi removido (é onde vive o `Total errors`)._ _**Conformidade com as decisões do utilizador**: nunca reportar "limpo" para um ficheiro removido; preservar a detecção mesmo quando há erro; e **não mencionar o Defender sem evidência** — o detalhe diz o facto ("o ficheiro deixou de existir durante a análise"), não a hipótese._
+- 🟡 `clamav-codex-review-p1` — **P1 (x9)** Achados da review independente do Codex sobre o batch do ClamAV, ainda por tratar — _**3 dos 9 foram corrigidos na retomada de 2026-10-02 (F4, F5, F6), com testes de regressão. Os restantes 6 continuam abertos, registados e não escondidos. Nenhum foi classificado como P0._ _**Corrigidos**: basename só quando inívoco, para não atribuir uma deteção ao ficheiro errado (F4); evidência parcial nunca dá `clean` — a regra passa a disparar só quando há contagem declarada **não atribuída** (F5); descodificação UTF-8 com `StringDecoder`, para um caractere multibyte partido entre chunks não transformar uma linha `FOUND` em lixo (F6)._ _**Os que importam para a honestidade do resultado** (podem dar `clean`/`safe` sem evidência suficiente): atribuição de deteção por basename quando dois ficheiros têm o mesmo nome (clamav.ts:176); erros/deteções parcialmente identificados que deixam ficheiros sem resultado em `clean` (clamav.ts:313, :339); descodificação UTF-8 independente por chunk, que pode corromper `FOUND` em `clean` (clamav.ts:663)._ _**Os que afectam o serviço** (não o veredicto): ficheiros acima de 100 MB ignoram ERROR/DETECTED do prefetch e podem sair SAFE (analysis.ts:77); ficheiro que desaparece depois do prefetch perde a deteção e conta como analisado (analysis.ts:73, engine.ts:1443, scan-manager.ts:358); prefetch global sem isolamento por scan (engine.ts:1240, scan-manager.ts:429); cancelamento antes da criação do controller perde-se e pode arrancar um batch já cancelado (engine.ts:596, scan-manager.ts:307); SIGINT/SIGTERM termina o serviço sem `dispose()` (index.ts:185); ownership aceita PIDs antigos sem limpeza (engine.ts:774)._ _**UNKNOWN, não verificado por Codex**: kill por PID reutilizado e a segurança do `freshclam` concorrente. Nenhum foi corrigido aqui._
+- 🔴 `scanner-manual-gate` — **PENDING_MANUAL** Gate manual do scanner continua por fazer — _Estado deliberadamente inalterado e **inalterável por nós**: este gate só passa quando o utilizador o executa com as próprias mãos. Nenhuma medição automática o pode substituir, e o sprint não pediu nem podia pedir esse scan._ _As condições previstas ficaram prontas e verificadas por medição automática: 1 spawn, pico de 1 processo, ~7,6 s tanto para 5 como para 20 ficheiros, 0 órfãos, 5/5 clean, `REAL_HOME_WRITES_DURING_TEST = 0`. São as mesmas condições do teste manual, medidas por outro caminho — o que prova que o caminho automático funciona, não que o manual passa._ _**Nota de 2026-10-02**: o serviço e a app passaram a distinguir `inconclusive` (badge cinzento, tom `unknown`) de `safe` (badge verde). Se o utilizador vir "Seguro" por cima de um ficheiro que desapareceu, está a correr uma build antiga — e isso é informação útil, não um problema._
+- ✅ `scan-observability` — Tornar a sessão de scan observável (persistir/registar progresso e resultado terminal) — _scanId nos eventos de progresso e só eventos úteis persistidos em disco; o contador de ameaças passou a ser auditável. Log por ficheiro excluído atrás de flag de debug._
 
 ## Motores de Segurança & Protection Health
 _Camadas reais do antivírus e respetivo estado de saúde._
 
 - ✅ `prot-yara` — YARA-X funcional com regras válidas e testes
-- ✅ `prot-hash` — Hash DB com SHA-256 e fallback offline — _2026-09-25: hash EICAR fabricado (MD5+zeros) substituído pelo SHA-256 real (`275a021b…`) e base empacotada pela primeira vez em `packages/service/definitions/hashes/default.json`._
-- ✅ `prot-clam-state` — ClamAV reporta degraded/unavailable quando não está funcional
+- ✅ `prot-hash` — Hash DB com SHA-256 e fallback offline — _Hash EICAR real (SHA-256) e base de hashes empacotada pela primeira vez._
+- ✅ `prot-clam-state` — ClamAV reporta degraded/unavailable quando não está funcional — _Estado degradado do ClamAV validado como honesto: motor instalado não é motor operacional._
 - ✅ `prot-native-state` — Native Engine reporta unavailable quando não está disponível
-- ✅ `prot-firewall` — Estado do Firewall integrado no ProtectionHealth
+- ✅ `prot-firewall` — Estado do Firewall integrado no ProtectionHealth — _Separação honesta entre estado do Windows Firewall e módulo WFP validada; estado desconhecido nunca é apresentado como proteção desligada._
 - ✅ `prot-health` — ProtectionHealth centralizado sem fingir motores ativos
-- ✅ `ui-degraded-copy` — Copy "Degradada" removida da UI visível (tray + ReportsPage); enum técnico interno mantido — _2026-09-25 (Qoder): tray "Proteção: Precisa de atenção · N/100" e relatório "Proteção precisa de atenção"; desktop 29/29 PASS._
-- ✅ `entitlement-premium-leak` — NOVO (2026-09-25) — Personal premium recebe features business-only — _Confirmado no ramo premium de `getUserFeatures` (`...Object.values(FEATURES)` sem filtro de conta). Delegado a **kiro** (scope `featureControl.ts` + `business-feature-control.test.ts`) após **non-delivery da Continue** (reportou "completed" sem tocar no código — verificar sempre diffs dos locais antes de dar por feito). DONE (kiro): premium filtra BUSINESS_SPECIFIC_FEATURES quando accountType!=='business' (Set para dedupe); 4 testes novos (personal-premium sem USB/REPORTS/DEVICE_MANAGEMENT; business-premium intacto; personal mantém as suas; free/pro iguais). Gate final Qoder: core 140, service 95, app 151, desktop 29 — 0 falhas; typecheck PASS; `git diff --check` limpo._
+- ✅ `ui-degraded-copy` — Copy "Degradada" removida da UI visível (tray + ReportsPage); enum técnico interno mantido — _Degradada removido da UI visível (tray e relatório); o enum técnico interno mantém-se._
+- ✅ `entitlement-premium-leak` — Personal premium recebe features business-only (leak em getUserFeatures) — _Conta Personal premium deixou de receber features business-only, com 4 testes novos. Nenhuma feature foi removida das contas Business._
 - ✅ `prot-score` — Separação correta Protection Score ≠ PcState
 - ✅ `prot-eicar` — Testes de integridade com EICAR / regras YARA
 - ✅ `prot-quarantine` — Quarentena: mover, restaurar, apagar e metadados/manifest
 - ✅ `prot-defs` — Updater/scheduler de definições
-- 🟡 `prot-clam-config` — Fechar configuração/distribuição do ClamAV para funcionar sem setup manual frágil — _Já houve falha de freshclam/config no ambiente de desenvolvimento. **Diagnostico fechado 2026-09-26 (honesto, DONE na parte do estado):** nao existe base de assinaturas em lado nenhum - `definitions/clamav` vazio, diretorio do Chocolatey vazio e `C:\ProgramData\ClamAV` vazio, e o `freshclam` nao popula; o binario existe mas sem base nao ha varrimento. Logo o estado **degraded do ClamAV esta correto** e e isso que os motores reportam (`prot-clam-state` ✅ mantem-se). **Falta (bloqueia o FECHO, nao o estado):** distribuir as definitions no pacote ou correr freshclam com rede, e so ai `prot-clam` passa a active._
-- ✅ `prot-hash-update` — Robustecer atualização da base de hashes / tratamento de falhas do feed — _2026-09-25: `refreshBuiltinIfStale()` re-semeia a base em disco no `init()`; migração confirmada no ambiente real (~/.cybersafe-service/.../default.json atualizado às 07:25:08Z com o EICAR real). **DONE 2026-09-26:** a base offline de referência (EICAR) nunca desaparece com feed parcial ou inválido — o refresh só substitui quando o payload é válido e não retira os registos embutidos. Evidência: `hash-db-refresh` 18/18, regressão combinada `engine-integrity` + `signatures` 29/29, `tsc` do core exit 0. **Pendente (não é desta tarefa, fica registado):** `applyRemoteRecords()` existe mas não é chamado por `engine.ts` nem `updater.ts` — o feed remoto ainda não aplica registros; só a defesa contra feed mau está provada._
-- 🟡 `prot-history` — Histórico consolidado de deteções, ações e quarentena
+- 🟡 `prot-clam-config` — Fechar configuração/distribuição do ClamAV para funcionar sem setup manual frágil — _ClamAV está instalado, mas sem base de assinaturas funcional. O produto reporta corretamente estado degradado; falta configurar/distribuir as definições._
+- ✅ `prot-hash-update` — Robustecer atualização da base de hashes / tratamento de falhas do feed — _A base offline de referência nunca desaparece com feed parcial ou inválido; provado por testes. O applyRemoteRecords() continua por ligar — o feed remoto ainda não aplica registos._
+- ✅ `prot-history` — Histórico consolidado de deteções, ações e quarentena — _Fechado com validação manual: o histórico devolve de imediato as deteções do scan real, sem divergência entre o Scanner e a página Ameaças._
+- ✅ `prot-detection-quality` — Qualidade das deteções: limpeza dos fixtures/probes de desenvolvimento — _Causa corrigida: dedup de YARA, assinatura ausente = 0 pontos, heuristica generica isolada limitada; bun.exe real 100/critical -> 35/low/safe e EICAR mantem critical/quarantine. Suites: service 143/143, core 233/233, app 283/283._
+- ⚪ `prot-native-hash-trust` — Native engine hash divergence (confiança no hashDB) — _Motor nativo devolveu SHA-256 7f489a66... para o bun.exe cujo hash real é 15277c59... (confirmado por Node e Get-FileHash). Provar a causa antes de confiar em decisões hashDB neste caminho. OPEN / PRÓXIMA SESSÃO._
+- ✅ `prot-engine-context` — Dashboard/Protection Details: contexto dos motores em linguagem humana — _WS-B validado por humano: Dashboard mostra ClamAV/WFP em PT-PT sem degraded/unavailable crus nem paths na copy principal; Protection Details mostra YARA Ativo (1 regra carregada, cobertura limitada), Hash DB Ativo (4 assinaturas, cobertura limitada), ClamAV com explicação humana da base ausente, Native Engine em texto humano com path só nos detalhes técnicos, Windows Firewall separado de WFP; score "3 estão ativos" com cobertura real. Detalhes técnicos crus só com a área técnica expandida (aceitável). Audit: output/sprint-audit-cde/RESULT.md._
 
 ## Proteção em Tempo Real & Windows
 _Monitorização contínua de ficheiros, processos, serviços e defesas do Windows._
@@ -130,9 +153,9 @@ _Monitorização contínua de ficheiros, processos, serviços e defesas do Windo
 - ✅ `rt-health` — Windows Health: serviços, firewall, processos, rede, discos, utilizadores e registo
 - 🟡 `rt-epperm` — Tratar junctions/reparse points e reduzir spam EPERM dos watchers
 - ⚪ `rt-defender` — Estado do antivírus/Windows Security via SecurityCenter/Defender quando aplicável
-- ⚪ `rt-events` — Auditoria de eventos críticos do Windows (energia, disco, sistema)
+- ⚪ `rt-events` — Auditoria de eventos críticos do Windows (energia, disco, sistema), _PÓS-PAP / BACKLOG._
 - 🟡 `rt-filearrival` — Detetar novos ficheiros fora do browser com monitorização nativa e analisar quando relevante
-- ⚪ `rt-motw` — Usar Mark of the Web (Zone.Identifier) quando disponível como contexto de risco
+- ⚪ `rt-motw` — Usar Mark of the Web (Zone.Identifier) quando disponível como contexto de risco, _PÓS-PAP / BACKLOG._
 - ⚪ `rt-lowlevel-validation` — Validar ETW, AMSI e WFP com testes controlados — _ETW/AMSI podem ser testados no PC real; WFP preferencialmente em VM quando houver bloqueio real._
 
 ## Saúde do PC & Telemetria
@@ -149,13 +172,11 @@ _Hardware, desempenho, sensores, discos e estado geral do computador._
 - 🟡 `health-temp` — Temperaturas reais CPU/GPU/NVMe/board/fans via provider robusto — _Prioridade seguinte após fechar o Scanner._
 - ⚪ `health-lhm` — Helper persistente LibreHardwareMonitor, cache curto e lifecycle limpo
 - ⚪ `health-temp-bundle` — Bundlar helper/sensores no CyberSafe sem download silencioso nem instalação manual
-- ⚪ `health-smart` — S.M.A.R.T. de SSD/HDD (vida útil, health/warnings)
+- ⚪ `health-smart` — S.M.A.R.T. de SSD/HDD (vida útil, health/warnings), _PÓS-PAP / BACKLOG._
 - 🟡 `health-stress` — Rever Stress Index para representar pressão instantânea real e explicar “Como é calculado?”
 - ✅ `health-diskfinding` — Pouco espaço em disco como finding de saúde, separado de stress instantâneo
-- ⚪ `health-thermal-actions` — Alertas térmicos + ação segura/opt-in em vez de desligamento automático por defeito
-- 🟡 `health-taskmanager` — NOVO (2026-09-25) — Task Manager (PC Center): lista de processos e terminação de processos — _PATCH FEITO (qoder, 2026-09-25), READY FOR MANUAL TEST. Causa LIST confirmada: `processes.list` devolvia só o cache de eventos com cap silencioso de 200 — ~139 de 331-339 processos invisíveis; agora `listProcesses()` reconcilia on-demand com a verdade do SO (TTL 2s, fallback cache, sem cap). Causa KILL confirmada: `taskkill` corria com `stdio ignore` (stdout/stderr descartados) e só mapeava 0/128 — exit 5 vira `access-denied` com a mensagem real; `exitCode/stdout/stderr` propagados até à UI; `actions.log` com Cmd/Status/Exit/Stdout/Stderr. Live no pipe real: 339 processos com proteção OFF; notepad (WMI) visível → killed exit 0 → PID ausente no tasklist → sem stale; System#4 e explorer recusados ANTES do taskkill. Testes: core 136/136, service 61/61 (8 novos), app 147/147 (3 novos), desktop 29/29, typecheck PASS, `git diff --check` limpo. Falta: validação manual na UI (terminar um notepad; tentar matar um serviço protegido e ver a mensagem de acesso negado com o diagnóstico real). REVISÃO QODER 2026-09-25: diff confirmado sem regressão (chain `access-denied` core→types→service→app com testes); focados core 140/140, service 66/66, app 147/147, desktop 29/29 PASS._
-  _**REABERTO 2026-09-26 - bug reproduzido pelo utilizador - READY FOR MANUAL TEST.** Sintoma: o caminho sem pesquisa (U) divergia do caminho com pesquisa (F) - no U a area principal ficava praticamente vazia/escura, a resposta ao clique era inconsistente, havia muito loading e num caso o processo nem foi terminado; no F (pesquisa notepad) o fluxo era normal. RAIZ EM DUAS CAMADAS: (1) `snapshotProcesses` engolia o erro da enumeracao e devolvia um mapa vazio, pelo que `listProcesses()` esvaziava o cache, carimbarva-o como fresco e mostrava uma lista vazia enquanto o aviso do kill dizia sucesso; (2) o modal de confirmacao do Gestor de Tarefas nao identificava o processo e a lista reordenava por CPU a cada refresh - as linhas mudavam de sitio sob o cursor e o utilizador confirmava um PID que nunca viu. FIXES ENTREGUES: a fronteira passou a lancar no falhanço da enumeracao primaria e o servico serve o cache em vez de uma lista vazia (`native-windows/src/index.ts` langa Enumeracao de processos indisponivel; `engine.ts` mantem cache e TTL no catch); o modal passou a mostrar nome, PID, utilizador e memoria; a ordenacao e deterministica (metrica, depois nome, depois PID); o overlay fecha com o resultado terminal do kill e o refetch passa a correr em segundo plano. Prova do defeito no codigo anterior por `git show HEAD` do modal: zero ocorrencias de nome/PID; e do `handleKill`: `await refreshProcesses()` dentro do try antes do finally que fechava o overlay. **AINDA EM ABERTO:** P6 e P7, o refetch ainda e o fetchSnapshot de 7 pedidos do `App.tsx` e um snapshot mais velho pode sobrepor-se a um mais novo; e falta a validacao manual do caminho sem pesquisa pelo utilizador. **KILL-BUDGET ENTREGUE (correcao a esta nota, que estava errada):** o servico passou a ter UM orcamento total de 12 s (`KILL_TOTAL_BUDGET_MS`, `engine.ts:188`) com `remaining()` por etapa - `killDeadline` (1368), `step(ceiling)` (1371), orcamento esgotado devolve `timeout` sem chegar a disparar o taskkill (1403-1408), `runTaskkill` recebe `timeoutMs: remaining()` (1412) e o reap e limitado por `Math.min(killReapDeadlineMs, remaining())` com piso (1509-1510). 12 s fica abaixo dos 15 s do prazo do renderer, que era exatamente o objectivo do P4. Testes desta ronda: task-manager-page 16 novos + task-kill-flow, 38/38; service 110/110; typecheck verde._
-  _**P0-A 2026-09-26 (Fast Builder/qoder) - READY FOR MANUAL TEST.** Patch aplicado nos 4 pontos diagnosticados: **P1** tombstones + epoca no servico (`engine.ts`) - um PID confirmado morto nunca volta por uma enumeracao em voo nem por um `process.started` velho, e o TTL so se re-arma se nada mudou entretanto; **P2** probe pelo CIM - o OpenProcess diz vivo a um processo ja terminado enquanto houver handles (caso classico do Notepad), entao a morte confirma-se por duas ausencias consecutivas no Win32_Process e a query-alvo passou a ser rate-limited (antes ate ~33 PowerShell num kill lento); **P3** desfecho terminal invalida sempre a janela de frescura (`reused` tira a entrada do dono antigo sem tombstone; `still-running` nao mente para baixo mas força nova leitura); **P5** `alias-stub` no renderer - o desfecho existia no servico e nos tipos mas caia no erro generico e nao fazia refetch (era o um run nunca acabou). Evidencia: service 110/110, app 182/182, `process-kill` 32/32, typecheck verde, `git diff --check` limpo. **Pendentes:** P4 (orcamento do kill) **ja foi entregue** a 2026-09-26 com um budget total de 12 s no servico, restando P6-P9 (sequenciacao de snapshots no App/PC Center, polling do Gestor de Tarefas, head-of-line no socket, timeout no ServiceClient), P11 (identidade com CreationDate), e os 4 passos de validacao manual do utilizador (matar notepad e nao voltar; alias-stub com PID real; processo com handle pendurado; cronometrar o clique)._
+- ⚪ `health-thermal-actions` — Alertas térmicos + ação segura/opt-in em vez de desligamento automático por defeito, _PÓS-PAP / BACKLOG._
+- ✅ `health-taskmanager` — Task Manager (PC Center): lista de processos e terminação de processos — _Gestor de Tarefas validado manualmente: lista, terminação e tombstone funcionam. Refinamentos internos restantes não bloqueiam a PAP._
 
 ## Matrix AI & Experiência Inteligente
 _Traduz dados técnicos em significado, prioridade e orientação simples._
@@ -169,7 +190,7 @@ _Traduz dados técnicos em significado, prioridade e orientação simples._
 - ✅ `mx-model` — Provider Groq / groq/compound integrado
 - ✅ `mx-onboarding` — Onboarding overlay em 3 passos com persistência
 - ✅ `mx-moods` — Assets/moods Matrix (safe/guide/alert/success/happy/defender/avatar/mini)
-- ⚪ `mx-business` — Matrix Business para explicar eventos de rede e anomalias de egress
+- ⚪ `mx-business` — Matrix Business para explicar eventos de rede e anomalias de egress, _PÓS-PAP / BACKLOG._
 
 ## CyberSafe Business
 _Visibilidade de rede, eventos empresariais e futura gestão multi-endpoint._
@@ -218,9 +239,12 @@ _Clareza primeiro; efeitos visuais apenas quando ajudam a compreender estado ou 
 - ✅ `ux-matrix` — Tema Matrix Terminal
 - ✅ `ux-red` — Tema Red Belbete (dark burgundy/ruby + light rose/ice)
 - ✅ `ux-lightfix` — Correção de accent no Light Mode
-- 🟡 `ux-liquid` — Tema CyberSafe Liquid experimental
+- ✅ `ux-typography-stable` — Tipografia estável: Light/Dark mudam só cor, nunca font-family — _Light/Dark passou a mudar só cor; a família tipográfica deixou de variar entre modos. Regressão coberta por teste novo e validada manualmente._
+- 🟡 `ux-tray-dpi` — Ícone da bandeja dimensionado ao DPI real do Windows — _Taskbar PASS. Variante B entregue: 8 tray-symbol-{active,warning}-{16,20,24,32}.png (símbolo transparente, sem placa) com escolha por slot no main.ts e fallback seguro. Validação humana: 100% PASS, 125% e 150% pendentes._
+- 🟡 `ux-liquid` — Tema CyberSafe Liquid experimental, _PÓS-PAP / BACKLOG._
+- ⚪ `ux-protection-copy-polish` — Polish de copy em Protection Details, _PÓS-PAP / BACKLOG._ — _"Cobertura atual: YARA: ..." pode ser melhorado estilisticamente; a frase "A nota é o contrário do risco" pode ser simplificada. Registado pelo utilizador na validação WS-B; não reabrir WS-B por polish._
 - ✅ `ux-semantic` — Cores semânticas independentes do tema
-- 🟡 `ux-dashboard-polish` — NOVO (2026-09-26) — Painel: pergunta central, hierarquia de estado e menos ruido visual — _Sem redesign, sobre a versao atual. Hero compactado (padding, anel 28 para 68 px, Matrix de xl para md, categorias em linha) a responder a uma so pergunta: O meu computador esta bem? com resposta curta por nivel (`answer`/`answerDetail` em protectionHealth); Protection Score com numero, estado e nota de definicoes em hierarquia clara; CPU/RAM/Disco/Rede como metricas principais e GPU/VRAM reduzidas a uma linha secundaria; disco passa a mostrar espaco LIVRE, o que significa e o que fazer (`describeDiskSpace`, duas regras: GB absolutos e percentagem); acoes do Scanner agrupadas num painel com uma primaria e duas secundarias; empty states de ameacas e alertas de uma linha; fim das repeticoes de aviso (o hero nao repete a lista de prioridades, os cartoes de metrica deixaram de imprimir o alerta vermelho que ja la estava, rotulos de severidade em PT); menos cyan decorativo (icones para muted, glow da Sidebar removido, hexagonos 0.03 para 0.02 e cyber-grid 4% para 3%, scrollbar global fina coerente com o ProtectionDetails). **Bug real corrigido:** o cartao Quarentena mostrava `pcState.findings.length` (recomendacoes, nao quarentena) e passou a chamar-se Recomendacoes - nao se inventou contagem de quarentena porque `DashboardSummary` nao traz esse campo. Evidencia: `dashboard-layout` 14/14 e `protection-health` 13/13, gate do Maestro typecheck verde + app 182/182. **Falta:** validacao visual em 3 larguras (o hero usa flex-wrap com order) e contagem real de quarentena exige campo novo no `DashboardSummary` (backend)._
+- 🟡 `ux-dashboard-polish` — Painel: pergunta central, hierarquia de estado e menos ruido visual — _Painel reorganizado para responder a uma só pergunta, com hierarquia de estado e menos ruído; corrigido o cartão Quarentena que mostrava recomendações. Falta validação visual em 3 larguras e um campo real de contagem de quarentena no backend._
 - ⚪ `ux-scanner-steps` — Adaptar Multi Step Loader/step indicator para fases reais do Scanner
 - ⚪ `ux-statebutton` — Stateful Button para ações assíncronas (quarentena, corrigir, restaurar, atualizar)
 - ⚪ `ux-circular` — Circular Progress para Protection Score / métricas quando fizer sentido
@@ -260,22 +284,23 @@ _Transformar o projeto num produto instalável e repetível._
 
 - ✅ `dist-electron` — Desktop Electron funcional em desenvolvimento
 - 🟡 `dist-autostart` — Autostart com Windows / iniciar minimizado — _Implementado, mas falta validação final em build empacotado._
-- ⚪ `dist-installer` — Gerar instalador final CyberSafe-Setup.exe
+- ⚪ `dist-installer` — Gerar instalador final CyberSafe-Setup.exe — _Build de diretório validado em runtime (win-unpacked): logs privados fora do pacote (asar 276 MB → 6,87 MB), scan-engine.exe empacotado e nativeEngine=active provado. NSIS final congelado até gates A (tray 125/150) e B (scan full smoke) fecharem._
 - ⚪ `dist-helper` — Bundlar temperature helper/dependências necessárias no instalador
 - ⚪ `dist-clam` — Bundlar/configurar motores externos necessários sem downloads silenciosos em runtime
 - ⚪ `dist-cleanvm` — Teste de instalação e primeiro arranque em Windows/VM limpa
 - 🟡 `dist-upgrade` — Estratégia de atualização do aplicativo e definições
-- ⚪ `dist-sign` — Assinatura de código/installer para distribuição real
+- ⚪ `dist-sign` — Assinatura de código/installer para distribuição real, _PÓS-PAP / BACKLOG._
+- ✅ `rel-selfdetect-canary` — Release self-detection: dev canário dentro do bundle — _O CyberSafe empacotado detetava-se a si próprio; o literal do canário saiu do src de produção e foi medido com zero ocorrências no app.asar novo._
 
 ## Relatórios & Evidências
 _Relatórios A4, dados técnicos explicados e evidências úteis para utilizador e PAP._
 
 - ✅ `rep-a4` — Relatório A4 com cabeçalho, ameaças, quarentena, motores, hardware e findings
-- 🟡 `rep-score` — Garantir que relatório consome PcState/ProtectionHealth corretos em vez de score próprio antigo — _**READY FOR MANUAL TEST 2026-09-26:** o relatorio interno passa a consumir PcState e ProtectionHealth em vez de calcular score proprio; nao ha metrica paralela; a ausencia de dados aparece como indisponivel e nunca como zero nem como saudavel. Evidencia: 17/17 testes focados. **Falta:** validar o PDF A4 impresso (layout) e confirmar que o espelho do build reflete o `core dist`._
+- 🟡 `rep-score` — Garantir que relatório consome PcState/ProtectionHealth corretos em vez de score próprio antigo — _O relatório consome PcState e ProtectionHealth em vez de score próprio; falta validar o PDF A4 impresso._
 - ✅ `rep-export` — Impressão/PDF do relatório
-- ✅ `rep-e2e-canary` — NOVO (2026-09-25) — Teste E2E do pipeline de deteção sem EICAR real (canário dev-only) — _`packages/service/test/dev-canary.test.js`: scan real → deteção → `threat.detected` → `threatsFound`, com o mesmo contrato do `engine.ts`, e o caso inverso em `NODE_ENV=production` (0 deteções). Permite validar o pipeline sem disparar o Windows Defender._
-- ⚪ `rep-business` — Relatório Business de eventos/risco de rede
-- ⚪ `rep-privacy` — Relatório/explicação “o que o CyberSafe monitoriza” para transparência Business
+- ✅ `rep-e2e-canary` — Teste E2E do pipeline de deteção sem EICAR real (canário dev-only) — _Teste E2E do pipeline de deteção sem EICAR real, com canário só de teste e caso inverso em produção._
+- ⚪ `rep-business` — Relatório Business de eventos/risco de rede, _PÓS-PAP / BACKLOG._
+- ⚪ `rep-privacy` — Relatório/explicação “o que o CyberSafe monitoriza” para transparência Business, _PÓS-PAP / BACKLOG._
 
 ## PAP — Relatório, Documentação & Apresentação
 _Tudo o que precisa estar preparado para apresentar o projeto de forma fiel ao estado real._
@@ -290,7 +315,7 @@ _Tudo o que precisa estar preparado para apresentar o projeto de forma fiel ao e
 - 🟡 `pap-matrix` — Capítulo Matrix AI e tradução de dados técnicos
 - 🟡 `pap-business` — Business: separar claramente Phase 1 implementada de funções futuras
 - ⚪ `pap-privacy` — Privacidade/RGPD Business: local-first, minimização, transparência e limitações
-- 🟡 `pap-testing` — Reunir evidências de testes, probes, builds e screenshots finais — _2026-09-25: nova evidência disponível (manual test do canário + suites core 128/128, service 53/53, typecheck limpo) e o registo da Sprint 3 no topo do ficheiro `CYBERSAFE_ORGANIZADOR.md`. **SPRINT 4 GATE FINAL (Qoder, após kiro+Kilo):** core 140/140, service 95/95, app 151/151, desktop 29/29, typecheck PASS, `git diff --check` limpo; novo `scripts/protection-state-probe.mjs` (live pipe: yara active, hashDb active, native active, clamav degraded→freshclam, firewall unavailable em dev). Falta: manual test Task Manager (Notepad) pelo utilizador._
+- 🟡 `pap-testing` — Teste estruturado com utilizadores reais: tarefas propostas, tempo, dificuldades, feedback e melhorias — _Teste estruturado com utilizadores reais antes da PAP: tarefas propostas, tempo, dificuldades, feedback e melhorias. Ainda não correu, porque depende de pessoas e de agenda._
 - ⚪ `pap-usability` — Realizar testes estruturados com utilizadores reais e documentar os resultados — _Orientação do Professor Edgar Costa: tarefas reais, tempos, dificuldades, feedback e melhorias._
 - ⚪ `pap-manual` — Manual do utilizador
 - ⚪ `pap-diagrams` — Diagramas de arquitetura e fluxos
