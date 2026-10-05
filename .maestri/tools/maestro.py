@@ -374,7 +374,10 @@ def commit_plan(dirty_files):
         p = f.replace("\\", "/")
         if len(p) > 1 and p[0] == '"' and p[-1] == '"':
             p = p[1:-1]
-        if p.startswith(".maestri/"):
+        # .gitignore e configuracao do repositorio, nao rascunho. Sem esta
+        # regra caia em scratch-temp e um `git add` por grupo deixava-o de
+        # fora, perdendo a protecção dos artefactos de build.
+        if p.startswith(".maestri/") or p in (".gitignore", ".gitattributes"):
             groups["maestri-infra"].append(p)
         elif p.startswith("docs/relatorio PAP/"):
             # O DOCX/PDF do relatorio e fonte do PAP Delivery, nao rascunho.
@@ -417,9 +420,21 @@ def git_sync(write_state=True):
     rc, po = git("status", "--porcelain")
     staged, modified, untracked = [], [], []
     for l in po.splitlines():
-        xy, path = l[:2], l[3:]
+        if not l.strip():
+            continue
+        xy, path = l[:2], l[3:] if len(l) > 3 else ""
+        path = path.strip()
+        if not path:
+            continue
+        # git porcelain e XY(2 chars) + separador + path. Medido: o path de
+        # ficheiros ocultos perdia o ponto inicial (".maestri/..." chegava
+        # como "maestri/..."), e ai o commit_plan deixava de os reconhecer:
+        # a infra ia para docs e o produto podia ir para scratch-temp. Em vez
+        # de assumir a forma exacta da saida, escolhe-se o caminho que existe.
+        if not os.path.exists(os.path.join(REPO, path)) and os.path.exists(os.path.join(REPO, "." + path)):
+            path = "." + path
         if l.startswith("??"):
-            untracked.append(path.strip())
+            untracked.append(path)
             continue
         if xy[0] not in (" ", "?"):
             staged.append(path)
@@ -1092,7 +1107,9 @@ AGENT_SKILLS = {
                           "skill-security-review"],
     "OpenCode": ["systematic-debugging", "code-review-and-quality", "code-simplification",
                  "requesting-code-review", "verification-before-completion", "source-driven-development",
-                 "executing-plans", "cybersafe-ipc-contract", "cybersafe-windows-native"],
+                 "executing-plans", "cybersafe-ipc-contract", "cybersafe-windows-native",
+                 "cybersafe-delivery", "context-compression", "cybersafe-ptpt-ui",
+                 "context-optimization", "impeccable", "cybersafe-design-system"],
     "qoder": ["react-best-practices", "impeccable", "apple-design-principles", "cybersafe-design-system",
               "cybersafe-ptpt-ui", "test-driven-development", "systematic-debugging",
               "verification-before-completion"],
@@ -1115,7 +1132,9 @@ NATIVE_LOADERS = {"OpenCode": {"kind": "NATIVE", "path": OPENCODE_SKILLS},
                   "qoder": {"kind": "MAESTRO_INJECTION", "path": "-"},
                   "Kilo Builder": {"kind": "MAESTRO_INJECTION", "path": "-"},
                   "kiro": {"kind": "MAESTRO_INJECTION", "path": "-"},
-                  "Continue Worker": {"kind": "MAESTRO_INJECTION", "path": "-"}}
+                  "Continue Worker": {"kind": "MAESTRO_INJECTION", "path": "-"},
+                  "Luna External": {"kind": "EXTERNAL",
+                                    "path": os.path.join(STATE_DIR, "..", "external", "luna")}}
 
 
 def sha(path):
@@ -1205,6 +1224,29 @@ def event(name, task, agent, evidence=""):
     if name in EVIDENCE_EVENTS and not evidence.strip():
         print("ERROR: evento %s exige evidence (nao inferir estado)" % name)
         return 1
+    # DONE exige VERIFICATION anterior para a MESMA task. Texto de evidence
+    # nao e verificacao: escrever "tudo verde" no DONE sem ter corrido nada
+    # passava o gate. A prova e um VERIFICATION registado, com o comando e a
+    # saida, para a task em questao.
+    if name == "DONE":
+        prior = []
+        try:
+            for l in open(LEDGER, encoding="utf-8"):
+                if not l.strip():
+                    continue
+                try:
+                    r = json.loads(l)
+                except ValueError:
+                    continue
+                if r.get("task") == task and r.get("event") == "VERIFICATION":
+                    prior.append(r)
+        except FileNotFoundError:
+            prior = []
+        if not prior:
+            print("ERROR: DONE sem VERIFICATION registado para '%s' "
+                  "(evidence escrita nao e verificacao)" % task)
+            return 1
+        print("DONE apoiado em %d VERIFICATION(s) de '%s'" % (len(prior), task))
     os.makedirs(STATE_DIR, exist_ok=True)
     rec = {"ts": now(), "task": task, "agent": agent, "event": name, "evidence": evidence}
     with open(LEDGER, "a", encoding="utf-8", newline="\n") as f:
@@ -1223,6 +1265,440 @@ def ledger_tail(n=10):
         print(l)
     return 0
 
+
+# ------------------------------------------------- P30 CLASSIFICACAO DE TEXTO
+# O ROUTING acima e chaveado por um TYPE que o humano escreve a mao. Isso e
+# policy, nao routing. Faltava o passo TASK CLASSIFICATION a partir do texto
+# que o utilizador diz. As regras abaixo sao deterministas e ordenadas, e a
+# ordem e explicita: primeiro os padroes especificos, depois o fallback.
+#
+# Regra de desenho: BUG vence DESIGN. "Corrigir um bug visual no Dashboard" e um
+# bug de frontend (qoder + systematic-debugging), nao um pedido de design. Se
+# DESIGN estivesse checked primeiro, esse texto cairia em frontend_design e
+# perderia o caminho de debugging, que e o que a secao 32 do briefing pede.
+CLASSIFY_RULES = (
+    # (TYPE, padrao de keywords)
+    ("electron_ipc", r"named[\s-]*pipe|\bipc\b|preload|contextIsolation|main\s+process|"
+                     r"electron|renderer|snapshot storm|canal\s+(de\s+)?servico"),
+    ("security_review", r"seguran|security|seguro|vulnerab|\bauth\b|autentic|token|secret|"
+                        r"credencial|privileg|least privilege|owasp|\bcve\b|ameaca|exposto"),
+    ("long_context", r"investigar|auditar|inventari|auditoria|muitos ficheiros|"
+                     r"read[\- ]?only|sem editar|so ler|nao editar|nao escrever|contexto longo"),
+    ("delivery", r"\bpap\b|relatorio|workstream|organizador|changelog|evidence bundle"),
+    ("bug_windows", r"tombstone|\bcim\b|powershell|\bwmi\b|taskkill|registo do windows|"
+                    r"windows registry|processo do windows|service do windows"),
+)
+
+# BUG e DESIGN partilham quase as mesmas palavras em portugues. Um unico padrao
+# gigante seria classificado pela ordem de aparecimento no texto, que e fragil.
+# Separa-se: primeiro verifica-se se ha BUG, so depois e que se decide design.
+BUG_PAT = re.compile(r"\bbug\b|\bbugs\b|falha|intermitente|nao funciona|crash|erro|"
+                     r"corrigir|corrige|correcao|defeito|regress", re.I)
+DESIGN_PAT = re.compile(r"visual|design|\bui\b|\bux\b|dashboard|identidade|theme|tema|layout|"
+                        r"tipografia|espacamento|polish|composicao|cores|contraste|"
+                        r"dark|light|tokens", re.I)
+FRONTEND_PAT = re.compile(r"dashboard|react|\bui\b|\bux\b|componente|visual|pagina|"
+                          r"packages/app|frontend|\btsx?\b", re.I)
+READONLY_PAT = re.compile(r"read[\- ]?only|sem editar|so ler|nao editar|nao escrever|auditar|"
+                          r"auditoria|inventari", re.I)
+
+# TYPE -> (owner, CLASSIFICATION, REQUIRED_SKILLS, rationale)
+# A ordem das skills e por prioridade: as duas primeiras sao o nucleo.
+ROUTING_TEXT = {
+    "frontend_design": ("qoder", "FRONTEND/UX/DESIGN",
+                        ["cybersafe-design-system", "impeccable", "apple-design-principles",
+                         "react-best-practices"],
+                        "tokens e identidade: design-system; craft: impeccable; "
+                        "disciplina Apple; componentes React"),
+    "bug_ui": ("qoder", "FRONTEND/BUG",
+               ["systematic-debugging", "react-best-practices", "verification-before-completion"],
+               "bug de frontend: reproduzir antes de mudar, depois comportamento de "
+               "componente, e prova"),
+    "bug_generic": ("Kilo Builder", "BACKEND/BUG",
+                    ["systematic-debugging", "test-driven-development", "verification-before-completion"],
+                    "bug sem marca de camada: reproduzir, teste que falha antes do fix, e prova"),
+    "electron_ipc": ("Kilo Builder", "BACKEND/IPC",
+                     ["electron-best-practices", "cybersafe-ipc-contract", "systematic-debugging",
+                      "verification-before-completion"],
+                     "fronteira main/preload e contrato IPC: o contrato CyberSafe exige "
+                     "ler o contrato antes de mexer"),
+    "bug_windows": ("Kilo Builder", "BACKEND/WINDOWS",
+                    ["systematic-debugging", "cybersafe-windows-native", "test-driven-development",
+                     "verification-before-completion"],
+                    "medicao de processo/hardware e SO: medicao pelo SO, nunca por exit code"),
+    "security_review": ("Antigravity", "SECURITY",
+                        ["secpriv", "verification-before-completion"],
+                        "review de seguranca read-only: superficie minima, entrada validada, "
+                        "privilegios"),
+    "delivery": ("OpenCode", "DELIVERY/PAP",
+                 ["cybersafe-delivery", "context-compression", "verification-before-completion"],
+                 "workstream fechado: estado factual, report writer, changelog"),
+    "long_context": ("Luna External", "INVESTIGATION_READONLY",
+                     ["context-optimization", "context-compression"],
+                     "leitura longa, barata e externa; nao justifica premium nem quota"),
+}
+
+# Politica de skills (secao 7): 2-3 normal, 4 maximo. Nao se enviam 8-10.
+SKILL_BUDGET = {"MIN": MIN_SKILLS, "NORMAL": 3, "MAX": MAX_SKILLS}
+# Progressive disclosure: injeta-se o frontmatter mais as primeiras linhas do
+# corpo, nunca o SKILL.md inteiro. Estes limites sao o gate de contexto.
+INJECT_LINES_PER_SKILL = 28          # tecto por skill, quando cabem poucas
+INJECT_LINES_TOTAL = 100             # tecto total do packet (economia de contexto)
+
+
+def _hit(text, pattern):
+    m = re.search(pattern, text or "", re.I)
+    return m.group(0) if m else None
+
+
+def classify(text):
+    """TASK CLASSIFICATION determinista. Devolve (TYPE, CLASSIFICATION, hits)."""
+    t = text or ""
+    hits = [(t_, _hit(t, pat)) for t_, pat in CLASSIFY_RULES if _hit(t, pat)]
+    for label, pat in (("BUG", BUG_PAT), ("DESIGN", DESIGN_PAT), ("FRONTEND", FRONTEND_PAT),
+                       ("READONLY", READONLY_PAT)):
+        hit = _hit(t, pat.pattern)
+        if hit:
+            hits.append((label, hit))
+    hit_types = [h[0] for h in hits]
+    if BUG_PAT.search(t):
+        # BUG vence DESIGN, mas a camada decide o owner.
+        if "electron_ipc" in hit_types:
+            return "electron_ipc", ROUTING_TEXT["electron_ipc"][1], hits
+        if "bug_windows" in hit_types:
+            return "bug_windows", ROUTING_TEXT["bug_windows"][1], hits
+        if FRONTEND_PAT.search(t):
+            return "bug_ui", ROUTING_TEXT["bug_ui"][1], hits
+        return "bug_generic", ROUTING_TEXT["bug_generic"][1], hits
+    if DESIGN_PAT.search(t):
+        if READONLY_PAT.search(t) and not FRONTEND_PAT.search(t):
+            return "long_context", ROUTING_TEXT["long_context"][1], hits
+        return "frontend_design", ROUTING_TEXT["frontend_design"][1], hits
+    for t_, _pat in CLASSIFY_RULES:
+        if t_ in hit_types:
+            return t_, ROUTING_TEXT[t_][1], hits
+    return "bug_generic", ROUTING_TEXT["bug_generic"][1],         [("FALLBACK", "nenhuma keyword reconhecida: default conservador, confirmar com o humano")]
+
+
+def plan_route(text, scope=None):
+    """Determina owner e skills a partir do texto. Sem efeitos secundarios."""
+    cls_type, classification, hits = classify(text)
+    owner, _cls, skills, why = ROUTING_TEXT[cls_type]
+    profile = NATIVE_LOADERS.get(owner, {}).get("kind", "UNKNOWN")
+    # NATIVE exige que TODAS as skills pedidas existam no diretorio nativo do
+    # agente. Ter um loader nativo nao basta: se falta uma skill, o caminho real
+    # e injecao, e o packet tem de dizer MAESTRO_INJECTION.
+    native_ok = profile == "NATIVE" and all(
+        os.path.isfile(os.path.join(OPENCODE_SKILLS, s, "SKILL.md")) for s in skills)
+    missing_native = [s for s in skills
+                      if profile == "NATIVE"
+                      and not os.path.isfile(os.path.join(OPENCODE_SKILLS, s, "SKILL.md"))]
+    if owner == "Luna External":
+        delivery = "EXTERNAL"
+    elif native_ok:
+        delivery = "NATIVE"
+    else:
+        delivery = "MAESTRO_INJECTION"
+    return {
+        "TASK": (text or "").strip(),
+        "TYPE": cls_type,
+        "CLASSIFICATION": classification,
+        "WRITER": owner,
+        "REVIEWER": "OpenCode" if owner != "OpenCode" else "Antigravity",
+        "SKILLS_DELIVERY": delivery,
+        "NATIVE_SKILLS_MISSING": missing_native,
+        "LOADER_KIND": profile,
+        "REQUIRED_SKILLS": skills,
+        "SKILL_BUDGET": "min=%d normal=%d max=%d" % (MIN_SKILLS, SKILL_BUDGET["NORMAL"], MAX_SKILLS),
+        "LUNA_CANDIDATE": "YES" if owner == "Luna External" else "NO",
+        "SCOPE": scope or "",
+        "CLASSIFY_EVIDENCE": ["%s -> %r" % (k, v) for k, v in hits],
+        "ROUTING_WHY": why,
+        "OWNERSHIP_CONFLICT": route_agent_ok(owner, skills),
+        "MISSING_SKILLS": [s for s in skills if not skill_exists(s)],
+    }
+
+
+def skill_inject(name, budget=INJECT_LINES_PER_SKILL):
+    """Carrega so o necessario de uma skill (progressive disclosure).
+
+    Nao despeja o SKILL.md inteiro: devolve a descricao do frontmatter mais as
+    primeiras `budget` linhas do corpo. A evidencia e o sha do ficheiro inteiro
+    mais o numero de linhas realmente injetadas, para que SKILLS_LOADED signifique
+    'isto foi mesmo lido' e nao 'esta instalada'.
+    """
+    p = os.path.join(SKILLS_DIR, name, "SKILL.md")
+    if not os.path.isfile(p):
+        return {"error": "SKILL.md inexistente: %s" % name}
+    raw = open(p, encoding="utf-8", errors="replace").read()
+    m = re.match(r"^---\n(.*?)\n---\n(.*)$", raw, re.S)
+    head, body = (m.group(1), m.group(2)) if m else ("", raw)
+    d = re.search(r"^description:\s*(.+)$", head, re.M | re.S)
+    desc = " ".join(d.group(1).split()) if d else ""
+    body_lines = body.strip().splitlines()
+    lines = body_lines[:budget]
+    return {"name": name, "sha256": sha(p), "lines_total": len(raw.splitlines()),
+            "lines_injected": len(lines), "description": desc,
+            "text": "\n".join(lines)}
+
+
+def deliver_skills(skills):
+    """SKILL DELIVERY -> SKILLS_LOADED. So conta se carregou mesmo."""
+    injected, evidence, total = {}, [], 0
+    per_skill = max(12, min(INJECT_LINES_PER_SKILL, (INJECT_LINES_TOTAL - 8) // max(1, len(skills))))
+    for s in skills:
+        inj = skill_inject(s, budget=per_skill)
+        if inj.get("error"):
+            evidence.append("%s=NAO_CARREGADA (%s)" % (s, inj["error"]))
+            continue
+        injected[s] = inj["text"]
+        total += inj["lines_injected"]
+        evidence.append("%s=LOADED(sha=%s, %d/%d linhas)" % (
+            s, inj["sha256"][:12], inj["lines_injected"], inj["lines_total"]))
+    budget_exceeded = "YES" if total > INJECT_LINES_TOTAL else "NO"
+    loaded = "YES" if (skills and all(s in injected for s in skills)
+                       and total <= INJECT_LINES_TOTAL) else "NO"
+    return injected, {"SKILLS_LOADED": loaded,
+                      "SKILLS_LOADED_EVIDENCE": evidence,
+                      "INJECTED_LINES_TOTAL": total,
+                      "INJECTED_LINES_BUDGET": INJECT_LINES_TOTAL,
+                      "BUDGET_EXCEEDED": budget_exceeded}
+
+
+def build_packet(text, scope=None, allow_start=False, owner_free=None):
+    """Cadeia completa: texto -> classificacao -> owner -> skills -> delivery -> packet."""
+    p = plan_route(text, scope=scope)
+    injected, ev = deliver_skills(p["REQUIRED_SKILLS"])
+    blockers = []
+    if p["OWNERSHIP_CONFLICT"]:
+        blockers.append("fora do perfil: %s" % "; ".join(p["OWNERSHIP_CONFLICT"]))
+    if p["MISSING_SKILLS"]:
+        blockers.append("skills inexistentes: %s" % ", ".join(p["MISSING_SKILLS"]))
+    if ev["SKILLS_LOADED"] != "YES":
+        blockers.append("skills nao carregadas")
+    if owner_free is None:
+        if not scope:
+            blockers.append("SCOPE ausente: nao se pode verificar ownership nem autorizar start")
+        elif ownership_check(scope, p["WRITER"]) != 0:
+            blockers.append("ownership ocupado noutro writer em %s" % scope)
+    start = "YES" if (allow_start and not blockers) else "NO"
+    p.update(ev)
+    p["INJECTED_SECTIONS"] = injected
+    p["ACCEPTANCE"] = ["classificacao correta", "skills carregadas (SKILLS_LOADED=YES)",
+                       "ownership limpo", "verificacao com evidencia"]
+    p["TESTS"] = "a definir no packet de implementacao"
+    p["VERIFICATION_EVIDENCE"] = ""
+    p["DONE_ALLOWED"] = "NO"
+    p["START_ALLOWED"] = start
+    p["START_BLOCKERS"] = blockers
+    p["CREATED_AT"] = now()
+    p["REPORT_EDIT_MODE"] = "FILE"
+    return p
+
+
+def route_text(text, scope=None, out=None, allow_start=False):
+    p = build_packet(text, scope=scope, allow_start=allow_start)
+    print("TASK           = %s" % p["TASK"])
+    print("CLASSIFICATION = %s (type=%s)" % (p["CLASSIFICATION"], p["TYPE"]))
+    print("CLASSIFY_EVID  = %s" % "; ".join(p["CLASSIFY_EVIDENCE"]))
+    print("WRITER         = %s" % p["WRITER"])
+    print("REVIEWER       = %s (read-only)" % p["REVIEWER"])
+    print("SKILLS         = %s" % ", ".join(p["REQUIRED_SKILLS"]))
+    print("SKILL_BUDGET   = %s (entregues %d)" % (p["SKILL_BUDGET"], len(p["REQUIRED_SKILLS"])))
+    print("DELIVERY       = %s (loader=%s)" % (p["SKILLS_DELIVERY"], p["LOADER_KIND"]))
+    if p.get("NATIVE_SKILLS_MISSING"):
+        print("NATIVE_MISSING = %s (por isso NAO e NATIVE)" % ", ".join(p["NATIVE_SKILLS_MISSING"]))
+    print("SKILLS_LOADED  = %s" % p["SKILLS_LOADED"])
+    for e in p["SKILLS_LOADED_EVIDENCE"]:
+        print("   %s" % e)
+    print("INJECTED_LINES = %d/%d (budget excedido=%s; progressive disclosure: so o "
+          "necessario de cada SKILL.md)" % (
+              p["INJECTED_LINES_TOTAL"], p["INJECTED_LINES_BUDGET"], p["BUDGET_EXCEEDED"]))
+    print("ROUTING_WHY    = %s" % p["ROUTING_WHY"])
+    print("START_ALLOWED  = %s" % p["START_ALLOWED"])
+    if p["START_BLOCKERS"]:
+        for b in p["START_BLOCKERS"]:
+            print("   BLOCKER: %s" % b)
+    if out:
+        save(out, p)
+        print("PACKET_WRITTEN = %s" % out)
+        packet_validate(out)
+    return 0 if p["START_ALLOWED"] == "YES" or not allow_start else 1
+
+# ---------------------------------------------------------- P31 DEFINITION OF DONE
+# A DoD nao e um texto: e um conjunto de campos que o Maestro tem de avaliar
+# TODOS antes de autorizar DONE. Cada campo declara o seu proprio estado, e um
+# campo REQUIRED que nao esteja PASS impede DONE_ALLOWED. Um workstream pode
+# declarar NOT_REQUIRED legitimamente; o que nao pode e omitir o campo.
+DOD_FIELDS = ("PRODUCT", "TESTS", "RUNTIME", "REVIEW", "VERIFICATION",
+              "MANUAL_GATE", "ORGANIZER", "PAP_REPORT", "EVIDENCE", "GIT_CHECKPOINT")
+DOD_STATES = ("REQUIRED", "NOT_REQUIRED", "PASS", "BLOCKED", "PENDING")
+
+
+def dod_check(path_or_dict):
+    """Avalia a Definition of Done. Sem avaliacao implicita: cada campo tem de
+    ser declarado. Um campo ausente e diferente de um campo NOT_REQUIRED."""
+    d = path_or_dict if isinstance(path_or_dict, dict) else load(path_or_dict)
+    if not d:
+        print("DoD_INVALID: nada para avaliar")
+        return 2
+    dod = d.get("DEFINITION_OF_DONE") or {}
+    errs, rows = [], []
+    for f in DOD_FIELDS:
+        if f not in dod:
+            errs.append("campo ausente na DoD: %s (declarar explicitamente)" % f)
+            continue
+        st = str(dod[f]).strip().upper()
+        if st not in DOD_STATES:
+            errs.append("%s = %r invalido (permitidos: %s)" % (f, dod[f], ", ".join(DOD_STATES)))
+            continue
+        rows.append((f, st))
+    if len(rows) != len(DOD_FIELDS):
+        print("DoD_INCOMPLETE: %d/%d campos avaliados" % (len(rows), len(DOD_FIELDS)))
+        for e in errs:
+            print("   ERROR: %s" % e)
+        return 1
+    # PASS e BLOCKED sao os estados que decidem o destino do workstream.
+    must_pass = [f for f, st in rows if st in ("REQUIRED", "BLOCKED")]
+    not_done = [f for f, st in rows if st == "PENDING"]
+    # O organizador e o PAP sao parte do DoD por decisao do Maestro, mas podem
+    # ser NOT_REQUIRED num workstream puramente interno. Nunca sao assumidos.
+    workflow_closed = [f for f, st in rows
+                       if f in ("ORGANIZER", "PAP_REPORT") and st in ("REQUIRED", "BLOCKED", "PENDING")]
+    allowed = not must_pass and not not_done
+    for f, st in rows:
+        print("   DoD %-14s = %s" % (f, st))
+    print("DoD_WORKFLOW_CLOSED = %s (organizador e PAP: %s)" % (
+        "NO" if workflow_closed else "YES", "em aberto" if workflow_closed else "fechado ou nao aplicavel"))
+    print("DONE_ALLOWED_BY_DoD = %s" % ("YES" if allowed else "NO"))
+    if must_pass:
+        print("   BLOQUEADO por: %s" % ", ".join("%s=%s" % (f, st) for f, st in rows
+                                                if st in ("REQUIRED", "BLOCKED")))
+    if not_done:
+        print("   PENDENTE: %s" % ", ".join(not_done))
+    return 0 if allowed else 1
+
+
+# ------------------------------------------------------------- P32 REVIEW BUDGET
+# Regra: 1 reviewer por workstream normal. A segunda review so quando o trigger
+# existe. "Nao repetir o episodio de muitas reviews do ClamAV" e uma regra de
+# custo, e um gate que so penaliza o excesso e o que a torna respeitavel.
+REVIEW_TRIGGERS = ("P0", "SECURITY", "FIRST_REVIEW_FOUND_ISSUE", "CONTRADICTORY_EVIDENCE")
+REVIEW_BUDGET_NORMAL = 1
+REVIEW_BUDGET_PREMIUM = 2
+
+
+def review_budget_check(reviews_done, triggers=(), premium=False):
+    """reviews_done: quantas reviews ja foram feitas. triggers: porquê uma 2a."""
+    tr = [t for t in triggers if t in REVIEW_TRIGGERS]
+    bad = [t for t in triggers if t not in REVIEW_TRIGGERS]
+    base = REVIEW_BUDGET_PREMIUM if premium else REVIEW_BUDGET_NORMAL
+    # Cada trigger VALIDO compra exatamente UMA review extra. Um unico trigger
+    # nao da licenca para repetir reviews: e o que trava o episodio ClamAV.
+    cap = base + len(tr)
+    over = reviews_done > cap
+    print("REVIEW_BUDGET  = %d usada(s) / cap %d (base %d + %d trigger(s) validos)" % (
+        reviews_done, cap, base, len(tr)))
+    print("TRIGGERS       = %s" % (", ".join(tr) or "nenhum"))
+    if bad:
+        print("   AVISO: triggers desconhecidos (nao contam): %s" % ", ".join(bad))
+    if premium:
+        print("PREMIUM        = JUSTIFICADO (base %d em vez de %d)" % (base, REVIEW_BUDGET_NORMAL))
+    over_budget = over
+    print("REVIEW_BUDGET_OK = %s" % ("NO" if over_budget else "YES"))
+    if over_budget:
+        print("   BLOCKER: %d reviews excedem o tecto %d (base %d + %d trigger valido(s))" % (
+            reviews_done, cap, base, len(tr)))
+    return 0 if not over_budget else 1
+
+
+# ------------------------------------------------------ P33 SCREENSHOT/EVIDENCE
+# Evidencia tecnica e sempre obrigatoria. Screenshot so quando ha superficie
+# visual. Nao se cria backlog de screenshots: so o que a task altera visivelmente.
+def screenshot_policy(changed_paths=(), kind="mixed"):
+    """kind: 'ui' | 'backend' | 'mixed'."""
+    paths = list(changed_paths)
+    ui_re = re.compile(r"packages/app/|\.(tsx|css|scss|jsx|css)$", re.I)
+    visual = kind == "ui" or (kind == "mixed" and any(ui_re.search(p) for p in paths))
+    print("SCOPE_PATHS    = %s" % (", ".join(paths) or "(nao declarados)"))
+    print("SCREENSHOT_REQUIRED = %s" % ("YES" if visual else "NO"))
+    print("TECH_EVIDENCE_REQUIRED = YES (sempre, seja backend ou visual)")
+    print("SCREENSHOT_POLICY = %s" % ("1 por superficie visual alterada; sem backlog" if visual
+                                      else "sem screenshot: nada visual alterado"))
+    return "YES" if visual else "NO"
+
+
+# ------------------------------------------------------------- P34 SHELL QA PLAN
+# Shell e QA mecanico: testes, typecheck, builds, git diff --check. Nao e LLM.
+# O plano tem de trazer comando, resultado esperado, timeout e scope. Um plano sem
+# EXPECTED RESULTS so repete o que o teste ja diz; nao e verificacao.
+PKG_TEST = {
+    "packages/core": "npm test --workspace packages/core",
+    "packages/service": "npm test --workspace packages/service",
+    "packages/app": "npm test --workspace packages/app",
+    "packages/api": "npm test --workspace packages/api",
+    "packages/desktop": "npm test --workspace packages/desktop",
+    "packages/native-windows": "npm test --workspace packages/native-windows",
+}
+QA_TIME_OUT = {"test": 900, "typecheck": 600, "build": 1200, "diff": 60}
+
+
+def qa_plan(changed_paths=()):
+    paths = list(changed_paths)
+    pkgs, cmds = [], []
+    for p in paths:
+        m = re.match(r"(packages/[a-z-]+)/", p)
+        if m and m.group(1) in PKG_TEST and m.group(1) not in pkgs:
+            pkgs.append(m.group(1))
+    if not pkgs:
+        pkgs = ["(infra: sem suite de produto)"]
+    for p_ in pkgs:
+        if p_ in PKG_TEST:
+            cmds.append({"cmd": PKG_TEST[p_], "expect": "exit 0 e 0 falhas",
+                         "timeout_s": QA_TIME_OUT["test"], "scope": p_})
+    cmds.append({"cmd": "npm run typecheck", "expect": "exit 0, sem erros de tipo",
+                 "timeout_s": QA_TIME_OUT["typecheck"], "scope": "root"})
+    cmds.append({"cmd": "git diff --check", "expect": "sem output (nenhum whitespace error)",
+                 "timeout_s": QA_TIME_OUT["diff"], "scope": "repo"})
+    print("SHELL_ROLE     = Test Engineer / QA mecanico (NAO e LLM, custo FREE_LOCAL)")
+    print("PKGS_IN_SCOPE  = %s" % ", ".join(pkgs))
+    for c in cmds:
+        print("  $ %s" % c["cmd"])
+        print("      EXPECTED: %s | TIMEOUT: %ss | SCOPE: %s" % (c["expect"], c["timeout_s"], c["scope"]))
+    return cmds
+
+
+# --------------------------------------------------------- P35 ORGANIZER FLOW
+# Regra do briefing: "atualiza o organizador" nao pode depender de memoria.
+# Este gate diz, para um workstream finished, se o organizador e o PAP tem de
+# seguir. So devolve 'nao aplicavel' com justificacao explicita.
+ORGANIZER_TRIGGERS = ("PRODUCT", "DELIVERY/PAP", "BACKEND/WINDOWS", "BACKEND/IPC", "FRONTEND/BUG")
+
+
+def organizer_flow(classification, product_changed=True, dry_run=True):
+    needed = product_changed and classification in ORGANIZER_TRIGGERS
+    print("ORGANIZER_UPDATE_REQUIRED = %s" % ("YES" if needed else "NO"))
+    if needed:
+        print("   1. atualizar source of truth (html editavel)")
+        print("   2. espelho markdown + organizer-check")
+        print("   3. PAP Report Writer")
+        print("   4. Git checkpoint")
+        print("   DRY_RUN=%s (nada foi escrito)" % ("YES" if dry_run else "NO"))
+    else:
+        print("   sem trabalho de produto: organizador e PAP nao sao gatilho")
+    return needed
+
+
+# ------------------------------------------------------ P36 REPORT WRITER FLOW
+def report_writer_flow(section="(dry-run: secao nao tocada)", dry_run=True):
+    """Fluxo do Report Writer em modo FILE. Nunca escreve no DOCX durante dry-run."""
+    print("REPORT_EDIT_MODE = FILE")
+    print("WORD_WEB_LIVE     = ABANDONED")
+    print("FLOW = evidence bundle -> identificar secao -> propor actualizacao -> "
+          "DOCX validator -> changelog")
+    print("TARGET_SECTION    = %s" % section)
+    print("DRY_RUN           = %s (DOCX nao escrito, changelog nao escrito)" % ("YES" if dry_run else "NO"))
+    return True
 
 if __name__ == "__main__":
     # A consola do Windows vem em cp1252 e estraga os acentos do relatorio.
@@ -1279,6 +1755,31 @@ if __name__ == "__main__":
         sys.exit(state_write())
     elif cmd == "state-show":
         state_show()
+    elif cmd == "route-text":
+        text = sys.argv[2]
+        scope = os.environ.get("MAESTRI_SCOPE") or None
+        out = os.environ.get("MAESTRI_PACKET_OUT") or None
+        allow = os.environ.get("MAESTRI_ALLOW_START") == "1"
+        sys.exit(route_text(text, scope=scope, out=out, allow_start=allow))
+    elif cmd == "classify":
+        t_, c_, h_ = classify(sys.argv[2])
+        print("TYPE=%s CLASSIFICATION=%s EVIDENCE=%s" % (t_, c_, h_))
+    elif cmd == "dod-check":
+        sys.exit(dod_check(sys.argv[2]))
+    elif cmd == "review-budget":
+        trig = sys.argv[3].split(",") if len(sys.argv) > 3 and sys.argv[3] else []
+        sys.exit(review_budget_check(int(sys.argv[2]), trig))
+    elif cmd == "screenshot-policy":
+        paths = sys.argv[2].split(",") if len(sys.argv) > 2 and sys.argv[2] else []
+        kind = sys.argv[3] if len(sys.argv) > 3 else "mixed"
+        screenshot_policy(paths, kind)
+    elif cmd == "qa-plan":
+        paths = sys.argv[2].split(",") if len(sys.argv) > 2 and sys.argv[2] else []
+        qa_plan(paths)
+    elif cmd == "organizer-flow":
+        sys.exit(0 if organizer_flow(sys.argv[2], dry_run=True) else 0)
+    elif cmd == "report-flow":
+        sys.exit(0 if report_writer_flow(dry_run=True) else 1)
     elif cmd == "health":
         sys.exit(health())
     else:

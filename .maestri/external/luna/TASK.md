@@ -1,100 +1,85 @@
-# LUNA — PAP & DOCUMENTATION AUDIT (READ-ONLY)
+# LUNA — ESTRUTURA MAESTRI COHERENCE AUDIT (READ-ONLY)
 
 STATUS = READY_FOR_MANUAL_TRIGGER
-PREPARED_BY = Freebuff (Maestro Principal), sprint "PAP DELIVERY, REPORT, UX & RELEASE", 2026-10-04
-SCOPE = READ-ONLY. Não escrever, não commitar, não instalar, não navegar fora do scope.
+PREPARED_BY = Freebuff (Maestro Principal), sessao "Maestri Structure Completion", 2026-10-05
+SCOPE = READ-ONLY. Não escrever em produto, não commitar, não instalar, não executar testes,
+não abrir o Word, não tocar no relatório PAP.
+
+Esta tarefa substitui a auditoria PAP/DOCUMENTATION de 2026-10-04, que apontava para um
+ficheiro DOCX antigo (`Relatorio_PAP_CyberSafe_v9_REVISTA_04-10-2026 (1).docx`) e não para
+o relatório LIVE. Não é a mesma tarefa e não deve ser confundida com ela.
 
 ---
 
 ## OBJECTIVO
 
-Auditar a dissertação da PAP e a documentação de apoio do CyberSafe Assistant para encontrar
-divergências entre o que o relatório afirma e o que o produto faz, e o que o produto faz e o
-relatório ainda não diz. Produzir um relatório factual. Não reescrever a dissertação.
+Auditar se as três fontes que governam o Maestri **concordam entre si** sobre quem é o
+Freebuff, quem é o Qoder, e como as skills chegam aos agentes:
+
+1. `AGENT ROLES` — quem pode escrever o quê.
+2. `skill-routing` — que skills cada agente recebe, e por que caminho.
+3. `MAESTRI_STATE` — o que o estado persistido afirma.
+
+Se as três não concordarem, o Maestro vai dar o mesmo advice a três sistemas diferentes.
+Isso é o que esta auditoria procura.
 
 ---
 
-## FICHEIROS PARA LER
+## FICHEIROS PARA LER (só leitura)
 
-Relatório (PAP):
-- `C:\Users\caioc\Desktop\Caio\garoto de programa\cybersafe-assistant\docs\relatorio PAP\Relatorio_PAP_CyberSafe_v9_REVISTA_04-10-2026 (1).docx`  (baseline, INTOCADO — só leitura)
-- `C:\Users\caioc\Desktop\Caio\garoto de programa\cybersafe-assistant\docs\relatorio PAP\Relatorio_PAP_CyberSafe_v9_REVISTA_04-10-2026.pdf`  (baseline, INTOCADO — só leitura)
-- `C:\Users\caioc\Desktop\Caio\garoto de programa\cybersafe-assistant\docs\relatorio PAP\Relatorio_PAP_CyberSafe_LIVE.docx`  (fonte editável viva; pode não existir ainda)
+Raiz do repositório:
+`C:\Users\caioc\Desktop\Caio\garoto de programa\cybersafe-assistant`
 
-Organizador e estado:
-- `docs/CYBERSAFE_ORGANIZADOR.md`
-- `docs/cybersafe-organizador-pap-v2-editavel.html`
-- `docs/ORGANIZADOR_HISTORICO.md`
-- `docs/ai-map/05-CURRENT-STATE.md`
-- `docs/ai-map/03-CRITICAL-FLOWS.md`
-- `docs/ai-map/01-ARCHITECTURE.md`
-- `docs/CYBERSAFE_HANDOFF.md`
-- `docs/RELEASE_DRIVER_CHECK.md`
-- `docs/ROADMAP.md`
+- `AGENTS.md`, `CLAUDE.md` (raiz)
+- `docs/ai-map/06-AGENT-ROLES.md`  ← fonte de verdade dos papéis
+- `.maestri/tools/maestro.py`      ← `AGENT_SKILLS`, `NATIVE_LOADERS`, `ROUTING_TEXT`, `CLASSIFY_RULES`
+- `.maestri/state/maestro-state.json`
+- `.maestri/state/ownership.json`
+- `.maestri/state/skills-manifest.json`
+- `.maestri/external/luna/STATUS.md`
 
-Evidência de runtime recente:
-- `output/manual-retest/MANUAL-RETEST-RESULT-2026-10-03.md`
-- `output/manual-retest/SCANNER_REAL_BATCH_STALL.md`
-- `output/manual-retest/FINAL-WIDE-GATE.md`
-
-Tecnologia (para conferir claims techniques):
-- `packages/core/src/clamav.ts`, `packages/service/src/clam-database-gate.ts`, `packages/service/src/updater.ts`
+Para skills (só para confirmar nomes e contagens; **não** usar como fonte de regra):
+- `%USERPROFILE%\.agents\skills\`  ← canónica, 32 skills
 
 ---
 
-## O QUE PROCURAR
+## PERGUNTAS A RESPONDER
 
-1. **UNSUPPORTED_CLAIMS** — afirmações no relatório que o código, os testes ou a evidência não sustentam.
-   Atenção especial a: motor ClamAV descrito como nativo quando é `clamscan.exe` orquestrado;
-   YARA descrito como cobertura ampla quando há uma regra; "scan completo" quando o scan em lote real não completa;
-   número de testes ou percentagens de progresso que não batem com os suites reais.
-2. **MISSING_IMPLEMENTED_FEATURES** — funcionalidades implementadas e testadas que ainda não aparecem na PAP.
-   Candidatos já conhecidos (confirmar no código antes de reportar):
-   - gate de coordenação freshclam ↔ scan (`clam-database-gate.ts`) com distinção de causa de adiamento
-   - tecto de recursos ClamAV: RAM cascade + `PEAK_CLAMSCAN_PROCESS_COUNT = 1`
-   - veredicto `inconclusive` em vez de `safe` em erro do motor
-   - `parseClamavOutput` a decidir pelo output e não pelo exit code
-   - re-probe do motor depois de actualização bem sucedida
-   - batch de ficheiros numa só invocação do motor
-   - Protection Health / PcState, Matrix Terminal, organização de PC, Business (personal vs business)
-3. **STALE_CONTENT** — conteúdo que reflecte um estado anterior do produto (nomes antigos, ecrãs removidos, terminologia trocada).
-4. **REPORT_GAPS** — secções fracas, sem evidência, com promessas vagas, ou que descrevem o futuro como presente.
-5. **DUPLICATION** — conteúdo repetido entre capítulos.
-6. **INCONSISTENCIES** — divergências DOCX ↔ PDF ↔ docs ↔ organizador (títulos, numeração, números, captções de figuras).
-7. **SCREENSHOTS_NEEDED** — que figuras/faltam para tornar o relatório defensável perante um júri.
-8. **ORGANIZER_DRIFT** — tarefas concluídas que o organizador diz DONE mas a PAP não refere; tarefas no organizador que não existem no produto.
-9. **PRESENTATION** — melhorias de apresentação de baixo risco (estrutura de tabelas, legendas, consistência de figuras).
-
----
-
-## REGRAS DURAS
-
-- READ-ONLY ABSOLUTO. Não editar o DOCX, o PDF, o organizador, o código ou qualquer ficheiro do projecto.
-- Não commitar. Não executar git reset / restore / checkout -- / clean / stash / force push.
-- Não ler segredos, chaves, tokens ou ficheiros .env.
-- Não instalar nada (npm install, pip install, extensões).
-- Não contactar a rede para "pesquisar" claims; basear a auditoria no repositório.
-- Não escrever no relatório. Devolver findings.
-- Não inventar. Se não conseguires confirmar um finding, marcá-lo como `UNCONFIRMED`.
-- PT-PT.
+1. O `AGENT ROLES` diz que o **Freebuff** é o Maestro Principal / Integration Lead?
+   `maestro.py` trata-o como `Freebuff Builder` no perfil de skills? Os nomes batem?
+2. O `AGENT ROLES` diz que o **Qoder** é o writer de frontend/design?
+   Em `ROUTING_TEXT`, `frontend_design` e `bug_ui` vão mesmo para `qoder`?
+3. Algum papel descrito no `AGENT ROLES` **não existe** em `AGENT_SKILLS` em `maestro.py`?
+4. Algum agente em `AGENT_SKILLS` **não aparece** no `AGENT ROLES`?
+5. Alguma skill em `ROUTING_TEXT` está **fora do perfil** do agente que a recebe?
+6. `maestro-state.json` afirma algum papel ou skill que já não existe na biblioteca?
 
 ---
 
 ## FORMATO DA RESPOSTA
 
+Devolver em `HANDOFF.md`, com estas quatro secções e **só** isto:
+
 ```
-LUNA_STATUS =
-CONFIRMED =
-UNSUPPORTED_CLAIMS =        (lista: secção do relatório, citação curta, porque não é sustentada, evidência)
-MISSING_IMPLEMENTED_FEATURES =  (lista: funcionalidade, onde está implementada, secção da PAP onde deveria entrar)
-STALE_CONTENT =
-REPORT_GAPS =
-DUPLICATIONS =
-INCONSISTENCIES =
-SCREENSHOTS_NEEDED =
-ORGANIZER_DRIFT =
-RECOMMENDATIONS =
-LIMITATIONS =
+CONFIRMED          — o que se confirmou, com o ficheiro e a linha
+CONFLICTS          — o que as fontes dizem de formas diferentes (fich:linha de cada lado)
+STALE_REFERENCES   — o que aponta para algo que já não existe
+RECOMMENDATIONS    — o que deve ser corrigido, por ordem de gravidade
 ```
 
-Não escrever mais do que isto. Não escrever a PAP. Devolver findings.
+Regras:
+
+- Citar `ficheiro:linha` em cada afirmação. Sem citação, a afirmação não conta.
+- Se um ficheiro não existir ou não for legível: escrever `BLOCKED` com o caminho exacto.
+  Não adivinhar o conteúdo.
+- **Não** propor mudanças de produto. Isto é auditoria de infra.
+- **Não** editar nada. A única escrita permitida é o próprio `HANDOFF.md`.
+
+---
+
+## O QUE ESTE TRABALHO NÃO DEVE CONCLUIR
+
+- Não declarar o routing "correcto" porque as skills existem. Existe ≠ está carregada.
+- Não declarar Luna integrada porque este ficheiro existe. TASK_READY ≠ LUNA_USED.
+- Não tratar `maestro-state.json` como verdade quando o `AGENT ROLES` diz outra coisa:
+  registar como CONFLICT, não escolher um lado.

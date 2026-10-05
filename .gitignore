@@ -28,3 +28,7 @@ Thumbs.db
 *.db
 *.sqlite
 .aider*
+
+# Artefactos de build python (nao sao fonte)
+__pycache__/
+*.pyc

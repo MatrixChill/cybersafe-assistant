@@ -263,15 +263,15 @@
   "sessionClosed": true,
   "git": {
     "branch": "main",
-    "head": "fb38ad0",
+    "head": "a6bdf47",
     "upstream": "origin/main",
-    "ahead": 6,
+    "ahead": 0,
     "behind": 0,
-    "dirty": 174,
-    "syncState": "CLEAN_AHEAD",
+    "dirty": 16,
+    "syncState": "DIRTY_LOCAL",
     "syncReady": "YES",
     "securityPreflight": [],
-    "lastChecked": "2026-10-04T22:47:09Z"
+    "lastChecked": "2026-10-05T08:54:40Z"
   },
   "coMaestro": "Codex Lead",
   "agentsCoMaestro": "Codex Lead (recrutado com preset Codex sobre o terminal PowerShell existente; OpenCode-recusou o titulo, ofereceu READ-ONLY)"

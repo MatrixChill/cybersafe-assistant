@@ -1,5 +1,5 @@
 {
-  "generatedAt": "2026-10-01T20:24:28Z",
+  "generatedAt": "2026-10-05T08:15:11Z",
   "canonical": "C:\\Users\\caioc/.agents/skills",
   "agent_skill_matrix": {
     "Freebuff Builder": [
@@ -243,16 +243,16 @@
     },
     {
       "name": "maestri-chat",
-      "sha256": "cbe27030f3ff2699",
+      "sha256": "ce98e9c9f7f21464",
       "lines": 65,
-      "description_chars": 143,
+      "description_chars": 165,
       "spec": "OK",
       "opencode_mirror": null
     },
     {
       "name": "maestri-manager",
-      "sha256": "ef5f3e571c2c5ba8",
-      "lines": 172,
+      "sha256": "0badb48a3268895a",
+      "lines": 174,
       "description_chars": 268,
       "spec": "OK",
       "opencode_mirror": null
@@ -283,9 +283,9 @@
     },
     {
       "name": "maestri-workspace",
-      "sha256": "246825512d1fb295",
-      "lines": 82,
-      "description_chars": 261,
+      "sha256": "376e2cd992b4a34e",
+      "lines": 138,
+      "description_chars": 456,
       "spec": "OK",
       "opencode_mirror": null
     },
