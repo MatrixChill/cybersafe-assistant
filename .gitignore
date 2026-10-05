@@ -32,3 +32,13 @@ Thumbs.db
 # Artefactos de build python (nao sao fonte)
 __pycache__/
 *.pyc
+
+# Maestri: infra-estrutura de agentes, nao produto CyberSafe.
+# Decisao (2026-10-05): passa a ter Git independente e privado, em
+# MatrixChill/maestri-infra. Zero dependencias: verificado que packages/ nao
+# importa nada de .maestri.
+#
+# NOTA: ignorar um caminho NAO o remove do indice. O que ja estava versionado
+# saiu do indice em `git rm -r --cached .maestri`, e continua legivel em todos
+# os commits anteriores deste historico. Nao houve reescrita de historico.
+.maestri/
