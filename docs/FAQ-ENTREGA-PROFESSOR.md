@@ -1,34 +1,92 @@
-# FAQ — resposta ao professor e à banca
+# Perguntas frequentes para a entrega
 
-## “O motor devia ser em C++?”
+Respostas curtas às perguntas que costumam aparecer na apresentação e na leitura do
+repositório. Cada resposta corresponde ao que está no código hoje, não ao que se pretende
+fazer.
 
-**Sim, como evolução natural:** em produtos clássicos, o *core* de scan e parsers binários costuma ser **C/C++/Rust**. TypeScript/Node é excelente para **UI, API, orquestração e integração cloud**.
+## «O motor devia ser em C++?»
 
-**No estado deste repo:** o motor **principal** que decide fluxo, YARA-X, VirusTotal e quarentena está em **TypeScript**. O módulo **`packages/native-engine`** é um **executável C++** complementar para análise estática nativa; a integração no serviço é o próximo passo técnico explícito no `ROADMAP.md`.
+Em produtos clássicos de segurança, o núcleo de análise e os parsers binários costumam estar
+em C, C++ ou Rust, e a interface, a API e a orquestração em linguagens de mais alto nível.
+Este projeto segue essa divisão:
 
-## “Por que TypeScript aparece tanto no GitHub?”
+- **TypeScript** decide o fluxo, aplica heurísticas, chama YARA-X, consulta o VirusTotal e
+  gere a quarentena. É também onde vive a pontuação de risco que a interface mostra.
+- **C++ (`scan-engine.exe`)** faz análise estática de binários: SHA-256, entropia, cabeçalhos
+  PE, secções executáveis e ausência de importações.
 
-O GitHub usa **Linguist**: conta linhas por tipo de ficheiro no Git. O monorepo tem **muito** `.ts`/`.tsx`; por isso a barra de linguagens é dominada por TypeScript. Com **C++ versionado** em `packages/native-engine/src`, o C++ passa a aparecer após push (pode ser uma fatia pequena se o TS continuar a dominar).
+O motor nativo **já está integrado**: a ponte em `packages/service/src/native-engine-bridge.ts`
+executa o binário, devolve o resultado em JSON e o serviço integra os seus sinais na pontuação e
+acrescenta um fator próprio. Se o binário não estiver compilado, a análise continua apenas
+com o motor TypeScript e o painel de saúde mostra o motor nativo como indisponível.
 
-## “Electron não é pesado demais?”
+## «Porque é que o TypeScript domina a barra de linguagens do GitHub?»
 
-É um tradeoff: **Chromium + Node** na mesma app. Vantagem: **uma equipa**, **UI rica**, ecossistema npm. Desvantagem: RAM e disco. Alternativas: Tauri, Qt, WPF — cada uma com custo de stack diferente.
+O GitHub usa o Linguist, que conta linhas por tipo de ficheiro. O repositório tem muito
+`.ts` e `.tsx` — interface, serviço, API, tipos partilhados — e o C++ está concentrado no
+pacote do motor nativo, com poucas centenas de linhas. A barra reflete volume de linhas, não
+importância: o motor nativo é pequeno e faz uma parte específica do trabalho.
 
-## “Isto é um antivírus de verdade?”
+## «O motor nativo não funciona sem ser compilado?»
 
-Depende da definição:
+Funciona o resto. A aplicação arranca e analisa ficheiros com o motor TypeScript; o que
+perde é a segunda opinião nativa. Compilar exige CMake e é opcional
+(`npm run build:native`). Na candidata de instalação de 21/10, o `scan-engine.exe` foi
+incluído e a ponte procura-o primeiro na pasta de recursos.
 
-- **Protótipo / produto moderno de segurança:** sim — scan, regras, integrações, serviço, UI.
-- **Equivalente a Defender com kernel minifilter e telemetria completa:** ainda não — faltam camadas de kernel, reputação massiva, equipa de resposta, etc.
+## «O Electron não é pesado demais?»
 
-## “O que falta para parecer indústria?”
+É um compromisso: Chromium e Node na mesma aplicação. Permite partilhar TypeScript entre várias camadas e criar
+uma interface rica; perde-se em memória e tamanho de instalação. As alternativas — Tauri, Qt
+ou WPF — trocam esse compromisso por outro: menos consumo, mas outra stack e menos
+componentes prontos. Para uma aplicação local com painel e serviço, o Electron foi a escolha
+possível neste prazo.
 
-Ver `ROADMAP.md` fases 3–4. Em síntese: **motor nativo integrado**, **proteção contínua mais profunda**, e **muito** trabalho fora do código (assinaturas, compliance, operações).
+## «Isto é um antivírus de verdade?»
 
-## “API keys no código?”
+Depende do que se entende por antivírus.
 
-O projeto deve usar **`process.env`** e `.env` no `.gitignore`. Nunca commitar segredos. Validar com `grep` antes de entregar.
+- **Como protótipo de segurança:** reúne análise de ficheiros, regras, consulta de reputação,
+  quarentena e monitorização. Nem todas estas capacidades foram validadas no mesmo
+  ambiente; os testes reais e os limites estão descritos no documento de progresso.
+- **Como equivalente ao Windows Defender:** não. Faltam camadas de kernel, reputação à escala
+  global, equipa de resposta a incidentes e operação contínua de assinaturas.
 
-## “NtCreateProcess hook?”
+O próprio README diz que é uma ferramenta educacional e de monitorização. O produto
+empacotado, além disso, ainda não foi instalado nem executado.
 
-Em Windows moderno, soluções **suportadas** costumam envolver **minifilter**, **callbacks oficiais**, **ETW**, **AMSI**, **WFP** — não hooks clássicos estilo rootkit. Ver `WINDOWS-KERNEL-E-DRIVERS.md`.
+## «O instalador já foi testado?»
+
+Não. A candidata de 21/10 foi gerada e verificada estaticamente: nome, produto, versão,
+conteúdo do pacote e motores externos. Nunca foi instalada nem executada, porque neste
+computador de desenvolvimento a instalação colide com nove elementos já existentes. Validar
+uma instalação exige um ambiente isolado e está nos próximos passos.
+
+## «Como são tratadas as chaves de API?»
+
+Todas as chaves vêm de variáveis de ambiente. O repositório inclui um `.env.example` com os
+nomes esperados e o `.gitignore` exclui os ficheiros `.env`. A branch de progresso não inclui ficheiros de configuração com credenciais reais. O
+histórico antigo é separado e mantém valores de exemplo que exigem confirmação e eventual
+rotação caso tenham sido usados; não se afirma que todo esse histórico está livre de segredos. A verificação de segredos feita sobre a candidata de 21/10 teve cobertura
+zero de ficheiros de configuração, por isso não deve ser lida como prova de ausência de
+segredos.
+
+## «Porque não há capturas de ecrã no repositório?»
+
+Porque não existem capturas sanitizadas. As sessões de validação foram registadas em texto e
+em dados técnicos; as capturas referidas pela pessoa que testou não foram entregues. Em vez
+de inventar imagens ou reaproveitar capturas antigas que já não representam o estado atual, a
+entrega declara a lacuna. Ver [capturas](screenshots/README.md).
+
+## «E hooks de processo, tipo NtCreateProcess?»
+
+Não é esse o caminho. Em Windows moderno, as soluções suportadas passam por minifilter,
+callbacks oficiais, ETW, AMSI e WFP, com assinatura de driver e risco de instabilidade. Este
+projeto fica deliberadamente em modo de utilizador: monitorização e análise, sem driver. Um
+hook clássico estilo rootkit não é uma opção suportada nem desejável.
+
+## «O que falta para parecer indústria?»
+
+Ver o [roadmap](ROADMAP.md). Em resumo: instalação validada, atualizações reais com rollback,
+assinatura digital, acessibilidade em execução e muito trabalho fora do código — assinaturas,
+operações e resposta a incidentes.

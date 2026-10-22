@@ -1,91 +1,80 @@
 # CyberSafe Assistant
 
-O CyberSafe Assistant é uma aplicação desktop de cibersegurança para Windows, desenvolvida no
-âmbito de um Projeto de Aptidão Profissional (PAP). Combina análise de ficheiros, monitorização
-read-only do sistema e um painel Electron, apoiados por um serviço local que centraliza as leituras
-e pelos motores de análise do projeto.
+Aplicação desktop de segurança para Windows que reúne análise de ficheiros, monitorização
+do sistema e explicação de risco num único painel. Está a ser desenvolvida no âmbito do
+Projeto de Aptidão Profissional (PAP), com entrega de progresso a 23/10/2026 e entrega
+final e apresentação ao júri a 31/10/2026. A entrega de 23/10 é dirigida ao professor.
 
-É uma ferramenta **educacional e de monitorização**. Não substitui um antivírus comercial e não
-deve ser descrita como proteção completa.
+É uma ferramenta **educacional e de monitorização**. Não substitui um antivírus comercial
+nem o Windows Defender, e não deve ser apresentada como proteção completa.
 
-## Como ler esta documentação (júri)
+## Porquê este projeto
 
-Este pacote documenta o **marco de progresso de 23/10/2026**. Lê-se em dois níveis: este resumo e o
-[documento de progresso](docs/PROGRESSO-20261023.md), que apresenta a evidência lote a lote.
+Quem suspeita de um ficheiro ou nota o computador lento costuma saltar entre vários
+programas: um para analisar o ficheiro, outro para ver processos, outro para ler CPU e
+memória, e nenhum explica o resultado em linguagem simples. O CyberSafe Assistant parte
+dessa observação e tenta responder a uma pergunta concreta: **é possível juntar essas
+leituras num só sítio, locais e sem privilégios alargados, e explicar o risco de forma
+compreensível?**
 
-- **Cada afirmação indica o tipo de prova.** Observação humana correlacionada, teste automatizado,
-  validação estática do artefacto ou apenas integração de código. São coisas diferentes e não se
-  substituem: um teste verde não prova um produto instalado.
-- **Uma candidata gerada não é um produto validado.** Prova que o empacotamento terminou e que o
-  artefacto tem a identidade declarada. Não prova instalação, arranque, proteção nem atualização.
-- **As ausências estão escritas.** Sem feed de atualização real nem resposta MATRIX online comprovada nesta sessão; utilização da GPU,
-  temperaturas e SMART não comprovados; sem assinatura digital nem revisão de acessibilidade em runtime. Estão
-  listadas em [O que não está provado](#o-que-não-está-provado).
-- **Não há imagens neste pacote.** A entrega não inclui capturas de ecrã: nenhuma foi inventada e
-  nenhuma foi publicada sem sanitização. A lacuna está declarada em
-  [Capturas](docs/screenshots/README.md).
-- **A demonstração é feita em DEV.** `npm run dev:app` serve apenas a interface. As leituras do
-  sistema exigem o serviço e o runner externo descrito em
-  [Runner externo de evidência](#runner-externo-de-evidência), que não faz parte deste repositório.
+Daí vêm três decisões que atravessam o projeto:
 
-## Estado atual
+- **Várias fontes de análise, um veredicto.** Heurísticas próprias, regras YARA, ClamAV e
+  VirusTotal (os dois últimos opcionais) contribuem para uma pontuação de risco que mostra
+  os fatores que a fizeram subir, em vez de um número sem justificação.
+- **Leituras reais em vez de valores decorativos.** A intenção é apresentar a origem e a
+  disponibilidade dos dados. Nas métricas por processo ainda existem zeros ambíguos,
+  identificados como limitação a corrigir, e não como medições confirmadas.
+- **Testes com dados separados.** A validação Windows usou um modo específico de leitura,
+  com perfil e base de dados próprios. Nesse modo, terminar processos e outras alterações
+  são recusados antes de executar a operação. A aplicação tem outros modos e ações; esta
+  restrição descreve a sessão controlada, não uma garantia global do produto.
 
-O projeto encontra-se em desenvolvimento ativo. A entrega está organizada em dois marcos:
-**23/10/2026 — ponto de progresso** e **31/10/2026 — entrega final**.
+## O que a aplicação faz
 
-Documento revisto a **22/10/2026** para integração. Não houve nova execução: os dados continuam a
-ser o instantâneo de 21/10/2026.
+### Análise de ficheiros e pastas
 
-| Item | Estado a 21/10/2026 (revisto a 22/10/2026) |
-|---|---|
-| Aplicação em modo de desenvolvimento (DEV) | Sessão manual observada: login, arranque, Painel, PC Center, Gestor de Tarefas, leituras de CPU, RAM, discos, rede e processos |
-| Candidata de instalação de 21/10 | **Gerada e validada estaticamente; nunca instalada nem executada** |
-| Reserva de 16/10 | Preservada byte a byte, com SHA-256 registado |
-| Candidata 151509 (16/10) | Candidata separada; o gate humano continua pendente e não foi transferido |
-| Correção do painel de Atualizações | Integrada; 55/55 testes focados passaram. Ligação a um feed real e instalação continuam por provar |
-| Empacotamento | Pipeline disponível e candidata produzida; sem assinatura Authenticode |
-| Pacote / instalação | **`BLOCKED_HOST` por 9 colisões de host**; não instalado |
+- Análise rápida, profunda ou personalizada de um ficheiro, de uma pasta ou de zonas do
+  computador; ficheiros ZIP são inspecionados pelo conteúdo e não apenas pelo nome.
+- Heurísticas próprias e regras YARA executadas no serviço local; ClamAV e VirusTotal são
+  motores externos opcionais.
+- Segunda opinião de um motor nativo em C++ (`scan-engine.exe`), quando compilado: calcula
+  SHA-256, entropia, características do formato PE e uma pontuação própria, que o serviço
+  integra no resultado.
+- Quarentena dos ficheiros considerados perigosos, com registo do que foi movido e porquê.
+- Cancelamento de uma análise em curso, com o resultado parcial marcado como incompleto em
+  vez de apresentado como definitivo.
 
-Uma candidata gerada **não** é uma instalação validada. O facto de o build ter terminado não prova
-que o produto instalado arranca, protege ou atualiza.
+### Monitorização do sistema
 
-## O que está provado
+- Painel com CPU, memória, discos e rede lidos do sistema, cada um com o seu estado.
+- Gestor de tarefas, usado em modo de leitura na validação: lista processos, permite pesquisar e mostra quais pertencem
+  à própria aplicação.
+- Estado da proteção lido como booleano a partir do serviço, sem inferência a partir de
+  texto na interface.
+- Monitorização de unidades USB: quando ligada, o serviço pede a análise das unidades
+  ligadas depois de si, uma de cada vez; não bloqueia nem ejeta.
+- Vigilância de pastas para análise automática de ficheiros novos, quando ativada.
 
-- **Arranque e navegação reais em DEV.** Uma sessão manual assistida, com perfil e pipe isolados,
-  registou prontidão em 2 890 ms, 19 ciclos de leitura e navegação por Painel, PC Center, Gestor de
-  Tarefas e Configurações.
-- **Leituras do sistema medidas, não inferidas.** CPU e RAM com estado `available`, RAM agregada a
-  68 %, quatro discos lidos, 374 processos enumerados em duas amostras e 26/26 PIDs próprios
-  marcados.
-- **Proteção desligada lida como booleano.** `protection.getState` devolveu `protectionEnabled:
-  false` em todos os ciclos, sem inferência a partir de texto.
-- **Arranque confirmado visualmente.** O utilizador confirmou o ecrã de arranque na sessão m1b;
-  a política de prontidão tem 62/62 testes verdes.
-- **Fronteira Windows read-only exercida.** Uma tentativa de terminar processos foi recusada com
-  `efeito_negado_por_modo_leitura` antes de chegar ao handler; nenhum processo foi morto por esse
-  caminho.
-- **A4 e A5 com prova GUI de escopo limitado.** O canário YARA read-only deu resultado positivo na
-  GUI (R2). Dois cancelamentos foram comprovados na GUI (R4) e correlacionados com relato humano.
-  Isto não é prova de um scan completo.
-- **Testes focados verdes.** Arranque/prontidão 62/62, acessibilidade dos sparklines 90/90 e painel
-  de Atualizações 55/55, com `tsc -b` a terminar sem erros nos respetivos lotes.
-- **Candidata de 21/10 verificada estaticamente.** Identidade do pacote com 12 PASS, 0 FAIL e
-  três UNKNOWN declaradas (publisher, ícone no PE e filhos em runtime); os motores externos
-  (scan-engine e ClamAV) batem certo com a fonte; o patch de leitura read-only está presente no
-  bundle. O setup tem 171 650 785 bytes e SHA-256
-  `1c0648d557b74fc79ba5137a5cb58ee1212c362715ea7c7f38cff79e6eecb1f3`.
+### Painel, histórico e assistente
 
-## O que não está provado
+- Painel com o risco atual, os fatores que o compõem e o histórico de análises.
+- MATRIX, assistente para perguntas sobre o estado da aplicação. Quando está configurado para responder online, o texto é enviado para
+  um fornecedor externo compatível com a API OpenAI (por omissão, Groq, com o modelo
+  `openai/gpt-oss-120b`); não devem ser introduzidos dados pessoais.
+- Extensão de navegador (Manifest V3) para monitorização de downloads.
+- Cinco identidades visuais e modo claro/escuro, com os mesmos componentes em toda a
+  aplicação.
 
-- Execução do instalador, primeira execução e comportamento do produto empacotado.
-- Utilização real de GPU, temperaturas e SMART (a temperatura continua `unavailable` neste host).
-- Matrix/IA online: o cliente é compatível com a API da Groq, mas uma resposta válida do
-  fornecedor não foi demonstrada nesta entrega.
-- Atualização a partir de um feed real, download, instalação e rollback.
-- Reteste de GUI do P0A rev2 e do painel de Atualizações, correções **posteriores** ao lote A4/A5.
-  A4/A5 têm provas GUI de escopo limitado; não provam um scan completo.
-- Leitura por um leitor de ecrã real e revisão de acessibilidade em runtime.
-- Assinatura digital do executável: a candidata está **NotSigned**.
+## Estado atual (22/10/2026)
+
+- A aplicação **funciona em modo de desenvolvimento** e foi observada numa sessão manual
+  com perfil isolado: login, arranque, Painel, PC Center, Gestor de Tarefas, CPU, memória,
+  discos, rede e processos.
+- A **candidata de instalação de 21/10 foi gerada e verificada estaticamente**, mas nunca
+  foi instalada nem executada. Uma candidata gerada não é um produto validado.
+- A instalação neste computador de desenvolvimento está **bloqueada por conflitos de identidade e de dados com a instalação existente**; a validação do produto empacotado continua por fazer.
+- A candidata **não está assinada** (Authenticode).
 
 ## Arquitetura
 
@@ -93,17 +82,18 @@ Monorepo npm com nove pacotes em `packages/*`:
 
 | Pacote | Papel |
 |---|---|
-| `packages/app` | Interface React (Vite + Tailwind CSS), consumida pelo desktop |
+| `packages/app` | Interface React (Vite + Tailwind CSS) consumida pelo desktop |
 | `packages/desktop` | Shell Electron, pré-carregamento, IPC e bandeja do sistema |
-| `packages/service` | Serviço local Node.js: orquestra scans, quarentena, monitorização e histórico |
-| `packages/core` | Motor de análise: heurísticas, YARA-X, ClamAV, VirusTotal, scoring e quarentena |
-| `packages/api` | API REST (Express + SQLite): autenticação, dashboard e assistente |
-| `packages/native-windows` | Camada PowerShell read-only: saúde do Windows, processos e firewall |
-| `packages/native-engine` | Executável C++17/CMake: hash SHA-256, entropia e análise PE |
-| `packages/shared-types` | Tipos TypeScript partilhados |
+| `packages/service` | Serviço local Node.js: orquestra análises, quarentena, monitorização e histórico |
+| `packages/core` | Motor de análise: heurísticas, YARA-X, ClamAV, VirusTotal, pontuação e quarentena |
+| `packages/api` | API REST (Express + SQLite): autenticação, painel e assistente |
+| `packages/native-windows` | Providers Windows para processos, hardware e estado do sistema |
+| `packages/native-engine` | Executável C++17/CMake: SHA-256, entropia e análise PE |
+| `packages/shared-types` | Tipos TypeScript partilhados pelos pacotes |
 | `packages/extension` | Extensão de navegador (Manifest V3) para monitorização de downloads |
 
-`packages/manual-retest` contém documentação de sessões de teste; não é um pacote executável.
+`packages/manual-retest` contém documentação de sessões de teste; não é um pacote
+executável.
 
 ```
 Renderer (React)
@@ -112,14 +102,18 @@ Electron main
     │  named pipe do serviço
 Serviço Node.js (@cybersafe/service)
     ├── @cybersafe/core (heurísticas, YARA-X, ClamAV, VirusTotal, quarentena)
-    ├── @cybersafe/native-windows (PowerShell read-only)
-    └── scan-engine.exe (C++, opcional, segunda opinião)
-API REST (Express + SQLite) ── autenticação, dashboard, assistente
+    ├── @cybersafe/native-windows (providers Windows)
+    └── NativeEngineBridge ── scan-engine.exe (C++, opcional)
+
+API REST (Express + SQLite) ── autenticação, painel, assistente
 ```
 
-O renderer não recebe acesso direto ao Node.js nem ao sistema de ficheiros: as operações passam
-pelo preload e pelos canais definidos no serviço. A camada Windows é limitada a consultas
-allowlisted e operações de leitura.
+O renderer não tem acesso direto ao Node.js nem ao sistema de ficheiros. As operações
+privilegiadas passam pelo preload e pelo processo principal do Electron; autenticação e
+MATRIX também comunicam por HTTP com a API local. A ponte para o motor nativo
+(`NativeEngineBridge`) procura o executável no pacote ou na árvore de desenvolvimento,
+expõe o estado do motor ao painel de saúde e devolve o resultado em JSON; se o binário não
+existir, a análise continua apenas com o motor TypeScript.
 
 ## Requisitos
 
@@ -127,13 +121,10 @@ allowlisted e operações de leitura.
 - **Node.js 20 ou superior** e **npm** (o repositório usa npm workspaces).
 - **Electron 33.4.11** — versão fixada no pacote `@cybersafe/desktop`.
 - **CMake** apenas para compilar o motor nativo C++ (opcional).
-- O **ClamAV** é um motor externo opcional; as regras **YARA** são definições locais carregadas
+- **ClamAV** é um motor externo opcional; as regras YARA são definições locais carregadas
   pelo `@litko/yara-x`. Nenhum destes componentes é substituído por código do repositório.
 
-A instalação do serviço Windows exige elevação. Para desenvolvimento não é necessário instalar o
-serviço nem criar uma conta de sistema.
-
-## Desenvolvimento
+## Como executar (execução limitada)
 
 Instalar dependências na raiz:
 
@@ -141,36 +132,33 @@ Instalar dependências na raiz:
 npm install
 ```
 
-O repositório inclui um runner de isolamento cujo modo por omissão é **dry-run**: mostra o plano
-sem arrancar processos.
-
-```bash
-node scripts/dev-isolated-run.mjs
-```
-
-O dry-run **não** é uma receita de arranque validada. O modo `--start` não é apresentado aqui como
-receita: sem JWT e sem modo read-only validados, pode iniciar outra sessão. Uma sessão Windows
-read-only validada exige ferramentas externas ao repositório que ainda não estão publicadas por
-dependerem de portabilidade do ambiente. Sem essas ferramentas, não se promete que um arranque
-local fique isolado do perfil pessoal.
-
-Não uses `npm run dev` como caminho normal de desenvolvimento. Esse comando lança serviço, API,
-app e desktop com `concurrently` contra as portas e o perfil normais; a guarda de isolamento recusa
-a porta 4000 e o arranque pode ser bloqueado por desenho. Fica reservado para uma máquina
-controlada e para quem conhece o perfil que está a usar.
-
-Para avaliação visual do frontend, sem bridge, serviço ou Electron:
+Para ver e avaliar a interface, sem serviço, bridge ou Electron:
 
 ```bash
 npm run dev:app
 ```
 
-Este modo serve apenas a interface. Não prova leituras do sistema, IPC, proteção, scans ou
-qualquer comportamento do produto empacotado.
+Este modo serve apenas o frontend. Não prova leituras do sistema, IPC, proteção, análises
+nem qualquer comportamento do produto empacotado.
+
+O repositório inclui um runner de isolamento cujo modo por omissão é **dry-run**: mostra o
+plano sem arrancar processos.
+
+```bash
+node scripts/dev-isolated-run.mjs
+```
+
+O dry-run não é uma receita de arranque validada. O modo `--start` não é apresentado aqui
+como receita: sem JWT e sem modo read-only validados, pode iniciar outra sessão. Uma sessão
+Windows read-only validada exige ferramentas externas ao repositório, ainda não publicadas.
+
+Não uses `npm run dev` como caminho normal de desenvolvimento: lança serviço, API, app e
+desktop com `concurrently` contra as portas e o perfil normais, e a guarda de isolamento
+recusa a porta 4000. Fica reservado a quem conhece o perfil que está a usar.
 
 A criação da conta de desenvolvimento exige uma base de dados e uma raiz isoladas, num
-procedimento externo. Não é documentada aqui como comando para evitar escritas na base pessoal.
-Não existe uma credencial por omissão documentada.
+procedimento externo. Não é documentada aqui como comando, e não existe credencial por
+omissão.
 
 ### Comandos úteis
 
@@ -185,21 +173,12 @@ Não existe uma credencial por omissão documentada.
 | `npm run build:native` | Compila o motor C++ com CMake |
 | `npm run test:native` | Vetores de hash do motor nativo |
 
-Não existe um `npm test` na raiz; os testes correm por workspace. Alguns testes de serviço e de
-core exigem build prévio e são mais demorados.
+Não existe um `npm test` na raiz: os testes correm por workspace. Alguns testes de serviço
+e de core exigem build prévio e demoram mais.
 
-### Runner externo de evidência
+### Empacotamento
 
-As sessões de GUI em Windows read-only foram conduzidas por um **runner externo ao repositório**,
-mantido na área de integração e evidência, fora do Git. Não é uma dependência do produto, não é
-instalado por `npm install` e não é necessário para compilar ou executar a aplicação. A receita
-validada depende deste tooling externo, que ainda não foi publicado por portabilidade. Este README
-não promete um comando que não exista neste repositório.
-
-## Empacotamento
-
-O pipeline de empacotamento vive em `scripts/package-windows.mjs` e usa `electron-builder` com
-alvo NSIS x64:
+O pipeline vive em `scripts/package-windows.mjs` e usa `electron-builder` com alvo NSIS x64:
 
 ```bash
 # Verificações, sem produzir instalador
@@ -209,47 +188,71 @@ node scripts/package-windows.mjs --check
 node scripts/package-windows.mjs --candidate
 ```
 
-A candidata é escrita numa pasta `release/candidate-<AAAAMMDD-HHMMSS>-<8 hex>`. O processo não
-assina o executável (sem certificado configurado) e não instala nada. Uma candidata só pode ser
-considerada validada depois de executada num ambiente isolado e aprovado.
+A candidata é escrita numa pasta `release/candidate-<AAAAMMDD-HHMMSS>-<8 hex>`. O processo
+não assina o executável (não há certificado configurado) e não instala nada.
 
-## Segurança e privacidade
+## Verificação já feita
 
-- O código não deve receber chaves, tokens, palavras-passe ou ficheiros `.env` versionados.
-- A conta de desenvolvimento exige um procedimento isolado; não há credenciais por omissão no
-  README.
-- A camada Windows é read-only por allowlist. O bloqueio de processos está desativado em DEV e é
-  recusado pela fronteira read-only.
-- O assistente envia o texto do utilizador para um fornecedor externo compatível com a API OpenAI
-  (por omissão, Groq). Não devem ser introduzidos dados pessoais, chaves ou ficheiros sensíveis.
-- O repositório contém histórico de bases de dados e checkpoints/referências de agentes, incluindo
-  material fora do HEAD atual. A curadoria é um **gate do responsável do projeto**, a concluir antes
-  de qualquer novo push ou divulgação alargada. Nada nesta documentação declara o histórico limpo.
+- Sessão manual em desenvolvimento com 19 ciclos de leitura, prontidão em 2 890 ms e
+  navegação por Painel, PC Center, Gestor de Tarefas e Configurações.
+- Lotes de testes focados: prontidão de arranque 62/62, acessibilidade dos gráficos de
+  telemetria 90/90 e painel de Atualizações 55/55, com `tsc -b` sem erros nos respetivos
+  lotes.
+- Validação estática da candidata de 21/10: identidade do pacote com 12 PASS, 0 FAIL e três
+  incógnitas declaradas (publisher, ícone embutido no PE e processos filhos em runtime);
+  motores externos coerentes com a fonte; 171 650 785 bytes e SHA-256
+  `1c0648d557b74fc79ba5137a5cb58ee1212c362715ea7c7f38cff79e6eecb1f3`.
 
-## Limitações conhecidas
+## Limites conhecidos
 
-- A aplicação não é um antivírus completo nem substitui o Windows Defender.
-- O motor nativo C++ é opcional; sem ele, mantém-se a integração TypeScript, sem garantir a mesma cobertura de análise.
-- ClamAV, VirusTotal e o assistente dependem de binários, chaves e limites externos.
-- O modo empacotado não é testável com a guarda de leitura de DEV ligada; essa guarda exige
-  `!isPackaged` e reserva o teste para um ambiente isolado.
-- A interface foi observada em sessão manual, mas não existe ainda uma revisão de acessibilidade
-  em runtime nem capturas fornecidas para publicação.
-- O histórico do repositório contém bases de dados e checkpoints de agentes que exigem curadoria
-  antes de uma divulgação alargada.
+Nas métricas de CPU e RAM por processo, alguns zeros ainda não distinguem uma medição
+real de um valor sem leitura. Esta limitação não deve ser confundida com os estados de
+disponibilidade das leituras globais.
+
+
+- A aplicação não é um antivírus completo: não tem camadas de kernel, reputação massiva nem
+  equipa de resposta, e não substitui o Windows Defender.
+- O produto **empacotado** não foi instalado nem executado. Instalação, primeira execução,
+  arranque e comportamento do pacote continuam por provar.
+- Não há atualização real demonstrada: descoberta, download, verificação, instalação e
+  rollback a partir de um feed continuam por fazer.
+- Utilização de GPU, temperaturas e SMART não estão comprovadas; na amostra observada, a
+  temperatura apareceu como indisponível.
+- Uma resposta válida do assistente a partir do fornecedor externo não foi demonstrada
+  nesta entrega.
+- O modo empacotado não é testável com a guarda de leitura de desenvolvimento ligada: essa
+  guarda exige `!isPackaged` e reserva o teste para um ambiente isolado.
+- A interface foi observada em sessão manual, mas não houve revisão de acessibilidade em
+  runtime nem leitura por um leitor de ecrã real.
+- A candidata está **NotSigned**; SmartScreen e confiança do utilizador ficam por resolver.
+- A entrega não inclui capturas de ecrã. Nenhuma foi inventada e nenhuma foi publicada sem
+  sanitização.
+
+## Próximos objetivos
+
+1. **Validar a instalação** num ambiente isolado e registar primeira execução, arranque,
+   login e leituras reais; neste computador a instalação está bloqueada por colisões de
+   host.
+2. **Retestar na interface** as correções mais recentes — painel de Atualizações e recusa de
+   terminação de processos — que hoje só têm prova por testes.
+3. **Fechar o empacotamento**: obter o registo completo do build, confirmar avisos e decidir
+   entre assinatura digital e aceitação explícita de `NotSigned`.
+4. **Atualizações reais**: ligar o painel a um feed e provar descoberta, download,
+   verificação, instalação e rollback.
+5. **Acessibilidade em runtime** e revisão de teclado/foco.
+6. **Preparar a entrega de 31/10**: versão congelada, candidata identificada, capturas
+   sanitizadas e uma declaração clara do que foi e do que não foi provado.
 
 ## Documentação
 
 - [Arquitetura](docs/ARCHITECTURE.md)
 - [Roadmap](docs/ROADMAP.md)
 - [Progresso de 23/10](docs/PROGRESSO-20261023.md)
-- [FAQ para entrega](docs/FAQ-ENTREGA-PROFESSOR.md)
-- [Capturas: estado e requisitos de privacidade](docs/screenshots/README.md)
-- [Como ler esta documentação (júri)](#como-ler-esta-documentação-júri)
+- [Perguntas frequentes para a entrega](docs/FAQ-ENTREGA-PROFESSOR.md)
+- [Capturas: estado e requisitos](docs/screenshots/README.md)
 - [Motor nativo](packages/native-engine/README.md)
 
 ## Licença
 
-O repositório não inclui atualmente um ficheiro `LICENSE`. A utilização, cópia ou distribuição
-depende de autorização do autor do projeto.
-
+O repositório não inclui atualmente um ficheiro `LICENSE`. A utilização, cópia ou
+distribuição depende de autorização do autor do projeto.

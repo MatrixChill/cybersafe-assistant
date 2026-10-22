@@ -1,37 +1,66 @@
-# Roadmap — do protótipo ao AV “nível indústria”
+# Roadmap
 
-## Estado atual (documentado no código)
+O projeto está numa fase de consolidação: a arquitetura já existe e funciona em
+desenvolvimento, mas o produto empacotado ainda não foi validado e há correções recentes à
+espera de reteste na interface. Este documento diz, sem promessas, o que está feito, o que
+vem a seguir e o que fica fora de âmbito.
 
-- Monorepo TS com serviço Windows, desktop Electron, core com YARA-X, VirusTotal, quarentena, watchers, etc. (ver `packages/service`, `packages/core`).
-- `packages/native-engine`: executável **C++** com análise estática básica (hash, entropia, PE, score). **Integração no `engine.ts`:** planeada; implementar `spawn`/`execFile` e fundir JSON com o pipeline TS.
+## Onde estamos (22/10/2026)
 
-## Fase 1 — Consolidar (curto prazo)
+- Monorepo TypeScript com serviço local, desktop Electron, API, interface, providers Windows, extensão de navegador e motor nativo em C++.
+- Pipeline de análise implementado no lado TypeScript: heurísticas, YARA-X, ClamAV, VirusTotal,
+  pontuação com fatores e quarentena.
+- **Motor nativo já integrado.** A ponte `NativeEngineBridge`, em `packages/service`, localiza
+  o `scan-engine.exe`, expõe o estado do motor ao painel de saúde e integra o resultado na
+  pontuação final. Sem o binário, a análise continua apenas com o motor TypeScript.
+- Candidata de instalação gerada e verificada estaticamente, sem assinatura digital.
+- Sessão manual de desenvolvimento com leituras reais e navegação pelas páginas principais.
 
-1. Integrar `scan-engine.exe` no serviço (`native-bridge` ou equivalente).
-2. Testes manuais: EICAR, `notepad.exe`, ficheiro empacotado de exemplo.
-3. Documentar variáveis de ambiente em `packages/api/.env.example` (sem segredos no Git).
+## Fase 1 — Fechar a entrega de 31/10
 
-## Fase 2 — Engine híbrida
+1. **Validar a instalação** num ambiente isolado: resolver as nove colisões de host,
+   instalar a candidata e registar primeira execução, arranque, login e leituras reais.
+2. **Retestar na interface** as correções mais recentes: painel de Atualizações e recusa de
+   terminação de processos, hoje provadas apenas por testes.
+3. **Fechar observações da sessão manual:** erro ao terminar processo, linguagem do Monitor,
+   zeros ambíguos de CPU e memória e explicação dos indicadores de saúde e segurança no PC Center.
+4. **Registo completo do build**, para que os avisos deixem de ser «não confirmados».
+5. **Decidir sobre assinatura:** certificado ou aceitação explícita de `NotSigned`.
 
-- TS continua a orquestrar; C++ faz blocos pesados (ficheiros grandes, PE profundo).
-- Unificar scores (pesos TS + pesos C++) com regras claras nos docs.
+## Fase 2 — Produto utilizável no dia a dia
 
-## Fase 3 — Proteção user-mode avançada
+- **Atualizações reais:** feed, descoberta, download, verificação, instalação e rollback.
+- **Acessibilidade:** revisão de teclado, foco e leitura por leitor de ecrã em execução.
+- **Qualidade das análises:** casos de teste controlados num ambiente isolado, com tempo e
+  resultado registados; análise de ZIPs grandes e de ficheiros em uso pelo sistema.
+- **Desempenho:** reduzir o custo por ficheiro em análises profundas e evitar leituras
+  repetidas do mesmo ficheiro.
 
-- Melhorar watchers (mais pastas, menos latência).
-- Job objects / limites para testes controlados (não “sandbox” completa).
-- Endurecimento do processo do serviço (documentar limites: admin malicioso ainda pode matar processos).
+## Fase 3 — Motor nativo mais profundo
 
-## Fase 4 — Kernel (só com maturidade)
+- Análise PE mais completa (recursos, assinaturas, packers) e fusão de pontuações com regras
+  documentadas, em vez de soma simples.
+- Equilíbrio de pesos entre heurísticas TypeScript e sinais nativos, com testes que fixem o
+  comportamento esperado.
+- Compilação do motor no fluxo de build, para que o binário acompanhe cada candidata.
 
-- Minifilter, callbacks de processo, WFP, ETW — **projeto separado**, WDK, assinatura de driver, BSOD risk.
-- Não iniciar esta fase sem requisitos de assinatura e equipa com tempo.
+## Fase 4 — Fora de âmbito
 
-## Prioridades honestas
+- **Drivers de kernel:** novos minifilters ou drivers próprios exigem desenvolvimento e
+  assinatura específicos e ficam fora do âmbito atual. Isto não elimina as integrações
+  de monitorização em modo de utilizador que já existem.
+- **Infraestrutura de antivírus comercial:** reputação massiva, telemetria global e equipa de
+  resposta a incidentes estão fora do alcance de um projeto individual.
+- **Autoproteção agressiva do processo:** mesmo endurecida, não resiste a um administrador
+  malicioso. Não é prometida.
+
+## Prioridades
 
 | Prioridade | Item |
-|------------|------|
-| Alta | Integração TS ↔ `scan-engine` + testes |
-| Média | `.env.example` completo, CI que compile o C++ |
-| Baixa | “Self-defense” avançada sem kernel (expectativas realistas) |
-| Futuro | Driver assinado |
+|---|---|
+| Alta | Validar a instalação num ambiente isolado |
+| Alta | Reteste na interface das correções recentes |
+| Média | Atualizações reais com rollback |
+| Média | Assinatura do executável |
+| Baixa | Aprofundar o motor nativo e os pesos de pontuação |
+| Futuro | Camadas de kernel (projeto separado) |
