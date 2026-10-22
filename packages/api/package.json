@@ -1,0 +1,41 @@
+{
+  "name": "api",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "dev": "tsx watch src/index.ts",
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/lifecycle.test.js test/ai-policy.test.js test/ai-classify.test.js test/auth-role.test.js test/auth-role-production.test.js test/auth-jwt-secret.test.js test/auth-api-guard.test.js test/email-validation.test.js test/provision-admin.test.js test/rotate-jwt-secret.test.js test/verify-account-migration.test.js test/matrix-guard.test.js test/r6-matrix-boundaries.test.js test/r6-l8-request-shape.test.js test/r6-l10-normalizacao.test.js test/r6-l12-logout.test.js test/process-intelligence.test.js test/recovery-process-validation.test.js test/recovery-process-chat.test.js test/preview-api-cors.test.js test/dist-auth13-inputs.test.js test/dev-isolation.test.js",
+    "start": "node dist/index.js",
+    "prisma:generate": "prisma generate",
+    "prisma:migrate": "prisma migrate dev",
+    "db:push": "prisma db push",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cybersafe/shared-types": "0.1.1",
+    "@prisma/client": "^6.19.2",
+    "adm-zip": "^0.5.16",
+    "bcryptjs": "^3.0.3",
+    "better-sqlite3": "^12.10.0",
+    "dotenv": "^16.6.1",
+    "express": "^5.1.0",
+    "jsonwebtoken": "^9.0.3",
+    "multer": "^2.0.2",
+    "openai": "^6.33.0"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.7",
+    "@types/bcryptjs": "^2.4.6",
+    "@types/better-sqlite3": "^7.6.13",
+    "@types/express": "^5.0.5",
+    "@types/jsonwebtoken": "^9.0.10",
+    "@types/multer": "^2.0.0",
+    "@types/node": "^24.12.0",
+    "prisma": "^6.19.2",
+    "tsx": "^4.20.6",
+    "typescript": "^5.9.3"
+  }
+}

@@ -1,0 +1,23 @@
+{
+  "name": "@cybersafe/native-windows",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "test": "npm run build && node --test test/windows-health-logic.test.js test/powershell-normalize.test.js test/watcher-errors.test.js test/process-monitor-cadence.test.js test/wfp-stop-no-spawn.test.js test/process-monitor-cold-start-burst.test.js test/watcher-worker-startup.test.js test/watcher-readiness-budget.test.js test/watcher-monitored-paths.test.js test/watcher-recursive-coverage.test.js test/firewall-state.test.js test/tcp-state-map.test.js test/process-monitor-stop-during-poll.test.js test/posthuman-usb-cim-links.test.js",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cybersafe/shared-types": "0.1.1",
+    "chokidar": "^4.0.0",
+    "systeminformation": "^5.31.5"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.0",
+    "typescript": "^5.9.3"
+  }
+}

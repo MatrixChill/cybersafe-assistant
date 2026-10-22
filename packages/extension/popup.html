@@ -1,0 +1,121 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      width: 340px;
+      font-family: 'Segoe UI', system-ui, sans-serif;
+      background: #0a0e1a;
+      color: #e2e8f0;
+      padding: 16px;
+    }
+    .header {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-bottom: 14px;
+      padding-bottom: 12px;
+      border-bottom: 1px solid rgba(56,74,112,0.35);
+    }
+    .header svg {
+      width: 24px;
+      height: 24px;
+      color: #60a5fa;
+    }
+    .header h1 {
+      font-size: 14px;
+      font-weight: 700;
+      background: linear-gradient(135deg, #3b82f6, #2563eb);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    #status {
+      font-size: 15px;
+      font-weight: 700;
+      margin-bottom: 10px;
+      padding: 8px 12px;
+      border-radius: 8px;
+      text-align: center;
+    }
+    .safe {
+      background: rgba(52,211,153,0.1);
+      color: #34d399;
+    }
+    .risk-medium {
+      background: rgba(251,191,36,0.1);
+      color: #fbbf24;
+    }
+    .risk-high {
+      background: rgba(248,113,113,0.1);
+      color: #f87171;
+    }
+    .risk-critical {
+      background: rgba(167,139,250,0.1);
+      color: #a78bfa;
+    }
+    .info-row {
+      display: flex;
+      justify-content: space-between;
+      padding: 6px 0;
+      font-size: 12px;
+      border-bottom: 1px solid rgba(56,74,112,0.2);
+    }
+    .info-row .label {
+      color: #5b6785;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .info-row .value {
+      color: #e2e8f0;
+      text-align: right;
+      max-width: 200px;
+      word-break: break-all;
+    }
+    .api-online { color: #34d399; font-weight: 700; }
+    .api-offline { color: #f87171; font-weight: 700; }
+    #url {
+      font-size: 11px;
+      color: #8b98b5;
+      word-break: break-all;
+      margin-bottom: 10px;
+      padding: 6px 8px;
+      background: rgba(15,23,42,0.65);
+      border-radius: 6px;
+      border: 1px solid rgba(56,74,112,0.25);
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z" />
+    </svg>
+    <h1>CyberSafe Assistant</h1>
+  </div>
+
+  <div id="status">Analisando...</div>
+  <div id="url">—</div>
+
+  <div class="info-row">
+    <span class="label">Severidade</span>
+    <span class="value" id="severity">—</span>
+  </div>
+  <div class="info-row">
+    <span class="label">Confiança</span>
+    <span class="value" id="confidence">—</span>
+  </div>
+  <div class="info-row">
+    <span class="label">Regras</span>
+    <span class="value" id="rules">—</span>
+  </div>
+  <div class="info-row">
+    <span class="label">API local</span>
+    <span class="value" id="api">—</span>
+  </div>
+
+  <script src="dist/popup.js" type="module"></script>
+</body>
+</html>

@@ -1,0 +1,166 @@
+/**
+ * TESTES DO MANIFESTO EMPACOTADO (forma exata do que vai dentro do pacote).
+ *
+ * O `--check` mede os inputs do disco; estes testes medem a FORMA do manifesto
+ * que o pipeline escreve em `app/package.json`, importando `buildAppManifest`
+ * diretamente. É a única maneira de provar isto sem correr um build inteiro.
+ *
+ * O que fica provado:
+ *   1. `productName` viaja no manifesto da app — sem ele, o Electron deriva o
+ *      `userData` do `name` do pacote e a instalação grava tudo em
+ *      `%APPDATA%\@cybersafe\desktop` (medido no app.asar entregue a 11/10);
+ *   2. os módulos nativos ficam fora do asar (better-sqlite3 e o YARA-X);
+ *   3. o `@prisma` não entra, apesar de a API o declarar;
+ *   4. o ícone, o scan-engine.exe e a pasta de saída são caminhos absolutos e
+ *      reais do repo;
+ *   5. importar o módulo NÃO corre o pipeline (é importável sem efeitos);
+ *   6. o bundle ClamAV (binários verificados + fonte correspondente) entra em
+ *      `resources/clamav` — sem ele o pacote não leva motor nenhum.
+ *
+ * Uso: node --test scripts/test/7h-packaging-manifest.test.mjs
+ */
+import { describe, it } from "node:test";
+import assert from "node:assert/strict";
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
+import { execFileSync } from "node:child_process";
+import * as url from "node:url";
+
+import { buildAppManifest, preflightChecks } from "../package-windows.mjs";
+
+const HERE = path.dirname(url.fileURLToPath(import.meta.url));
+const REPO_ROOT = path.resolve(HERE, "..", "..");
+const DESKTOP_DIR = path.join(REPO_ROOT, "packages", "desktop");
+const SCRIPT = path.resolve(HERE, "..", "package-windows.mjs");
+
+const desktopManifest = JSON.parse(fs.readFileSync(path.join(DESKTOP_DIR, "package.json"), "utf8"));
+
+/** Manifesto construído com tarballs falsos: a forma não depende dos ficheiros. */
+function manifest(overrides = {}) {
+  const tarballs = {
+    "@cybersafe/core": "C:/tmp/staging/tarballs/cybersafe-core-0.1.1.tgz",
+    "@cybersafe/shared-types": "C:/tmp/staging/tarballs/cybersafe-shared-types-0.1.1.tgz",
+    "@cybersafe/service": "C:/tmp/staging/tarballs/cybersafe-service-0.1.1.tgz",
+    api: "C:/tmp/staging/tarballs/api-0.1.1.tgz",
+    ...overrides.tarballs,
+  };
+  return buildAppManifest({
+    desktopManifest,
+    tarballs,
+    electronVersion: "33.4.11",
+    scanEngine: path.join(REPO_ROOT, "packages", "native-engine", "build", "Release", "scan-engine.exe"),
+    outDir: path.join(DESKTOP_DIR, "release"),
+    desktopDir: DESKTOP_DIR,
+    ...overrides,
+    ...(overrides.tarballs ? { tarballs } : {}),
+  });
+}
+
+function stagingDirs() {
+  const tmp = os.tmpdir();
+  return fs
+    .readdirSync(tmp)
+    .filter((entry) => entry.startsWith("cybersafe-package-"));
+}
+
+describe("manifesto da aplicação empacotada", () => {
+  it("leva productName: sem ele o userData cai em %APPDATA%\\@cybersafe\\desktop", () => {
+    const m = manifest();
+    assert.equal(m.productName, desktopManifest.build.productName, "o productName tem de vir do config do builder");
+    assert.notEqual(m.productName, m.name, "o productName não pode ser o name do pacote (@cybersafe/desktop)");
+    assert.doesNotMatch(String(m.productName), /[@/]/, "um nome de pasta com @ ou / no %APPDATA% é o defeito que isto corrige");
+  });
+
+  it("copia a identidade e o ponto de entrada do shell", () => {
+    const m = manifest();
+    assert.equal(m.name, desktopManifest.name);
+    assert.equal(m.version, desktopManifest.version);
+    assert.equal(m.main, desktopManifest.main);
+    assert.equal(m.type, desktopManifest.type);
+    assert.equal(m.private, true);
+  });
+
+  it("instala as dependências do workspace a partir dos tarballs locais", () => {
+    const m = manifest();
+    assert.deepEqual(Object.keys(m.dependencies).sort(), ["@cybersafe/core", "@cybersafe/service", "@cybersafe/shared-types", "api"]);
+    for (const [dep, spec] of Object.entries(m.dependencies)) {
+      assert.match(spec, /^file:.+\.tgz$/, `${dep} tem de apontar para o tarball local`);
+      assert.doesNotMatch(spec, /\\/, `${dep}: o npm recebe barras normais em Windows`);
+    }
+  });
+
+  it("empacota dist + node_modules e exclui prisma, logs e sourcemaps", () => {
+    const m = manifest();
+    assert.ok(m.build.files.includes("dist/**/*"), "o shell compilado tem de entrar");
+    assert.ok(m.build.files.includes("node_modules/**/*"), "as dependências reais têm de entrar");
+    assert.ok(
+      m.build.files.some((pattern) => pattern.includes("@prisma")),
+      "o @prisma (declarado, não usado em runtime) tem de ficar excluído",
+    );
+    assert.ok(m.build.files.includes("!**/*.log"));
+    assert.ok(m.build.files.includes("!**/*.map"));
+  });
+
+  it("mantém os módulos nativos fora do asar", () => {
+    const m = manifest();
+    for (const pattern of ["**/*.node", "**/node_modules/better-sqlite3/**", "**/node_modules/@litko/**"]) {
+      assert.ok(m.build.asarUnpack.includes(pattern), `o asarUnpack tem de cobrir ${pattern}`);
+    }
+  });
+
+  it("aponta ícone, scan-engine.exe e saída para caminhos absolutos reais", () => {
+    const m = manifest();
+    assert.ok(path.isAbsolute(m.build.win.icon) && m.build.win.icon.endsWith(path.join("assets", "icon.ico")));
+    // DIST-CLAMAV13OUT (2026-10-13): passaram a ser DOIS extraResources — o
+    // scan-engine.exe (como antes) e o bundle ClamAV, que o electron-builder
+    // copia para `resources/clamav`. É exactamente aí que o pin
+    // CYBERSAFE_CLAMSCAN_PATH do desktop o procura.
+    assert.equal(m.build.extraResources.length, 2);
+    assert.equal(m.build.extraResources[0].to, "scan-engine.exe");
+    assert.equal(path.basename(m.build.extraResources[0].from), "scan-engine.exe");
+    const clamavEntry = m.build.extraResources.find((entry) => entry.to === "clamav");
+    assert.ok(clamavEntry, "o bundle ClamAV tem de ser publicado em resources/clamav");
+    assert.ok(path.isAbsolute(clamavEntry.from), "a árvore de staging vive fora do repo: o `from` tem de ser absoluto");
+    assert.equal(path.basename(clamavEntry.from), "clamav");
+    assert.equal(path.basename(path.dirname(clamavEntry.from)), "vendor");
+    assert.equal(m.build.directories.output, path.join(DESKTOP_DIR, "release"));
+    assert.equal(m.build.electronVersion, "33.4.11", "a versão do Electron tem de ser a realmente instalada");
+  });
+
+  it("o alvo do instalador continua a ser o NSIS do config do desktop", () => {
+    const m = manifest();
+    assert.deepEqual(m.build.win.target, desktopManifest.build.win.target);
+    assert.equal(m.build.nsis.deleteAppDataOnUninstall, false, "desinstalar não pode apagar os dados da instalação");
+  });
+
+  it("importar o módulo não corre o pipeline", () => {
+    const before = stagingDirs();
+    const out = execFileSync(
+      process.execPath,
+      [
+        "--input-type=module",
+        "-e",
+        `import(${JSON.stringify(`file:///${SCRIPT.replace(/\\/g, "/")}`)}).then((m) => { console.log("imported", typeof m.buildAppManifest); })`,
+      ],
+      { encoding: "utf8", cwd: REPO_ROOT, timeout: 60_000 },
+    );
+    assert.match(out, /imported function/, "o módulo tem de ser importável");
+    assert.deepEqual(stagingDirs().filter((dir) => !before.includes(dir)), [], "importar não pode criar staging");
+  });
+});
+
+describe("pré-verificação dos inputs", () => {
+  it("cobre todos os pacotes empacotados e diz como corrigir cada falta", () => {
+    const checks = preflightChecks();
+    for (const pkg of ["@cybersafe/shared-types", "@cybersafe/core", "@cybersafe/native-windows", "@cybersafe/service", "api"]) {
+      assert.ok(checks.some((check) => check.id.startsWith(`workspace:${pkg}/`)), `${pkg} tem de ser verificado`);
+    }
+    assert.ok(checks.some((check) => check.id === "binario:scan-engine.exe"));
+    assert.ok(checks.some((check) => check.id === "icone:icon.ico"));
+    for (const check of checks) {
+      assert.ok(check.fix && check.fix.trim().length > 0, `"${check.id}" tem de dizer como se corrige`);
+      assert.equal(check.exists, fs.existsSync(check.path), `"${check.id}": o resultado tem de vir do disco`);
+    }
+  });
+});

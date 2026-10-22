@@ -1,0 +1,71 @@
+node_modules/
+# Last reviewed: 2026-05-13
+dist/
+build/
+*.log
+packages/*/dist/
+packages/*/node_modules/
+packages/*/release/
+
+# Environment variables
+.env
+.env.local
+.env.development.local
+.env.test.local
+.env.production.local
+**/.env
+**/.env.local
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# IDE files
+.vscode/
+.idea/
+
+# Database
+*.db
+*.sqlite
+.aider*
+
+# Artefactos de build python (nao sao fonte)
+__pycache__/
+*.pyc
+
+# Maestri: infra-estrutura de agentes, nao produto CyberSafe.
+# Decisao (2026-10-05): passa a ter Git independente e privado, em
+# MatrixChill/maestri-infra. Zero dependencias: verificado que packages/ nao
+# importa nada de .maestri.
+#
+# NOTA: ignorar um caminho NAO o remove do indice. O que ja estava versionado
+# saiu do indice em `git rm -r --cached .maestri`, e continua legivel em todos
+# os commits anteriores deste historico. Nao houve reescrita de historico.
+.maestri/
+
+# Nao vao para o repo privado (auditoria 14/10 qoder):
+output/
+vendor/
+release/
+.qoder/
+_tmp*
+*.proposed
+opencode.json
+
+# PAP delivery: local secrets/runtime/agent state are never source artifacts
+.env*
+!.env.example
+!**/.env.example
+*.db*
+*.sqlite*
+*.pfx
+*.p12
+*.key
+*.pem
+*.tsbuildinfo
+.npmrc
+.claude/
+.qoder/
+.agents/
+.cache/
+coverage/

@@ -1,0 +1,43 @@
+{
+  "name": "cybersafe-assistant",
+  "private": true,
+  "version": "0.1.1",
+  "description": "CyberSafe Assistant monorepo",
+  "scripts": {
+    "branding": "node scripts/sync-branding.mjs",
+    "predev": "node scripts/sync-branding.mjs",
+    "core:build": "npm run build -w @cybersafe/core",
+    "dev:app": "npm run dev -w @cybersafe/app",
+    "dev:api": "npm run dev -w api",
+    "dev:desktop": "npm run dev -w @cybersafe/desktop",
+    "dev:service": "npm run dev -w @cybersafe/service",
+    "dev": "concurrently --kill-others \"npm run dev:service\" \"npm run dev:api\" \"npm run dev:app\" \"npm run dev:desktop\"",
+    "build:all": "node scripts/build-all-ordered.mjs",
+    "build:native": "cmake -S packages/native-engine -B packages/native-engine/build && cmake --build packages/native-engine/build --config Release",
+    "test:native": "node --test packages/native-engine/test/hash-vectors.test.js",
+    "test:build-order": "node --test scripts/build-all-ordered.test.mjs",
+    "test:dev-isolation": "node --test scripts/desktop-dev-profile-paths.test.mjs scripts/dev-cached-exception.test.mjs",
+    "lint": "npm run lint --workspaces",
+    "typecheck": "npm run typecheck --workspaces",
+    "memory:report": "node scripts/memory-report.mjs",
+    "drivers:check": "node scripts/check-release-drivers.mjs",
+    "scanner:probe": "node scripts/scanner-runtime-probe.mjs",
+    "scanner:benchmark": "node scripts/scanner-benchmark.mjs",
+    "scanner:batch-probe": "node scripts/scanner-clamav-batch-probe.mjs",
+    "protection:probe": "node scripts/protection-toggle-probe.mjs"
+  },
+  "license": "MIT",
+  "engines": {
+    "node": ">=20"
+  },
+  "workspaces": [
+    "packages/*"
+  ],
+  "devDependencies": {
+    "concurrently": "^9.2.1",
+    "wait-on": "^9.0.5"
+  },
+  "dependencies": {
+    "@tailwindcss/postcss": "^4.3.3"
+  }
+}

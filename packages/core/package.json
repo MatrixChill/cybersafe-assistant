@@ -1,0 +1,27 @@
+{
+  "name": "@cybersafe/core",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "dev": "tsc -p tsconfig.json --watch",
+    "test": "npm run build && node --test test/engine-integrity.test.js test/protection-status.test.js test/signatures.test.js test/pcstate.test.js test/stress-index.test.js test/disk-snapshot.test.js test/exclusions.test.js test/hardware-gpu.test.js test/temperature-providers.test.js test/adlx-provider.test.js test/process-kill.test.js test/kill-guard-internal.test.js test/clamav-db.test.js test/clamav-resource-cap.test.js test/clamav-cap-review.test.js test/clamav-kill-grace-cap.test.js test/clamav-evidence-attribution.test.js test/clamav-result-model.test.js test/clamav-batch.test.js test/clamav-pid-identity.test.js test/clamav-unknown-never-kills.test.js test/clamav-contract-cases.test.js test/batch-result-integrity.test.js test/error-never-verdict-safe.test.js test/detection-criterion.test.js test/virustotal.test.js test/hash-db-migration.test.js test/hash-db-refresh.test.js test/wfp-vs-windows-firewall.test.js test/yara-coverage-contract.test.js test/factor-labels-ptpt.test.js test/clamav-db-lease-death.test.js test/clamav-db-lease-no-hook.test.js test/clamav-error-death.test.js test/eicar-manual-opt-in.test.js test/clamav-batch-file-list.test.js test/clamav-batch-progress.test.js test/clamav-late-stdout-race.test.js test/clamav-slot-priority.test.js test/clamav-slot-backpressure.test.js test/quarantine-restore-safety.test.js test/pcstate-realtime-off.test.js test/hardware-disk-first-read.test.js test/dist-clamav-binary-resolution.test.js test/clamav-health-recovery.test.js test/human01-coverage-degraded.test.js test/tp-unify-engines.test.js test/unified-battery-refresh.test.js test/unified-ram-measured.test.js",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cybersafe/shared-types": "0.1.1",
+    "@litko/yara-x": "^0.5.0",
+    "adm-zip": "^0.5.10",
+    "chokidar": "^4.0.0",
+    "events": "^3.3.0",
+    "systeminformation": "^5.31.5"
+  },
+  "devDependencies": {
+    "@types/adm-zip": "^0.5.5",
+    "@types/node": "^24.12.0",
+    "typescript": "^5.9.3"
+  }
+}

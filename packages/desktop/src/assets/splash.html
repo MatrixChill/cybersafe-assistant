@@ -1,0 +1,78 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <style>
+    body {
+      background: transparent;
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      height: 100vh;
+      margin: 0;
+      font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+      color: #00ff9d;
+      overflow: hidden;
+    }
+    .container {
+      text-align: center;
+      background: rgba(9, 11, 18, 0.95);
+      padding: 40px;
+      border-radius: 15px;
+      border: 1px solid rgba(0, 255, 157, 0.3);
+      box-shadow: 0 0 30px rgba(0, 255, 157, 0.2);
+      width: 350px;
+    }
+    h2 { 
+      margin: 0 0 10px 0; 
+      font-size: 28px; 
+      letter-spacing: 4px; 
+      font-weight: 800;
+      text-shadow: 0 0 10px rgba(0, 255, 157, 0.5);
+    }
+    .loader {
+      border: 3px solid rgba(0, 255, 157, 0.1);
+      border-top: 3px solid #00ff9d;
+      border-radius: 50%;
+      width: 40px;
+      height: 40px;
+      animation: spin 1s linear infinite;
+      margin: 25px auto;
+    }
+    @keyframes spin { 0% { transform: rotate(0deg); } 100% { transform: rotate(360deg); } }
+    p { 
+      font-size: 13px; 
+      color: rgba(255, 255, 255, 0.6); 
+      margin-top: 15px; 
+      font-weight: 500;
+      letter-spacing: 1px;
+    }
+    .status-dot {
+      display: inline-block;
+      width: 6px;
+      height: 6px;
+      background: #00ff9d;
+      border-radius: 50%;
+      margin-right: 8px;
+      animation: pulse 1.5s infinite;
+    }
+    @keyframes pulse {
+      0% { opacity: 0.3; transform: scale(0.8); }
+      50% { opacity: 1; transform: scale(1.2); }
+      100% { opacity: 0.3; transform: scale(0.8); }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <!-- tile = monograma em placa própria (assets/branding/source/06), copiado
+         para dist/assets/cybersafe no build. Lê-se sobre qualquer fundo. -->
+    <img src="cybersafe/tile-128.png" alt="CyberSafe" width="72" height="72" style="margin: 0 auto 12px; display: block; border-radius: 18px;">
+    <h2>CYBERSAFE</h2>
+    <div class="loader"></div>
+    <div style="display: flex; align-items: center; justify-content: center;">
+      <span class="status-dot"></span>
+      <p>A inicializar os motores de proteção...</p>
+    </div>
+  </div>
+</body>
+</html>

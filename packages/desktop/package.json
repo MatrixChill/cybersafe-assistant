@@ -1,0 +1,81 @@
+{
+  "name": "@cybersafe/desktop",
+  "version": "0.1.1",
+  "private": true,
+  "description": "CyberSafe Assistant desktop shell",
+  "author": "CyberSafe Team",
+  "main": "dist/main.js",
+  "type": "module",
+  "scripts": {
+    "dev": "concurrently -k \"vite build --watch\" \"wait-on dist/main.js && electron .\"",
+    "build": "vite build",
+    "start": "electron .",
+    "lint": "node -e \"console.log('desktop lint delegated to app/core workspaces')\"",
+    "dist": "node ../../scripts/package-windows.mjs",
+    "dist:dir": "node ../../scripts/package-windows.mjs --dir",
+    "test": "node --test test/*.test.mjs",
+    "typecheck": "tsc --noEmit -p tsconfig.json"
+  },
+  "build": {
+    "appId": "com.cybersafe.assistant",
+    "productName": "CyberSafe Assistant",
+    "directories": {
+      "output": "release"
+    },
+    "files": [
+      "dist/**/*",
+      "package.json",
+      "!**/*.log",
+      "!node_modules/@cybersafe/service/logs/**",
+      "!**/node_modules/@prisma/**"
+    ],
+    "asarUnpack": [
+      "**/*.node",
+      "**/node_modules/better-sqlite3/**",
+      "**/node_modules/@litko/**"
+    ],
+    "extraResources": [
+      {
+        "from": "../native-engine/build/Release/scan-engine.exe",
+        "to": "scan-engine.exe"
+      },
+      {
+        "from": "../../vendor/clamav",
+        "to": "clamav"
+      }
+    ],
+    "win": {
+      "target": [
+        {
+          "target": "nsis",
+          "arch": [
+            "x64"
+          ]
+        }
+      ],
+      "icon": "src/assets/icon.ico"
+    },
+    "nsis": {
+      "oneClick": false,
+      "allowToChangeInstallationDirectory": true,
+      "createDesktopShortcut": true,
+      "deleteAppDataOnUninstall": false
+    },
+    "artifactName": "${productName}-${version}-setup.${ext}"
+  },
+  "dependencies": {
+    "@cybersafe/core": "0.1.1",
+    "@cybersafe/shared-types": "0.1.1",
+    "@cybersafe/service": "0.1.1",
+    "api": "0.1.1"
+  },
+  "devDependencies": {
+    "@types/node": "^24.12.0",
+    "electron": "33.4.11",
+    "electron-builder": "^25.0.0",
+    "typescript": "^5.9.3",
+    "vite": "^8.0.1",
+    "vite-plugin-electron": "^0.29.0",
+    "vite-plugin-electron-renderer": "^0.14.6"
+  }
+}

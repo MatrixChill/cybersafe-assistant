@@ -1,0 +1,15 @@
+{
+  "version": "0.1.1",
+  "signature": "NotSigned",
+  "candidate": "20261021-223423-21a34fcd",
+  "readmeUpdatedAfterBuild": true,
+  "sourceFreezeFiles": 382,
+  "setupSHA256": "1C0648D557B74FC79BA5137A5CB58EE1212C362715EA7C7F38CFF79E6EECB1F3",
+  "note": "HEAD is not complete build source: integrated WIP was present. Publication snapshot records file hashes; generated outputs and binaries excluded. README/docs/ignore/template authored after build are delivery-only differences.",
+  "setupBytes": 171650785,
+  "hostValidation": "BLOCKED_HOST",
+  "builtFromHead": "090efa610e9ed1d6c97bf40d3f8378a107651636",
+  "installedValidated": false,
+  "sourceFreezeDigest": "5536b3d80063178bc9d7ab94cdf9486b1d82789f01e2964fe3b38c399d96f90f",
+  "builtFromWorkingTree": true
+}

@@ -1,0 +1,5 @@
+import test from 'node:test';import assert from 'node:assert/strict';import fs from 'node:fs';
+const source=fs.readFileSync(new URL('../src/components/AIAssistant.tsx',import.meta.url),'utf8');
+test('privacy notice is a native disclosure, closed by default, with supplier and consent state visible',()=>{const disclosure=source.match(/<details\b[^>]*data-matrix-privacy[^>]*>/)?.[0];assert.ok(disclosure);assert.doesNotMatch(disclosure,/\bopen(?:\s|=|>)/);assert.match(source,/<summary[^>]*>[\s\S]*?fornecedor externo[\s\S]*?processConsent[\s\S]*?<\/summary>/);});
+test('telemetry stays opt-in and the full warning and checkbox remain available',()=>{assert.match(source,/useState\(false\)/);assert.match(source,/checked=\{processConsent\}/);assert.match(source,/setProcessConsent\(event.target.checked\)/);assert.match(source,/Não inclua palavras-passe/);assert.match(source,/processPayload\(processContext, processConsent\)/);});
+test('requested PID remains visible even if its instance has disappeared',()=>{assert.match(source,/data-matrix-process/);assert.match(source,/PID \{explainRequest.pid\}/);});

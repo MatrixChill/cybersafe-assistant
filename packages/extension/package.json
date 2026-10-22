@@ -1,0 +1,18 @@
+{
+  "name": "extension",
+  "version": "0.1.1",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "lint": "tsc -p tsconfig.json --noEmit",
+    "typecheck": "tsc -p tsconfig.json --noEmit"
+  },
+  "dependencies": {
+    "@cybersafe/shared-types": "0.1.1"
+  },
+  "devDependencies": {
+    "@types/chrome": "^0.1.26",
+    "typescript": "^5.9.3"
+  }
+}

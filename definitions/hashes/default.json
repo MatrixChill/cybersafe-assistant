@@ -1,0 +1,20 @@
+[
+  {
+    "sha256": "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f",
+    "family": "EICAR-Test-File",
+    "severity": "critical",
+    "source": "built-in"
+  },
+  {
+    "sha256": "24d004a104d4d54034dbcffc2a4b19a11f39008a575aa614ea04703480b1022c",
+    "family": "WannaCry-Ransomware",
+    "severity": "critical",
+    "source": "malwarebazaar"
+  },
+  {
+    "sha256": "ed01ebfbc9eb5bbea545af4d01bf5f1071661840480439c6e5babe8e080e41aa",
+    "family": "WannaCry-Ransomware",
+    "severity": "critical",
+    "source": "malwarebazaar"
+  }
+]

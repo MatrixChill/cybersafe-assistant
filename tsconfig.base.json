@@ -1,0 +1,24 @@
+// Monorepo sync: 2026-05-13
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "moduleResolution": "node",
+    "baseUrl": ".",
+    "paths": {
+      "@cybersafe/shared-types": [
+        "../../packages/shared-types/src/index.ts"
+      ],
+      "@cybersafe/core": [
+        "../../packages/core/src/index.ts"
+      ],
+      "@cybersafe/native-windows": [
+        "../../packages/native-windows/src/index.ts"
+      ],
+      "@cybersafe/service": [
+        "../../packages/service/src/index.ts"
+      ]
+    },
+    "strict": true,
+    "skipLibCheck": true
+  }
+}
