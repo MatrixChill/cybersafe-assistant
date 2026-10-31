@@ -1,208 +1,256 @@
-# CyberSafe Assistant
+<p align="center">
+  <img src="assets/branding/generated/icon-128.png" alt="CyberSafe Assistant" width="112" height="112">
+</p>
 
-O CyberSafe Assistant é uma plataforma de cibersegurança focada em monitorização, análise de ameaças e gestão de saúde do sistema Windows. Desenvolvido como projeto educacional (PAP), integra múltiplas camadas de análise — desde heurísticas locais até consulta a serviços externos — numa interface desktop moderna.
+<h1 align="center">CyberSafe Assistant</h1>
 
-## O que é o CyberSafe Assistant
+<p align="center">
+  Aplicação desktop de cibersegurança para Windows — análise de ficheiros com múltiplos motores,
+  monitorização do sistema e resposta a ameaças, num único painel.
+</p>
 
-O CyberSafe Assistant é um dashboard de cibersegurança para Windows que combina:
+<p align="center">
+  <img alt="Electron" src="https://img.shields.io/badge/Electron-33-47848F">
+  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB">
+  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6">
+  <img alt="Node" src="https://img.shields.io/badge/Node.js-%E2%89%A520-339933">
+  <img alt="Windows" src="https://img.shields.io/badge/Windows-10%2F11-0078D4">
+  <img alt="Estado" src="https://img.shields.io/badge/estado-desenvolvimento%20académico-orange">
+</p>
 
-- **Análise de ficheiros** com motor heurístico, YARA, entropia e hashing SHA-256;
-- **Monitorização em tempo real** de processos, serviços, ligações de rede e firewall;
-- **PC Health** — avaliação de saúde do sistema (RAM, disco, processos, serviços críticos);
-- **Quarentena e resposta a ameaças** com scoring de risco e recomendações automáticas;
-- **Assistente IA** para interpretação de riscos e suporte ao utilizador;
-- **Interface desktop** construída com Electron + React + Tailwind CSS.
+> **Projeto académico (PAP) em desenvolvimento.** Os instaladores internos usados nos testes
+> **não estão aprovados para distribuição**. O CyberSafe Assistant **não substitui** o Microsoft
+> Defender nem qualquer antivírus certificado, e **não garante deteção** de todo o malware.
+
+---
+
+## Índice
+
+- [O que é](#o-que-é)
+- [Funcionalidades](#funcionalidades)
+- [Arquitetura](#arquitetura)
+- [Tecnologias](#tecnologias)
+- [Desenvolvimento](#desenvolvimento)
+- [Testes](#testes)
+- [Segurança e limitações](#segurança-e-limitações)
+- [Melhorias futuras](#melhorias-futuras)
+- [Documentação](#documentação)
+- [Licença](#licença)
+
+---
+
+## O que é
+
+O **CyberSafe Assistant** é uma aplicação desktop para Windows que reúne, num painel único:
+
+- **análise de ficheiros** com vários motores independentes (YARA, base de hashes conhecidos,
+  ClamAV e um motor nativo em C++);
+- **monitorização** de processos, hardware e eventos de segurança do sistema;
+- **quarentena** e resposta a ameaças, com histórico e relatórios exportáveis;
+- **gestão do sistema** — gestor de tarefas (só leitura), PC Center, otimização e proteção USB.
+
+O projeto nasce no âmbito do **Projeto de Aptidão Profissional (PAP)** de um curso de
+cibersegurança. Serve simultaneamente como produto funcional e como evidência do processo de
+engenharia: cada capacidade é implementada, testada e documentada, e o produto **declara o que não
+sabe** em vez de simular estados (motores indisponíveis aparecem como indisponíveis).
+
+## Funcionalidades
+
+### Implementado e coberto por testes
+
+| Área | O que faz |
+|---|---|
+| **Scanner** | Análise rápida, personalizada e de ficheiro individual; progresso real, cancelamento, contagens de analisados / excluídos / inacessíveis |
+| **Motores** | YARA (via `@litko/yara-x`), base de hashes maliciosos, ClamAV (binário oficial vendorizado) e motor nativo C++ (hash SHA-256, entropia, análise PE) |
+| **Quarentena** | Isolamento com metadados, restauro controlado e política de confiança |
+| **Histórico** | Sessões de análise persistidas com resultados, contagens e estado terminal |
+| **Relatórios** | Relatório consolidado A4 exportável em PDF, com impressão como alternativa |
+| **Gestor de Tarefas** | Processos com CPU/RAM e terminação sujeita a política de segurança — operações destrutivas desativadas por decisão de produto |
+| **PC Center** | Saúde do sistema: CPU, RAM, disco, bateria, GPU, temperatura e diagnósticos |
+| **Monitorização** | Processos, hardware e eventos de segurança em tempo real |
+| **Otimizar** | Sugestões de limpeza e otimização com base no estado medido |
+| **Proteção USB** | Deteção de dispositivos, leitura apenas e análise de conteúdos |
+| **MATRIX** | Assistente de segurança com consentimento explícito e chave própria (BYOK) |
+| **Configurações** | Tema, identidade visual, arranque e preferências de proteção |
+| **Atualizações** | Verificação de novas versões e estado honesto de disponibilidade |
+
+### Parcialmente validado
+
+- **Instalador NSIS personalizado** (4 ecrãs, verificação de espaço e caminho): construído e
+  compilado offline, **sem execução real** — a validação final depende de instalação em VM.
+- **Proteção em tempo real** (watchers e recuperação): lógica e testes automatizados presentes;
+  comportamento em instalação real ainda em validação.
+- **Motor nativo C++**: integrado no serviço por *bridge* com estados de saúde explícitos; a
+  comparação de resultados em cenários reais continua em avaliação.
+
+### Planeado
+
+- Gestor de exclusões com interface própria;
+- Melhor desempenho em análises profundas (varrer e classificar sem esgotar o orçamento numa pasta);
+- Diagnóstico mais detalhado de resultados inconclusivos;
+- Compatibilidade gráfica alargada (DPI e aceleração em hardware variado);
+- Instalador com validação completa em máquina limpa.
 
 ## Arquitetura
 
-O repositório é um **monorepo npm** (`packages/*`):
-
-| Pacote | Papel |
-|--------|-------|
-| `packages/app` | UI web (Vite + React + Tailwind CSS) consumida pelo desktop |
-| `packages/desktop` | Shell Electron — integração IPC com o serviço e system tray |
-| `packages/service` | Serviço Windows (Node.js) — orquestra scans, quarentena, monitorização |
-| `packages/core` | Motor lógico (TypeScript) — YARA-X, análise heurística, scoring, client VirusTotal |
-| `packages/api` | API REST (Express + SQLite) — dashboard, IA assistente, autenticação |
-| `packages/native-windows` | Camada PowerShell read-only — health do Windows, processos, firewall |
-| `packages/native-engine` | Executável C++ (CMake) — hash SHA-256, entropia, análise PE |
-| `packages/shared-types` | Tipos TypeScript partilhados entre todos os pacotes |
-| `packages/extension` | Extensão de navegador para monitorização de downloads |
+Monorepo npm (`packages/*`) com separação entre interface, orquestração, motores e serviço:
 
 ```
-Electron (UI)
-    ↓ IPC / named pipe
-Serviço Windows (Node.js — engine.ts)
-    ↓
-@cybersafe/core (MalwareAnalyzer, YaraEngine, VirusTotal, quarentena)
-    ↓ (opcional)
-scan-engine.exe (C++) — segunda opinião nativa (hash, entropia, PE)
+┌──────────────────────────────────────────────────────────────┐
+│  packages/app        React + Vite + Tailwind (renderer)      │
+└───────────────▲──────────────────────────────────────────────┘
+                │ IPC seguro (contextBridge / preload)
+┌───────────────┴──────────────────────────────────────────────┐
+│  packages/desktop    Electron: main, preload, tray, splash   │
+└───────────────▲──────────────────────────────────────────────┘
+                │ named pipe JSON-RPC
+┌───────────────┴──────────────────────────────────────────────┐
+│  packages/service    orquestra scans, quarentena, USB,       │
+│                      monitorização, histórico, atualizações  │
+└───────▲───────────────▲──────────────▲───────────────▲───────┘
+        │               │              │               │
+ @cybersafe/core   native-windows   ClamAV         scan-engine.exe
+ (YARA, hashes,    (PowerShell      (vendorizado)  (C++: hash,
+  heurística,       read-only)                      entropia, PE)
+  scoring)
 ```
 
-## Funcionalidades implementadas
+| Pacote | Responsabilidade |
+|---|---|
+| `packages/app` | Interface (React 19, Vite, Tailwind), shell V2 e páginas |
+| `packages/desktop` | Shell Electron, preload, IPC, tray, arranque e ciclo de vida |
+| `packages/service` | Serviço Node: pipeline de análise, quarentena, USB, watchdog |
+| `packages/core` | Motor lógico: YARA, hashes, heurística, scoring, ClamAV, hardware |
+| `packages/native-windows` | Camada PowerShell **read-only** e watchers do Windows |
+| `packages/native-engine` | Executável C++ (CMake): SHA-256, entropia, parsing PE |
+| `packages/api` | API REST (Express + Prisma/SQLite) para contas e assistente |
+| `packages/shared-types` | Contratos TypeScript partilhados (comandos/respostas do serviço) |
+| `packages/extension` | Extensão de navegador para consciencialização de downloads |
 
-### Motor de análise e proteção
-- Análise heurística de ficheiros (magic numbers, entropia, extensões perigosas, assinatura digital)
-- Scan com regras YARA (via `@litko/yara-x`)
-- Hash SHA-256 e base de assinaturas Known-bad
-- Integração com VirusTotal (API key via variável de ambiente)
-- Scoring de risco (0–100) com severidade e ação recomendada
-- Quarentena com restauração e gestão de confiança (hash/publisher allowlist)
-- Scan de ficheiros individuais, full system scan e scan personalizado
+Princípios aplicados no código:
 
-### Monitorização Windows (read-only)
-- Processos ativos (CPU e RAM) com deteção de comportamentos suspeitos
-- Serviços Windows e estado dos mesmos
-- Ligações TCP ativas com resolução de processo
-- Utilizadores locais do sistema
-- Discos e espaço disponível
-- Estado do Firewall do Windows (perfis)
-- Snapshot de saúde com scoring e recomendações automáticas
+- **veredictos não derivam de exit codes** — resultam de evidência medida;
+- **estados incertos nunca são apresentados como seguros** (`unknown` ≠ `off` ≠ `protected`);
+- **operações destrutivas** (terminar processos, eliminar ficheiros) passam por política explícita;
+- **sem segredos no repositório** — chaves vivem em configuração local do utilizador.
 
-### PowerShell integration
-- Camada segura de execução PowerShell com queries allowlistadas
-- Apenas operações de leitura (`Get-*`) — sem funcionalidades destrutivas
-- Scripts fixos sem interpolação com input do utilizador
+## Tecnologias
 
-### Desktop (Electron)
-- Interface com system tray, auto-start (configurável) e notificações desktop
-- Splash screen e conexão automática ao serviço
-- Proteção contra tentativas de kill do processo
-- Gestão de eventos de segurança em tempo real
+| Camada | Tecnologias |
+|---|---|
+| Desktop | Electron 33, Vite, electron-builder (NSIS) |
+| Interface | React 19, TypeScript 5.9, Tailwind CSS 4, Framer Motion, Radix UI |
+| Serviço | Node.js (≥ 20), named pipes JSON-RPC, `node-windows` |
+| Análise | `@litko/yara-x` (YARA), hashes SHA-256, ClamAV, motor nativo C++17 |
+| Windows | PowerShell read-only, CIM/WMI, `systeminformation` |
+| API | Express, Prisma + SQLite, JWT (bcrypt), SSE |
+| Inteligência artificial | Fornecedor configurável pelo utilizador (chave BYOK) |
+| Qualidade | `node --test`, `tsx`, TypeScript `--noEmit`, ESLint |
 
-### IA Assistente
-- Chatbot integrado para suporte sobre segurança digital
-- Interpretação de riscos e recomendações contextualizadas
-- Powered by Groq API (Llama 3.1) — chave via variável de ambiente
-
-### API REST
-- Endpoints para dashboard, eventos, estatísticas e file scan
-- Autenticação JWT com registo e login
-- SSE (Server-Sent Events) para eventos em tempo real
-- Treino educacional (jogos de simulação de cibersegurança)
-
-## Estado atual do projeto
-
-O CyberSafe Assistant encontra-se em **fase ativa de desenvolvimento**. As funcionalidades centrais (análise de ficheiros, monitorização Windows, interface desktop e IA assistente) encontram-se implementadas e funcionais. O projeto continua a evoluir com foco em:
-
-- Integração completa do motor C++ como segunda opinião nativa
-- Expansão das regras heurísticas e definições YARA
-- Refinamento do scoring de risco e do sistema de recomendações
-- Melhoria contínua da interface e experiência do utilizador
-
-## Segurança e gestão de credenciais
-
-O CyberSafe Assistant utiliza chaves de API externas (VirusTotal, Groq) e segredos (JWT) que **nunca devem ser expostos no código fonte**.
-
-- Todas as credenciais devem ser fornecidas através de variáveis de ambiente ou ficheiros `.env` locais
-- O ficheiro `.env` está excluído do repositório via `.gitignore`
-- Nunca inclua API keys, passwords ou tokens diretamente no código
-- Em ambiente de produção, utilize um gestor de segredos adequado
-
-Exemplo de configuração (ficheiro `.env` na raiz ou no pacote correspondente):
-
-```
-VIRUSTOTAL_API_KEY=sua_chave_aqui
-GROQ_API_KEY=sua_chave_aqui
-JWT_SECRET=seu_segredo_aqui
-```
-
-## Contexto PAP
-
-O CyberSafe Assistant é desenvolvido no âmbito de um **Projeto de Aptidão Profissional (PAP)**. O projeto evolui através de ciclo iterativo de desenvolvimento, testes e documentação, com o objetivo de demonstrar competências técnicas em cibersegurança, engenharia de software e arquitetura de sistemas.
-
-Este repositório serve como evidência do processo de desenvolvimento e das soluções técnicas implementadas.
-
-## Como executar
-
-Este projeto é um monorepo npm (workspaces). Para iniciar:
-
-```bash
-# 1. Instalar dependências
-npm install
-
-# 2. Iniciar todos os serviços (serviço, API, app, desktop)
-npm run dev
-```
-
-Após iniciar, a janela Electron abre automaticamente com a interface (carrega `http://localhost:5173`). A API REST fica em `http://localhost:4000`.
-
-> Credencial de desenvolvimento (seed): `admin@cybersafe.local` / `CyberSafe2026!`
-
-Comandos individuais:
-
-| Comando | Descrição |
-|---------|-----------|
-| `npm run dev:service` | Serviço Windows em background |
-| `npm run dev:desktop` | Interface Electron |
-| `npm run dev:app` | Aplicação frontend (React) |
-| `npm run dev:api` | API REST |
-
-### Motor nativo C++
-
-O pacote [`packages/native-engine/`](./packages/native-engine/) contém o executável `scan-engine` (C++17/CMake). Para compilar:
-
-```bash
-npm run build:native
-```
+## Desenvolvimento
 
 ### Requisitos
 
-- **Node.js** >= 20
-- **Windows** (a monitorização PowerShell e o serviço são específicos para Windows)
-- **CMake** (para compilar o motor nativo C++)
+- **Node.js ≥ 20** (recomendado 20 LTS ou superior)
+- **Windows 10/11** — a monitorização e o serviço são específicos do Windows
+- **CMake + compilador C++17** — apenas para o motor nativo
+- **ClamAV para Windows** — obtido pelo script de vendorização (não é versionado)
 
-## Estrutura do repositório
+### Instalação
 
-```
-cybersafe-assistant/
-├── packages/
-│   ├── app/              # Frontend React (Vite + Tailwind)
-│   ├── desktop/          # Shell Electron
-│   ├── service/          # Serviço Windows (Node.js)
-│   ├── core/             # Motor de análise (TypeScript)
-│   ├── api/              # API REST (Express)
-│   ├── native-windows/   # PowerShell layer (read-only)
-│   ├── native-engine/    # Motor C++ (CMake)
-│   ├── shared-types/     # Tipos partilhados
-│   └── extension/        # Extensão de navegador
-├── definitions/          # Definições YARA e hashes
-├── docs/                 # Documentação técnica
-├── logs/                 # Logs de runtime
-└── README.md
+```bash
+npm install
 ```
 
-## Principais tecnologias
+### Executar em desenvolvimento
 
-| Camada | Tecnologias |
-|--------|-------------|
-| Desktop | Electron, Vite |
-| Frontend | React, Tailwind CSS, Framer Motion |
-| Backend | Node.js, Express, SQLite (via Prisma) |
-| Motor de análise | TypeScript, YARA-X (@litko/yara-x), ClamAV |
-| Motor nativo | C++17, CMake |
-| Windows | PowerShell (read-only), Named Pipes |
-| IA | Groq API (Llama 3.1) |
-| Outros | JWT, bcrypt, multer, SSE |
+```bash
+# Serviço, API, app e desktop em conjunto
+npm run dev
 
-## Limitações
+# Ou individualmente
+npm run dev:service
+npm run dev:api
+npm run dev:app
+npm run dev:desktop
+```
 
-- A monitorização Windows (PowerShell, processos, firewall) só funciona em ambiente Windows
-- O motor nativo C++ é opcional — a análise funcional sem ele é assegurada pelo motor TypeScript
-- A integração VirusTotal e IA dependem de chaves API externas (plano gratuito com rate limits)
-- O projeto não substitui um antivírus comercial — é uma ferramenta educacional e de monitorização
-- Alguns módulos (ETW, WFP, AMSI) encontram-se em fase preliminar
+A janela Electron abre com o renderer servido pelo Vite; a API fica em `http://localhost:4000`.
 
-## Documentação adicional
+### Build
 
-- Arquitetura detalhada: [`docs/ARCHITECTURE.md`](./docs/ARCHITECTURE.md)
-- Roadmap: [`docs/ROADMAP.md`](./docs/ROADMAP.md)
-- Resumo consolidado: [`docs/PLANO-CONSOLIDADO.md`](./docs/PLANO-CONSOLIDADO.md)
-- FAQ para entrega ao professor: [`docs/FAQ-ENTREGA-PROFESSOR.md`](./docs/FAQ-ENTREGA-PROFESSOR.md)
-- Relatório da sessão de preparação da PAP: [`docs/PAP_LONG_SESSION_REPORT.md`](./docs/PAP_LONG_SESSION_REPORT.md)
-- Relatório da sessão de polimento da PAP: [`docs/PAP_POLISH_SESSION_REPORT.md`](./docs/PAP_POLISH_SESSION_REPORT.md)
-- Motor nativo C++: [`packages/native-engine/README.md`](./packages/native-engine/README.md)
+```bash
+npm run build:all          # pacotes pela ordem de dependências
+npm run build:native       # motor C++ (CMake, Release)
+npm run dist -w @cybersafe/desktop   # empacotamento Windows (local)
+```
+
+> O empacotamento gera instaladores **internos** (`NOT_FOR_DISTRIBUTION`). Não estão aprovados
+> para distribuição e não devem ser publicados.
+
+### ClamAV (vendorização)
+
+O binário do ClamAV **não** está no repositório. O script `scripts/vendor-clamav.mjs` obtém o
+pacote portátil oficial (Cisco/Talos), valida assinatura e digests, e prepara `vendor/clamav/`.
+Sem esse passo, o motor ClamAV apresenta-se como indisponível — e o produto diz exatamente isso.
+
+## Testes
+
+Os testes usam o runner nativo do Node (`node --test`), com `tsx` onde há TypeScript.
+
+```bash
+npm test -w @cybersafe/core
+npm test -w @cybersafe/service
+npm test -w @cybersafe/app
+npm test -w @cybersafe/desktop
+npm test -w @cybersafe/native-windows
+npm test -w api
+
+npm run typecheck
+npm run lint
+```
+
+Cada suíte cobre contratos reais do produto (pipeline de análise, quarentena, honestidade de
+estados, segurança de *pipes*, ciclo de vida do arranque). Testes que dependem de hardware,
+motores externos ou de uma instalação real estão fora do que a CI consegue provar — e são
+marcados como validação manual.
+
+## Segurança e limitações
+
+- **Não é um antivírus certificado.** Não substitui o Microsoft Defender e não oferece garantia
+  de deteção; a ausência de deteções não prova que um ficheiro seja seguro.
+- **Windows-only.** A monitorização, o serviço e o empacotamento assumem Windows.
+- **Chaves externas** (VirusTotal, fornecedor de IA) são configuradas localmente pelo utilizador;
+  nunca são incluídas no repositório.
+- **Operações destrutivas** (terminar processos, eliminar/quarentenar) são limitadas por política;
+  um administrador malicioso continua a poder contornar a proteção em *user-mode*.
+- **Limites de cobertura:** orçamento de ficheiros por análise, exclusões de sistema e formatos
+  não suportados são declarados nos resultados (analisados / excluídos / inacessíveis).
+- **Instaladores internos** não são distribuíveis e não substituem um processo de assinatura.
+
+Se encontrares um problema de segurança, não abras uma issue pública com detalhes sensíveis.
+
+## Melhorias futuras
+
+1. Gestor de exclusões com interface dedicada;
+2. Otimização do pipeline de análise (orçamento distribuído, menos trabalho repetido);
+3. Melhor cobertura de formatos e heurísticas;
+4. Diagnóstico explícito de resultados inconclusivos;
+5. Atualizações seguras com verificação de integridade fim-a-fim;
+6. Compatibilidade gráfica e DPI em hardware variado;
+7. Instalador final validado em máquina limpa, com assinatura.
+
+## Documentação
+
+- [Arquitetura](docs/ARCHITECTURE.md) — camadas, fluxos e contratos
+- [Roadmap](docs/ROADMAP.md) — fases e prioridades honestas
+- [FAQ de entrega](docs/FAQ-ENTREGA-PROFESSOR.md) — perguntas típicas sobre o projeto
+- [Camada PowerShell / Windows](docs/POWERSHELL-WINDOWS-LAYER.md)
+- [Toolchain C++ no Windows](docs/TOOLCHAIN-CPP-WINDOWS.md)
+- [Motor nativo](packages/native-engine/README.md) — compilar e testar o `scan-engine`
+- [Índice da documentação](docs/README.md)
 
 ## Licença
 
-MIT
+MIT. Ver [`package.json`](package.json). Componentes de terceiros mantêm as respetivas licenças
+(ver `assets/licenses/`).

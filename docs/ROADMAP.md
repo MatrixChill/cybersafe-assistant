@@ -1,37 +1,57 @@
-# Roadmap — do protótipo ao AV “nível indústria”
+# Roadmap — estado real e próximos passos
 
-## Estado atual (documentado no código)
+Este documento descreve o que **existe no código**, o que está **parcialmente validado** e o que
+está **planeado**. Não é uma promessa de datas.
 
-- Monorepo TS com serviço Windows, desktop Electron, core com YARA-X, VirusTotal, quarentena, watchers, etc. (ver `packages/service`, `packages/core`).
-- `packages/native-engine`: executável **C++** com análise estática básica (hash, entropia, PE, score). **Integração no `engine.ts`:** planeada; implementar `spawn`/`execFile` e fundir JSON com o pipeline TS.
+## Estado atual (snapshot de desenvolvimento)
 
-## Fase 1 — Consolidar (curto prazo)
+- Monorepo TypeScript com serviço de fundo, shell Electron, renderer React e API REST.
+- Scanner com YARA, base de hashes, ClamAV e motor nativo C++ integrado por *bridge*.
+- Quarentena, histórico, relatórios em PDF, gestor de tarefas (leitura), PC Center,
+  otimização, monitorização, proteção USB, assistente MATRIX e atualizações — com testes
+  automatizados por área.
+- Instalador NSIS personalizado construído e compilado offline; **execução e validação em
+  máquina limpa pendentes**.
 
-1. Integrar `scan-engine.exe` no serviço (`native-bridge` ou equivalente).
-2. Testes manuais: EICAR, `notepad.exe`, ficheiro empacotado de exemplo.
-3. Documentar variáveis de ambiente em `packages/api/.env.example` (sem segredos no Git).
+## Fase 1 — Fechar a validação (prioridade alta)
 
-## Fase 2 — Engine híbrida
+1. Instalação em VM limpa do build atual; verificar arranque, serviço, motores e desinstalação.
+2. Validar preservação de dados/configuração/quarentena em upgrade e remoção.
+3. Fechar o diagnóstico de arranque degradado com logs reais de uma instalação.
+4. Repetir os cenários manuais do scanner e do tempo real no build instalado.
 
-- TS continua a orquestrar; C++ faz blocos pesados (ficheiros grandes, PE profundo).
-- Unificar scores (pesos TS + pesos C++) com regras claras nos docs.
+## Fase 2 — Qualidade de análise (prioridade alta)
 
-## Fase 3 — Proteção user-mode avançada
+- Gestor de exclusões com interface dedicada (hoje a política existe apenas no motor).
+- Melhor distribuição do orçamento de ficheiros por pasta, para análises profundas mais úteis.
+- Diagnóstico explícito de resultados inconclusivos (o que faltou medir e porquê).
+- Ampliar regras YARA e a base de hashes com processo de atualização verificável.
 
-- Melhorar watchers (mais pastas, menos latência).
-- Job objects / limites para testes controlados (não “sandbox” completa).
-- Endurecimento do processo do serviço (documentar limites: admin malicioso ainda pode matar processos).
+## Fase 3 — Sistema e proteção
 
-## Fase 4 — Kernel (só com maturidade)
+- Endurecer watchers e recuperação em cenários de carga e suspensão.
+- Consolidar a proteção USB e os estados de dispositivo.
+- Melhorar a defesa *user-mode* do serviço (documentando os limites reais).
 
-- Minifilter, callbacks de processo, WFP, ETW — **projeto separado**, WDK, assinatura de driver, BSOD risk.
-- Não iniciar esta fase sem requisitos de assinatura e equipa com tempo.
+## Fase 4 — Distribuição
+
+- Instalador final com identidade de versão, assinatura de código e atualizações verificadas.
+- Compatibilidade gráfica e DPI em hardware variado.
+- Documentação de suporte e política de privacidade.
+
+## Fora de âmbito (por agora)
+
+- **Kernel:** minifilter, callbacks de processo, WFP ou ETW exigem WDK, assinatura de driver e
+  risco operacional elevado — projeto separado, só com maturidade e requisitos claros.
+- **Substituir o Microsoft Defender.** O CyberSafe é uma ferramenta académica e de
+  monitorização; não compete com produtos certificados.
 
 ## Prioridades honestas
 
 | Prioridade | Item |
-|------------|------|
-| Alta | Integração TS ↔ `scan-engine` + testes |
-| Média | `.env.example` completo, CI que compile o C++ |
-| Baixa | “Self-defense” avançada sem kernel (expectativas realistas) |
-| Futuro | Driver assinado |
+|---|---|
+| Alta | Validação em VM do build atual (instalação, arranque, desinstalação) |
+| Alta | Gestor de exclusões e diagnóstico de resultados inconclusivos |
+| Média | Desempenho de análise profunda; regras e assinaturas |
+| Média | Instalador assinado e atualizações verificadas |
+| Baixa | Camadas de kernel (projeto separado) |
