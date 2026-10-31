@@ -1306,10 +1306,85 @@ function regularNonEmpty(file) {
  * Não segue symlinks e não lê ficheiros fora do directório do vendor.
  */
 export function verifyYaraVendor(options = {}) {
-  const dir = options.dir ?? yaraVendorDir;
+  const requestedDir = options.dir ?? yaraVendorDir;
+  const dir = path.resolve(requestedDir);
   const manifestPath = options.manifestPath ?? path.join(dir, "VENDOR.json");
   const problems = [];
   const result = { ok: false, problems, manifestPath, version: null, filesChecked: 0, bytesChecked: 0, runtimeBundled: false };
+  const REQUIRED = ["yara64.exe", "yarac64.exe", "COPYING.txt", "vcruntime140.dll"];
+  // Lista EXATA do que pode viver em vendor/yara: o manifesto + os 4 recursos.
+  // O extraResources copia o directório inteiro; sem esta allowlist um ficheiro
+  // extra (ou um subdirectório) entrava no pacote sem ser medido.
+  const ALLOWED = new Set(["vendor.json", ...REQUIRED.map((name) => name.toLowerCase())]);
+
+  const lstatOrNull = (file) => {
+    try {
+      return fs.lstatSync(file);
+    } catch {
+      return null;
+    }
+  };
+  const norm = (value) => (process.platform === "win32" ? path.resolve(value).toLowerCase() : path.resolve(value));
+
+  // ── Raiz e PARENTES: um junction acima do vendor também é um escape ───────
+  const rootStat = lstatOrNull(dir);
+  if (!rootStat) {
+    problems.push(`${requestedDir}: vendor ausente`);
+    return result;
+  }
+  if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
+    problems.push(`${requestedDir}: vendor é um link/junction ou não é directório`);
+  }
+  try {
+    if (norm(fs.realpathSync.native(dir)) !== norm(dir)) {
+      problems.push(`${requestedDir}: caminho resolvido fora do vendor (link/junction num parent)`);
+    }
+  } catch {
+    problems.push(`${requestedDir}: caminho não resolvível`);
+  }
+
+  // ── Travessia: recusa QUALQUER link antes de ler; junta colisões de caixa ─
+  const onDisk = new Map();
+  let walkFailed = false;
+  const walk = (current, relBase) => {
+    let entries;
+    try {
+      entries = fs.readdirSync(current, { withFileTypes: true });
+    } catch {
+      problems.push(`${relBase || "."}: directório ilegível`);
+      walkFailed = true;
+      return;
+    }
+    for (const entry of entries) {
+      const full = path.join(current, entry.name);
+      const rel = relBase ? `${relBase}/${entry.name}` : entry.name;
+      const stat = lstatOrNull(full);
+      if (!stat) {
+        problems.push(`${rel}: inacessível`);
+        continue;
+      }
+      if (stat.isSymbolicLink()) {
+        problems.push(`${rel}: link/junction recusado (não é seguido)`);
+        continue;
+      }
+      if (stat.isDirectory()) {
+        walk(full, rel);
+        continue;
+      }
+      if (!stat.isFile()) {
+        problems.push(`${rel}: não é ficheiro regular`);
+        continue;
+      }
+      const key = rel.toLowerCase();
+      if (onDisk.has(key)) {
+        problems.push(`${rel}: colisão de maiúsculas/duplicado no disco`);
+        continue;
+      }
+      onDisk.set(key, rel);
+    }
+  };
+  walk(dir, "");
+  if (walkFailed) return result;
 
   let manifest;
   try {
@@ -1326,49 +1401,60 @@ export function verifyYaraVendor(options = {}) {
     return result;
   }
 
-  const listed = new Map(manifest.files.map((entry) => [String(entry.path ?? "").replaceAll("\\", "/").toLowerCase(), entry]));
-  for (const name of ["yara64.exe", "yarac64.exe", "COPYING.txt", "vcruntime140.dll"]) {
-    if (!listed.has(name.toLowerCase())) problems.push(`${name}: ausente do VENDOR.json`);
-  }
-
+  // ── Manifesto: entradas exactas, sem duplicados nem subdirectórios ────────
+  const declared = new Map();
   for (const entry of manifest.files) {
     const rel = String(entry.path ?? "").replaceAll("\\", "/");
-    if (!rel || rel.includes("..") || path.isAbsolute(rel)) {
-      problems.push(`caminho inválido no manifesto: ${rel}`);
+    if (!rel || rel.includes("..") || path.isAbsolute(rel) || rel.includes("/")) {
+      problems.push(`caminho inválido/não permitido no manifesto: ${rel}`);
       continue;
     }
-    const file = path.join(dir, ...rel.split("/"));
-    let stat;
-    try {
-      stat = fs.lstatSync(file);
-    } catch {
-      problems.push(`${rel}: ausente do disco`);
+    const key = rel.toLowerCase();
+    if (!ALLOWED.has(key)) {
+      problems.push(`${rel}: entrada não permitida no manifesto`);
       continue;
     }
-    if (stat.isSymbolicLink() || !stat.isFile()) {
-      problems.push(`${rel}: não é um ficheiro regular`);
+    if (declared.has(key)) {
+      problems.push(`${rel}: entrada duplicada/colisão de maiúsculas no manifesto`);
+      continue;
+    }
+    declared.set(key, entry);
+  }
+
+  for (const name of REQUIRED) {
+    if (!declared.has(name.toLowerCase())) problems.push(`${name}: ausente do VENDOR.json`);
+  }
+
+  // ── Conjunto exacto: qualquer ficheiro extra seria copiado pelo packaging ─
+  for (const [key, rel] of onDisk) {
+    if (!ALLOWED.has(key)) problems.push(`${rel}: ficheiro extra não listado (o extraResources copiá-lo-ia)`);
+  }
+  for (const key of ALLOWED) {
+    if (key !== "vendor.json" && !onDisk.has(key)) problems.push(`${key}: ficheiro obrigatório ausente do disco`);
+  }
+
+  for (const name of REQUIRED) {
+    const entry = declared.get(name.toLowerCase());
+    if (!entry) continue;
+    const file = path.join(dir, name);
+    const stat = lstatOrNull(file);
+    if (!stat || stat.isSymbolicLink() || !stat.isFile()) {
+      problems.push(`${name}: ausente ou não regular no disco`);
       continue;
     }
     result.filesChecked += 1;
     result.bytesChecked += stat.size;
     if (stat.size !== entry.bytes) {
-      problems.push(`${rel}: ${stat.size} B != ${entry.bytes} B declarados`);
+      problems.push(`${name}: ${stat.size} B != ${entry.bytes} B declarados`);
       continue;
     }
     if (sha256OfFile(file) !== entry.sha256) {
-      problems.push(`${rel}: sha256 diferente do manifesto`);
+      problems.push(`${name}: sha256 diferente do manifesto`);
     }
   }
 
   result.version = typeof manifest.version === "string" ? manifest.version : null;
-  // Mede o ficheiro NO DISCO, não só a entrada no manifesto: um manifesto que
-  // liste o runtime com o ficheiro apagado continua a ser uma falha.
-  try {
-    const runtimeStat = fs.lstatSync(path.join(dir, "vcruntime140.dll"));
-    result.runtimeBundled = runtimeStat.isFile() && !runtimeStat.isSymbolicLink();
-  } catch {
-    result.runtimeBundled = false;
-  }
+  result.runtimeBundled = onDisk.has("vcruntime140.dll");
   result.ok = problems.length === 0;
   return result;
 }

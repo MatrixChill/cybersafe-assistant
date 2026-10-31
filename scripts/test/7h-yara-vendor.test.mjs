@@ -84,4 +84,60 @@ describe("vendor/yara — integridade medida", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("recusa um ficheiro EXTRA (o extraResources copia o directório inteiro)", () => {
+    const dir = tempCopy();
+    try {
+      fs.writeFileSync(path.join(dir, "extra.dll"), "nao listado");
+      const report = verifyYaraVendor({ dir });
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.problems.some((problem) => problem.includes("extra.dll") && problem.includes("extra")),
+        report.problems.join("; "),
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("recusa duplicado/colisão de maiúsculas no manifesto", () => {
+    const dir = tempCopy();
+    try {
+      const manifestPath = path.join(dir, "VENDOR.json");
+      const manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+      const yara = manifest.files.find((entry) => entry.path === "yara64.exe");
+      manifest.files.push({ ...yara, path: "YARA64.EXE" });
+      fs.writeFileSync(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+      const report = verifyYaraVendor({ dir, manifestPath });
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.problems.some((problem) => problem.includes("duplicada") || problem.includes("colisão")),
+        report.problems.join("; "),
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("recusa junction dentro do vendor (não segue para fora)", () => {
+    const dir = tempCopy();
+    const outside = fs.mkdtempSync(path.join(os.tmpdir(), "cybersafe-yara-outside-"));
+    const link = path.join(dir, "link");
+    try {
+      fs.writeFileSync(path.join(outside, "fora.txt"), "fora do vendor");
+      fs.symlinkSync(outside, link, "junction");
+      const report = verifyYaraVendor({ dir });
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.problems.some((problem) => problem.includes("link") || problem.includes("junction")),
+        report.problems.join("; "),
+      );
+    } finally {
+      try {
+        fs.rmdirSync(link);
+      } catch {}
+      fs.rmSync(outside, { recursive: true, force: true });
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });
