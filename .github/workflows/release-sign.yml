@@ -2,6 +2,8 @@ name: release-sign
 
 # Manual e fail-closed: não publica, não cria Release, não executa instaladores.
 # A chave privada vem de um environment protegido e nunca é escrita no repo.
+# O manifesto de entrada é validado/confiado ao repositório pelo script; o
+# artefacto é o manifesto COMPLETO com o bloco signature que o updater lê.
 on:
   workflow_dispatch:
     inputs:
@@ -31,27 +33,31 @@ jobs:
           PRIVATE_KEY: ${{ secrets.RELEASE_ED25519_PRIVATE_KEY }}
           PUBLIC_KEY: ${{ secrets.RELEASE_ED25519_PUBLIC_KEY }}
           EXPECTED_FINGERPRINT: ${{ vars.RELEASE_ED25519_FINGERPRINT }}
+          MANIFEST_PATH: ${{ inputs.manifest_path }}
+          SIGNED_MANIFEST: ${{ runner.temp }}/update-manifest.signed.json
         run: |
           set -euo pipefail
           if [ -z "${PRIVATE_KEY:-}" ] || [ -z "${PUBLIC_KEY:-}" ] || [ -z "${EXPECTED_FINGERPRINT:-}" ]; then
             echo "::error::Chave/reparo de assinatura não provisionados. Requer aprovação humana."
             exit 1
           fi
+          # MANIFEST_PATH chega por env e é sempre citado; nunca é interpolado
+          # com uma expressão GitHub no corpo do run. --sign-manifest confina o
+          # caminho ao repositório e exige ficheiro regular.
           umask 077
           KEY_DIR="${RUNNER_TEMP}/cybersafe-signing"
-          SIG_FILE="${RUNNER_TEMP}/update-manifest.sig"
           mkdir -p "$KEY_DIR"
           printf '%s' "$PRIVATE_KEY" > "$KEY_DIR/private.pem"
           printf '%s' "$PUBLIC_KEY" > "$KEY_DIR/public.pem"
           trap 'rm -rf "$KEY_DIR"' EXIT
           node scripts/release-signing.mjs --check-key "$KEY_DIR/private.pem" "$KEY_DIR/public.pem" "$EXPECTED_FINGERPRINT"
-          node scripts/release-signing.mjs --sign "${{ inputs.manifest_path }}" --key "$KEY_DIR/private.pem" --out "$SIG_FILE"
-          node scripts/release-signing.mjs --verify "${{ inputs.manifest_path }}" --key "$KEY_DIR/public.pem" --sig "$SIG_FILE"
+          node scripts/release-signing.mjs --sign-manifest "$MANIFEST_PATH" --key "$KEY_DIR/private.pem" --fingerprint "$EXPECTED_FINGERPRINT" --out "$SIGNED_MANIFEST"
+          node scripts/release-signing.mjs --verify-embedded "$SIGNED_MANIFEST" --key "$KEY_DIR/public.pem"
 
-      - name: Guardar assinatura (não publica)
+      - name: Guardar manifesto assinado (não publica)
         uses: actions/upload-artifact@v4
         with:
-          name: update-manifest-ed25519
-          path: ${{ runner.temp }}/update-manifest.sig
+          name: update-manifest-signed
+          path: ${{ runner.temp }}/update-manifest.signed.json
           if-no-files-found: error
           retention-days: 7

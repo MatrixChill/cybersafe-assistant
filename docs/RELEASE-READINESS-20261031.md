@@ -47,13 +47,22 @@ instalador, não houve instalação, VM, publicação ou Release.**
 - `scripts/release-signing.mjs`: assina/verifica os bytes canónicos de
   `manifest.ts`; recusa chave privada dentro do repo (incluindo symlink) e nunca
   imprime material da chave.
-- Testes: `release-signing` 6/6; compatibilidade assinador↔updater 1/1.
+- Testes: `release-signing` 10/10 + segurança de workflows 4/4; compatibilidade
+  assinador↔updater 2/2 (inclui manifesto embutido aceite pelo validador e
+  verificador reais).
 - `.github/workflows/ci.yml`: build, testes dirigidos e suíte desktop; sem
   segredos e sem publicação.
 - `.github/workflows/release-sign.yml`: manual, environment `release-signing`,
-  exige chave/fingerprint por secrets/variable e só produz a assinatura.
+  exige chave/fingerprint por secrets/variable; o input chega por `env` (nunca
+  interpolado em `run`), é confinado ao repo por realpath/ficheiro regular e o
+  artefacto é `update-manifest.signed.json` com `signature` embutida, verificado
+  antes do upload. Não é um `.sig` destacado.
 - `docs/RELEASE-SIGNING-RUNBOOK.md`: geração offline, aprovação, ativação,
   rotação e limites.
+- Âmbito real do CI: `build:all` + testes dirigidos + suíte desktop. **Não é
+  build Windows+payload completo**: não builda native-engine, não provisiona
+  ClamAV/YARA, não gera NSIS nem mede o payload. Esses gates continuam locais/
+  Windows com o freeze aprovado.
 - A chave de produção **não foi gerada**. `release-trust.json` continua
   `enabled: false`, com chave/fingerprint vazios.
 

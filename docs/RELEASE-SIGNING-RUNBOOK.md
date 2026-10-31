@@ -14,9 +14,16 @@ nos logs ou no payload. A aprovação é humana e ainda não foi dada.
   assinador e o updater canonicalizam os mesmos bytes.
 - `.github/workflows/release-sign.yml` — manual, environment `release-signing`,
   exige `RELEASE_ED25519_PRIVATE_KEY`, `RELEASE_ED25519_PUBLIC_KEY` e
-  `RELEASE_ED25519_FINGERPRINT`; só produz um artefacto com a assinatura. Não
-  publica, não cria Release e não executa instaladores.
-- `.github/workflows/ci.yml` — build e testes; sem segredos.
+  `RELEASE_ED25519_FINGERPRINT`. O `manifest_path` chega por `env`, nunca é
+  interpolado no corpo do `run`; `--sign-manifest` confina-o ao repositório por
+  realpath e exige ficheiro regular. Produz `update-manifest.signed.json` com o
+  bloco `signature` que o updater lê (não um `.sig` destacado sem instrução de
+  montagem) e verifica-o antes de exportar. Não publica, não cria Release e não
+  executa instaladores.
+- `.github/workflows/ci.yml` — build:all e testes; sem segredos. **Não é um
+  build Windows+payload completo**: não builda o native-engine, não provisiona
+  ClamAV/YARA, não gera NSIS nem mede o payload. Esses gates são locais/Windows
+  com o freeze aprovado.
 
 ## Geração (offline, fora do repositório)
 
@@ -55,6 +62,15 @@ o proprietário aprova, não a chave privada.
 ## Assinar e verificar localmente
 
 ```bash
+# Forma preferida: manifesto completo com signature embutida (formato updater).
+node scripts/release-signing.mjs --sign-manifest release/update-manifest.json \
+  --key "$HOME/.cybersafe-release-keys/cybersafe-release-private.pem" \
+  --fingerprint "<FINGERPRINT_APROVADO>" \
+  --out release/update-manifest.signed.json
+node scripts/release-signing.mjs --verify-embedded release/update-manifest.signed.json \
+  --key "$HOME/.cybersafe-release-keys/cybersafe-release-public.pem"
+
+# Variante destacada, só para inspeção local; não é o artefacto do workflow.
 node scripts/release-signing.mjs --sign release/update-manifest.json \
   --key "$HOME/.cybersafe-release-keys/cybersafe-release-private.pem" \
   --out release/update-manifest.sig
@@ -76,5 +92,7 @@ node scripts/release-signing.mjs --verify release/update-manifest.json \
 
 - Sem a chave aprovada, `release-trust.json` fica desativado e o updater
   `unconfigured`. Não substituir por chave de fixture.
+- O CI atual não constrói nem mede o instalador; a assinatura do manifesto não
+  substitui o packaging, o Authenticode nem a validação na VM.
 - O certificado Authenticode continua separado da assinatura Ed25519; este
   runbook não cria nem instala certificados.

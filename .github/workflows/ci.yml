@@ -1,5 +1,8 @@
 name: ci
 
+# Âmbito: build:all + testes dirigidos + suíte desktop. NÃO é packaging
+# completo: não builda native-engine, não provisiona ClamAV/YARA, não gera NSIS
+# nem mede o payload. Esses gates são locais/Windows com freeze aprovado.
 on:
   push:
     branches: [main, "pap/**"]
@@ -27,8 +30,8 @@ jobs:
       - name: Build dos workspaces
         run: npm run build:all
 
-      - name: Assinatura de release (unitário)
-        run: node --test scripts/test/release-signing.test.mjs
+      - name: Assinatura de release (unitário + segurança do workflow)
+        run: node --test scripts/test/release-signing.test.mjs scripts/test/release-workflow-security.test.mjs
 
       - name: Vendor YARA e manifesto de packaging
         run: node --test scripts/test/7h-yara-vendor.test.mjs scripts/test/7h-packaging-manifest.test.mjs

@@ -9,12 +9,14 @@ import * as url from "node:url";
 
 import {
   assertPrivateKeyOutsideRepo,
+  buildSignedManifest,
   canonicalManifestBytes,
   checkKeyPair,
   fingerprintFromPublicKeyPem,
   loadPrivateKey,
   loadPublicKey,
   normalizeForSigning,
+  resolveManifestPath,
   signCanonical,
   verifyCanonical,
 } from "../release-signing.mjs";
@@ -113,6 +115,101 @@ describe("release-signing — canónico e Ed25519", () => {
       assert.equal(loadPublicKey(publicPath).asymmetricKeyType, "ed25519");
     } finally {
       fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveManifestPath confina ao repo e recusa traversal/absoluto/diretório", () => {
+    const inside = resolveManifestPath("package.json", REPO_ROOT);
+    assert.equal(inside, fs.realpathSync(path.join(REPO_ROOT, "package.json")));
+    assert.throws(() => resolveManifestPath("scripts", REPO_ROOT), /ficheiro regular/);
+    assert.throws(() => resolveManifestPath('package.json" --key x', REPO_ROOT), /caracteres inválidos/);
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cybersafe-outside-"));
+    try {
+      const outsideFile = path.join(outsideDir, "manifest.json");
+      fs.writeFileSync(outsideFile, "{}\n");
+      assert.throws(() => resolveManifestPath(outsideFile, REPO_ROOT), /fora do repositório/);
+      assert.throws(
+        () => resolveManifestPath(path.relative(REPO_ROOT, outsideFile), REPO_ROOT),
+        /fora do repositório/,
+      );
+    } finally {
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("resolveManifestPath recusa junction/symlink que escapa ao repo", () => {
+    const outsideDir = fs.mkdtempSync(path.join(os.tmpdir(), "cybersafe-outside-link-"));
+    const link = path.join(REPO_ROOT, `.sign-test-link-${process.pid}-${Date.now()}`);
+    try {
+      fs.writeFileSync(path.join(outsideDir, "manifest.json"), "{}\n");
+      fs.symlinkSync(outsideDir, link, process.platform === "win32" ? "junction" : "dir");
+      assert.throws(
+        () => resolveManifestPath(path.join(path.basename(link), "manifest.json"), REPO_ROOT),
+        /fora do repositório/,
+      );
+    } finally {
+      try {
+        fs.unlinkSync(link);
+      } catch {
+        // O link já pode ter sido removido; o diretório externo é limpo abaixo.
+      }
+      fs.rmSync(outsideDir, { recursive: true, force: true });
+    }
+  });
+
+  it("buildSignedManifest embute a assinatura no formato do updater", () => {
+    const { privateKey, publicKey, publicPem } = pair();
+    const fingerprint = fingerprintFromPublicKeyPem(publicPem);
+    const result = buildSignedManifest(manifest(), privateKey, fingerprint);
+    assert.equal(result.signed.signature.algorithm, "ed25519");
+    assert.equal(result.signed.signature.signedByFingerprint, fingerprint);
+    assert.equal(
+      verifyCanonical(publicKey, canonicalManifestBytes(result.signed), result.signed.signature.value),
+      true,
+    );
+    assert.ok(!JSON.stringify(result.signed).includes("signatureSha"));
+  });
+
+  it("CLI --sign-manifest/--verify-embedded entrega o manifesto completo", () => {
+    const repoDir = fs.mkdtempSync(path.join(REPO_ROOT, ".sign-test-manifest-"));
+    const outDir = fs.mkdtempSync(path.join(os.tmpdir(), "cybersafe-signing-embedded-"));
+    try {
+      const { privatePem, publicPem } = pair();
+      const privatePath = path.join(outDir, "private.pem");
+      const publicPath = path.join(outDir, "public.pem");
+      const manifestPath = path.join(repoDir, "manifest.json");
+      const signedPath = path.join(outDir, "manifest.signed.json");
+      fs.writeFileSync(privatePath, privatePem);
+      fs.writeFileSync(publicPath, publicPem);
+      fs.writeFileSync(manifestPath, `${JSON.stringify(manifest(), null, 2)}\n`);
+      const fingerprint = fingerprintFromPublicKeyPem(publicPem);
+      execFileSync(
+        process.execPath,
+        [
+          SCRIPT,
+          "--sign-manifest",
+          manifestPath,
+          "--key",
+          privatePath,
+          "--fingerprint",
+          fingerprint,
+          "--out",
+          signedPath,
+        ],
+        { encoding: "utf8" },
+      );
+      const signed = JSON.parse(fs.readFileSync(signedPath, "utf8"));
+      assert.equal(signed.version, "0.1.11");
+      assert.equal(signed.signature.algorithm, "ed25519");
+      const out = execFileSync(
+        process.execPath,
+        [SCRIPT, "--verify-embedded", signedPath, "--key", publicPath],
+        { encoding: "utf8" },
+      );
+      assert.match(out, /^OK/);
+    } finally {
+      fs.rmSync(repoDir, { recursive: true, force: true });
+      fs.rmSync(outDir, { recursive: true, force: true });
     }
   });
 

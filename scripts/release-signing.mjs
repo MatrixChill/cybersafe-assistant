@@ -20,6 +20,12 @@
  *   node scripts/release-signing.mjs --check-key <private.pem> <public.pem> <fingerprint>
  *   node scripts/release-signing.mjs --sign <manifest.json> --key <private.pem> --out <sig.txt>
  *   node scripts/release-signing.mjs --verify <manifest.json> --key <public.pem> --sig <sig.txt>
+ *   node scripts/release-signing.mjs --sign-manifest <manifest.json> --key <private.pem> --fingerprint <fp> --out <signed.json>
+ *   node scripts/release-signing.mjs --verify-embedded <signed.json> --key <public.pem>
+ *
+ * `--sign-manifest` é o caminho do workflow: só aceita manifesto DENTRO do
+ * repositório, valida o caminho por realpath (sem symlink/junction para fora) e
+ * escreve o manifesto completo com o bloco `signature` que o updater lê.
  *
  * Códigos: 0 = ok, 1 = falha de chave/assinatura/manifesto, 2 = uso inválido.
  */
@@ -40,6 +46,8 @@ function usage() {
     "  node scripts/release-signing.mjs --check-key <private.pem> <public.pem> <fingerprint>",
     "  node scripts/release-signing.mjs --sign <manifest.json> --key <private.pem> --out <sig.txt>",
     "  node scripts/release-signing.mjs --verify <manifest.json> --key <public.pem> --sig <sig.txt>",
+    "  node scripts/release-signing.mjs --sign-manifest <manifest.json> --key <private.pem> --fingerprint <fp> --out <signed.json>",
+    "  node scripts/release-signing.mjs --verify-embedded <signed.json> --key <public.pem>",
     "",
     "A chave privada tem de estar FORA do repositório. Nunca é impressa.",
   ].join("\n");
@@ -105,6 +113,42 @@ export function canonicalManifestBytes(manifest) {
   });
 }
 
+/**
+ * Confina o manifesto de entrada ao repositório antes de o ler. O realpath
+ * resolve symlinks/junctions; a verificação de containment acontece ANTES de
+ * qualquer leitura de conteúdo e exige ficheiro regular. Recusa aspas/controlos
+ * (não são nomes Windows válidos e não devem chegar ao shell).
+ */
+export function resolveManifestPath(manifestPath, root = ROOT) {
+  if (typeof manifestPath !== "string" || manifestPath.length === 0) {
+    fail("manifesto: caminho vazio");
+  }
+  if (/[\u0000-\u001f"]/u.test(manifestPath)) {
+    fail("manifesto: caminho com caracteres inválidos");
+  }
+  const rootReal = fs.realpathSync(path.resolve(root));
+  const candidate = path.resolve(rootReal, manifestPath);
+  let real;
+  try {
+    real = fs.realpathSync(candidate);
+  } catch {
+    fail(`manifesto não existe: ${manifestPath}`);
+  }
+  const norm = (value) => (process.platform === "win32" ? value.toLowerCase() : value);
+  const rel = path.relative(norm(rootReal), norm(real));
+  if (rel === "" || rel === ".." || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) {
+    fail("manifesto fora do repositório: recusado");
+  }
+  if (!fs.statSync(real).isFile()) {
+    fail("manifesto não é ficheiro regular");
+  }
+  return real;
+}
+
+function normalizeFingerprint(value) {
+  return String(value).replace(/[:\s-]/g, "").toUpperCase();
+}
+
 export function fingerprintFromPublicKeyPem(pem) {
   const key = createPublicKey(pem);
   const der = key.export({ format: "der", type: "spki" });
@@ -113,6 +157,32 @@ export function fingerprintFromPublicKeyPem(pem) {
 
 export function signCanonical(privateKey, canonical) {
   return sign(null, Buffer.from(canonical, "utf8"), privateKey).toString("base64");
+}
+
+/**
+ * Produz o documento FINAL que o updater valida: corpo normalizado + bloco
+ * `signature` embutido. A assinatura cobre os bytes canónicos do corpo, que são
+ * exactamente os campos que aqui ficam. Campos desconhecidos do input não são
+ * copiados, para não ficarem fora da assinatura.
+ */
+export function buildSignedManifest(raw, privateKey, expectedFingerprint) {
+  const manifest = normalizeForSigning(raw);
+  const derivedPublic = createPublicKey(privateKey);
+  const fingerprint = fingerprintFromPublicKeyPem(
+    derivedPublic.export({ format: "pem", type: "spki" }).toString(),
+  );
+  if (normalizeFingerprint(expectedFingerprint) !== fingerprint) {
+    fail(`fingerprint esperado não corresponde: ${String(expectedFingerprint)} != ${fingerprint}`);
+  }
+  const signature = signCanonical(privateKey, canonicalManifestBytes(manifest));
+  return {
+    signed: {
+      ...manifest,
+      signature: { algorithm: "ed25519", value: signature, signedByFingerprint: fingerprint },
+    },
+    fingerprint,
+    signature,
+  };
 }
 
 export function verifyCanonical(publicKey, canonical, signatureBase64) {
@@ -166,7 +236,7 @@ export function checkKeyPair(privatePath, publicPath, expectedFingerprint, root 
   if (fingerprint !== fingerprintFromPublicKeyPem(publicKey.export({ format: "pem", type: "spki" }).toString())) {
     fail("chave pública não corresponde à privada");
   }
-  if (String(expectedFingerprint).replace(/[:\s-]/g, "").toUpperCase() !== fingerprint) {
+  if (normalizeFingerprint(expectedFingerprint) !== fingerprint) {
     fail(`fingerprint esperado não corresponde: ${String(expectedFingerprint)} != ${fingerprint}`);
   }
   return { fingerprint, publicKey, privateKey };
@@ -193,6 +263,38 @@ function verifyFile(manifestPath, keyPath, sigPath) {
   return { ok, reason: ok ? null : "assinatura inválida" };
 }
 
+function signEmbeddedFile(manifestPath, keyPath, expectedFingerprint, outPath) {
+  const real = resolveManifestPath(manifestPath);
+  const raw = JSON.parse(fs.readFileSync(real, "utf8"));
+  const result = buildSignedManifest(raw, loadPrivateKey(keyPath), expectedFingerprint);
+  fs.writeFileSync(path.resolve(outPath), `${JSON.stringify(result.signed, null, 2)}\n`, "utf8");
+  return result;
+}
+
+function verifyEmbeddedFile(signedPath, keyPath) {
+  const raw = JSON.parse(fs.readFileSync(path.resolve(signedPath), "utf8"));
+  const signature = asRecord(raw.signature);
+  if (
+    !signature ||
+    signature.algorithm !== "ed25519" ||
+    typeof signature.value !== "string" ||
+    !BASE64.test(signature.value) ||
+    typeof signature.signedByFingerprint !== "string"
+  ) {
+    return { ok: false, reason: "bloco signature inválido" };
+  }
+  const manifest = normalizeForSigning(raw);
+  const publicKey = loadPublicKey(keyPath);
+  const fingerprint = fingerprintFromPublicKeyPem(
+    publicKey.export({ format: "pem", type: "spki" }).toString(),
+  );
+  if (normalizeFingerprint(signature.signedByFingerprint) !== fingerprint) {
+    return { ok: false, reason: "fingerprint do manifesto não corresponde à chave" };
+  }
+  const ok = verifyCanonical(publicKey, canonicalManifestBytes(manifest), signature.value);
+  return { ok, reason: ok ? null : "assinatura inválida" };
+}
+
 function main(argv) {
   if (argv.length === 0 || argv.includes("--help") || argv.includes("-h")) {
     process.stdout.write(`${usage()}\n`);
@@ -211,8 +313,10 @@ function main(argv) {
       process.stdout.write(`chave ed25519 coerente: ${result.fingerprint}\n`);
       return 0;
     }
-    if (command === "--sign" || command === "--verify") {
-      const manifestPath = rest.find((arg) => !arg.startsWith("--") && !["--key", "--out", "--sig"].includes(arg));
+    if (command === "--sign" || command === "--verify" || command === "--sign-manifest" || command === "--verify-embedded") {
+      const manifestPath = rest.find(
+        (arg) => !arg.startsWith("--") && !["--key", "--out", "--sig", "--fingerprint"].includes(arg),
+      );
       const value = (flag) => {
         const index = rest.indexOf(flag);
         return index >= 0 ? rest[index + 1] : undefined;
@@ -225,6 +329,19 @@ function main(argv) {
         const signature = signFile(manifestPath, keyPath, outPath);
         process.stdout.write(`assinatura escrita (${signature.length} chars base64)\n`);
         return 0;
+      }
+      if (command === "--sign-manifest") {
+        const outPath = value("--out");
+        const expectedFingerprint = value("--fingerprint");
+        if (!outPath || !expectedFingerprint) return 2;
+        const result = signEmbeddedFile(manifestPath, keyPath, expectedFingerprint, outPath);
+        process.stdout.write(`manifesto assinado escrito (fingerprint ${result.fingerprint})\n`);
+        return 0;
+      }
+      if (command === "--verify-embedded") {
+        const result = verifyEmbeddedFile(manifestPath, keyPath);
+        process.stdout.write(`${result.ok ? "OK" : `FALHA: ${result.reason}`}\n`);
+        return result.ok ? 0 : 1;
       }
       const sigPath = value("--sig");
       if (!sigPath) return 2;
