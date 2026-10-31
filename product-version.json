@@ -1,0 +1,6 @@
+{
+  "version": "0.1.11-internal.pap-r6.20261031",
+  "channel": "internal",
+  "codename": "pap-r6",
+  "note": "Fonte canónica da versão do produto. Lida por scripts/app-version.mjs, injectada no manifesto da aplicação empacotada e no renderer (__BUILD__). Substitui o uso de package.json de workspace como identidade do produto."
+}
