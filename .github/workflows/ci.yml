@@ -1,0 +1,41 @@
+name: ci
+
+on:
+  push:
+    branches: [main, "pap/**"]
+  pull_request:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+
+      - name: Instalar dependências (sem scripts nativos)
+        run: npm ci --ignore-scripts --no-audit --no-fund
+
+      - name: Build dos workspaces
+        run: npm run build:all
+
+      - name: Assinatura de release (unitário)
+        run: node --test scripts/test/release-signing.test.mjs
+
+      - name: Vendor YARA e manifesto de packaging
+        run: node --test scripts/test/7h-yara-vendor.test.mjs scripts/test/7h-packaging-manifest.test.mjs
+
+      - name: YARA clássico e proveniência
+        run: node --test packages/core/test/yara-classic-engine.test.js packages/core/test/yara-engine-provenance.test.js
+
+      - name: Suíte do desktop
+        run: npm test -w @cybersafe/desktop
+

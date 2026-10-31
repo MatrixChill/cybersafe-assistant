@@ -1,0 +1,80 @@
+# Assinatura Ed25519 de releases — runbook
+
+Estado em 2026-10-31: **NÃO PROVISIONADO**. `packages/desktop/src/updater/release-trust.json`
+tem `enabled: false`, `publicKeyPem` vazio e `pinnedKeyFingerprint` vazio. Nenhuma
+chave de produção foi gerada nesta lane e nenhum segredo foi escrito no repo,
+nos logs ou no payload. A aprovação é humana e ainda não foi dada.
+
+## O que já está implementado
+
+- `scripts/release-signing.mjs` — assina/verifica os bytes canónicos de
+  `packages/desktop/src/updater/manifest.ts`; recusa chave privada dentro do
+  repositório (incluindo symlink) e nunca imprime material da chave.
+- `packages/desktop/test/release-signing-compat.test.mjs` — prova que o
+  assinador e o updater canonicalizam os mesmos bytes.
+- `.github/workflows/release-sign.yml` — manual, environment `release-signing`,
+  exige `RELEASE_ED25519_PRIVATE_KEY`, `RELEASE_ED25519_PUBLIC_KEY` e
+  `RELEASE_ED25519_FINGERPRINT`; só produz um artefacto com a assinatura. Não
+  publica, não cria Release e não executa instaladores.
+- `.github/workflows/ci.yml` — build e testes; sem segredos.
+
+## Geração (offline, fora do repositório)
+
+Executar num diretório fora do repo, idealmente offline e com o mínimo de
+permissões. Não colar a chave privada em chats, issues, logs ou variáveis
+persistentes.
+
+```bash
+mkdir -p "$HOME/.cybersafe-release-keys"
+umask 077
+openssl genpkey -algorithm ED25519 -out "$HOME/.cybersafe-release-keys/cybersafe-release-private.pem"
+openssl pkey -in "$HOME/.cybersafe-release-keys/cybersafe-release-private.pem" \
+  -pubout -out "$HOME/.cybersafe-release-keys/cybersafe-release-public.pem"
+node scripts/release-signing.mjs --fingerprint "$HOME/.cybersafe-release-keys/cybersafe-release-public.pem"
+```
+
+O fingerprint devolvido é SHA-256 do DER SPKI, em maiúsculas. É esse valor que
+o proprietário aprova, não a chave privada.
+
+## Aprovação e ativação (humana)
+
+1. O proprietário confirma o fingerprint e a origem da chave.
+2. Guardar a privada num gestor de segredos/offline; nunca no repositório
+   (`*.pem` e `*.key` já estão no `.gitignore`, mas isso não é o controlo).
+3. Definir no GitHub, no environment `release-signing`:
+   - secret `RELEASE_ED25519_PRIVATE_KEY` (PEM completo);
+   - secret `RELEASE_ED25519_PUBLIC_KEY` (PEM público);
+   - variable `RELEASE_ED25519_FINGERPRINT` (fingerprint aprovado).
+4. Só depois da aprovação, atualizar `release-trust.json` com a chave pública,
+   o fingerprint e `enabled: true`. A chave pública pode ser commitada; a
+   privada nunca.
+5. Correr o workflow `release-sign` com um manifesto revisto e verificar a
+   assinatura com `--verify`. O updater continua em modo manual: a assinatura
+   precede a disponibilidade, mas a instalação automática permanece bloqueada.
+
+## Assinar e verificar localmente
+
+```bash
+node scripts/release-signing.mjs --sign release/update-manifest.json \
+  --key "$HOME/.cybersafe-release-keys/cybersafe-release-private.pem" \
+  --out release/update-manifest.sig
+node scripts/release-signing.mjs --verify release/update-manifest.json \
+  --key "$HOME/.cybersafe-release-keys/cybersafe-release-public.pem" \
+  --sig release/update-manifest.sig
+```
+
+## Rotação/revogação
+
+- Gerar novo par, obter novo fingerprint e aprovação explícita.
+- Atualizar `pinnedKeyFingerprint` e `publicKeyPem` numa release que ainda possa
+  ser verificada pela chave antiga; documentar a janela de transição.
+- O updater aceita UMA chave pinada; não há lista de chaves. Uma rotação sem
+  essa janela deixa instalações antigas sem verificação — é uma decisão do
+  proprietário, não do build.
+
+## Limites
+
+- Sem a chave aprovada, `release-trust.json` fica desativado e o updater
+  `unconfigured`. Não substituir por chave de fixture.
+- O certificado Authenticode continua separado da assinatura Ed25519; este
+  runbook não cria nem instala certificados.
