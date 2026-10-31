@@ -1,5 +1,6 @@
 import { installNavigationPolicy } from "./navigation-policy.js";
 import { installInitialWindowReveal } from "./window-foreground.js";
+import { readBuildIdentity } from "./build-identity.js";
 import { registerProcessTerminationIpc } from "./process-termination-ipc.js";
 import { createAiCredentialsStore, type AiCredentialsStore } from "./ai-credentials-store.js";
 import { registerAiCredentialsIpc } from "./ai-credentials-ipc.js";
@@ -1824,10 +1825,16 @@ if (!gotTheLock) {
     // Updater: hoje UNCONFIGURED (sem feed/chave/editor). `runtimeSupported` só
     // em Windows empacotado; dev/portable ⇒ `unsupported` honesto. Nenhum adapter
     // real é exercitado neste estado.
+    // Identidade REAL do artefacto: o carimbo escrito pelo staging do renderer.
+    // Sem carimbo, build/commit ficam ausentes e a UI diz «desconhecida» — nunca
+    // se inventa um valor a partir da versão ou do nome do ficheiro.
+    const installedIdentity = readBuildIdentity(app.getAppPath());
     appUpdater = createProductionUpdater({
       cacheDir: updaterCacheDir(app.getPath("userData")),
       runtimeSupported: app.isPackaged && process.platform === "win32",
       installedVersion: app.getVersion(),
+      installedBuild: installedIdentity.build,
+      installedCommit: installedIdentity.commit,
     });
     updateStateUnsub = appUpdater.onState((s) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:update-state", toAppUpdateSnapshot(s));

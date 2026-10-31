@@ -9,7 +9,7 @@ import { createGitHubReleaseOpener, isGitHubReleaseUrl } from './github-transpor
 import { HttpsFeedSource } from './sources.ts';
 
 /** Build-pinned public trust, never renderer/env-controlled. No installer execution. */
-export function createProductionUpdater(opts: {runtimeSupported: boolean; installedVersion: string; cacheDir: string}) {
+export function createProductionUpdater(opts: {runtimeSupported: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string}) {
   const unavailable = () => createUnconfiguredUpdater(opts);
   if (!trust.enabled || !isGitHubReleaseUrl(trust.feedManifestUrl)) return unavailable();
   try {
@@ -25,7 +25,7 @@ export function createProductionUpdater(opts: {runtimeSupported: boolean; instal
   if (!config.ok) return unavailable();
   const transport = createGitHubReleaseOpener(createNodeHttpsOpener());
   return createUpdater({
-    config, runtimeSupported: opts.runtimeSupported, installed: {version: opts.installedVersion},
+    config, runtimeSupported: opts.runtimeSupported, installed: {version: opts.installedVersion, build: opts.installedBuild, commit: opts.installedCommit},
     manualDownloadOnly: true,
     source: new HttpsFeedSource(config.config, createHttpsFeedFetcher(config.config, transport)),
     downloader: createHttpsArtifactDownloader(config.config, transport),

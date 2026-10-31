@@ -60,11 +60,14 @@ export function createUnconfiguredUpdater(opts: {
   runtimeSupported: boolean;
   installedVersion: string;
   cacheDir?: string;
+  /** Identidade real do build instalado; ausente = a UI diz «desconhecida». */
+  installedBuild?: string;
+  installedCommit?: string;
 }): Updater {
   return createUpdater({
     config: resolveUpdaterConfig({}), // fail-closed: sem âncoras ⇒ unconfigured
     runtimeSupported: opts.runtimeSupported,
-    installed: { version: opts.installedVersion },
+    installed: { version: opts.installedVersion, build: opts.installedBuild, commit: opts.installedCommit },
     source: BLOCKED_SOURCE,
     downloader: BLOCKED_DOWNLOADER,
     signatureVerifier: createEd25519ManifestVerifier({ publicKey: "", pinnedFingerprint: "" }),
@@ -151,11 +154,11 @@ export function validateAutomaticInput(raw: unknown): Validated<boolean> {
  * updater ainda não foi inicializado ou o payload é inválido em RUNTIME — sem
  * nunca rebentar (sem `appUpdater!`) nem fingir um estado que não aconteceu.
  */
-export function failureSnapshot(code: AppUpdateErrorCode, installedVersion: string, message: string): AppUpdateSnapshot {
+export function failureSnapshot(code: AppUpdateErrorCode, installedVersion: string, message: string, identity?: { build?: string; commit?: string }): AppUpdateSnapshot {
   return {
     status: code === "unconfigured" ? "unconfigured" : code === "unsupported" ? "unsupported" : "error",
     channel: "stable",
-    installed: { version: installedVersion },
+    installed: { version: installedVersion, build: identity?.build, commit: identity?.commit },
     canInstall: false,
     automaticCheckEnabled: false,
     error: { code, message },
