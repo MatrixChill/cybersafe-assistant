@@ -27,7 +27,7 @@
 import * as fs from "node:fs/promises";
 import * as fss from "node:fs";
 import * as path from "node:path";
-import * as os from "node:os";
+import { resolveServiceBaseDir } from "@cybersafe/core";
 
 export interface LogWriterOptions {
   /** Tamanho máximo por ficheiro antes de rotacionar. */
@@ -302,7 +302,10 @@ export function createServiceLogWriters(baseDir: string) {
 
 /** Directório base do serviço (`~/.cybersafe-service`). */
 export function serviceBaseDir(): string {
-  return path.join(os.homedir(), ".cybersafe-service");
+  // Sem o otim-in de desenvolvimento, devolve exatamente `~/.cybersafe-service`
+  // (o literal histórico). Com otim-in válido, aponta para a raiz dedicada.
+  // Config parcial/inválida lança cá — ANTES do mkdirSync do index (fail closed).
+  return resolveServiceBaseDir();
 }
 
 export function errorLogPath(baseDir = serviceBaseDir()): string {
@@ -326,14 +329,18 @@ const PERSISTED_EVENT_TYPES = new Set([
   "process.killed",
   "threat.detected",
   "quarantine.added",
+  "quarantine.requested",
+  "quarantine.failed",
+  "protection.changed",
   "quarantine.restored",
   "quarantine.deleted",
   "persistence.detected",
   "engine.health",
 ]);
 
-export function shouldPersistEvent(event: { type?: string } | null | undefined): boolean {
+export function shouldPersistEvent(event: { type?: string; data?: unknown } | null | undefined): boolean {
   if (!event || typeof event.type !== "string") return false;
+  if (event.type === "artifact.analyzed") return (event.data as {verdict?:unknown} | undefined)?.verdict === "inconclusive";
   return PERSISTED_EVENT_TYPES.has(event.type);
 }
 

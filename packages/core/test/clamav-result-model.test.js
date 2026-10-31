@@ -244,7 +244,9 @@ describe("parseClamavOutput — batch", () => {
       files,
       stdout:
         "C:\\tmp\\a.txt: OK\n" +
+        "C:\\tmp\\b.txt: OK\n" +
         "C:\\tmp\\c.txt: Eicar-Signature FOUND\n" +
+        "C:\\tmp\\d.txt: OK\n" +
         FOUND_SUMMARY(1, 0),
       stderr: "",
       code: 1,
@@ -292,6 +294,43 @@ describe("parseClamavOutput — batch", () => {
       fileExists: () => true,
     });
     assert.equal(out.files[0].verdict, "detected", "caminho com / tem de casar com \\");
+  });
+  it("um ficheiro vazio (`: Empty file`) obtém veredicto e não degrada o motor", () => {
+    // MEDIDO 2026-10-16 (instalação real, pasta com um ficheiro vazio): o
+    // clamscan imprime `<path>: Empty file` e NÃO o conta em `Scanned files`,
+    // por isso a aritmética de cobertura falhava e o único ficheiro sem `: OK`
+    // (o vazio) era classificado `inconsistent-exit` — degradando o motor por
+    // um lote que correu bem. O ficheiro vazio foi avaliado: não há nada a ler.
+    const files = ["C:\\tmp\\a.txt", "C:\\tmp\\zero.id"];
+    const out = parseClamavOutput({
+      files,
+      stdout:
+        "C:\\tmp\\a.txt: OK\n" +
+        "C:\\tmp\\zero.id: Empty file\n" +
+        FOUND_SUMMARY(0, 0),
+      stderr: "",
+      code: 0,
+      fileExists: () => true,
+    });
+    assert.equal(out.files[0].verdict, "clean");
+    assert.equal(out.files[1].verdict, "clean", "o ficheiro vazio foi avaliado, não é incógnita");
+    assert.equal(out.status.status, "active", "um lote bem corrido não degrada o motor");
+  });
+
+  it("um ficheiro SEM linha nenhuma e resumo que não o cobre continua inconsistente", () => {
+    // Guarda de regressão do contrato: a correção do ficheiro vazio não pode
+    // alargar a confiança a ficheiros sem evidência nenhuma.
+    const files = ["C:\\tmp\\a.txt", "C:\\tmp\\b.txt"];
+    const out = parseClamavOutput({
+      files,
+      stdout: "C:\\tmp\\a.txt: OK\n" + FOUND_SUMMARY(0, 0),
+      stderr: "",
+      code: 0,
+      fileExists: () => true,
+    });
+    assert.equal(out.files[1].verdict, "error");
+    assert.equal(out.files[1].reason, "inconsistent-exit");
+    assert.equal(out.status.status, "degraded");
   });
 });
 

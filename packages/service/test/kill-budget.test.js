@@ -17,6 +17,24 @@ import { mkdtempSync } from "node:fs";
  */
 const TEST_BASE_DIR = mkdtempSync(path.join(os.tmpdir(), "cybersafe-p0-kill-budget-"));
 
+/**
+ * Compatibilidade dos cenários legados: a lista é injetada à mão e o alvo do
+ * teste é o orçamento, não a frescura da foto (coberta em tp-f1-r1-identity).
+ * Uma cache injetada sem `processesPhotoAt` é tratada como foto do instante
+ * da injeção.
+ *
+ * R2 (FINDING-FRESH-PID-REUSE): a foto já não dispensa a revalidação — quem
+ * chega ao taskkill fixa o mock de `queryCimProcesses` com o MESMO dono do
+ * snapshot. Nenhum caminho de produto passa por este wrapper.
+ */
+const killProcessReal = ProtectionEngineService.prototype.killProcess;
+ProtectionEngineService.prototype.killProcess = function killProcessComFotoDeTeste(...args) {
+  if (this.processesPhotoAt === 0 && this.processes.length > 0) {
+    this.processesPhotoAt = Date.now();
+  }
+  return killProcessReal.apply(this, args);
+};
+
 
 /**
  * P4 — orçamento global do kill.
@@ -120,17 +138,21 @@ describe("P4 — orçamento global do kill", () => {
     assert.ok(floor >= 2_000, `piso de ${floor} ms e insuficiente para as confirmações do reap`);
   });
 
-  it("1b. a espera entre tentativas tambem come orçamento (nada gasta fora do deadline)", async () => {
-    const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
+  it("1b. a espera entre tentativas tambem come orçamento (nada gasta fora do deadline)", async () => {      const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const BUDGET = 700;
     try {
+      // O alvo tem de vir do snapshot (referência do utilizador); sem cache a
+      // R1 recusa antes do taskkill. A frescura da foto é do instante da
+      // injeção (wrapper de compatibilidade).
+      const row = processEntry({ pid: child.pid, name: "vivo.exe", commandLine: "vivo.exe" });
+      engine.processes = [row];
       // taskkill falha e o SO diz que o alvo esta vivo: a segunda tentativa e
       // tentada, e a espera entre as duas nao pode passar do deadline.
       engine.queryCimProcesses = async (filter) => {
         if (!filter.startsWith("ProcessId=")) return [];
         await sleep(10);
-        return [processEntry({ pid: child.pid, name: "vivo.exe", commandLine: "vivo.exe" })];
+        return [row];
       };
       let attempts = 0;
       engine.runTaskkill = async (pid) => {
@@ -164,6 +186,7 @@ describe("P4 — orçamento global do kill", () => {
     const PER_STAGE = BUDGET / 3;
     try {
       const target = processEntry({ pid: child.pid, name: "vivo.exe", commandLine: "vivo.exe" });
+      engine.processes = [target];
       let calls = 0;
       // Cada seam gasta até `PER_STAGE`, e o que lhe é concedido é o que
       // resta do orçamento. Se a soma não estivesse limitada, o elapsed
@@ -236,8 +259,10 @@ describe("P4 — orçamento global do kill", () => {
   it("3. o reap ainda confirma a morte no caso típico (não regrediu por encolher)", async () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     // PID inexistente → `isProcessAlive` falso, o reap confirma à primeira.
-    engine.processes = [processEntry({ pid: 42001, name: "morto.exe", commandLine: "morto.exe" })];
-    engine.queryCimProcesses = async () => [];
+    // R2: a fonte confirma o alvo antes da ação (mesmo dono do snapshot).
+    const row = processEntry({ pid: 42001, name: "morto.exe", commandLine: "morto.exe" });
+    engine.processes = [row];
+    engine.queryCimProcesses = async () => [row];
     engine.runTaskkill = okTaskkill;
 
     const started = Date.now();
@@ -257,11 +282,14 @@ describe("P4 — orçamento global do kill", () => {
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     try {
-      // O CIM "não vê" o PID duas vezes → ausência confirmada.
+      const row = processEntry({ pid: child.pid, name: "vivo.exe", commandLine: "vivo.exe" });
+      engine.processes = [row];
+      // 1.ª query = pré-ação (confirma o alvo); depois o CIM "não vê" o PID
+      // duas vezes → ausência confirmada.
       let queries = 0;
       engine.queryCimProcesses = async () => {
         queries += 1;
-        return [];
+        return queries === 1 ? [row] : [];
       };
       engine.runTaskkill = okTaskkill; // NÃO mata o filho: força o caminho do reap
 
@@ -285,10 +313,13 @@ describe("P4 — orçamento global do kill", () => {
     const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     try {
+      const row = processEntry({ pid: child.pid, name: "vivo.exe", commandLine: "vivo.exe" });
+      engine.processes = [row];
       engine.queryCimProcesses = async (_filter, timeoutMs) => {
-        // Com o orçamento a zero, o lookup recebe 0 e responde de imediato.
+        // Com o orçamento a zero, a revalidação pré-ação recebe 0 e responde
+        // de imediato; o timeout é decidido a seguir, antes do taskkill.
         await sleep(Math.min(timeoutMs ?? 0, 50));
-        return [processEntry({ pid: child.pid, name: "vivo.exe", commandLine: "vivo.exe" })];
+        return [row];
       };
       let taskkillRan = false;
       engine.runTaskkill = async () => {

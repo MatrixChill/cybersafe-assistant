@@ -2,6 +2,34 @@ import path from "node:path";
 import fs from "node:fs";
 import os from "node:os";
 
+/**
+ * Fronteira de segmento para exclusões por caminho (D7).
+ *
+ * Um `startsWith` cru excluía irmãos com o mesmo prefixo textual
+ * ("C:\\foo" excluía "C:\\foobar"). Aqui o alvo tem de SER o caminho excluído
+ * ou um descendente seu, com a fronteira a cair num separador de caminho.
+ * Recebe o caminho já normalizado e em minúsculas; a exclusão é normalizada aqui.
+ */
+export function matchesPathBoundary(lowerPath: string, exclusion: string): boolean {
+  if (!exclusion) return false;
+  const normalizedEx = path.normalize(exclusion).toLowerCase();
+  if (normalizedEx === "" || normalizedEx === ".") return false;
+  if (lowerPath === normalizedEx) return true;
+  const withSep = normalizedEx.endsWith(path.sep) ? normalizedEx : normalizedEx + path.sep;
+  return lowerPath.startsWith(withSep);
+}
+
+/**
+ * Categoria de exclusão: PORQUE um ficheiro ficou fora dos motores. Serve para
+ * exibir o dado sem expor caminhos do utilizador (`path` não transporta o
+ * caminho; `extension`/`filename` transportam só o token).
+ */
+export interface ExclusionCategory {
+  reason: "extension" | "path" | "filename";
+  /** Extensão (`.log`) ou nome exato; ausente para exclusões por caminho. */
+  detail?: string;
+}
+
 export interface ExclusionConfig {
   /** Directories or file paths to exclude. Prefix-match: excluding "C:\foo" also excludes "C:\foo\bar". */
   paths: string[];
@@ -48,7 +76,7 @@ export class ExclusionManager {
     const fileName = path.basename(lowerPath);
 
     // 1. Path prefix exclusions (directories / exact files)
-    if (this.config.paths.some(ex => lowerPath.startsWith(ex.toLowerCase()))) {
+    if (this.config.paths.some(ex => matchesPathBoundary(lowerPath, ex))) {
       return true;
     }
 
@@ -77,7 +105,7 @@ export class ExclusionManager {
     const fileName = path.basename(lowerPath);
 
     for (const ex of this.config.paths) {
-      if (lowerPath.startsWith(ex.toLowerCase())) {
+      if (matchesPathBoundary(lowerPath, ex)) {
         return `path matches exclusion: ${ex}`;
       }
     }
@@ -86,6 +114,32 @@ export class ExclusionManager {
     }
     if (this.config.files.includes(fileName)) {
       return `filename excluded: ${fileName}`;
+    }
+    return null;
+  }
+
+  /**
+   * A MESMA decisão de `isExcluded`, mas com a categoria que a explica.
+   *
+   * A ORDEM das regras é a de `isExcluded` (caminho → extensão → nome) e não
+   * pode divergir: um ficheiro que case duas regras tem de ser classificado pela
+   * primeira que o excluiu, senão a explicação contradiz a contagem. Há um
+   * teste que confronta as duas funções numa matriz de entradas.
+   */
+  public exclusionCategory(filePath: string): ExclusionCategory | null {
+    if (!filePath) return { reason: "path" };
+
+    const lowerPath = path.normalize(filePath).toLowerCase();
+    if (this.config.paths.some(ex => matchesPathBoundary(lowerPath, ex))) {
+      return { reason: "path" };
+    }
+    const ext = path.extname(lowerPath);
+    if (this.config.extensions.includes(ext)) {
+      return { reason: "extension", detail: ext };
+    }
+    const fileName = path.basename(lowerPath);
+    if (this.config.files.includes(fileName)) {
+      return { reason: "filename", detail: fileName };
     }
     return null;
   }

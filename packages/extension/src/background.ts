@@ -1,6 +1,8 @@
 import { analyzeUrlRisk, analyzeDownloadEvent, type ThreatEvent } from "@cybersafe/shared-types";
 
-const API_BASE = "http://localhost:4000";
+// S3: a API local escuta apenas em loopback IPv4 — 127.0.0.1 evita o mismatch
+// com "localhost" (que pode resolver para ::1 sem listener).
+const API_BASE = "http://127.0.0.1:4000";
 const EVENTS_URL = `${API_BASE}/api/events`;
 const HEALTH_URL = `${API_BASE}/health`;
 const FETCH_TIMEOUT_MS = 3500;
@@ -111,6 +113,17 @@ async function sendEvent(event: ThreatEvent): Promise<boolean> {
       body: JSON.stringify(event)
     });
     if (!res.ok) {
+      // S3: /api/events passou a exigir sessão. Um 401/403 NÃO é "offline" — a
+      // API está alcançável e recusou o pedido; dizer offline seria falso. A
+      // extensão ainda não tem credencial própria (tarefa registada): até lá os
+      // eventos não são aceites, e o estado fica visível em vez de inventado.
+      if (res.status === 401 || res.status === 403) {
+        setApiState("online");
+        console.warn(
+          `[CyberSafe] API local recusou o evento (HTTP ${res.status}): /api/events exige sessão autenticada.`,
+        );
+        return false;
+      }
       setApiState("offline");
       console.warn(`[CyberSafe] Evento não aceite pela API local (HTTP ${res.status}).`);
       return false;

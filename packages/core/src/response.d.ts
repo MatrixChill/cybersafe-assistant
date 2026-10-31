@@ -7,8 +7,8 @@ export declare class QuarantineManager {
     init(): Promise<void>;
     private flush;
     quarantine(analysis: AnalysisResult): Promise<QuarantineEntry | null>;
-    restore(id: string, restoredBy?: string): Promise<boolean>;
-    delete(id: string): Promise<boolean>;
+    restore(id: string, restoredBy?: string): Promise<{ success: boolean; error?: string }>;
+    delete(id: string): Promise<{ success: boolean; error?: string }>;
     list(): QuarantineEntry[];
 }
 export declare function killProcessTree(pid: number): Promise<boolean>;

@@ -98,11 +98,15 @@ function extrairLiterais(src: string): string[] {
 
 const LITERAIS = extrairLiterais(ENGINE_SRC);
 
-/** Os tres toasts que o App.tsx mostra, para o guard se auto-verificar. */
+/** Os summaries que o App.tsx mostra em toast, para o guard se auto-verificar. */
+// O auto-kill saiu do engine: "Processo bloqueado por caminho" deixou de ser
+// publicado, e os dois process.suspicious honestos ("processo não terminado")
+// passaram a chegar ao toast. A lista espelha os summaries REAIS do engine.
 const SUMARIOS_DE_TOAST = [
   "Ameaça detetada em",
   "Execução de script malicioso bloqueada",
-  "Processo bloqueado por caminho",
+  "Deteção anterior neste caminho; processo não terminado",
+  "Assinatura detetada; processo não terminado",
 ];
 
 /**

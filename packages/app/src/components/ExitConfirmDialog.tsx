@@ -157,6 +157,14 @@ export function ExitConfirmHost() {
     });
   }, []);
 
+  // Modal apresentado (o React já comprometeu o render): avisar o main, que
+  // para os reenvios e revela a janela já pintada. Só depois da confirmação
+  // de render é que a janela escondida é mostrada — evita a janela branca.
+  useEffect(() => {
+    if (!open) return;
+    void window.electronAPI?.ackExitConfirm?.()?.catch(() => {});
+  }, [open]);
+
   const respond = useCallback((action: ExitConfirmAction) => {
     const answer = exitConfirmResponse(action);
     if (answer === null) return;

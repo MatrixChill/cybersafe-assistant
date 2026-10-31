@@ -90,6 +90,40 @@ export const KILL_TIMEOUT_ERROR =
 
 export const KILL_ERROR_ERROR = "Erro ao terminar processo.";
 
+/**
+ * A recusa NOMEADA da fronteira Windows de leitura.
+ *
+ * Não é um término que falhou: o pedido foi barrado no processo main do
+ * Electron antes de chegar ao serviço, por isso o Windows não mudou de estado e
+ * nenhum processo foi morto. Dizer «Erro ao terminar processo» aqui minte nas
+ * duas direções — sugere uma tentativa real e empurra o utilizador para repetir
+ * a mesma ação já recusada.
+ */
+export const KILL_READONLY_UNAVAILABLE =
+  "Ação indisponível nesta sessão — o CyberSafe está em modo de leitura e nenhum processo foi terminado.";
+
+/**
+ * Reconhece APENAS a recusa nomeada do efeito negado.
+ *
+ * `ipcRenderer.invoke` não propaga objetos: quando o handler do main lança, o
+ * renderer recebe um `Error` com o texto embrulhado
+ * (`Error occurred in handler for '…': …`). Por isso se testa o SUBSTRING do
+ * código da fronteira, e não a classe do erro — a classe ficou no main.
+ *
+ * A lista de não-correspondências importa tanto como a de correspondências:
+ * `metodo_nao_e_leitura_permitida_neste_modo` é outra recusa (leitura não
+ * permitida) e uma falha de rede ou um `access denied` REAL têm de continuar a
+ * dar `null` para não mascarar um problema verdadeiro como indisponibilidade.
+ */
+export function classifyKillRejection(erro: unknown): "dev_windows_readonly" | null {
+  const mensagem = erro instanceof Error ? erro.message : null;
+  if (typeof mensagem !== "string" || mensagem === "") return null;
+  if (mensagem.includes("dev_windows_readonly: efeito_negado_por_modo_leitura")) {
+    return "dev_windows_readonly";
+  }
+  return null;
+}
+
 export const KILL_PROTECTED_ERROR =
   "Processo protegido do CyberSafe/sistema: não pode ser terminado.";
 
@@ -254,6 +288,14 @@ export interface RunKillProcessOptions {
  */
 export interface KillRequestGate {
   inFlight: boolean;
+  /**
+   * A fronteira Windows já recusou os kills desta montagem, por nome. Uma vez
+   * recusada, a recusa é uma propriedade da SESSÃO (o main barra o pedido antes
+   * de ele chegar ao serviço), não um infortúnio pontual — carregar outra vez
+   * bate na mesma guarda. Persiste no mesmo objeto `gate` que a página usa para
+   * o duplo envio, por isso vive aqui e não num `useState`.
+   */
+  readonlyRefused?: boolean;
 }
 
 export function isKillRequestInFlight(gate: KillRequestGate): boolean {
@@ -277,6 +319,22 @@ export const KILL_REQUEST_ALREADY_IN_FLIGHT: KillOutcome = {
   success: false,
   message: null,
 };
+
+/** O desfecho devolvido a uma ação que a fronteira já tinha recusado. */
+export const KILL_REQUEST_READONLY_REFUSED: KillOutcome = {
+  status: "unavailable",
+  pid: 0,
+  success: false,
+  message: KILL_READONLY_UNAVAILABLE,
+};
+
+/**
+ * Este desfecho é a recusa nomeada (e não um `unavailable` de duplo envio, que
+ * vem sem mensagem)? É o que decide se a guarda fica travada para a montagem.
+ */
+export function isReadonlyKillRefusal(outcome: KillOutcome): boolean {
+  return outcome.status === "unavailable" && outcome.message === KILL_READONLY_UNAVAILABLE;
+}
 
 export interface RunKillRequestOptions extends RunKillProcessOptions {
   /** Guarda síncrona do fluxo. Sem ela, cada clique no mesmo turno é um pedido. */
@@ -305,6 +363,22 @@ export interface RunKillRequestOptions extends RunKillProcessOptions {
 export async function runKillRequest(options: RunKillRequestOptions): Promise<KillOutcome> {
   const { gate, onOutcome, onFinish, refresh, ...killOptions } = options;
 
+  if (gate.readonlyRefused === true) {
+    // A fronteira já recusou esta ação por nome. Repetir o pedido não é
+    // re-testar nada: o main barra-o antes do serviço. Devolve-se o MESMO
+    // desfecho honesto, sem `kill` e sem refetch (o Windows não mudou).
+    //
+    // A entrega é o ponto: a página limpa o aviso ANTES de chamar
+    // (`TaskManagerPage.tsx:480`) e só o escreve dentro de `onOutcome` (`:498`).
+    // Devolver sem entregar deixava a segunda tentativa muda — a mensagem certa
+    // entregue ao sítio errado. `onFinish` corre porque é o contrato de fecho
+    // de quem chama, não uma otimização.
+    const recusado: KillOutcome = { ...KILL_REQUEST_READONLY_REFUSED, pid: killOptions.pid };
+    onOutcome?.(recusado);
+    onFinish?.();
+    return recusado;
+  }
+
   if (isKillRequestInFlight(gate)) {
     // Confirmação duplicada barrada. Não é um kill, logo não há desfecho de
     // kill a inventar: devolve-se um `unavailable` sem mensagem, e o primeiro
@@ -315,6 +389,7 @@ export async function runKillRequest(options: RunKillRequestOptions): Promise<Ki
   beginKillRequest(gate);
   try {
     const outcome = await runKillProcess(killOptions);
+    if (isReadonlyKillRefusal(outcome)) gate.readonlyRefused = true;
     onOutcome?.(outcome);
     if (shouldRefetchAfterKill(outcome)) void refresh?.();
     return outcome;
@@ -351,7 +426,13 @@ export async function runKillProcess({
     }
 
     return mapKillResult(raced as ProcessKillResult);
-  } catch {
+  } catch (erro) {
+    // A recusa da fronteira não é um terminate falhado: é um `unavailable` com
+    // uma mensagem que diz que nada foi morto. Qualquer outra exceção
+    // continua `failed` — não se dilui uma avaria real numa indisponibilidade.
+    if (classifyKillRejection(erro) === "dev_windows_readonly") {
+      return { status: "unavailable", pid, success: false, message: KILL_READONLY_UNAVAILABLE };
+    }
     return { status: "failed", pid, success: false, message: KILL_ERROR_ERROR };
   } finally {
     if (timer) clearTimeout(timer);
@@ -413,6 +494,36 @@ export const PROCESSES_POLL_MS = 2_000;
 export const PROCESSES_REFRESH_COALESCE_MS = 250;
 
 /**
+ * Duas cadências e uma razão: noutras páginas a lista é o PRODUTO (cada linha
+ * conta), noutras é só a tabela que traduz PID → nome.
+ *
+ *   · produto (Gestor de Tarefas, Monitor): o ritmo do produtor, 2 s;
+ *   · tradução (Segurança Empresarial): 10 s chega — pedir mais depressa publica
+ *     as MESMAS linhas e volta a serializá-las pelo cano.
+ *
+ * Porque isto existe: o painel empresarial tinha um `getProcesses` próprio de 5 s
+ * em paralelo com o poll do App. A mesma consulta com dois donos, dois ritmos e
+ * duas noções de frescura — e era esse caminho privado que carimbava «Atualizado»
+ * com o relógio do cliente. Um dono só, com o ritmo declarado por página.
+ */
+export const PROCESSES_ENRICHMENT_POLL_MS = 10_000;
+
+/** Página → ritmo. Página fora daqui não mostra processos e não pede nada. */
+const PAGINAS_DE_PROCESSOS = new Map<string, number>([
+  ["taskmanager", PROCESSES_POLL_MS],
+  ["monitor", PROCESSES_POLL_MS],
+  ["business", PROCESSES_ENRICHMENT_POLL_MS],
+]);
+
+/**
+ * O ritmo a que o renderer pede a lista nesta página, ou `null` quando a página
+ * não mostra processos. É a única resposta: o App não decide cadência à parte.
+ */
+export function processosPollMs(pagina: string): number | null {
+  return PAGINAS_DE_PROCESSOS.get(pagina) ?? null;
+}
+
+/**
  * Eventos cujo tema é a LISTA de processos. Pedem UM pedido (processes), nunca
  * o snapshot completo de 7: um `process.started` não tem nada a dizer sobre
  * ameaças, ligações, quarentena ou PC state.
@@ -437,6 +548,9 @@ export type EventRefreshRoute = "processes" | "snapshot" | "none";
  */
 export function resolveEventRefresh(eventType: string): EventRefreshRoute {
   if (eventType === "scan.progress") return "none";
+  // Observations and per-file outcomes already reach the history subscription.
+  // Findings/confirmed actions have their own events that refresh the snapshot.
+  if (["file.created","file.modified","file.deleted","file.renamed","artifact.analyzed","quarantine.requested"].includes(eventType)) return "none";
   if (isProcessesEvent(eventType)) return "processes";
   return "snapshot";
 }

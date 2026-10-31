@@ -526,6 +526,13 @@ describe("resolveEventRefresh — a decisão que o App consome", () => {
     const published = [
       "file.created",
       "file.modified",
+      "file.deleted",
+      "file.renamed",
+      "quarantine.requested",
+      "quarantine.added",
+      "quarantine.failed",
+      "engine.health",
+      "protection.changed",
       "registry.persistence.changed",
       "process.started",
       "process.exited",
@@ -536,8 +543,15 @@ describe("resolveEventRefresh — a decisão que o App consome", () => {
       "scan.progress",
     ];
     const expected: Record<string, string> = {
-      "file.created": "snapshot",
-      "file.modified": "snapshot",
+      "file.created": "none",
+      "file.modified": "none",
+      "file.deleted": "none",
+      "file.renamed": "none",
+      "quarantine.requested": "none",
+      "quarantine.added": "snapshot",
+      "quarantine.failed": "snapshot",
+      "engine.health": "snapshot",
+      "protection.changed": "snapshot",
       "registry.persistence.changed": "snapshot",
       "process.started": "processes",
       "process.exited": "processes",
@@ -547,7 +561,7 @@ describe("resolveEventRefresh — a decisão que o App consome", () => {
       "process.blocked": "processes",
       "script.blocked": "snapshot",
       "threat.detected": "snapshot",
-      "artifact.analyzed": "snapshot",
+      "artifact.analyzed": "none",
       "scan.progress": "none",
     };
     for (const type of published) {

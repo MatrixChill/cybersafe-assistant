@@ -19,9 +19,17 @@ function createMockEngine(opts = {}) {
       scannedFiles.push(filePath);
       scannedCalls.push({ filePath, source, options });
       if (opts.threatFiles && opts.threatFiles.includes(path.basename(filePath))) {
-        return { highRiskCount: 1, overallSeverity: "high" };
+        return {
+          highRiskCount: 1,
+          overallSeverity: "high",
+          results: [{ analysisState: "completed" }],
+        };
       }
-      return { highRiskCount: 0, overallSeverity: "safe" };
+      return {
+        highRiskCount: 0,
+        overallSeverity: "safe",
+        results: [{ analysisState: "completed" }],
+      };
     },
     emitScanProgress: () => {},
   };
@@ -91,6 +99,65 @@ describe("Single file scan (custom type)", () => {
     assert.equal(state.filesScanned, 1);
     assert.equal(engine.scannedFiles.length, 1);
     assert.equal(engine.scannedFiles[0], target);
+
+    await cleanup(tmpDir);
+  });
+
+  it("counts an inconclusive engine result separately from a clean analysis", async () => {
+    const engine = createMockEngine();
+    engine.scanArtifact = async () => ({
+      highRiskCount: 0,
+      overallSeverity: "safe",
+      results: [{ analysisState: "inconclusive" }],
+    });
+    const mgr = new ScanManager(engine);
+    const target = path.join(tmpDir, "test-file.txt");
+
+    const id = await mgr.startScan("custom", target);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.status, "completed");
+    assert.equal(state.filesAnalyzed, 1);
+    assert.equal(state.filesInconclusive, 1);
+
+    await cleanup(tmpDir);
+  });
+
+  it("does not count a failed engine result as conclusive", async () => {
+    const engine = createMockEngine();
+    engine.scanArtifact = async () => ({
+      highRiskCount: 0,
+      overallSeverity: "low",
+      results: [{ analysisState: "failed" }],
+    });
+    const mgr = new ScanManager(engine);
+    const target = path.join(tmpDir, "test-file.txt");
+
+    const id = await mgr.startScan("custom", target);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.status, "completed");
+    assert.equal(state.filesAnalyzed, 1);
+    assert.equal(state.filesInconclusive, 1);
+
+    await cleanup(tmpDir);
+  });
+
+  it("does not treat a missing result list as a conclusive scan", async () => {
+    const engine = createMockEngine();
+    engine.scanArtifact = async () => ({ highRiskCount: 0, overallSeverity: "safe" });
+    const mgr = new ScanManager(engine);
+    const target = path.join(tmpDir, "test-file.txt");
+
+    const id = await mgr.startScan("custom", target);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.status, "completed");
+    assert.equal(state.filesAnalyzed, 1);
+    assert.equal(state.filesInconclusive, 1);
 
     await cleanup(tmpDir);
   });
@@ -284,18 +351,57 @@ describe("Progress reporting", () => {
 
 // ─── Empty Scan ───────────────────────────────────────────────────────
 describe("Empty scan", () => {
-  it("completes immediately when no files found", async () => {
+  // CONTRATO reconciliado, não produto invertido. A decisão do utilizador está no
+  // própria fonte (scan-manager.ts:696-707: «Nenhum ficheiro para analisar = erro,
+  // nunca 'concluído' … (decisão do utilizador)») e na histórica autorizada
+  // rc22-pap / entrega-integracao-2026-10-23-0025: «análise sem ficheiros produz
+  // falha explícita». O teste anterior esperava `completed` + `progress: 100` — ou
+  // seja, pedia exactamente o falso seguro que a decisão eliminou: uma varrimento
+  // que não analisou nada a parecer uma análise feita. Mantêm-se as provas que
+  // importam (0 ficheiros, 0 deteções, nada enviado ao motor) e passa a exigir-se
+  // a causa observável, que antes ninguém verificava.
+  it("falha de forma explícita quando o alvo não tem ficheiros", async () => {
     const engine = createMockEngine();
     const mgr = new ScanManager(engine);
 
     const tmpDir = await createTestTree("empty", {});
+    assert.deepEqual(await fs.readdir(tmpDir), [], "o alvo tem de estar mesmo vazio");
+    assert.equal(engine.scannedFiles.length, 0, "ainda nada foi ao motor");
+
     const id = await mgr.startScan("custom", tmpDir);
     await new Promise((r) => setTimeout(r, 300));
 
     const state = mgr.getScan(id);
-    assert.equal(state.status, "completed");
+    assert.equal(state.status, "failed", "sem ficheiros é falha explícita, não conclusão");
+    assert.match(state.error ?? "", /Nenhum ficheiro para analisar/, "a causa tem de ser legível, não um estado oco");
+    assert.equal(state.filesDiscovered, 0);
+    assert.equal(state.filesTotal, 0);
+    assert.equal(state.filesScanned, 0, "zero ficheiros analisados");
+    assert.equal(state.threatsFound, 0, "zero deteções: falhou por não haver nada, não por haver ameaça");
+    assert.notEqual(state.progress, 100, "nada pode aparecer como análise completa");
+    assert.equal(engine.scannedFiles.length, 0, "nenhum ficheiro foi enviado ao motor");
+    assert.ok(state.endTime, "terminaliza e fica registável no histórico");
+
+    await cleanup(tmpDir);
+  });
+
+  it("falha da mesma forma quando só há directórios vazios (zero ficheiros reais)", async () => {
+    const engine = createMockEngine();
+    const mgr = new ScanManager(engine);
+
+    // «Pasta com subpastas vazias» é o caso que mais facilmente passaria por
+    // trabalho feito: existe alvo, existe árvore, e mesmo assim não há um único
+    // ficheiro para analisar.
+    const tmpDir = await createTestTree("empty-dirs", { "vazio": {} });
+    const id = await mgr.startScan("custom", tmpDir);
+    await new Promise((r) => setTimeout(r, 300));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.status, "failed");
+    assert.match(state.error ?? "", /Nenhum ficheiro para analisar/);
     assert.equal(state.filesScanned, 0);
-    assert.equal(state.progress, 100);
+    assert.equal(state.threatsFound, 0);
+    assert.equal(engine.scannedFiles.length, 0);
 
     await cleanup(tmpDir);
   });
@@ -990,7 +1096,10 @@ describe("VirusTotal scope policy", () => {
       }
   });
 
-  function artifactEngine(t, positives) {
+  async function artifactEngine(t, positives) {
+    // Real disposable file: the production pre/post identity guard must execute.
+    const dir = await createTestTree("vt-artifact", {"fixture.txt":"Benign fixture"});
+    const filePath = path.join(dir, "fixture.txt");
     // Run the real methods without starting monitors, persistence, native binaries or networking.
     const engine = Object.create(ProtectionEngineService.prototype);
     const events = [];
@@ -1015,14 +1124,14 @@ describe("VirusTotal scope policy", () => {
       logHistory: async () => {}, actionsLog: { write: () => {} },
     });
     t.mock.method(NativeEngineBridge, "scan", async () => ({ ok: false }));
-    return { engine, events, vtCalls };
+    return { engine, events, vtCalls, filePath };
   }
 
   for (const [positives, score, severity] of [[4, 75, "high"], [8, 95, "critical"]]) {
     it(`accepted sensitivity loss: bulk skips VT boost and ${severity} escalation with a healthy key`, async (t) => {
-      const { engine, events, vtCalls } = artifactEngine(t, positives);
+      const { engine, events, vtCalls, filePath } = await artifactEngine(t, positives);
       // Product decision: quick/deep/custom lose min(40, positives * 5), unlike single-file scans.
-      const bulk = await engine.scanArtifact("fixture.txt", "system-scanner", { skipVirusTotal: true });
+      const bulk = await engine.scanArtifact(filePath, "system-scanner", { skipVirusTotal: true });
       assert.equal(vtCalls.length, 0, "bulk must never call the VT client");
       assert.equal(bulk.riskScore, 55);
       assert.equal(bulk.overallSeverity, "low");
@@ -1031,7 +1140,7 @@ describe("VirusTotal scope policy", () => {
       assert.equal(events.filter((event) => event.type === "threat.detected").length, 0);
       assert.equal(events[0].data.vtResult, null);
 
-      const single = await engine.dispatch("scan.artifact", { path: "fixture.txt" });
+      const single = await engine.dispatch("scan.artifact", { path: filePath });
       assert.deepEqual(vtCalls, ["fixture-hash"]);
       assert.equal(single.riskScore, score);
       assert.equal(single.overallSeverity, severity);
@@ -1051,13 +1160,14 @@ describe("VirusTotal scope policy", () => {
     const expected = { totalFiles: 1 };
     engine.scanArtifact = async (...args) => { received = args; return expected; };
     assert.equal(await engine.dispatch("scan.artifact", { path: "single.txt" }), expected);
-    assert.deepEqual(received, ["single.txt", "dashboard"]);
+    // O `deepEqual` continua a provar a intenção original: o scan de um ficheiro escolhido na UI NÃO leva `skipVirusTotal`. Agora pina também o contrato novo do P0 de starvation — `priority: "user"`, porque é trabalho PEDIDO e não pode ficar atrás das análises automáticas. Se `skipVirusTotal` aparecesse aqui, o deepEqual falhava.
+    assert.deepEqual(received, ["single.txt", "dashboard", { priority: "user" }]);
   });
 
   it("explicit false and default realtime/process calls retain VT", async (t) => {
-    const { engine, vtCalls } = artifactEngine(t, 4);
+    const { engine, vtCalls, filePath } = await artifactEngine(t, 4);
     for (const [source, options] of [["dashboard", { skipVirusTotal: false }], ["service", undefined], ["system-scanner", undefined]]) {
-      const result = await engine.scanArtifact("fixture.txt", source, options);
+      const result = await engine.scanArtifact(filePath, source, options);
       assert.equal(result.overallSeverity, "high");
       assert.equal(result.riskScore, 75);
     }

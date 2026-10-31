@@ -1,3 +1,13 @@
+import { RpcRequestQueue, INDEPENDENT_READ_METHODS } from './rpc-request-queue.js';
+import { createDefinitionsUpdateResult } from "./definition-update-result.js";
+import {
+  ProtectionIntentStore,
+  ProtectionStartup,
+  protectionIntentPath,
+  parseOptInPayload,
+  type EscritaResultado,
+} from "./protection-intent.js";
+import { timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
 import * as os from "node:os";
@@ -7,6 +17,10 @@ import { promisify } from "node:util";
 import { fileURLToPath } from "node:url";
 import {
   VirusTotalClient,
+  SafeProcessTermination,
+  matchesSnapshotCreation,
+  createWindowsTerminationOpener,
+  type TerminationIdentity,
   HardwareHealthEngine,
   ClamavBridge,
   CLAMAV_ENGINE_PROCESS_NAMES,
@@ -30,21 +44,28 @@ import {
   normalizeProcessPath,
   reconcileProcessExit,
   scoreToStatus,
+  deriveProtectionStatus,
   decideTaskkillRetry,
   treeChildrenOf,
   KILL_RETRY_DELAY_MS,
   TREE_SWEEP_MAX_DEPTH,
   TREE_SWEEP_MAX_TARGETS,
   ExclusionManager,
+  type ExclusionCategory,
   engineIsDegraded,  effectiveRiskScore,
   PcStateEngine,
   disposeTempHelper,
   type ClamavFileOutcome,
+  type ClamavJobPriority,
+  PIPE_AUTH_VERSION,
+  generatePipeNonce,
+  isPipeNonce,
+  makePipeProof,
+  verifyPipeProof,
 } from "@cybersafe/core";
 import { NativeWindowsWatcher,
   ProcessMonitor,
   snapshotConnections,
-  terminateProcessTree,
   WindowsHealthEngine,
   type FileObservation,
   EtwConsumer,
@@ -53,20 +74,34 @@ import { NativeWindowsWatcher,
   PROCESS_POLL_INTERVAL_MS
 } from "@cybersafe/native-windows";
 import { NativeEngineBridge } from "./native-engine-bridge.js";
+import { RealtimeFileQueue } from "./realtime-file-queue.js";
+import { RealtimeRecovery, type SaturationStage } from "./realtime-recovery.js";
+import { canAutoQuarantine, loadQuarantinePolicy, type QuarantinePolicy } from "./quarantine-policy.js";
 import { isTransientFsError, TRANSIENT_SCAN_ERROR_WINDOW_MS } from "./scan-error.js";
-import { DefinitionUpdater } from "./updater.js";
+import { DefinitionUpdater, agendadorDefinicoesDeveArrancar, recuperacaoYaraPermitida } from "./updater.js";
 import { ClamDatabaseGate } from "./clam-database-gate.js";
-import { ScanManager } from "./scan-manager.js";
-import { createServiceLogWriters, shouldPersistEvent, formatScanLog, scanIdFromContext, type LogWriter } from "./log-writer.js";
+import { resolverCorpusYara } from "./dev-test-yara.js";
+import { ScanManager, linhaDeCancelamento } from "./scan-manager.js";
+import { ScanHistory } from "./scan-history.js";
+import { createServiceLogWriters, shouldPersistEvent, formatScanLog, scanIdFromContext, serviceBaseDir, type LogWriter } from "./log-writer.js";
+import { UsbConfigStore, UsbProtectionMonitor } from "./usb-protection.js";
+import { UsbReadOnlyScanAdapter, criarConfirmacaoPresencaUsb } from "./usb-scan-adapter.js";
+import { criarDeteccaoUsbNativa } from "./usb-detection-adapter.js";
+import { UsbProtectionRuntime, caminhoConfigUsb, motivoBloqueioUsbPolicy } from "./usb-protection-runtime.js";
 import { formatKillBlockedLine, type KillRequestKind } from "./logging.js";
 import type {
   AnalysisResult,
   ConnectionSnapshot,
   EngineHealth,
+  HardwareSnapshot,
   KillProcessResult,
   PcState,
+  ProcessEnumerationAttempt,
+  ProcessEnumerationError,
+  ProcessEnumerationTruth,
   ProcessKillResult,
 ProcessKillProtectionReason,
+  ProcessListResult,
   ProcessSnapshot,
   ProtectionState,
   ProtectionStats,
@@ -76,7 +111,8 @@ ProcessKillProtectionReason,
   ServiceResponseMap,
   ThreatEvent,
 } from "@cybersafe/shared-types";
-import { hasDegradedProtections, ENGINE_DISPLAY_NAME } from "@cybersafe/shared-types";
+import { hasDegradedProtections, ENGINE_DISPLAY_NAME, classifyProcessEnumerationError } from "@cybersafe/shared-types";
+import { RealtimeLossLedger } from "./realtime-loss.js";
 import type { KillProtectionContext, KillTargetInfo } from "@cybersafe/core";
 
 const execFileAsync = promisify(execFile);
@@ -106,7 +142,81 @@ const SHUTDOWN_BLOCKED_METHODS = new Set<string>([
   "scan.fullSystem",
   "definitions.update",
   "monitor.start",
+  // `monitor.resume` arranca a proteção, tal como `monitor.start`: prolonga o
+  // encerramento e não pode passar. `monitor.pause` também não passa — durante
+  // a desmontagem o estado da proteção deixa de ser do utilizador.
+  "monitor.resume",
+  "monitor.pause",
+  // Ligar a proteção USB durante o encerramento só criaria trabalho novo
+  // (inserções em fila) para um serviço que está a desmontar. Arrancar uma
+  // análise MANUAL no shutdown (`usb.scan`) é o mesmo tipo de trabalho novo;
+  // `usb.cancel` fica permitido — cancelar reduz, nunca prolonga.
+  "usb.configure",
+  "usb.scan",
 ]);
+
+/**
+ * Arranque progressivo (TP-PAP-F1-RUNTIME-20261026).
+ *
+ * O pipe abre depois das guardas (fixture/read-only) e ANTES de `init()`
+ * terminar. Durante essa janela só passam leituras cujo valor não depende de
+ * init; as restantes leituras esperam pela prontidão (com prazo) e as mutações
+ * são recusadas com um erro estável. Isto não é «pipe ligado = proteção
+ * pronta»: `getProtectionState()` continua a dizer OFF e o `service-ready` só
+ * sai depois de init.
+ *
+ * As listas são fail-closed: um método novo no dispatch que não esteja aqui
+ * fica recusado enquanto o motor arranca, em vez de correr sem guarda.
+ */
+type StartupState = "legacy" | "starting" | "ready" | "failed" | "disposed";
+
+/** Prazo máximo de espera de uma leitura que precisa de init. */
+const STARTUP_READY_WAIT_MS = 10_000;
+
+/**
+ * Leituras cuja resposta é honesta sem `init()`: não afirmam saúde, nem
+ * histórico/exclusões/intenção que só são carregados no init.
+ *
+ * `protection.getState` NÃO entra aqui: antes de init `osLayerHealthy` seria
+ * uma afirmação sem leitura real. O gate deixa-a esperar, tal como o histórico
+ * (`scan.history`), exclusões, intenção de proteção e o estado USB.
+ */
+const STARTUP_IMMEDIATE_READS = new Set<string>([
+  "events.list",
+  "threats.list",
+  "processes.list",
+  "scan.getActive",
+]);
+
+/** Leituras que esperam por init (saúde/histórico/exclusões/quarentena). */
+const STARTUP_DEFERRED_READS = new Set<string>([
+  "protection.getState",
+  "connections.list",
+  "quarantine.list",
+  "scan.getLast",
+  "scan.history",
+  "exclusions.get",
+  "protectionIntent.get",
+  "usb.getState",
+  "hardware.snapshot",
+  "windows.healthSnapshot",
+  "pcstate.get",
+]);
+
+const SERVICE_STARTING_MESSAGE = "Serviço a arrancar: inicialização em curso; tente de novo em instantes.";
+const SERVICE_STARTUP_FAILED_MESSAGE = "Serviço indisponível: a inicialização falhou; reinicie a aplicação.";
+const SERVICE_DISPOSED_MESSAGE = "Serviço indisponível: a encerrar.";
+
+/** Erro estável da janela de arranque. O código é local; o pipe leva a mensagem. */
+class ServiceStartupError extends Error {
+  constructor(
+    message: string,
+    readonly code: "SERVICE_STARTING" | "SERVICE_STARTUP_FAILED" | "SERVICE_DISPOSED",
+  ) {
+    super(message);
+    this.name = "ServiceStartupError";
+  }
+}
 
 /** Códigos de erro de socket esperados quando o peer fecha o pipe primeiro. */
 const EXPECTED_SOCKET_ERROR_CODES = new Set<string>([
@@ -134,6 +244,22 @@ function normaliseCreationIdentity(value: string | number | undefined | null): s
   const ms = Date.parse(value);
   if (Number.isFinite(ms)) return String(ms);
   return value.trim() || null;
+}
+
+/**
+ * Identidade de criação que serve para AUTORIZAR uma ação destrutiva.
+ *
+ * Ao contrário de `normaliseCreationIdentity` (que também serve para comparar
+ * chaves de cache), aqui uma data em texto livre NÃO é identidade: tem de ser
+ * um instante positivo e não futuro. `null` significa "não provado" — e quem
+ * chama recusa a ação. É esta a diferença entre um PID e o dono do PID.
+ */
+function trustedCreationIdentity(value: string | number | undefined | null): string | null {
+  const normalised = normaliseCreationIdentity(value);
+  if (normalised === null) return null;
+  const ms = Number(normalised);
+  if (!Number.isFinite(ms) || ms <= 0 || ms > Date.now()) return null;
+  return normalised;
 }
 
 /** O que sabemos de um PID que lançámos: quando nasceu e quando o registámos. */
@@ -233,7 +359,43 @@ const OWN_CHILD_CONTRADICTION_TTL_MS = 5 * 60 * 1000;
  */
 const OWN_CHILD_IDENTITY_FUTURE_SLACK_MS = 2_000;
 
+/**
+ * Janela (ms) em que um `HardwareSnapshot` já construído pode ser reutilizado.
+ *
+ * REGRESSÃO P0 MEDIDA (2026-10-10): o handler `hardware.snapshot` devolvia
+ * `getLastSnapshot() || await getSnapshot()` e era esse curto-circuito a única
+ * via de leitura. O primeiro snapshot é construído ANTES de a leitura do
+ * armazenamento (e da GPU e da temperatura) ter chegado — os ticks médio/lento
+ * são fire-and-forget — e ficava em cache PARA SEMPRE: nada voltava a chamar
+ * `getSnapshot()` quando a proteção estava desligada (o poller de 10 s só vive
+ * dentro de `startProtection`). Resultado observado pelo utilizador: Dashboard e
+ * PC Center presos em "Ainda sem leitura do armazenamento desde o arranque" /
+ * "—" e GPU "Não detetada", enquanto a Saúde do Windows (cache próprio, com
+ * TTL) mostrava o C: a 89% e 106,4 GB livres.
+ *
+ * A cache existe para não repetir trabalho entre chamadas quase simultâneas
+ * (renderer a 2 s + tray). Fora dessa janela, o snapshot é RECONSTRUÍDO — o
+ * motor de hardware já tem o seu próprio ritmo interno (rápido 1 s, médio 5 s,
+ * lento 10 s), portanto reconstruir é barato e é o que garante que uma leitura
+ * válida chega ao ecrã em vez de ficar presa na primeira fotografia.
+ */
+const HARDWARE_SNAPSHOT_REUSE_MS = 1_000;
+
 export class ProtectionEngineService {
+  /** Admission can be OFF while a previous module teardown remains unconfirmed. */
+  private protectionStopUnconfirmed = false;
+  private readonly realtimeQueue = new RealtimeFileQueue();
+  private readonly realtimeRecovery = new RealtimeRecovery();
+  private quarantinePolicy: QuarantinePolicy = "warn";
+  private lastClamavAvailability: boolean | undefined;
+  private fileObservationReads = 0;
+  private realtimeDroppedEvents = 0;
+  private overflowNoticeAt = -Infinity;
+  private coverageNoticeAt = -Infinity;
+  /** Única fonte dos números de perda: separa fila de watcher e nunca soma cumulativos. */
+  private loss = new RealtimeLossLedger();
+  /** Últimos buracos de cobertura reportados pelo filho do watcher (janela limitada). */
+  private coverageGaps: { path: string; motivo: string; detectedAt: string }[] = [];
   /**
    * Raiz de dados do serviço. Injetável para que um teste nunca escreva em
    * `%USERPROFILE%\.cybersafe-service`; o default de PRODUÇÃO é exatamente o de
@@ -311,22 +473,8 @@ export class ProtectionEngineService {
    * `null` = o gate recusa (update pendente ou activo) e o scan responde
    * `unavailable` sem spawn.
    */
-  private readonly clamav = new ClamavBridge({
-    acquireDatabaseLease: () => {
-      const attempt = this.clamDatabaseGate.tryAcquireScanLease();
-      if (attempt.ok) return attempt.lease;
-      // A CAUSA vai com a recusa. Sem ela a bridge anunciava sempre "estão a
-      // ser actualizadas", o que é falso quando o serviço está a encerrar:
-      // não há actualização a caminho, e esperar não ajuda ninguém.
-      return { refused: true, reason: attempt.reason };
-    },
-  });
-  private readonly analyzer = new MalwareAnalyzer({
-    signatures: this.signatures,
-    trust: this.trust,
-    yara: this.yara,
-    clamav: this.clamav,
-  });
+  private readonly clamav: ClamavBridge;
+  private readonly analyzer: MalwareAnalyzer;
   private readonly quarantine: QuarantineManager;
   private readonly watcher = new NativeWindowsWatcher();
   private readonly processMonitor = new ProcessMonitor();
@@ -334,12 +482,33 @@ export class ProtectionEngineService {
   private readonly wfpFilter = new WfpFilter();
   private readonly amsiProvider = new AmsiProvider();
   private readonly clients = new Set<net.Socket>();
+  private readonly authenticatingClients = new Set<net.Socket>();
+  /**
+   * Nonces de cliente já vistos por esta instância do pipe. A prova assina AMBOS
+   * os nonces e o nonce de servidor é novo por ligação, por isso um transcripto
+   * gravado de outra ligação não revalida sozinha; reenviar um `clientNonce`
+   * já usado é recusado aqui à mesma, porque só pode ser replay ou confusão de
+   * estado. Limitado: um pipe não é um arquivo de nonces.
+   */
+  private readonly seenClientNonces = new Set<string>();
+  private static readonly SEEN_NONCES_MAX = 4096;
+  private readonly pipeToken = process.env.CYBERSAFE_PIPE_TOKEN;
+  private readonly pipeAuthRequired = process.env.NODE_ENV === "production" || process.env.CYBERSAFE_PIPE_TOKEN !== undefined;
   private readonly vt = new VirusTotalClient(process.env.VIRUSTOTAL_API_KEY);
-  private readonly hardware = new HardwareHealthEngine();
+  private readonly hardware = new HardwareHealthEngine((line) => {
+    // Opt-in trace is retained by the existing bounded writer; stdout is drained.
+    this.actionsLog?.write('[hardware-query] ' + line);
+  });
   private readonly windowsHealth = new WindowsHealthEngine();
   private readonly exclusions = new ExclusionManager();
   private readonly pcState = new PcStateEngine();
-  private readonly scanManager = new ScanManager(this);
+  /** Histórico persistente de análises (`<baseDir>/scans.jsonl`). */
+  private readonly scanHistory: ScanHistory;
+  private readonly scanManager: ScanManager;
+  /** Adapter real do scan USB: forca `readOnly` no caminho do motor. */
+  private readonly usbAdapter: UsbReadOnlyScanAdapter;
+  /** Runtime da protecao USB (poll, opt-in, handlers usb.*). */
+  private readonly usbRuntime: UsbProtectionRuntime;
   private readonly historyPath: string;
   private readonly updater: DefinitionUpdater;
   private readonly logWriters: ReturnType<typeof createServiceLogWriters>;
@@ -350,19 +519,105 @@ export class ProtectionEngineService {
 
   /**
    * @param baseDir Raiz de dados do serviço. OMITIR = comportamento de PRODUÇÃO,
-   *   ou seja `path.join(os.homedir(), ".cybersafe-service")` — idêntico ao que
-   *   existia antes deste parâmetro. Passar um diretório temporário é o que
-   *   isola um teste: definições, logs, histórico e quarantine nascem todos aí.
+   *   resolvido por `serviceBaseDir()` — que é exatamente
+   *   `path.join(os.homedir(), ".cybersafe-service")` no regime normal, e só
+   *   aponta para outra raiz sob o otim-in EXPLÍCITO de desenvolvimento. Passar
+   *   um diretório temporário é o que isola um teste: definições, logs,
+   *   histórico e quarantine nascem todos aí.
    *
    * O corpo atribui pela ordem das dependências (baseDir -> derivados -> logs),
    * porque não pode contar com os field initializers.
    */
   constructor(baseDir?: string) {
-    this.baseDir = baseDir ?? path.join(os.homedir(), ".cybersafe-service");
+    this.baseDir = baseDir ?? serviceBaseDir();
     this.definitionsDir = path.join(this.baseDir, "definitions");
+    this.clamav = new ClamavBridge({
+      definitionsDir: this.definitionsDir,
+      acquireDatabaseLease: (scanId) => {
+        const attempt = this.clamDatabaseGate.tryAcquireScanLease();
+        if (process.env.CYBERSAFE_DEBUG_SCAN === "1") {
+          const gate = this.clamDatabaseGate.state;
+          console.log(
+            `[ScanPerf] DB_LEASE_GATE_RESULT scanId=${scanId ?? "n/a"} at=${new Date().toISOString()} result=${attempt.ok ? "granted" : "denied"} reason=${attempt.ok ? "none" : attempt.reason} activeScans=${gate.activeScans} updatePending=${gate.updatePending} updateActive=${gate.updateActive} updateWaiters=${gate.updateWaiters}`,
+          );
+        }
+        if (attempt.ok) return attempt.lease;
+        // A CAUSA vai com a recusa. Sem ela a bridge anunciava sempre "estão a
+        // ser actualizadas", o que é falso quando o serviço está a encerrar:
+        // não há actualização a caminho, e esperar não ajuda ninguém.
+        return { refused: true, reason: attempt.reason };
+      },
+    });
+    this.analyzer = new MalwareAnalyzer({
+      signatures: this.signatures,
+      trust: this.trust,
+      yara: this.yara,
+      clamav: this.clamav,
+    });
     this.logsDir = path.join(this.baseDir, "logs");
     this.quarantine = new QuarantineManager(this.baseDir);
     this.historyPath = path.join(this.baseDir, "history.jsonl");
+    this.scanHistory = new ScanHistory(path.join(this.baseDir, "scans.jsonl"));
+    this.scanManager = new ScanManager(this, this.scanHistory);
+    this.protectionStartup = new ProtectionStartup({
+      store: new ProtectionIntentStore(protectionIntentPath(this.baseDir)),
+      agora: () => Date.now(),
+      // O serviço confirma. `true` só quando o motor aceitou E a proteção está
+      // de facto ativa — nunca quando o pedido simplesmente regressou.
+      iniciar: async () => {
+        const resultado = await this.startProtection();
+        return resultado.ok === true && this.protectionState === true;
+      },
+    });
+
+    // ── Protecao USB (R8) ──
+    // O adapter FORCA `readOnly: true` no caminho do motor e exige o contrato
+    // de read-only (nome+versao) declarado pelo motor. Sem contrato, nao ha
+    // auto-scan. O runtime fica criado aqui e arranca em `init()`.
+    // UMA porta de deteção partilhada: o monitor enumera para a fila e a
+    // identidade, e o adapter volta a enumerar para CONFIRMAR o alvo ANTES de
+    // o scan declarar `completed` — as duas leem a mesma fonte, sem duplicar
+    // o enumerador nativo.
+    const deteccaoUsb = criarDeteccaoUsbNativa();
+    this.usbAdapter = new UsbReadOnlyScanAdapter({
+      scans: {
+        startScan: (type, targetPath, options) => this.scanManager.startScan(type, targetPath, options),
+        cancelScan: (id) => this.scanManager.cancelScan(id),
+        getScan: (id) => this.scanManager.getScan(id),
+      },
+      capacidade: () => this.usbReadOnlyCapacidade(),
+      confirmarPresenca: criarConfirmacaoPresencaUsb(deteccaoUsb),
+    });
+    this.usbRuntime = new UsbProtectionRuntime({
+      baseDir: this.baseDir,
+      monitor: new UsbProtectionMonitor({
+        deteccao: deteccaoUsb,
+        store: new UsbConfigStore(caminhoConfigUsb(this.baseDir)),
+        analise: this.usbAdapter,
+        readOnly: this.usbAdapter,
+        // Uma analise global (manual) em curso ocupa o unico slot.
+        analiseManualAtiva: () => this.scanManager.getActiveScan() !== null,
+      }),
+      estadoDoScan: (scanId) => this.scanManager.getScan(scanId) ?? null,
+      verificarCapacidade: () => this.usbAdapter.verificar(),
+      // Análise MANUAL (`usb.scan`): a MESMA porta read-only do auto-scan e a
+      // MESMA enumeração nativa. A raiz resolve-se aqui, por enumeração fresca
+      // a partir do `deviceId` — nunca vem do renderer.
+      analise: this.usbAdapter,
+      enumerar: () => deteccaoUsb.listar(),
+      slotOcupado: () => this.scanManager.getActiveScan() !== null,
+      // TP-GUI02-USB: a MESMA condição do `init()` (logo abaixo) é dita ao runtime
+      // na construção, para que `usb.getState` saiba que neste processo a enumeração
+      // nunca foi autorizada. É um campo declarado, não uma adivinhação: `null`
+      // significa «vai arrancar, deixa-o contar o que viu». Sem isto, o modo de
+      // leitura publica para sempre o `starting` de construtor — «a arrancar» —
+      // enquanto o PC Center mostra a pen ligada.
+      bloqueioPorPolitica: motivoBloqueioUsbPolicy(process.env),
+      registar: (mensagem, detalhe) => {
+        if (this.scanDebugEnabled) console.log(`[Service] ${mensagem}`, detalhe ?? "");
+      },
+    });
+
     this.updater = new DefinitionUpdater(this.definitionsDir, {
       gate: this.clamDatabaseGate,
       // P1-1 (2) — o re-probe é o MESMO nos dois caminhos, porque os dois
@@ -371,6 +626,23 @@ export class ProtectionEngineService {
       // o estado de antes da actualização.
       afterSwap: async () => {
         await this.clamav.isAvailable(true);
+      },
+      afterYaraUpdated: async () => {
+        const rulesPath = path.join(this.definitionsDir, "yara", "default.yar");
+        const publishedRules = await fs.readFile(rulesPath, "utf-8");
+        await this.yara.load(rulesPath);
+        const loadedRules = await fs.readFile(rulesPath, "utf-8");
+        if (loadedRules !== publishedRules || !this.yara.isAvailable || this.yara.health.status === "error") {
+          throw new Error("YARA reload did not retain the published corpus.");
+        }
+      },
+      afterYaraRollbackFailed: () => {
+        this.yara.markUnavailable("YARA desativado: não foi possível repor e recarregar o corpus anterior.");
+      },
+      afterDefinitionsUpdated: async (result) => {
+        if (result.hashesUpdated) {
+          await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.json"));
+        }
       },
     });
     // O caminho do binário ClamAV é uma exclusão de scan, e é o que fecha a
@@ -390,8 +662,22 @@ export class ProtectionEngineService {
   private processes: ProcessSnapshot[] = [];
   /** Quando foi a última reconciliação de `processes` com a verdade do SO. */
   private processesEnumeratedAt = 0;
+  /**
+   * Quando foi tirada a última FOTO bem-sucedida do SO. Distinta de
+   * `processesEnumeratedAt`: esse marcador é também a janela de frescura, e o
+   * caminho do kill põe-no a 0 para forçar re-enumeração. A idade da informação
+   * que se mostra ao utilizador não pode desaparecer com a invalidação — a foto
+   * aconteceu, e é isso que `truth.enumeratedAt` afirma.
+   */
+  private processesPhotoAt = 0;
   /** Reconciliações concorrentes partilham uma única enumeração (nunca duas). */
-  private processesEnumerating: Promise<ProcessSnapshot[]> | null = null;
+  private processesEnumerating: Promise<{ rows: ProcessSnapshot[]; servedFrom: "snapshot" | "cache" }> | null = null;
+  /**
+   * Registo da última TENTATIVA de enumerar o SO — boa ou má. Existe porque o
+   * resultado de uma falha não pode ser apagado: sem este registo, `[]` no wire
+   * significava «zero processos» quando queria dizer «o Windows não respondeu».
+   */
+  private processesAttempt: ProcessEnumerationAttempt | null = null;
   /**
    * PIDs cuja MORTE foi confirmada pelo Windows, com a identidade que tinham.
    * Uma enumeração demora 2–4 s e o poll do monitor só corre a cada 10 s: os
@@ -405,6 +691,8 @@ export class ProtectionEngineService {
   private static readonly TOMBSTONE_ANY_IDENTITY = "*";
   /** Incrementa em cada remoção autoritativa de `processes` (época da enumeração em voo). */
   private processesRevision = 0;
+  /** Only births received during the current OS enumeration may overlay it. */
+  private processBirthsDuringEnumeration: Map<number, ProcessSnapshot> | null = null;
   // ── P4: orçamento global do kill ────────────────────────────────────────
   // O renderer (packages/app/src/lib/processActions.ts: KILL_TIMEOUT_MS) deriva
   // o prazo DESTAS parcelas. Antes, o serviço podia levar 27–33 s porque cada
@@ -424,6 +712,23 @@ export class ProtectionEngineService {
   // (16 000 ms), logo nunca desiste antes de o serviço responder. Com 13 000 o
   // pior caso daria 15 000 — o renderer e o serviço a expirar no mesmo
   // instante, que é a divergência que estamos a fechar.
+  /**
+   * DELTA DE CONGELAMENTO (`f1-kill-disable-20261026`).
+   *
+   * `true` = o serviço recusa terminar QUALQUER processo, dentro do próprio
+   * `killProcess` — e como o dispatch do pipe (`process.killTree`) chama
+   * exatamente esse método, a recusa cobre também chamadas IPC diretas.
+   *
+   * Porque existe: a identidade de criação é provada na revalidação, mas a
+   * operação revalidação→taskkill NÃO é atómica (o taskkill é por PID). Onde o
+   * freeze não aceitar essa janela residual, este delta desativa a terminação
+   * em vez de a fingir segura. O que NÃO desativa: a listagem
+   * (`processes.list`), a monitorização e a proteção. A UI deve comunicar
+   * indisponibilidade — reconciliação Codex/Qoder; nenhum contrato partilhado
+   * é alterado aqui.
+   */
+  private static readonly KILL_TERMINATION_DISABLED = true;
+
   private static readonly KILL_TOTAL_BUDGET_MS = 12_000;
   /** Timeout de uma query CIM por alvo. Generoso de propósito: um WQL
    *  `ProcessId=n` custa 0.3–1 s; isto só é atingido com o CIM estrangulado. */
@@ -457,38 +762,180 @@ export class ProtectionEngineService {
    *  global restante. `killProcessTree` no core já suporta `timeoutMs`, logo
    *  esta é a única superfície que alarga — o core não muda. */
   private readonly runTaskkill: (pid: number, options?: { timeoutMs?: number }) => Promise<KillProcessResult> = killProcessTree;
-  /**
-   * Seam de teste do AUTO-KILL (P1), mesmo estilo do `runTaskkill` acima e NUNCA
-   * ligado ao contrato do kill manual: e uma seam NOVA, so para os dois
-   * caminhos que verificam deteccoes (`blockedPaths` e `blockedHashes`).
-   *
-   * Antes, `terminateProcessTree` era importado e chamado directamente nesses
-   * dois caminhos, e por isso NENHUM teste conseguia observar se tinha sido
-   * chamado. Um kill `/F /T` sem verificacao, invisivel para a suite, e
-   * precisamente por isso que os dois auto-kills ficaram sem passar pelo
-   * guard do kill manual.
-   *
-   * Por defeito e a funcao real. O chamador de producao nunca passa nada.
-   */
-  private readonly runAutoKill: (pid: number) => Promise<boolean> = terminateProcessTree;
   private connections: ConnectionSnapshot[] = [];
   private blockedHashes = new Set<string>();
   private blockedPaths = new Set<string>();
   private definitionsUpdatedAt = "";
   private networkTimer: NodeJS.Timeout | null = null;
   private networkInFlight = false;
-  private readonly recentScans = new Map<string, number>();
   /** Rate-limit para erros de scan transitórios (evita spam de stack traces). */
   private readonly transientScanLogAt = new Map<string, number>();
   private protectionState = false;
+  /**
+   * Opt-in de retoma ao arrancar. Deliberadamente separado da proteção viva:
+   * o registo em disco é uma preferência, nunca uma observação de que algo está
+   * a correr. Ver `ProtectionStartup` e `human-protection-startup.test.js`.
+   */
+  private readonly protectionStartup: ProtectionStartup;
   private protectionTransition: Promise<{ ok: boolean; protectionEnabled: boolean }> | null = null;
+  /**
+   * Pausa temporária: até quando a proteção fica desligada, e o timer que a
+   * volta a ligar. `null` = não há pausa. O timer é a ÚNICA fonte de
+   * reativação automática — o desktop nunca "acorda" a proteção por conta
+   * própria, para não haver duas autoridades a competir pelo mesmo estado.
+   */
+  private protectionPausedUntil: string | null = null;
+  private protectionResumeTimer: NodeJS.Timeout | null = null;
   /** Estado explícito de encerramento: para o trabalho novo e o broadcast. */
   private isShuttingDown = false;
   /** Garante que dispose()/shutdown() não correm a desmontagem duas vezes. */
   private disposed = false;
+  /** Estado do arranque progressivo. `legacy` = regime antigo, sem gate. */
+  private startupStateValue: StartupState = "legacy";
+  /** Só o bootstrap real pede o modo progressivo; testes/legado ficam iguais. */
+  private progressiveStartRequested = false;
+  private readinessPromise: Promise<StartupState> | null = null;
+  private resolveReadiness: ((state: StartupState) => void) | null = null;
+  private protectionGeneration = 0;
+  private backgroundAbort = new AbortController();
 
+  /**
+   * O regime de teste não lê nem escreve o registo de intenção: alguns testes
+   * correm com a `baseDir` real, e aí a preferência pertence a quem está a usar
+   * a máquina. Em runtime decide o serviço — nunca a UI.
+   */
+  private get intentAtivo(): boolean {
+    return process.env.NODE_ENV !== "test";
+  }
+
+  /**
+   * Estado observável do arranque. `legacy`/`ready` servem tudo; `starting`
+   * aplica o gate; `failed`/`disposed` recusam leituras e mutações.
+   */
+  get startupState(): StartupState {
+    return this.startupStateValue;
+  }
+
+  /** Prontidão para ações que exigem init (compatível com o contrato antigo). */
+  get ready(): boolean {
+    return this.startupStateValue === "legacy" || this.startupStateValue === "ready";
+  }
+
+  /**
+   * Ativa o modo progressivo. Idempotente. Sem esta chamada o motor mantém o
+   * comportamento de sempre (servir sem init), que os testes e arranques
+   * legados dependem.
+   */
+  beginProgressiveStart(): void {
+    if (this.progressiveStartRequested) return;
+    this.progressiveStartRequested = true;
+    if (this.startupStateValue === "ready") return;
+    this.startupStateValue = "starting";
+    this.readinessPromise = new Promise<StartupState>((resolve) => {
+      this.resolveReadiness = resolve;
+    });
+  }
+
+  /** Resolve a prontidão uma única vez; dispose/falha nunca ficam pendurados. */
+  private settleStartup(state: StartupState): void {
+    if (!this.progressiveStartRequested) return;
+    if (this.startupStateValue === "disposed") return;
+    this.startupStateValue = state;
+    const resolve = this.resolveReadiness;
+    this.resolveReadiness = null;
+    resolve?.(state);
+  }
+
+  /** Espera pela prontidão com prazo; devolve o estado no fim da espera. */
+  private async awaitStartup(deadlineMs: number): Promise<StartupState | "timeout"> {
+    if (this.startupStateValue !== "starting") return this.startupStateValue;
+    const readiness = this.readinessPromise;
+    if (!readiness) return this.startupStateValue;
+    let timer: NodeJS.Timeout | undefined;
+    const timeout = new Promise<"timeout">((resolve) => {
+      timer = setTimeout(() => resolve("timeout"), Math.max(1, deadlineMs));
+      timer.unref?.();
+    });
+    const outcome = await Promise.race([readiness, timeout]);
+    if (timer) clearTimeout(timer);
+    return outcome;
+  }
+
+  /**
+   * Gate do dispatch durante a janela. Leituras seguras passam; leituras que
+   * dependem de init esperam (com prazo) e mutações são recusadas. Tudo o que
+   * não está nas listas é recusado — fail-closed, não fail-open.
+   */
+  private async gateMethodDuringStartup(method: string): Promise<void> {
+    if (!this.progressiveStartRequested) return;
+    const state = this.startupStateValue;
+    if (state === "ready" || state === "legacy") return;
+    // Encerrar é sempre possível: é a vida do processo, não uma ação no motor.
+    if (method === "service.shutdown") return;
+    if (state === "starting") {
+      if (STARTUP_IMMEDIATE_READS.has(method)) return;
+      if (STARTUP_DEFERRED_READS.has(method)) {
+        const outcome = await this.awaitStartup(STARTUP_READY_WAIT_MS);
+        if (outcome === "ready") return;
+        if (outcome === "failed") {
+          throw new ServiceStartupError(SERVICE_STARTUP_FAILED_MESSAGE, "SERVICE_STARTUP_FAILED");
+        }
+        if (outcome === "disposed") {
+          throw new ServiceStartupError(SERVICE_DISPOSED_MESSAGE, "SERVICE_DISPOSED");
+        }
+        throw new ServiceStartupError(SERVICE_STARTING_MESSAGE, "SERVICE_STARTING");
+      }
+      throw new ServiceStartupError(SERVICE_STARTING_MESSAGE, "SERVICE_STARTING");
+    }
+    if (state === "failed") {
+      throw new ServiceStartupError(SERVICE_STARTUP_FAILED_MESSAGE, "SERVICE_STARTUP_FAILED");
+    }
+    throw new ServiceStartupError(SERVICE_DISPOSED_MESSAGE, "SERVICE_DISPOSED");
+  }
+
+  /**
+   * Wrapper de init: a prontidão só é resolvida no fim (sucesso) ou na falha.
+   * O corpo antigo vive em `initInternal` para não alterar a ordem interna.
+   */
   async init() {
+    try {
+      await this.initInternal();
+      // O dispose pode chegar durante um await do init. Nesse caso o motor já
+      // está a encerrar: NUNCA se declara ready nem se deixa o bootstrap enviar
+      // `service-ready` sobre um serviço meio-desmontado.
+      if (this.disposed) {
+        throw new ServiceStartupError(SERVICE_DISPOSED_MESSAGE, "SERVICE_DISPOSED");
+      }
+      this.settleStartup("ready");
+    } catch (error) {
+      if (this.startupStateValue !== "disposed") this.settleStartup("failed");
+      throw error;
+    }
+  }
+
+  /** Portão local para efeitos de init que já não podem começar. */
+  private throwIfDisposed(): void {
+    if (this.disposed) {
+      throw new ServiceStartupError(SERVICE_DISPOSED_MESSAGE, "SERVICE_DISPOSED");
+    }
+  }
+
+  /**
+   * O ÚNICO caminho que liga o agendador de definições. `initInternal` chama-o;
+   * `startProtection` NÃO. A decisão (test/readonly/fixture) vive no updater
+   * (`agendadorDefinicoesDeveArrancar`) para o teste de wiring medir a matriz
+   * real sem arrancar rede nem binários.
+   */
+  private agendarDefinicoesSePermitido(): boolean {
+    if (!agendadorDefinicoesDeveArrancar()) return false;
+    this.updater.startScheduler();
+    return true;
+  }
+
+  private async initInternal() {
+    this.throwIfDisposed();
     await fs.mkdir(this.baseDir, { recursive: true });
+    this.quarantinePolicy = await loadQuarantinePolicy(path.join(this.baseDir, "protection-policy.json"));
     await fs.mkdir(this.logsDir, { recursive: true });
     await this.seedDefinitions();
     await this.quarantine.init();
@@ -499,16 +946,115 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // fabricado) que já foram corrigidos no built-in — o runtime nunca fica
       // com uma base desactualizada.
       await this.signatures.refreshBuiltinIfStale(path.join(this.definitionsDir, "hashes", "default.json"));
-    await this.yara.load(path.join(this.definitionsDir, "yara", "default.yar"));
+    // Corpus YARA do arranque. Sem `CYBERSAFE_DEV_TEST_YARA_PATH` isto é byte a byte
+    // o caminho de sempre e nenhum I/O novo acontece aqui; com a variável, o resolutor
+    // exige isolamento + gate montado + corpus validado ANTES do load, e uma config
+    // inválida faz o serviço não arrancar (a mesma regra do gate de fixture: falha ⇒ zero
+    // sessão) em vez de silenciosamente detetar com um corpus que ninguém reviu.
+    const corpusYara = await resolverCorpusYara({
+      env: process.env,
+      definitionsDir: this.definitionsDir,
+      scanManager: this.scanManager,
+    });
+    if (corpusYara.origem === "dev-test") {
+      // Nunca o caminho: só o que foi provado. O registo do serviço é lido por gente externa.
+      console.log(`[Service] corpus YARA de TESTE montado: ${corpusYara.motivo}`);
+    }
+    await this.yara.load(corpusYara.path);
+    // Corpus só de teste (EICAR/canário) é o que a interface mostra como
+    // DEGRADADO. O scheduler só volta a tentar daqui a 6 horas, por isso um
+    // corpus que falhou uma vez ficava horas no estado degradado. Uma única
+    // tentativa, no arranque, e só do YARA (nem freshclam, nem hashes, nem
+    // proteção). O corpus dev-test é explícito e não se auto-substitui.
+    if (
+      this.yara.health.coverage === "limited" &&
+      corpusYara.origem !== "dev-test" &&
+      process.env.NODE_ENV !== "test" &&
+      // Guarda de MODO, ao lado da de teste. Read-only e fixture não fazem
+      // rede nem escrevem definições: o recovery não chega a ser chamado.
+      recuperacaoYaraPermitida()
+    ) {
+      void this.updater.refreshYaraCorpus().catch(() => undefined);
+    }
     // ClamAV (Workstream C): corre o probe UMA vez no arranque — binário +
     // base de assinaturas. Sem isto, protection.getState mostra clamav
     // "Not checked" para sempre mesmo com o clamscan instalado.
     await this.clamav.isAvailable();
-    this.definitionsUpdatedAt = new Date().toISOString();
 
+    // ── DEFINIÇÕES NÃO DEPENDEM DA PROTEÇÃO ESTAR LIGADA ─────────────────────
+    //
+    // CAUSA MEDIDA (TP-RETOMA-01, 2026-10-29): o único `startScheduler()` vivia
+    // em `startProtection()`. Com a proteção OFF — o estado por omissão de um
+    // serviço acabado de arrancar e a intenção persistida nesta instalação —
+    // o freshclam nunca voltava a correr. A base de
+    // `~/.cybersafe-service/definitions/clamav` ficou com os ficheiros de
+    // 2026-10-18 e, ao fim de 7 dias, o probe classificou o motor `degraded`
+    // ("as definições têm 10 dia(s)") apesar de binário, DLLs e base carregarem
+    // 3.628.169 assinaturas. O agendador arranca agora com o SERVIÇO.
+    //
+    // A guarda é a mesma superfície fechada dos modos de leitura/fixture: nesses
+    // modos não há rede nem escrita em definições. Em teste o agendador também
+    // não nasce — os testes instanciam o motor sem querer I/O de rede.
+    this.agendarDefinicoesSePermitido();
+    // Motor nativo: EXISTIR O BINÁRIO NÃO É ESTAR UTILIZÁVEL. Um probe real
+    // (fixture benigna gerada por nós, 15 s) prova a invocação uma vez no
+    // arranque; até lá o estado é `degraded` e não `active`. Fora de teste —
+    // o probe spawna o binário e os testes provam-no isoladamente.
+    if (NativeEngineBridge.probePermitida()) {
+      void NativeEngineBridge.probe().catch(() => undefined);
+    }
+    // O arranque não comprova uma atualização das definições.
+
+    // Último ponto antes de abrir watchers/listeners: um shutdown durante as
+    // leituras caras acima não pode deixar trabalho novo a nascer depois do
+    // dispose. O wrapper `init()` volta a verificar no fim para o caso de a
+    // corrida acontecer dentro do bloco seguinte.
+    this.throwIfDisposed();
     this.bindEventBus();
     this.bindWatchers();
     this.protectionState = false;
+
+    // R8 — protecao USB. So' arranca onde faz sentido (servico real): em teste
+    // nao se liga o poll nativo (PowerShell/CIM) nem a prova de read-only — o
+    // runtime e' provado isoladamente. `CYBERSAFE_USB_PROTECTION=0` desliga-o.
+    //
+    // NAO mover nem alargar esta condição sem mexer no outro lado: é a MESMA
+    // decisão que `motivoBloqueioUsbPolicy` declara na construção do runtime, e é
+    // ela que faz `usb.getState` dizer «indisponível, a enumeração não foi
+    // autorizada» em vez de prometer «a arrancar» para sempre. Cortar o poll é o
+    // contrato do modo de leitura (`exige_poll_usb_cortado`); continuar a publicar
+    // um `starting` transitório por um ramo que nunca arranca é o defeito que a
+    // linha de cima criou sem querer — e remover o corte não é a correção.
+    this.throwIfDisposed();
+    if (process.env.CYBERSAFE_USB_PROTECTION !== "0" && process.env.NODE_ENV !== "test") {
+      await this.usbRuntime.iniciar().catch((erro) => {
+        console.warn("[Service] Protecao USB indisponivel no arranque:", (erro as Error)?.message ?? erro);
+      });
+    }
+
+    // A corrida pode ter entrado durante o `iniciar()` acima. Se o USB
+    // completou depois do dispose, desmonta o que acabou de nascer antes de
+    // recusar; nunca fica um poll a correr num motor encerrado.
+    if (this.disposed) {
+      await this.usbRuntime.dispose().catch(() => undefined);
+      this.throwIfDisposed();
+    }
+    // ── Retoma ao arrancar ──────────────────────────────────────────────────
+    // Opt-in separado, persistido, e lido AQUI. A ausência do registo vale OFF;
+    // um registo ilegível vale OFF; só `{desired:"enabled"}` escrito pelo controlo
+    // de Definições pode ligar. Ligar a proteção manualmente (`monitor.start`)
+    // não escreve nada — não há consentimento inferido de clique.
+    if (!this.intentAtivo) {
+      // teste: nem ler nem escrever a preferência de um utilizador real
+    } else if (process.env.CYBERSAFE_STARTUP_RESUME === "0") {
+      console.info("[Service] Retoma ao arrancar desativada por ENV; registo não consultado.");
+    } else {
+      const resultado = await this.protectionStartup.avaliarAoArrancar();
+      console.info(
+        `[Service] Retoma ao arrancar: decisao=${resultado.decisao} motivo=${resultado.motivo} iniciada=${resultado.iniciado}`
+        + (resultado.falha ? ` falha=${resultado.falha}` : ""),
+      );
+    }
   }
 
   /**
@@ -566,7 +1112,34 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     }
   }
 
-  async startProtection(): Promise<{ ok: boolean; protectionEnabled: boolean }> {
+  /**
+   * Publica o estado CONFIRMADO da proteção. Evento de BAIXA frequência: só sai
+   * quando o motor muda mesmo de estado (arranque, paragem, pausa), nunca num
+   * poll. A tray e o renderer usam-no para actualizar sem esperar 5 s — e sem
+   * pintar um sucesso que o motor ainda não confirmou.
+   */
+  private publishProtectionChanged(): void {
+    this.eventBus.publish(
+      "protection.changed",
+      this.protectionState ? "low" : "medium",
+      this.protectionPausedUntil
+        ? "Proteção em tempo real em pausa"
+        : this.protectionState
+          ? "Proteção em tempo real ativa"
+          : "Proteção em tempo real desativada",
+      {
+        protectionEnabled: this.protectionState,
+        protectionPausedUntil: this.protectionPausedUntil,
+      },
+    );
+  }
+
+  async startProtection(): Promise<ServiceResponseMap["monitor.start"]> {
+    if (this.isShuttingDown) return { ok: false, protectionEnabled: false };
+    if (this.protectionStopUnconfirmed) return {
+      ok: false, protectionEnabled: false,
+      failures: [{ label: "shutdown", reason: "O encerramento anterior não foi confirmado. Volte a pedir a desativação antes de ativar a proteção." }],
+    };
     if (this.protectionState) {
       return { ok: true, protectionEnabled: true };
     }
@@ -577,29 +1150,153 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
     this.protectionTransition = (async () => {
       let started = true;
+      // FIX P1-1: `processMonitor.start()` emite `process.started` imediatamente,
+      // mas `this.protectionState` só vira `true` mais abaixo (L670). O handler
+      // em `handleProcessStart` (L1562) descarta silenciosamente os eventos que
+      // chegam enquanto `!protectionState`, e como o ProcessMonitor já integrou
+      // o PID no seu `previous`, o processo nunca mais é reemitido — fica
+      // permanentemente sem análise. Acumulamos os starts em voo e
+      // reanalisá-los após a proteção confirmar; se o arranque falhar,
+      // descartamos e removemos o listener (sem leaks).
+      const pendingStarts: ProcessSnapshot[] = [];
+      const startCapture = (p: ProcessSnapshot) => { pendingStarts.push(p); };
+      this.processMonitor.on("process.started", startCapture);
+      // Events observed after watcher readiness but before all subsystems start
+      // must not disappear when protection is subsequently confirmed.
+      const pendingFiles = new Map<string, string>();
+      const fileCapture = (event: FileObservation) => {
+        if (this.isShuttingDown || this.exclusions.isExcluded(event.path)) return;
+        const key = path.resolve(event.path).toLowerCase();
+        if (!pendingFiles.has(key) && pendingFiles.size >= 64) { this.reportRealtimeOverflow(event.path); return; }
+        pendingFiles.set(key, event.path);
+      };
+      this.watcher.on("file.created", fileCapture);
+      this.watcher.on("file.modified", fileCapture);
+      const stopFileCapture = () => {
+        this.watcher.off("file.created", fileCapture);
+        this.watcher.off("file.modified", fileCapture);
+      };
 
+
+      // P0 GUI-TEST-18/19 + OPCAO A (transferencia titular 15/10, Codex Maestro):
+      //  1) a causa de falha deixou de ser engolida — `failures[{label,reason}]`
+      //     com motivo SANITIZADO segue pelo monitor.start ate a UI;
+      //  2) o WFP NAO E MAIS INICIADO na ativacao: o seu `start()` corre
+      //     `New-NetFirewallRule` (operacao privilegiada) e `stop()` removeria a
+      //     regra — zero alteracoes do Windows implícitas num clique de protecao.
+      //     O filtro de rede fica em DEGRADACAO EXPLICITA e permanente ate haver
+      //     provisionamento privilegiado separado, autorizado pelo titular. Essa
+      //     degradacao e medida no estado real (`engine.wfp.status = unavailable`)
+      //     e publicada em `engine.degradedReasons`; o motivo em linguagem vai no
+      //     resultado do arranque, ao lado do ok que continua a ser verdadeiro.
+      //  3) watcher/processMonitor/etwConsumer/amsiProvider continuam FATAIS:
+      //     qualquer um a falhar => ok:false, teardown de todos, UI mostra a causa.
+      const failures: { label: string; reason: string }[] = [];
+      const degraded: { label: string; reason: string }[] = [
+        {
+          label: "wfpFilter",
+          // Vai ao ecra (toast da tray + painel de protecao): PT-PT com acentos,
+          // e fala SEMPRE do NOSSO modulo, nunca do Firewall do Windows.
+          reason: "filtro de rede do CyberSafe não aplicado — a criação da regra de firewall exige provisionamento privilegiado separado; nada foi alterado no Windows por esta ativação",
+        },
+      ];
+      const sanitizeReason = (err: unknown) => {
+        const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
+        return msg.replace(/[A-Za-z]:[\\/](?:Users|users)[\\/][^\\/\s"']+/g, "C:\\Users\\<utilizador>").slice(0, 200);
+      };
       for (const [label, action] of [
         ["watcher", () => this.watcher.start()],
         ["processMonitor", () => this.processMonitor.start()],
         ["etwConsumer", () => this.etwConsumer.start()],
-        ["wfpFilter", () => this.wfpFilter.start()],
         ["amsiProvider", () => this.amsiProvider.start()],
       ] as const) {
         try {
           await action();
         } catch (error) {
-          started = false;
+          const reason = sanitizeReason(error);
           console.error(`[Service] Failed to start ${label}:`, error);
+          started = false;
+          failures.push({ label, reason });
         }
       }
 
+      if (this.isShuttingDown) started = false;
       if (!started) {
-        await this.stopProtection().catch(() => undefined);
-        return { ok: false, protectionEnabled: false };
+        stopFileCapture();
+        pendingFiles.clear();
+        // FIX P1-1: remover o listener temporário antes do teardown (sem leaks,
+        // mesmo no caminho de falha).
+        this.processMonitor.off("process.started", startCapture);
+        // DEADLOCK MEDIDO (P0 REALTIME_TRAY): `stopProtection()` espera pelo
+        // `protectionTransition` quando ele existe — e nestes momentos ele É este
+        // bloco. `startProtection` -> `stopProtection` -> `await
+        // protectionTransition` -> este bloco -> `stopProtection`: um arranque
+        // falhado ficava pendurado para SEMPRE, sem erro e sem estado, e a tray
+        // nunca chegava a saber que a proteção não subiu. Soltar o transition
+        // antes de desmontar quebra o ciclo; a montagem seguinte volta a
+        // instalá-lo.
+        this.protectionTransition = null;
+        // FIX P1-2 (correcao Maestro, 09/10): a ativacao falhada tambem
+        // tem de matar a pausa agendada. Sem isto, uma "pausa 15 min"
+        // sobrevivia a uma ativacao falhada e o motor voltava a ligar-se
+        // sozinho (regressao apanhada por protection-pause-timers.test.js).
+        if (this.protectionResumeTimer) {
+          clearTimeout(this.protectionResumeTimer);
+          this.protectionResumeTimer = null;
+        }
+        this.protectionPausedUntil = null;
+        if (this.networkTimer) {
+          clearInterval(this.networkTimer);
+          this.networkTimer = null;
+        }
+        // FIX P1-2: não confiar no atalho de `stopProtection()` (que sai no
+        // early-return quando `!protectionState` e deixa os subsistemas que
+        // arrancaram com sucesso antes da falha órfãos em background).
+        // Teardown forçado direto de todos os subsistemas, com tolerância a
+        // falha, e publicar o estado resultante.
+        await Promise.allSettled([
+          this.watcher.stop(),
+          this.processMonitor.stop(),
+          this.etwConsumer.stop(),
+          this.wfpFilter.stop(),
+          this.amsiProvider.stop(),
+        ]);
+        this.publishProtectionChanged();
+        return { ok: false, protectionEnabled: false, failures };
       }
 
+      ++this.protectionGeneration;
+      this.backgroundAbort = new AbortController();
       this.protectionState = true;
-      this.updater.startScheduler();
+      stopFileCapture();
+      for (const file of pendingFiles.values()) void this.handleFileObservation(file);
+      pendingFiles.clear();
+      // FIX P1-1: remover o listener temporário ANTES de drenar — evita
+      // re-entrância se algum handleProcessStart reativar o monitor.
+      this.processMonitor.off("process.started", startCapture);
+      // FIX P1-1: reanalisar os processos que nasceram enquanto a proteção
+      // estava em transição. Cada um passa pela mesma guarda de
+      // `shouldScanStartedProcess` que os starts diretos, portanto não há
+      // duplo-scan: um PID já analisado em voo é idempotente.
+      for (const p of pendingStarts) {
+        void this.handleProcessStart(p);
+      }
+      // P0 REALTIME_TRAY: uma proteção LIGADA não pode trazer consigo uma pausa.
+      //
+      // MEDIDO: "Pausar 15 minutos" seguido de "Ativar proteção agora" (o botão
+      // da tray chama `monitor.start`) arrancava o watcher, mas deixava
+      // `protectionPausedUntil` no passado e o `protectionResumeTimer` VIVO. A
+      // tray continuava a mostrar pausa/desativado com a proteção a correr, e o
+      // timer antigo podia depois disparar sobre um estado que já não era dele.
+      // Todos os caminhos que ligam a proteção — o fim da pausa, `monitor.start`
+      // da tray, `monitor.resume` — passam por aqui, e é aqui que a pausa morre.
+      if (this.protectionResumeTimer) {
+        clearTimeout(this.protectionResumeTimer);
+        this.protectionResumeTimer = null;
+      }
+      this.protectionPausedUntil = null;
+      // O agendador de definições pertence ao SERVIÇO, não à proteção. Ligar a
+      // proteção não o volta a arrancar (e não contorna a guarda readonly).
 
       Promise.all([
         this.processMonitor.list().then((p) => {
@@ -610,7 +1307,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           // entretanto, e um PID morto confirmado não volta por aqui.
           if (revisionBefore === this.processesRevision) this.processesEnumeratedAt = Date.now();
           else this.processesEnumeratedAt = 0;
-          return this.hardware.getSnapshot(this.processes);
+          return this.readHardwareSnapshot();
         }),
         this.refreshConnections(),
       ]).catch((err) => console.error("[Service] Initial background snapshots failed:", err));
@@ -621,14 +1318,15 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           this.networkInFlight = true;
           Promise.allSettled([
             this.refreshConnections(),
-            this.hardware.getSnapshot(this.processes),
+            this.readHardwareSnapshot(),
           ]).finally(() => {
             this.networkInFlight = false;
           });
         }, 10_000);
       }
 
-      return { ok: true, protectionEnabled: true };
+      this.publishProtectionChanged();
+      return { ok: true, protectionEnabled: true, degraded };
     })();
 
     try {
@@ -639,8 +1337,27 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     }
   }
 
-  async stopProtection(): Promise<{ ok: boolean; protectionEnabled: boolean }> {
-    if (!this.protectionState && !this.networkTimer && !this.protectionTransition) {
+  async stopProtection(): Promise<ServiceResponseMap["monitor.stop"]> {
+    ++this.protectionGeneration;
+    this.realtimeQueue.clear();
+    this.realtimeRecovery.clear();
+    // A contagem de perda é por sessão de proteção: sem ela, um número de
+    // ontem é apresentado como se fosse do estado atual.
+    this.loss.reset();
+    this.realtimeDroppedEvents = 0;
+    this.backgroundAbort.abort();
+    // O atalho "já está tudo parado" só vale se não houver NADA a parar — e um
+    // timer de retomada agendado é precisamente algo a parar. Sem esta cláusula
+    // o bypass era um buraco: "pausar 15 min" num motor que já estava parado
+    // agendava a retomada, e o "desligar" seguinte devolvia por aqui sem
+    // cancelar o timer. MEDIDO: timer VIVO depois de `stopProtection()`.
+    if (
+      !this.protectionState &&
+      !this.protectionStopUnconfirmed &&
+      !this.networkTimer &&
+      !this.protectionTransition &&
+      !this.protectionResumeTimer
+    ) {
       return { ok: true, protectionEnabled: false };
     }
 
@@ -649,22 +1366,105 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     }
 
     this.protectionState = false;
-    this.updater.stopScheduler();
+    ++this.protectionGeneration;
+    this.backgroundAbort.abort(); // Also invalidate a start that was in flight.
+    // O agendador de definições NÃO morre com a proteção: assinaturas frescas
+    // são uma condição do motor, não um efeito de a vigilância estar ligada.
+    // Fechá-lo aqui reproduzia a causa medida do ClamAV degradado (o scheduler
+    // só existia enquanto `startProtection` corria). O `dispose()` do serviço
+    // continua a ser quem para o timer (`stopScheduler`).
+
+    // Uma paragem manual cancela qualquer retomada agendada. Sem isto, "Pausar
+    // 15 min" seguido de "Desligar" deixava o timer vivo e a proteção voltava
+    // sozinha aos 15 minutos — o utilizador desligou-a e ela ignorou-o.
+    // Quem manda parar é o utilizador: parar tem de ser definitivo.
+    if (this.protectionResumeTimer) {
+      clearTimeout(this.protectionResumeTimer);
+      this.protectionResumeTimer = null;
+      this.protectionPausedUntil = null;
+    }
 
     if (this.networkTimer) {
       clearInterval(this.networkTimer);
       this.networkTimer = null;
     }
 
-    await Promise.allSettled([
-      this.watcher.stop(),
-      this.processMonitor.stop(),
-      this.etwConsumer.stop(),
-      this.wfpFilter.stop(),
-      this.amsiProvider.stop(),
-    ]);
+    const actions = [
+      ["watcher", () => this.watcher.stop()],
+      ["processMonitor", () => this.processMonitor.stop()],
+      ["etwConsumer", () => this.etwConsumer.stop()],
+      ["wfpFilter", () => this.wfpFilter.stop()],
+      ["amsiProvider", () => this.amsiProvider.stop()],
+    ] as const;
+    const stopped = await Promise.allSettled(actions.map(async ([label, stop]) => {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          Promise.resolve().then(stop),
+          new Promise<never>((_, reject) => { timer = setTimeout(() => reject(new Error(`${label}: stop não confirmado no prazo`)), 800); }),
+        ]);
+      } finally { clearTimeout(timer); }
+    }));
+    this.protectionStopUnconfirmed = stopped.some(result => result.status === "rejected");
+    if (this.protectionStopUnconfirmed) this.eventBus.publish(
+      "engine.health", "high",
+      "A admissão de análises foi desativada, mas o encerramento de um ou mais módulos não foi confirmado.",
+      { reason: "protection-stop-unconfirmed", modules: actions.filter((_, i) => stopped[i].status === "rejected").map(([label]) => label) },
+    );
 
-    return { ok: true, protectionEnabled: false };
+    this.publishProtectionChanged();
+    return { ok: !this.protectionStopUnconfirmed, protectionEnabled: false };
+  }
+
+  /**
+   * Pausa a proteção por um período limitado, com reativação AUTOMÁTICA.
+   *
+   * `durationMs` undefined/`Infinity` = pausa até ativação manual (não expira).
+   * Qualquer outro valor agenda o regresso. A reativação corre no motor, não no
+   * renderer: se o Electroncrashar ou fechar, a proteção volta na mesma.
+   *
+   * Uma pausa que termina é um Window em que a máquina NÃO está protegida. Por
+   * isso o estado exposto passa a `critical` enquanto decorre — nunca "safe".
+   */
+  async pauseProtection(durationMs?: number): Promise<{ ok: boolean; protectionEnabled: boolean; pausedUntil: string | null }> {
+    const result = await this.stopProtection();
+    if (!result.ok) return { ...result, pausedUntil: null };
+
+    if (this.protectionResumeTimer) {
+      clearTimeout(this.protectionResumeTimer);
+      this.protectionResumeTimer = null;
+    }
+
+    if (durationMs === undefined || !Number.isFinite(durationMs) || durationMs <= 0) {
+      this.protectionPausedUntil = null; // até ativação manual
+      this.publishProtectionChanged();
+      return { ...result, pausedUntil: null };
+    }
+
+    const until = new Date(Date.now() + durationMs).toISOString();
+    this.protectionPausedUntil = until;
+    this.protectionResumeTimer = setTimeout(() => {
+      this.protectionResumeTimer = null;
+      this.protectionPausedUntil = null;
+      void this.startProtection().catch((err) =>
+        console.error("[Service] Falha ao reativar proteção após pausa:", err),
+      );
+    }, durationMs);
+    // Não segura o processo aberto só por causa de uma pausa agendada.
+    this.protectionResumeTimer.unref?.();
+    this.publishProtectionChanged();
+    return { ...result, pausedUntil: until };
+  }
+
+  /** Cancela qualquer pausa agendada e reativa já. */
+  async resumeProtection(): Promise<{ ok: boolean; protectionEnabled: boolean; pausedUntil: string | null }> {
+    if (this.protectionResumeTimer) {
+      clearTimeout(this.protectionResumeTimer);
+      this.protectionResumeTimer = null;
+    }
+    this.protectionPausedUntil = null;
+    const result = await this.startProtection();
+    return { ...result, pausedUntil: null };
   }
 
   private bindEventBus() {
@@ -716,6 +1516,15 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
    * perto de 6 s, por processo).
    */
   private readonly scanAbortControllers = new Map<string, AbortController>();
+  /**
+   * INTENÇÃO de abortar um scan, guardada pelo ScanManager (`cancelScan`)
+   * antes de o controller do motor existir. O `signalForScan` lê-a quando
+   * criar o controller, para o signal nascer já abortado.
+   *
+   * Limpa-se em `releaseScanAbort` (chamado no `finally` do scan) — sem
+   * isto, um scanId cancelado e nunca usado ficava na Set para sempre.
+   */
+  private readonly scanAbortIntents = new Set<string>();
 
   /** Controller do scan pedido (cria se ainda não existir). */
   private signalForScan(scanId: string | undefined): AbortSignal | undefined {
@@ -723,9 +1532,34 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     let controller = this.scanAbortControllers.get(scanId);
     if (!controller) {
       controller = new AbortController();
+      // P1 — ABORT STICKY: um cancel que chegue antes de este controller
+      // existir (janela de looksLikeZip) deixa a intenção guardada em
+      // `scanAbortIntents`. Quando o motor criar o controller, nasce JÁ
+      // abortado — o signal never reports a live signal to a cancelled scan.
+      //
+      // MEDIDO (scan-cancel-prefetch-window.test.js): sem isto, o
+      // prefetchClamav criava o controller no interior do engine e o signal
+      // era vivo mesmo com o scan já cancelado, porque abortEngineWork só
+      // abortava um controller que ainda não existia.
+      if (this.scanAbortIntents.has(scanId)) {
+        controller.abort();
+      }
       this.scanAbortControllers.set(scanId, controller);
     }
     return controller.signal;
+  }
+
+  /**
+   * Marca a INTENÇÃO de abortar um scan. Chamado pelo ScanManager
+   * (`cancelScan`) ANTE de o controller do motor existir.
+   *
+   * A intenção sobrevive até o controller nascer (signalForScan) ou até
+   * `releaseScanAbort` limpar — o que vier primeiro. Sem isto, um cancel na
+   * janela de looksLikeZip era silencioso: o controller nascia depois, vivo.
+   */
+  public markScanAborted(scanId: string): void {
+    this.scanAbortIntents.add(scanId);
+    this.scanAbortControllers.get(scanId)?.abort();
   }
 
   /**
@@ -735,12 +1569,15 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
    * enquanto corre, e um controller já descartado perderia o abort.
    */
   abortEngineWork(scanId: string): void {
-    this.scanAbortControllers.get(scanId)?.abort();
+    this.markScanAborted(scanId);
   }
 
-  /** Liberta o controller de um scan terminado. */
-  private releaseScanAbort(scanId: string | undefined): void {
-    if (scanId) this.scanAbortControllers.delete(scanId);
+  /** Libertação explícita da intenção e do controller de um scan terminado. */
+  public releaseScanAbort(scanId: string | undefined): void {
+    if (scanId) {
+      this.scanAbortIntents.delete(scanId);
+      this.scanAbortControllers.delete(scanId);
+    }
   }
 
   private static readonly SAFE_PROCESSES = new Set([
@@ -1239,17 +2076,47 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
   }
 
   private bindWatchers() {
+    this.watcher.on("watcher.error", ({ error }: { error: NodeJS.ErrnoException }) => {
+      if (["EPERM", "ENOENT", "EACCES", "EBUSY"].includes(error.code ?? "")) return;
+      // Loss of monitoring must be visible. Recovery is an explicit monitor.start.
+      console.error("[Service] Monitorização de ficheiros indisponível:", error);
+      void this.stopProtection().catch(err => console.error("[Service] Falha ao parar proteção:", err));
+    });
+    this.watcher.on("watcher.coverage", (info: { motivo?: string; path?: string; message?: string; novos?: number; total?: number; eventosSemNome?: number }) => {
+      // Degradação de VIGILÂNCIA, não do motor: continua tudo ativo nas restantes
+      // raízes, por isso NÃO pode ir pelo canal de erro (que pararia a proteção).
+      // `novos`/`total` chegam do filho; o contador decide sozinho o delta — um
+      // cumulativo re-somado foi exatamente o defeito medido na C5.
+      // `total` so e passado quando existe mesmo: um 0 inventado faria o ledger
+      // tratar a mensagem como cumulativa e ignorar o `novos` legitimo do legado.
+      const totalBruto = info?.total ?? info?.eventosSemNome;
+      const temTotal = totalBruto !== undefined && totalBruto !== null && Number.isFinite(Number(totalBruto));
+      this.reportCoverageGap(
+        info?.path ?? "",
+        info?.motivo ?? "overflow",
+        Number(info?.novos ?? (temTotal ? Number(totalBruto) : 0)) || 0,
+        temTotal ? Number(totalBruto) : Number.NaN,
+        info?.message ?? "cobertura degradada",
+      );
+    });
     this.watcher.on("file.created", (event: FileObservation) => {
+      if (!this.protectionState || this.isShuttingDown) return;
       if (this.exclusions.isExcluded(event.path)) return;
       this.eventBus.publish("file.created", "low", `Novo ficheiro observado: ${event.path}`, event);
       void this.handleFileObservation(event.path);
     });
     this.watcher.on("file.modified", (event: FileObservation) => {
+      if (!this.protectionState || this.isShuttingDown) return;
       if (this.exclusions.isExcluded(event.path)) return;
       this.eventBus.publish("file.modified", "low", `Ficheiro modificado observado: ${event.path}`, event);
       void this.handleFileObservation(event.path);
     });
+    this.watcher.on("file.deleted", (event: FileObservation) => {
+      if (!this.protectionState || this.isShuttingDown) return;
+      this.eventBus.publish("file.deleted", "low", `Ficheiro removido: ${path.basename(event.path)}`, event);
+    });
     this.watcher.on("registry.persistence.changed", (event: any) => {
+      if (!this.protectionState || this.isShuttingDown) return;
       this.eventBus.publish("persistence.detected", "high", "Persistência de registo alterada", event);
     });
 
@@ -1265,6 +2132,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // CyberSafe". Identidade diferente = reutilização real de PID, e essa é
       // bem-vinda.
       if (this.tombstoneBlocks(processInfo.pid, processInfo.name, processInfo.commandLine)) return;
+      this.processBirthsDuringEnumeration?.set(processInfo.pid, processInfo);
       this.processes = [processInfo, ...this.processes.filter((entry) => entry.pid !== processInfo.pid)];
       // DEFESA DE IDENTIDADE no ponto de entrada: um processo que o SERVICO
       // lancou entra no cache (para a lista estar certa) mas nunca volta a
@@ -1326,41 +2194,113 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     }
   }
 
-  private async handleFileObservation(filePath: string) {
+  private async handleFileObservation(filePath: string, retry = false, recoverySignal?: AbortSignal): Promise<boolean> {
+    const generation = this.protectionGeneration;
+    if (!this.protectionState || this.isShuttingDown || recoverySignal?.aborted) return true;
+    if (this.fileObservationReads >= 64) { this.reportRealtimeOverflow(filePath, "metadata", retry); return false; }
+    ++this.fileObservationReads;
     // Guarda ANTES de qualquer tentativa de leitura: no Windows o watcher pode
     // reportar junctions/reparse points e diretórios como entradas de ficheiro
     // (Documents\Meus Vídeos, Minhas Imagens, Minhas Músicas). Abri-los produz
     // EPERM/EISDIR — não é um erro do motor, é um alvo que não é ficheiro.
+    let fingerprint: string;
     try {
       const stat = await fs.lstat(filePath);
-      if (stat.isDirectory() || stat.isSymbolicLink()) return;
+      if (stat.isDirectory() || stat.isSymbolicLink()) return true;
+      fingerprint = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
     } catch {
-      // Desapareceu entre o evento e o stat — nada a analisar.
-      return;
+      if (this.protectionState && !this.isShuttingDown && generation === this.protectionGeneration) this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.");
+      return true;
+    } finally {
+      --this.fileObservationReads;
     }
 
+    if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || recoverySignal?.aborted) return true;
+    const signal = this.backgroundAbort.signal;
+    const admission = this.realtimeQueue.enqueue(path.resolve(filePath).toLowerCase(), fingerprint, async () => {
+      if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || signal.aborted) return;
+      await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true });
+    });
+    if (admission === "full") { this.reportRealtimeOverflow(filePath, "analysis", retry); return false; }
+    return true;
+  }
+
+  private reportRealtimeOverflow(caminho = "", stage: SaturationStage = "analysis", retry = false): void {
+    // Só a primeira rejeição agenda. Uma retry falhada não cria outra cadeia.
+    if (retry) this.realtimeRecovery.recordRejection(caminho, stage);
+    else this.realtimeRecovery.defer(path.resolve(caminho), stage, signal => this.handleFileObservation(caminho, true, signal));
+    ++this.realtimeDroppedEvents;
+    this.loss.noteQueueRejection(caminho || "caminho-desconhecido");
     const now = Date.now();
-    const lastScan = this.recentScans.get(filePath);
+    if (now - this.overflowNoticeAt < 10000) return;
+    const resumo = this.loss.summary();
+    this.overflowNoticeAt = now;
+    this.eventBus.publish("engine.health", "high", `A fila de análise do tempo real está cheia: ${resumo.queueRejections} tentativas não entraram (em ${resumo.queueDistinctPaths} caminhos distintos${resumo.queuePathsCapped ? ", contagem de caminhos limitada" : ""}). Alguns ficheiros podem não ter sido analisados; faça uma análise manual.`, {reason:"queue-overflow",admissionStage:stage,recoveryEventId:this.realtimeRecovery.snapshot().lastEventId,metadataRejections:this.realtimeRecovery.snapshot().metadataRejections,analysisRejections:this.realtimeRecovery.snapshot().analysisRejections,queueDepth:this.realtimeQueue.size,recoveryDepth:this.realtimeRecovery.snapshot().pending,droppedEvents:this.realtimeDroppedEvents,distinctPaths:resumo.queueDistinctPaths,capped:resumo.queuePathsCapped});
+  }
 
-    // Evita analisar o mesmo ficheiro em menos de 10 segundos
-    if (lastScan && now - lastScan < 10000) {
-      return;
+  /**
+   * Lacuna de cobertura reportada pelo filho do watcher (15/10): notificações que
+   * chegaram sem nome de ficheiro, raiz apagada em runtime, ou raiz cujo attach
+   * falhou. NÃO toca em `realtimeDroppedEvents`: a conta do watcher é outra origem
+   * e outro número. E não promete o que o sinal não diz — o Node não garante
+   * `filename` em Windows, por isso isto é lacuna POSSÍVEL com quantidade de
+   * ficheiros desconhecida, não perda provada de eventos do SO (a prova de
+   * transbordo do ReadDirectoryChangesW e `lpBytesReturned` zero, que o Node não
+   * expõe aqui).
+   */
+  private reportCoverageGap(caminho: string, motivo: string, novos: number, total: number, mensagem: string): void {
+    this.loss.noteWatcherSignal({ path: caminho, novos, total });
+    this.coverageGaps.push({ path: caminho, motivo, detectedAt: new Date().toISOString() });
+    if (this.coverageGaps.length > 50) this.coverageGaps.shift();
+    const agora = Date.now();
+    if (agora - this.coverageNoticeAt < 10000) return;
+    this.coverageNoticeAt = agora;
+    const resumo = this.loss.summary();
+    const frase = motivo === "raiz-desaparecida"
+      ? `Pasta de vigilância desapareceu: ${caminho || "sem caminho"}. Deixou de estar vigiada; faz uma análise manual dessa localização.`
+      : motivo === "raiz-inacessivel" || motivo === "raiz-excluida-validacao"
+        ? `Pasta não vigiada: ${caminho || "sem caminho"}. ${mensagem}`
+        : `Vigilância de ${caminho || "sem caminho"} recebeu ${resumo.watcherNamelessCallbacks} notificações sem nome de ficheiro (${resumo.watcherSignals === 1 ? "1 aviso" : `${resumo.watcherSignals} avisos`}). Pode haver ficheiros por analisar nessa pasta e não se sabe quantos; faz uma análise manual.`;
+    this.eventBus.publish("engine.health", "high", frase, {
+      reason: "watcher-coverage",
+      motivo,
+      path: caminho,
+      novos,
+      total,
+      watcherSignals: resumo.watcherSignals,
+      watcherNamelessCallbacks: resumo.watcherNamelessCallbacks,
+      // `indeterminado` e o campo que impede a leitura contraria: diz que a
+      // quantidade de ficheiros afetados nao e conhecida, so o numero de sinais.
+      indeterminado: true,
+      detalhe: mensagem,
+    });
+  }
+
+  private publishInconclusiveFile(filePath: string, reason: string): ServiceResponseMap["scan.artifact"] {
+    const result = { fileName:path.basename(filePath),size:0,severity:"low" as const,confidence:0,rulesTriggered:[],riskScore:0,verdict:"inconclusive" as const,sha256:"",analysisState:"failed" as const,detail:reason };
+    this.eventBus.publish("artifact.analyzed", "low", reason, {...result,artifactPath:filePath,reason});
+    return {results:[result],totalFiles:1,highRiskCount:0,overallSeverity:"low",rulesTriggered:[],riskScore:0};
+  }
+
+  private async requestQuarantine(analysis: AnalysisResult, authorization: "manual" | "automatic"): Promise<boolean> {
+    const evidence = {artifactPath:analysis.artifactPath,fileName:analysis.fileName,sha256:analysis.sha256,authorization};
+    this.eventBus.publish("quarantine.requested", "high", `Quarentena solicitada: ${analysis.fileName}`, evidence);
+    try {
+      const entry = await this.quarantine.quarantine(analysis);
+      if (!entry) throw new Error("Operação não confirmada");
+      this.eventBus.publish("quarantine.added", "critical", `Colocado em quarentena ${analysis.fileName}`, entry);
+      void this.logHistory({type:"quarantine.added",entry,timestamp:new Date().toISOString()});
+      return true;
+    } catch {
+      this.eventBus.publish("quarantine.failed", "high", `Não foi possível confirmar o isolamento de ${analysis.fileName}. Verifique a quarentena e o ficheiro.`, evidence);
+      void this.logHistory({type:"quarantine.failed",...evidence,timestamp:new Date().toISOString()});
+      return false;
     }
-    this.recentScans.set(filePath, now);
-
-    // Limpar cache antiga para evitar memory leak (limpa a cada 50 scans, apenas entradas velhas)
-    if (this.recentScans.size > 1000) {
-      for (const [key, timestamp] of this.recentScans.entries()) {
-        if (now - timestamp > 60000) {
-          this.recentScans.delete(key);
-        }
-      }
-    }
-
-    void this.scanArtifact(filePath, "service");
   }
 
   private async handleProcessStart(processInfo: ProcessSnapshot) {
+    const generation = this.protectionGeneration;
+    if (!this.protectionState || this.isShuttingDown) return;
     // Dupla verificação no ponto de entrada. `isSafeProcess` sozinho já não
     // chega: quem decide é `shouldScanStartedProcess`, que conhece a
     // descendência do nosso próprio motor de scan.
@@ -1411,8 +2351,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           `Alvo de deteccao por caminho, mas nao foi terminado (protegido): ${processInfo.name}`,
           { ...processInfo, reason: `path bloqueado mas protegido por ${protection} (sem auto-kill)` });
       } else {
-        await this.runAutoKill(processInfo.pid);
-        this.eventBus.publish("process.blocked", "critical", `Processo bloqueado por caminho: ${processInfo.name}`, processInfo);
+        this.eventBus.publish("process.suspicious", "high", `Deteção anterior neste caminho; processo não terminado: ${processInfo.name}`, {...processInfo,reason:"Requer decisão manual; o CyberSafe não terminou o processo."});
       }
       return;
     }
@@ -1437,7 +2376,10 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     // DEFESA 2: um binário de motor de scan não é reanalisado por caminho.
     if (processInfo.path && !this.shouldScanProcessPath(processInfo.path)) return;
     if (processInfo.path) {
-      const analysis = await this.scanArtifact(processInfo.path, "service", { origin: "process_monitor" });
+      const analysis = await this.scanArtifact(processInfo.path, "service", {
+        origin: "process_monitor", backgroundSignal: this.backgroundAbort.signal,
+      });
+      if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration) return;
       if (analysis?.results[0]?.sha256 && this.blockedHashes.has(analysis.results[0].sha256)) {
         // P1: mesmo guard, mesmo sítio — imediatamente antes da chamada que mata.
         const protection = classifyKillTarget(processInfo, this.killProtectionContext());
@@ -1450,8 +2392,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
             `Alvo de deteccao por assinatura, mas nao foi terminado (protegido): ${processInfo.name}`,
             { ...processInfo, reason: `hash bloqueado mas protegido por ${protection} (sem auto-kill)` });
         } else {
-          await this.runAutoKill(processInfo.pid);
-          this.eventBus.publish("process.killed", "critical", `Processo bloqueado terminado (assinatura de malware): ${processInfo.name}`, processInfo);
+          this.eventBus.publish("process.suspicious", "high", `Assinatura detetada; processo não terminado: ${processInfo.name}`, {...processInfo,reason:"Requer decisão manual; o CyberSafe não terminou o processo."});
         }
       }
     }
@@ -1462,11 +2403,27 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
   }
 
   async dispose() {
+    ++this.protectionGeneration;
+    this.backgroundAbort.abort();
+    this.realtimeQueue.clear();
+    this.realtimeRecovery.clear();
     // Idempotente: pode ser chamado pelo shutdown e pelo handler de sinais.
     if (this.disposed) return;
     this.disposed = true;
+    this.individualTermination?.dispose();
+    // Se o encerramento apanhar a janela progressiva, nada fica à espera dela.
+    this.settleStartup("disposed");
+    this.hardware.dispose();
     this.protectionState = false;
     this.updater.stopScheduler();
+    // Uma pausa agendada NUNCA pode reanimar a proteção durante o
+    // encerramento: o timer disparava `startProtection()` em pleno teardown,
+    // a abrir watchers e ETW num motor que já está a desmontar.
+    if (this.protectionResumeTimer) {
+      clearTimeout(this.protectionResumeTimer);
+      this.protectionResumeTimer = null;
+      this.protectionPausedUntil = null;
+    }
     if (this.networkTimer) {
       clearInterval(this.networkTimer);
       this.networkTimer = null;
@@ -1506,6 +2463,8 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       parar("wfpFilter", () => this.wfpFilter.stop(), 800),
       parar("amsiProvider", () => this.amsiProvider.stop(), 800),
       parar("windowsHealth", () => this.windowsHealth.dispose(), 800),
+      // O poll da protecao USB nao pode sobreviver ao servico.
+      parar("usbRuntime", () => this.usbRuntime.dispose(), 800),
     ]);
 
     // O cleanup dos recursos criticos de IPC corre independentemente do que os
@@ -1515,10 +2474,11 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     // E a ultima coisa que o utilizador ve: o pipe tem de morrer, senao a app
     // seguinte liga-se a um servico meio-desligado.
     if (this.server) {
-      for (const client of this.clients) {
+      for (const client of [...this.clients, ...this.authenticatingClients]) {
         client.destroy();
       }
       this.clients.clear();
+      this.authenticatingClients.clear();
 
       await new Promise<void>((resolve) => {
         try {
@@ -1601,17 +2561,54 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
   }
 
   getProtectionState(): ProtectionState {
+    const available = this.clamav.health.status === "active";
+    if (this.lastClamavAvailability === true && !available) {
+      this.eventBus.publish("engine.health", "high", "O ClamAV deixou de conseguir analisar; os resultados podem ser inconclusivos.", {engine:"ClamAV",essentialUnavailable:true,status:this.clamav.health.status});
+    }
+    this.lastClamavAvailability = available;
     const recentThreats = this.threats.slice(0, 10);
     const maxRisk = recentThreats.length > 0
       ? Math.max(...recentThreats.map(t => t.riskScore))
       : 0;
 
-    // Estado real dos motores — nunca inventamos "proteção ativa".
+    // O estado do filtro tem de dizer a sua ORIGEM. `isActive()` só é true
+    // depois de leitura de volta; `nao_iniciado`, `parado` e `falhou` são
+    // coisas diferentes e nenhuma delas autoriza a frase "o Firewall do
+    // Windows está desligado" — o módulo medido é o filtro do CyberSafe.
+    // O `status` mantém o vocabulário de contrato (pinned por service-copy);
+    // é no `detail` que a causa distinguível chega ao consumidor.
+    const wfpEstado = this.wfpFilter.estado();
+    const wfpStatus = wfpEstado.estado === "ativo_confirmado" ? "active" : "unavailable";
+    const wfpCausa =
+      wfpEstado.estado === "falhou"
+        ? `tentativa recusada: ${wfpEstado.motivo}`
+        : wfpEstado.estado === "parado"
+          ? "parado por pedido"
+          : wfpEstado.estado === "solicitado_nao_verificado"
+            ? "pedido enviado, estado não lido de volta"
+            : undefined;
+    const wfpDetail = wfpCausa
+      ? `filtro WFP inativo — ${wfpCausa}`
+      : wfpStatus === "active" ? "filtro WFP ativo" : "filtro WFP inativo";
+
+    // Estado real dos motores — nunca inventamos "proteção ativa". Antes de
+    // init não houve leitura dos motores: `osLayerHealthy:true` seria uma
+    // afirmação sem fonte. `failed`/`disposed` também não são saudáveis.
+    const startupNotReady =
+      this.startupStateValue === "starting" ||
+      this.startupStateValue === "failed" ||
+      this.startupStateValue === "disposed";
     const engine: EngineHealth = {
       serviceRunning: true,
-      osLayerHealthy: true,
-      degradedReasons: [],
-      monitoredPaths: this.watcher.getDefaultPaths(),
+      osLayerHealthy: !startupNotReady,
+      degradedReasons: startupNotReady
+        ? ["Arranque em curso: a saúde dos motores ainda não foi confirmada por uma leitura real."]
+        : [],
+      monitoredPaths: this.protectionState ? this.watcher.getMonitoredPaths() : [],
+      realtimeQueueDepth: this.realtimeQueue.size,
+      realtimeDroppedEvents: this.loss.summary().queueRejections,
+      realtimeLoss: this.loss.summary(),
+      realtimeRecovery: { ...this.realtimeRecovery.snapshot(), metadataInFlight: this.fileObservationReads, analysisQueueDepth: this.realtimeQueue.size },
       definitionsUpdatedAt: this.definitionsUpdatedAt,
       lastEventAt: this.events.at(-1)?.timestamp,
       yara: this.yara.health,
@@ -1619,23 +2616,23 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       clamav: this.clamav.health,
       nativeEngine: NativeEngineBridge.health,
       // O filtro WFP do CyberSafe. NAO e o Firewall do Windows: e o que mede
-      // `wfpFilter.isActive()`, isto e, se as nossas regras de bloqueio de IP
+      // `wfpFilter.estado()`, isto e, se as nossas regras de bloqueio de IP
       // estao activas. O Firewall do Windows mede-se em `WindowsHealthSnapshot`.
       //
       // `firewall` e o MESMO objecto, publicado como alias temporario para o
       // renderer antigo. Nao e um segundo sentido: e o mesmo valor sob o nome
       // antigo. Um renderer novo tem de ler `wfp` (ou `wfpHealth()`).
-      wfp: {
-        status: this.wfpFilter.isActive() ? "active" : "unavailable",
-        detail: this.wfpFilter.isActive() ? "filtro WFP ativo" : "filtro WFP inativo",
-      },
-      firewall: {
-        status: this.wfpFilter.isActive() ? "active" : "unavailable",
-        detail: this.wfpFilter.isActive() ? "filtro WFP ativo" : "filtro WFP inativo",
-      },
+      wfp: { status: wfpStatus, detail: wfpDetail },
+      firewall: { status: wfpStatus, detail: wfpDetail },
       anyEngineDegraded: false,
     };
-    engine.anyEngineDegraded = hasDegradedProtections(engine);
+    engine.anyEngineDegraded = startupNotReady || hasDegradedProtections(engine) || engineIsDegraded(engine);
+    const perda = this.loss.summary();
+    if (perda.queueRejections > 0 || perda.watcherCallbacksIndeterminate) {
+      // `degradedReasons` é obrigatória no contrato: sem `!` e sem push condicional
+      // sobre um campo que pode não existir.
+      engine.degradedReasons.push("Cobertura do tempo real não confirmada: houve rejeições ou sinais de perda do watcher. Recuperar admissão não confirma análise de todas as versões.");
+    }
     if (engine.anyEngineDegraded) {
       for (const key of ["yara", "hashDb", "clamav", "nativeEngine", "wfp"] as const) {
         const sub = key === "wfp" ? engine.wfp : engine[key];
@@ -1654,25 +2651,68 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     const effectiveRisk = effectiveRiskScore(maxRisk, engine);
     const degradedForStatus = engineIsDegraded(engine);
 
+    // Facto real on/off, lido do motor. É independente das ameaças: zero
+    // ameaças não significa proteção ativa.
+    const protectionEnabled = this.protectionState === true;
+
     const stats: ProtectionStats = {
       riskScore: effectiveRisk,
       totalEvents: this.threats.length,
       highSeverityEvents: this.threats.filter((event) => event.severity === "high" || event.severity === "critical").length,
       blockedExecutions: this.events.filter((event) => event.type === "process.blocked" || event.type === "process.killed").length,
-      quarantinedCount: this.quarantine.list().length,
+      quarantinedCount: this.quarantine.list().filter(entry => entry.isolationStatus === "confirmed").length,
       monitoredProcesses: this.processes.length,
+      // P0-3 (15/10): a UI mostra a politica EFETIVA, lida do disco pelo
+      // loader no arranque (ausente/invalido = "warn"). Nada aqui ativa nada.
+      quarantinePolicy: this.quarantinePolicy,
     };
 
+    // A decisão vive em `deriveProtectionStatus` (core) para haver UM só sítio
+    // onde "protegido" é decidido, e para os testes poderem exercitar a mesma
+    // função que o motor usa em vez de uma cópia dela.
+    const derivedStatus = deriveProtectionStatus(
+      protectionEnabled,
+      stats.riskScore,
+      degradedForStatus,
+    );
+
     return {
-      status: scoreToStatus(stats.riskScore, degradedForStatus),
+      status: derivedStatus,
       stats,
       engine,
+      protectionEnabled,
+      protectionPausedUntil: this.protectionPausedUntil ?? null,
     };
   }
 
-  getPcState(): PcState {
+  /**
+   * Snapshot de hardware para CONSUMO (IPC e PC State).
+   *
+   * Cache só dentro da janela de reutilização (ver HARDWARE_SNAPSHOT_REUSE_MS):
+   * um snapshot antigo nunca é servido indefinidamente. É o ponto único por onde
+   * passam o Dashboard, o PC Center e o PC State — a mesma verdade, com a mesma
+   * idade, em todas as páginas.
+   */
+  private hardwareSnapshotFlight: Promise<HardwareSnapshot> | null = null;
+
+  private async readHardwareSnapshot(): Promise<HardwareSnapshot> {
+    const cached = this.hardware.getLastSnapshot();
+    const cachedAt = cached ? Date.parse(cached.timestamp) : Number.NaN;
+    if (cached && Number.isFinite(cachedAt) && Date.now() - cachedAt < HARDWARE_SNAPSHOT_REUSE_MS) {
+      return cached;
+    }
+    if (this.hardwareSnapshotFlight) return this.hardwareSnapshotFlight;
+    const flight = this.hardware.getSnapshot(this.processes);
+    this.hardwareSnapshotFlight = flight;
+    try { return await flight; }
+    finally { if (this.hardwareSnapshotFlight === flight) this.hardwareSnapshotFlight = null; }
+  }
+
+  async getPcState(): Promise<PcState> {
     const protection = this.getProtectionState();
-    const hardware = this.hardware.getLastSnapshot();
+    // Mesmo snapshot que o Dashboard e o PC Center: o PC State não pode ficar
+    // com uma fotografia antiga enquanto as outras páginas já têm a leitura nova.
+    const hardware = await this.readHardwareSnapshot();
     const windowsHealth = this.windowsHealth.getLastSnapshot();
 
     return this.pcState.update({
@@ -1682,6 +2722,17 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       threats: this.threats,
       now: Date.now(),
     });
+  }
+
+  /**
+   * Capacidade ESTRUTURAL do caminho read-only implementado: nome + versao.
+   * Mudar a semantica do modo USB (o que o motor deixa de/comeca a fazer)
+   * exige subir a versao: um adapter que espere outra versao bloqueia o
+   * auto-scan em vez de assumir. Nao e' prova dinamica de seguranca — a
+   * verificacao real do comportamento esta' nos testes com o ScanManager real.
+   */
+  public usbReadOnlyCapacidade() {
+    return { nome: "usb-readonly", versao: 1 };
   }
 
   public getEventBus() {
@@ -1694,6 +2745,20 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       return this.exclusions.isExcluded(filePath);
     } catch {
       return false;
+    }
+  }
+
+  /**
+   * PORQUÊ um ficheiro ficou fora dos motores, em categoria — é isto que o
+   * ScanManager agrega para a UI poder explicar a diferença entre
+   * "considerados" e "analisados" sem inventar. Nunca devolve caminhos: a
+   * categoria `path` não transporta o caminho que casou.
+   */
+  exclusionCategory(filePath: string): ExclusionCategory | null {
+    try {
+      return this.exclusions.exclusionCategory(filePath);
+    } catch {
+      return null;
     }
   }
 
@@ -1765,25 +2830,69 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
    * ficheiro. Nunca lanca: uma falha aqui tem de deixar o scan continuar com
    * o clamscan por ficheiro, que e lento mas correcto.
    */
-  async prefetchClamav(filePaths: string[], scanId?: string): Promise<{ spawned: boolean; error?: string }> {
-    if (filePaths.length === 0) return { spawned: false };
-    // O dono é registado ANTES do await. Sem isto, um cancelamento que chegue a
-    // meio do batch não tem contra o que comparar e o Map órfão instala-se depois.
-    // meio do batch não tem contra o que comparar e o Map órfão instala-se depois.
+  async prefetchClamav(
+    filePaths: string[],
+    scanId?: string,
+    onProgress?: (processedFiles: number) => void,
+  ): Promise<{ spawned: boolean; error?: string; files?: number }> {
+    if (filePaths.length === 0) return { spawned: false, files: 0 };
     const generation = ++this.clamavPrefetchGeneration;
     const owner = scanId ?? `sem-id-${generation}`;
-    this.clamavPrefetches.set(owner, { generation, files: new Map() });
+    const existing = scanId === undefined ? undefined : this.clamavPrefetches.get(owner);
+    const mergedFiles = existing?.files ?? new Map<string, ClamavFileOutcome>();
+    this.clamavPrefetches.set(owner, { generation, files: mergedFiles });
+    const perfEnabled = process.env.CYBERSAFE_DEBUG_SCAN === "1";
+    if (perfEnabled) {
+      console.log(`[ScanPerf] PREFETCH_BEGIN scanId=${owner} files=${filePaths.length} at=${new Date().toISOString()}`);
+    }
     try {
-      const batch = await this.clamav.scanFiles(filePaths, { signal: this.signalForScan(scanId) });
+      // `onProgress` e' o que tira o batch da caixa preta: o clamscan diz,
+      // linha a linha, quantos ficheiros ja varreu. Sem isto a UI ficava 0/N
+      // durante os minutos que o batch demora (P0 SCANNER_REAL_BATCH_STALL).
+      const batch = await this.clamav.scanFiles(filePaths, {
+        signal: this.signalForScan(scanId),
+        onProgress,
+        scanId: owner,
+        // Um prefetch só existe porque o ScanManager o pediu: é sempre trabalho
+        // de um scan do utilizador, e é ele que não pode ficar atrás da fila de
+        // análises automáticas (P0 SCANNER_RUNTIME_ZERO_PROGRESS).
+        priority: "user",
+      });
       const files = new Map(batch.files.map((f) => [ProtectionEngineService.prefetchKey(f.file), f]));
       // O dono pode ter sido limpo (ou trocado) durante o await. Se for, este
       // resultado é de um scan que já acabou: descartar é o honesto.
       if (this.clamavPrefetches.get(owner)?.generation !== generation) {
+        if (perfEnabled) {
+          console.log(`[ScanPerf] prefetch discard owner=${owner} generation=${generation}`);
+        }
         return { spawned: true, error: undefined };
       }
-      this.clamavPrefetches.get(owner)!.files = files;
-      return { spawned: true, error: batch.status.status === "degraded" ? batch.status.detail : undefined };
+      const current = this.clamavPrefetches.get(owner);
+      if (!current || current.generation !== generation) {
+        return { spawned: true, error: undefined };
+      }
+      for (const [key, outcome] of files) current.files.set(key, outcome);
+      if (perfEnabled) {
+        // `batch.files.length` = um veredicto terminal POR ficheiro pedido
+        // (parseClamavOutput mapeia sobre `files`). `files.size` e' o numero de
+        // chaves normalizadas e pode ser MENOR se dois caminhos colidirem: e'
+        // isso que separa "o clamscan perdeu uma linha de progresso" de "dois
+        // pedidos sao o mesmo ficheiro".
+        console.log(`[ScanPerf] PREFETCH_RESOLVE scanId=${owner} requested=${filePaths.length} outcomes=${batch.files.length} unique=${files.size} status=${batch.status.status} at=${new Date().toISOString()}`);
+      }
+      // O numero de outcomes e' a verdade terminal do batch: o `onProgress`
+      // (linhas `OK`/`FOUND`) pode omitir um ficheiro que o clamscan nomeou de
+      // outra forma, mas o veredicto por ficheiro existe sempre.
+      return {
+        spawned: true,
+        error: batch.status.status === "degraded" ? batch.status.detail : undefined,
+        files: batch.files.length,
+      };
     } catch (err) {
+      if (perfEnabled) {
+        const code = (err as NodeJS.ErrnoException)?.code ?? "unknown";
+        console.log(`[ScanPerf] PREFETCH_REJECT scanId=${owner} code=${String(code)} at=${new Date().toISOString()}`);
+      }
       // Sem prefetch, `scanArtifact` volta ao caminho de um ficheiro de cada
       // vez. Lento, mas nunca errado nem vazio.
       this.clamavPrefetches.delete(owner);
@@ -1800,6 +2909,15 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
    * reaparecer depois.
    */
   clearClamavPrefetch(scanId?: string): void {
+    if (process.env.CYBERSAFE_DEBUG_SCAN === "1") {
+      console.log(`[ScanPerf] PREFETCH_CLEAR scanId=${scanId ?? "all"} at=${new Date().toISOString()}`);
+    }
+    // P1 — ABORT STICKY: o controller de abort e a intenção de abort
+    // viviam no engine sem nunca serem limpos quando o scan terminava sem
+    // nunca ter criado o controller (cancel na janela de looksLikeZip). O
+    // `finally` do scan chama clearClamavPrefetch, por isso é o único ponto
+    // de limpeza e garante que um scanId never sobrevive ao seu terminal.
+    this.releaseScanAbort(scanId);
     if (scanId === undefined) {
       // Sem id não há dono a nomear: limpa-se tudo e invalida-se tudo. É o que
       // um chamador sem id genuinamente nao pode limpar so um.
@@ -1816,8 +2934,55 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     return entry?.files.get(ProtectionEngineService.prefetchKey(filePath));
   }
 
-  async scanArtifact(filePath: string, source: ThreatEvent["source"], options?: { skipVirusTotal?: boolean; origin?: string; scanId?: string; clamavOutcome?: ClamavFileOutcome }): Promise<ServiceResponseMap["scan.artifact"]> {
+  /**
+   * Decides, BEFORE any clamav work, whether this requested file is already a
+   * terminal batch outcome for the same scan. Eta/terminal progress would keep
+   * reporting 728/800 forever unless the post-batch UI is fed from this source
+   * of truth instead of re-running clamav for every batched file.
+   *
+   * Cache is valid only when the scanId matches (one scan = one prefetch
+   * tenancy). Because the cache is keyed by normalized lower-cased Windows
+   * separator paths, exact dev-vs-run path forms that refer to the same file
+   * still resolve to the same outcome. It is intentionally NOT a heuristic:
+   * if there is no scanId, there is no owner, and we do not guess.
+   */
+  private isAlreadyCachedScanArtifact(
+    filePath: string,
+    source: ThreatEvent["source"],
+    options?: { scanId?: string },
+  ): boolean {
+    if (options?.scanId === undefined) return false;
+    const entry = this.clamavPrefetches.get(options.scanId);
+    if (entry === undefined) return false;
+    return entry.files.has(ProtectionEngineService.prefetchKey(filePath));
+  }
+
+  async scanArtifact(
+    filePath: string,
+    source: ThreatEvent["source"],
+    options?: {
+      skipVirusTotal?: boolean;
+      origin?: string;
+      scanId?: string;
+      clamavOutcome?: ClamavFileOutcome;
+      /** Only automatic observations: OFF aborts queued/running background jobs. */
+      backgroundSignal?: AbortSignal;
+      /**
+       * Classe na vaga global do ClamAV. Por omissão deriva do `scanId`: quem
+       * pertence a um scan do utilizador (ScanManager) tem prioridade; as
+       * análises automáticas (ficheiro observado, processo iniciado) não.
+       */
+      priority?: ClamavJobPriority;
+      /**
+       * USB: analise estritamente READ-ONLY. Nunca coloca em quarentena,
+       * nunca escreve/move nada no dispositivo e forca skipVirusTotal.
+       * Um scan USB nao pode alterar o que esta' a analisar.
+       */
+      readOnly?: boolean;
+    },
+  ): Promise<ServiceResponseMap["scan.artifact"]> {
     try {
+      options?.backgroundSignal?.throwIfAborted();
       // Gatekeeper: Check exclusions first
       const exclusionReason = this.exclusions.exclusionReason(filePath);
       if (exclusionReason) {
@@ -1834,7 +2999,9 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
             confidence: 1,
             rulesTriggered: [],
             riskScore: 0,
-            verdict: "safe",
+            verdict: "inconclusive",
+            analysisState: "excluded",
+            detail: "Ficheiro excluído pela configuração; não foi analisado.",
             sha256: "",
           }],
           totalFiles: 1,
@@ -1845,13 +3012,51 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
         };
       }
 
+      let beforeFile: string;
+      try {
+        const stat = await fs.lstat(filePath);
+        if (!stat.isFile() || stat.isSymbolicLink()) return this.publishInconclusiveFile(filePath, "O alvo não é um ficheiro regular; análise não realizada.");
+        beforeFile = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
+      } catch {
+        return options?.backgroundSignal?.aborted ? null : this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.");
+      }
       const analysis = await this.analyzer.analyze(filePath, undefined, undefined, {
-        signal: this.signalForScan(options?.scanId),
+        signal: options?.backgroundSignal ?? this.signalForScan(options?.scanId),
         // FASE 4: se o batch ja correu, o veredicto vem dai. Sem batch, o
         // analyzer corre o seu proprio scanFile.
         clamavOutcome: options?.clamavOutcome ?? this.clamavOutcomeFor(filePath, options?.scanId),
+        // PRIORIDADE na vaga global do ClamAV. O default é explícito para que a
+        // intenção fique legível no chamador: pertencer a um scan do utilizador
+        // (tem scanId) dá prioridade; uma análise automática não a tem.
+        priority: options?.priority ?? (options?.scanId ? "user" : "background"),
       });
-      const nativeOutcome = await NativeEngineBridge.scan(filePath);
+      options?.backgroundSignal?.throwIfAborted();
+      const nativeTiming = process.env.CYBERSAFE_DEBUG_SCAN === "1";
+      const nativeStarted = nativeTiming ? Date.now() : 0;
+      const nativeOutcome = await NativeEngineBridge.scan(filePath, {
+        signal: options?.backgroundSignal ?? this.signalForScan(options?.scanId),
+      });
+      options?.backgroundSignal?.throwIfAborted();
+      if (nativeTiming) console.log(`[ScanPerf] ENGINE_PHASE engine=native elapsedMs=${Date.now() - nativeStarted} outcome=${nativeOutcome.ok ? "completed" : nativeOutcome.failure ?? "output"}`);
+      if (beforeFile !== undefined) {
+        try {
+          const stat = await fs.lstat(filePath);
+          if (beforeFile !== `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`) return this.publishInconclusiveFile(filePath, "Ficheiro alterado durante a análise; o resultado anterior não foi aplicado.");
+        } catch { return this.publishInconclusiveFile(filePath, "Ficheiro removido ou inacessível durante a análise."); }
+      }
+
+      // Per-file coverage must come from this invocation, never cached health.
+      const nativeCompleted = nativeOutcome.ok && nativeOutcome.result !== null;
+      const nativeFailure = nativeCompleted ? undefined : nativeOutcome.failure ?? "output";
+      const nativeEngine: import("@cybersafe/shared-types").NativeFileScanStatus = {
+        status: nativeCompleted ? "completed" : nativeFailure === "unavailable" ? "unavailable"
+          : nativeFailure === "cancelled" ? "cancelled" : "error",
+        ...(nativeFailure ? { failure: nativeFailure } : {}),
+      };
+      const nativeDetail = nativeCompleted ? undefined
+        : nativeFailure === "unavailable" ? "Motor nativo indisponível; verificação nativa não realizada."
+        : nativeFailure === "cancelled" ? "Verificação do motor nativo interrompida; cobertura inconclusiva."
+        : "Falha na verificação do motor nativo; cobertura inconclusiva.";
 
       // Consult VT if enabled
       let vtResult = null;
@@ -1874,7 +3079,11 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // min(40, positives * 5) e podem não escalar para high/critical: perda de
       // sensibilidade em massa aceite. Com HTTP 401, vtResult já seria null.
       // Ficheiro único e realtime/processos mantêm o enriquecimento por omissão.
-      if (options?.skipVirusTotal !== true && this.vt.isEnabled() && analysis.sha256) {
+      // Um scan USB e' estritamente read-only: nao fala com a rede sobre o
+      // dispositivo nem toca em nada dele. `skipVirusTotal` fica forcado AQUI
+      // para que nenhum chamador consiga esquecer-se.
+      const readOnlyUsb = options?.readOnly === true;
+      if (!readOnlyUsb && options?.skipVirusTotal !== true && this.vt.isEnabled() && analysis.sha256) {
         vtResult = await this.vt.scanHash(analysis.sha256, options?.origin || `scanArtifact:${source}`);
         if (vtResult && vtResult.positives > 0) {
           // If VT detects it, boost the risk score
@@ -1886,6 +3095,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       }
 
       // Native PE/entropy signals and generic YARA are heuristics, not proof.
+      options?.backgroundSignal?.throwIfAborted();
       // Match the existing process policy: >2 VT detections corroborate danger.
       const corroborated = hasStrongLocalEvidence || (vtResult?.positives ?? 0) > 2;
       if (!corroborated && finalRiskScore > DEFAULT_SETTINGS.thresholds.alertMax) {
@@ -1897,14 +3107,34 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       analysis.riskScore = finalRiskScore;
       analysis.severity = finalSeverity;
       analysis.verdict = finalSeverity === "critical" ? "malicious" : finalSeverity !== "low" ? "suspicious" : analysis.verdict;
-      analysis.recommendedAction = finalSeverity === "critical" ? "quarantined"
+      analysis.recommendedAction = finalSeverity === "critical" ? "alerted"
         : finalRiskScore > DEFAULT_SETTINGS.thresholds.monitorMax ? "alerted"
         : finalRiskScore > DEFAULT_SETTINGS.thresholds.safeMax ? "logged" : "allowed";
 
-      this.eventBus.publish("artifact.analyzed", finalSeverity, `Analisado ${analysis.fileName}`, { ...analysis, vtResult });
+      // A missing native result cannot turn into a negative verdict. Preserve
+      // positive evidence from other engines while reporting incomplete coverage.
+      if (!nativeCompleted && analysis.verdict === "safe") analysis.verdict = "inconclusive";
+      // A positive detection and completed native scan do not prove that the
+      // other engines evaluated this file. Use this invocation's structured
+      // factors, never cached engine health, to retain upstream coverage gaps.
+      const upstreamIncomplete = analysis.verdict === "inconclusive" ||
+        analysis.rulesTriggered.includes("scan_inconclusive") ||
+        analysis.factors.some(factor => ["clamav-inconclusive", "yara-inconclusive", "yara-timeout", "scan-cancelled"].includes(factor.id));
+      const analysisState: import("@cybersafe/shared-types").FileScanResult["analysisState"] =
+        !nativeCompleted ? nativeFailure === "unavailable" ? "engine-unavailable"
+          : nativeFailure === "cancelled" ? "inconclusive" : "failed"
+        : upstreamIncomplete ? "inconclusive" : "completed";
+      const coverageDetail = nativeDetail ?? (upstreamIncomplete
+        ? "Pelo menos um motor não conseguiu avaliar o ficheiro; a deteção disponível foi preservada, mas a cobertura é inconclusiva."
+        : undefined);
+
+      // Read-only: a recomendacao tem de dizer o que o motor faz de facto.
+      // Recomendar quarentena sem a executar faria a UI e o historico
+      // afirmarem uma quarentena que nunca aconteceu.
 
       const threat: ThreatEvent = {
         source,
+        sha256: analysis.sha256,
         url: `file://${filePath}`,
         domain: path.basename(filePath),
         severity: finalSeverity,
@@ -1922,9 +3152,11 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // e a pagina Ameacas mostrava 0 para deteccoes medium.
       if (finalSeverity !== "low") {
         this.threats = [threat, ...this.threats].slice(0, 500);
+        this.eventBus.publish("threat.detected", finalSeverity, `Ameaça detetada em ${analysis.fileName}`, {...threat});
+        void this.logHistory({type:"threat.detected",threat:{...threat},timestamp:new Date().toISOString()});
       }
 
-      if (analysis.recommendedAction === "quarantined" || finalSeverity === "critical") {
+      if (finalSeverity === "critical") {
         this.blockedHashes.add(analysis.sha256);
         this.blockedPaths.add(filePath.toLowerCase());
         if (this.blockedHashes.size > 10_000) {
@@ -1935,20 +3167,17 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           const firstPath = this.blockedPaths.values().next().value;
           if (firstPath !== undefined) this.blockedPaths.delete(firstPath);
         }
-        const quarantineEntry = await this.quarantine.quarantine({ ...analysis, riskScore: finalRiskScore });
-        this.eventBus.publish("quarantine.added", "critical", `Colocado em quarentena ${analysis.fileName}`, quarantineEntry ?? analysis);
-
-        // Em Fase 2, também bloqueamos a conexão do domínio suspeito com WFP
-        if (vtResult && vtResult.positives > 10) {
-           // Simulação: Bloquear IP (aqui não temos o IP, mas poderíamos extrair das conexões ativas)
-           // await this.wfpFilter.blockIp("10.0.0.99");
+        if (!readOnlyUsb && canAutoQuarantine(this.quarantinePolicy, analysis)) {
+          if (await this.requestQuarantine(analysis, "automatic")) {
+            analysis.recommendedAction = "quarantined";
+            threat.action = "quarantined";
+          }
         }
+
       }
 
-      if (finalSeverity !== "low") {
-         this.eventBus.publish("threat.detected", finalSeverity, `Ameaça detetada em ${analysis.fileName}`, threat);
-         void this.logHistory({ type: "threat.detected", threat, timestamp: new Date().toISOString() });
-      }
+      this.eventBus.publish("artifact.analyzed", finalSeverity, `Analisado ${analysis.fileName}`, { ...analysis, vtResult, analysisState, nativeEngine, detail: coverageDetail });
+
 
       // Log VT result to Action log (Workstream F: rotation + dedupe)
       if (vtResult) {
@@ -1964,6 +3193,9 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           rulesTriggered: analysis.rulesTriggered,
           riskScore: finalRiskScore,
           verdict: analysis.verdict,
+          analysisState,
+          nativeEngine,
+          detail: coverageDetail,
           sha256: analysis.sha256,
         }],
         totalFiles: 1,
@@ -1973,6 +3205,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
         riskScore: finalRiskScore,
       };
     } catch (err) {
+      if (options?.backgroundSignal?.aborted) return null;
       const code = (err as NodeJS.ErrnoException | null)?.code;
       if (isTransientFsError(err)) {
         // Erro esperado (junction/reparse point, ficheiro transitório): uma
@@ -1983,7 +3216,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       } else {
         console.error("Scan error:", err);
       }
-      return null;
+      return this.publishInconclusiveFile(filePath, "A análise falhou; não foi possível concluir um veredicto.");
     }
   }
 
@@ -1997,7 +3230,12 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     let virusTotal = null;
 
 if (processInfo.path) {
-        fileScan = await this.scanArtifact(processInfo.path, "service", { origin: "analyze_process" });
+        // O utilizador clicou "analisar este processo": é trabalho PEDIDO, e por
+        // isso tem prioridade sobre as análises automáticas na vaga do ClamAV.
+        fileScan = await this.scanArtifact(processInfo.path, "service", {
+          origin: "analyze_process",
+          priority: "user",
+        });
         if (fileScan?.results[0]?.sha256 && this.vt.isEnabled()) {
            virusTotal = await this.vt.scanHash(fileScan.results[0].sha256, "analyze_process");
         }
@@ -2050,7 +3288,10 @@ if (processInfo.path) {
         for (const entry of entries) {
           if (entry.isFile()) {
              const fullPath = path.join(scanPath, entry.name);
-             await this.scanArtifact(fullPath, "system-scanner");
+             // Análise completa pedida pelo utilizador: prioridade de utilizador
+             // (esta varredura antiga corre um ficheiro de cada vez, mas não
+             // pode ser atropelada pelas análises automáticas).
+             await this.scanArtifact(fullPath, "system-scanner", { priority: "user" });
              totalScanned++;
 
              // Publish progress every 10 files
@@ -2082,55 +3323,51 @@ if (processInfo.path) {
 
   async restoreQuarantine(id: string, trustAfterRestore = false) {
     const entry = this.quarantine.list().find((item) => item.id === id);
-    const success = await this.quarantine.restore(id, "desktop-ui");
+    const { success: restored, error } = await this.quarantine.restore(id, "desktop-ui");
+    const success = restored === true;
     if (success && trustAfterRestore && entry?.sha256) {
       await this.allowHash(entry.sha256);
     }
     if (success) {
       this.eventBus.publish("quarantine.restored", "low", `Entrada de quarentena restaurada ${id}`, { id });
     }
-    return { success };
+    return { success, ...(error !== undefined ? { error } : {}) };
   }
 
   async deleteQuarantine(id: string) {
-    const success = await this.quarantine.delete(id);
-    return { success };
+    // Sem evento publico: um "eliminado" nao tem tipo de evento proprio e
+    // reaproveitar "restored" seria mentir sobre o que aconteceu ao ficheiro.
+    return this.quarantine.delete(id);
   }
 
   async updateDefinitions() {
+    // `""` é "nunca atualizado", não uma data. O contrato devolve null nesse caso.
+    const anterior = this.definitionsUpdatedAt || null;
     try {
-      // O MESMO gate e o MESMO `afterSwap` do caminho periódico. Uma segunda
-      // instância de `DefinitionUpdater` sem o gate permitiria a um update
-      // manual escrever na base por cima de um scan vivo — a mesma corrida,
-      // com uma segunda porta de entrada.
-      const updater = new DefinitionUpdater(this.definitionsDir, {
-        gate: this.clamDatabaseGate,
-        afterSwap: async () => {
-          await this.clamav.isAvailable(true);
-        },
-      });
-      const result = await updater.checkAndUpdate(true);
-
-      // Hot-reload: recarrega as definições em memória sem reiniciar o serviço
-      await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.json"));
-      await this.yara.load(path.join(this.definitionsDir, "yara", "default.yar"));
-
-      // O ClamAV tambem tem de ser re-sondado, e esse trabalho e do afterSwap
-      // DENTRO do checkAndUpdate acima - nos dois caminhos, manual e periodico.
-      // Nao ha um segundo isAvailable aqui: re-sondar em separado re-sondaria
-      // tambem quando o freshclam NAO correu (drain falhado, exit != 0, freshclam
-      // ausente), publicando um estado que ninguem mudou. O afterSwap so corre
-      // com clamUpdated === true, que e a prova de que a base mudou.
-
-      this.definitionsUpdatedAt = new Date().toISOString();
-      this.eventBus.publish("engine.health", "low", `Definições atualizadas (YARA: ${result.yaraUpdated}, ClamAV: ${result.clamUpdated}, Hashes: ${result.hashesUpdated})`, {
-        updatedAt: this.definitionsUpdatedAt,
-        ...result,
-      });
-      return { success: true, updatedAt: this.definitionsUpdatedAt };
+      // A instância partilhada assegura que a atualização manual e o scheduler
+      // executam os mesmos gates e recarregam os motores pelo mesmo callback.
+      // O que se devolve são as FLAGS reais do updater: terminar não prova que
+      // os três conjuntos de definições mudaram.
+      const result = await this.updater.checkAndUpdate(true);
+      const response = createDefinitionsUpdateResult(result, anterior, new Date().toISOString());
+      if (response.yaraUpdated || response.clamUpdated || response.hashesUpdated) {
+        this.definitionsUpdatedAt = response.checkedAt;
+      }
+      // Os nomes dos componentes só aparecem na mensagem quando os três
+      // confirmam: "atualizado" sem dizer o quê seria mais honesto do que uma
+      // frase completa construída sobre flags que não foram todas verdade.
+      this.eventBus.publish("engine.health", response.success ? "low" : "medium",
+        response.success
+          ? `Definições atualizadas (YARA: ${response.yaraUpdated}, ClamAV: ${response.clamUpdated}, Hashes: ${response.hashesUpdated})`
+          : "Atualização de definições incompleta ou com avisos", response);
+      return response;
     } catch (err: any) {
       console.error("[Engine] Falha ao atualizar definições:", err);
-      return { success: false, updatedAt: this.definitionsUpdatedAt };
+      const checkedAt = new Date().toISOString();
+      return createDefinitionsUpdateResult({
+        yaraUpdated: false, clamUpdated: false, hashesUpdated: false,
+        errors: ["O serviço não confirmou a atualização de definições."], warnings: [], timestamp: checkedAt,
+      }, anterior, checkedAt);
     }
   }
 
@@ -2244,6 +3481,15 @@ if (processInfo.path) {
   private static readonly PROCESS_TRUTH_TTL_MS = PROCESS_POLL_INTERVAL_MS * 2;
 
   /**
+   * Depois de uma enumeração falhada, a próxima leitura tenta de novo passado
+   * este intervalo, mesmo que ainda exista uma foto dentro do TTL. Sem isto,
+   * uma falha ficava 2×PROCESS_POLL_INTERVAL_MS a servir cache como se a
+   * última tentativa tivesse sido boa. Não é um limiter de leitura: é o
+   * intervalo mínimo entre tentativas de RECUPERAÇÃO depois de erro.
+   */
+  private static readonly PROCESS_RETRY_AFTER_FAILURE_MS = 1_000;
+
+  /**
    * Um tombstone barra este PID? Barra quando é o mesmo processo que
    * confirmámos morto (ou quando não conhecíamos a identidade do morto e por
    * isso qualquer candidato é suspeito). Se a identidade for DIFERENTE, o
@@ -2287,6 +3533,7 @@ if (processInfo.path) {
     entry: { name?: string; commandLine?: string } | undefined,
     options: { tombstone: boolean; invalidateTruth: boolean },
   ) {
+    this.processBirthsDuringEnumeration?.delete(pid);
     this.processes = this.processes.filter((cached) => cached.pid !== pid);
     this.processesRevision += 1;
     if (options.tombstone) {
@@ -2305,13 +3552,55 @@ if (processInfo.path) {
   }
 
   /**
+   * Verdade da enumeração SEM linhas e SEM origem: é a leitura do estado, não a
+   * resposta a um pedido. Quem serve a lista usa `composeProcessesTruth`, que
+   * sabe de onde vêm as linhas; aqui `servedFrom` não tem significado, e por
+   * isso é `null` em vez de um palpite.
+   */
+  get processesTruth(): Omit<ProcessEnumerationTruth, "servedFrom"> & { servedFrom: null } {
+    const { servedFrom: _origem, ...resto } = this.composeProcessesTruth("cache");
+    return { ...resto, servedFrom: null };
+  }
+
+  /**
+   * Compõe o `ProcessEnumerationTruth` a partir do registo de tentativas.
+   *
+   * `servedFrom` é decidido por quem chama (a foto que acabou de chegar, ou o
+   * que já cá estava). A idade afirmada é sempre a da FOTO (`processesPhotoAt`),
+   * nunca o instante em que a resposta foi composta — foi exatamente essa
+   * confusão, feita do lado do cliente, que permitia ler cache velho como actual.
+   */
+  private composeProcessesTruth(servedFrom: "snapshot" | "cache"): ProcessEnumerationTruth {
+    const attempt = this.processesAttempt;
+    const state: ProcessEnumerationTruth["state"] = !attempt
+      ? "never"
+      : attempt.finishedAt === null
+        ? "in-progress"
+        : attempt.ok
+          ? "ok"
+          : "failed";
+    return {
+      state,
+      enumeratedAt: this.processesPhotoAt > 0 ? this.processesPhotoAt : null,
+      servedFrom,
+      attempt: attempt ? { ...attempt } : null,
+      asOf: Date.now(),
+    };
+  }
+
+  /**
    * processes.list com reconciliação on-demand: a fonte de verdade é o SO
    * (`processMonitor.list()`), não o cache de eventos. Antes disto, o handler
    * devolvia só o cache (cap silencioso de 200, nunca re-enumerava) e o
    * "refresh" da UI nunca via a realidade — processos reais ficavam invisíveis.
-   * Enumeração falhou → serve o cache (degradado, nunca lista vazia silenciosa).
+   *
+   * P1-PROCESS-TRUTH: Enumeração falhou → serve o que existir, mas diz que
+   * falhou. O `catch` já não apaga o facto: as linhas vêm com `truth.state`
+   * `"failed"` e o motivo, e `enumeratedAt` continua a ser a idade da última
+   * foto boa (ou `null` se nunca a houve). Devolver `[]` nu era afirmar «este
+   * computador não tem processos».
    */
-  async listProcesses(): Promise<ProcessSnapshot[]> {
+  async listProcesses(): Promise<ProcessListResult> {
     // P0 de latência: este pedido é o sinal de "há alguém a olhar". O
     // ProcessMonitor usa-o para passar da cadência lenta (10 s) à rápida (2 s)
     // e volta atrás sozinho quando os pedidos param. Não é preciso a UI
@@ -2319,14 +3608,33 @@ if (processInfo.path) {
     this.processMonitor.noteObserver();
 
     const cached = this.withoutTombstoned(this.processes);
+    // Uma falha recente não invalida a foto imediatamente (não se apaga a
+    // última verdade). Durante o intervalo de retry serve-se a cache com
+    // `truth.state=failed` (evita uma tempestade de PowerShell); passado esse
+    // intervalo a próxima leitura vai AO SO, mesmo que a foto ainda esteja
+    // dentro do TTL — é isto que fecha a recuperação depois de um erro.
+    const failedAt =
+      this.processesAttempt !== null && this.processesAttempt.ok === false
+        ? this.processesAttempt.finishedAt
+        : null;
+    const retryDue =
+      failedAt !== null &&
+      Date.now() - failedAt >= ProtectionEngineService.PROCESS_RETRY_AFTER_FAILURE_MS;
+    const withinFailureRetryWindow = failedAt !== null && !retryDue;
     if (
       cached.length > 0 &&
-      Date.now() - this.processesEnumeratedAt < ProtectionEngineService.PROCESS_TRUTH_TTL_MS
+      !retryDue &&
+      (withinFailureRetryWindow ||
+        Date.now() - this.processesEnumeratedAt < ProtectionEngineService.PROCESS_TRUTH_TTL_MS)
     ) {
-      return cached;
+      return { processes: cached, truth: this.composeProcessesTruth("cache") };
     }
     if (!this.processesEnumerating) {
+      const startedAt = Date.now();
+      this.processesAttempt = { startedAt, finishedAt: null, ok: false };
+      this.processBirthsDuringEnumeration = new Map();
       this.processesEnumerating = (async () => {
+        let falhou = false;
         try {
           const fresh = await this.processMonitor.list();
           // Uma enumeração é uma FOTO. Um processo que nasce (ou que a UI mata)
@@ -2354,15 +3662,29 @@ if (processInfo.path) {
           this.reconcileOwnChildren(fresh);
           this.processes = this.withoutTombstoned(this.mergeEventObserved(fresh));
           this.processesEnumeratedAt = Date.now();
+          this.processesPhotoAt = this.processesEnumeratedAt;
+          this.processesAttempt = { startedAt, finishedAt: Date.now(), ok: true };
         } catch (error) {
-          console.error("[Service] processes.list: falhou a enumeração do SO; a servir o cache de eventos:", error);
+          console.error("[Service] processes.list: falhou a enumeração do SO; a servir a última lista conhecida como degrada:", error);
+          this.processesAttempt = {
+            startedAt,
+            finishedAt: Date.now(),
+            ok: false,
+            error: classifyProcessEnumerationError(error),
+          };
+          falhou = true;
         } finally {
+          this.processBirthsDuringEnumeration = null;
           this.processesEnumerating = null;
         }
-        return this.processes;
+        // `servedFrom` descreve o que FOI servido, não o ramo que foi tomado:
+        // quando a tentativa rebenta, as linhas são as que já cá estavam (ou
+        // nenhuma), e dizer «snapshot» seria afirmar uma foto que não existe.
+        return { rows: this.processes, servedFrom: falhou ? ("cache" as const) : ("snapshot" as const) };
       })();
     }
-    return this.processesEnumerating;
+    const { rows, servedFrom } = await this.processesEnumerating;
+    return { processes: rows, truth: this.composeProcessesTruth(servedFrom) };
   }
 
   /**
@@ -2372,8 +3694,8 @@ if (processInfo.path) {
    */
   private mergeEventObserved(fresh: ProcessSnapshot[]): ProcessSnapshot[] {
     const byPid = new Map(fresh.map((entry) => [entry.pid, entry]));
-    for (const cached of this.processes) {
-      if (!byPid.has(cached.pid)) byPid.set(cached.pid, cached);
+    for (const born of this.processBirthsDuringEnumeration?.values() ?? []) {
+      byPid.set(born.pid, born);
     }
     return Array.from(byPid.values());
   }
@@ -2382,57 +3704,78 @@ if (processInfo.path) {
    * CIM query com FILTRO ALVO (A1): um único PowerShell com WQL exato
    * (ProcessId=n / Name='x') — barato (~0.3–1 s) vs a enumeração completa
    * (~2 s) que o caminho do kill fazia antes em cada PID fora do cache.
-   * Falhou ⇒ devolve []: o kill segue com a classificação que tem (PID,
-   * limiares, ancestrais), nunca fica bloqueado pelo diagnóstico.
-   * Seam de teste: este método é substituível na instância.
+   *
+   * CONTRATO R1: falha de fonte LANÇA. «Não consegui perguntar» nunca pode ser
+   * a mesma resposta que «o PID não existe»; quem quer tolerância (diagnóstico
+   * de alias) chama um wrapper explícito. Seam de teste: substituível.
    */
-  async queryCimProcesses(cimFilter: string, timeoutMs = ProtectionEngineService.CIM_QUERY_TIMEOUT_MS): Promise<KillTargetInfo[]> {
+  async queryCimProcesses(cimFilter: string, timeoutMs = ProtectionEngineService.CIM_QUERY_TIMEOUT_MS): Promise<Array<KillTargetInfo & { startedAt?: string }>> {
+    try {
+      return await this.runCimQuery(cimFilter, timeoutMs);
+    } catch (error) {
+      console.warn(`[Service] CIM query falhou (${cimFilter}):`, (error as Error)?.message ?? error);
+      throw error;
+    }
+  }
+
+  /**
+   * Query CIM ESTRITA: uma falha lança. É a versão usada pela revalidação
+   * pré-kill, onde «não há linha» e «não consegui perguntar» não podem ser a
+   * mesma resposta — a primeira é um PID que já não existe, a segunda é uma
+   * identidade que não foi provada. Nessa segunda, nenhuma ação é executada.
+   */
+  private async runCimQuery(cimFilter: string, timeoutMs = ProtectionEngineService.CIM_QUERY_TIMEOUT_MS): Promise<Array<KillTargetInfo & { startedAt?: string }>> {
     const psLiteral = `'${cimFilter.replace(/'/g, "''")}'`;
     const script =
       "$ErrorActionPreference='Stop';" +
       ` Get-CimInstance -ClassName Win32_Process -Filter ${psLiteral}` +
-      " | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath" +
+      " | Select-Object ProcessId,ParentProcessId,Name,CommandLine,ExecutablePath,@{n='CreatedIso';e={$_.CreationDate.ToUniversalTime().ToString('o')}}" +
       " | ConvertTo-Json -Compress";
-    try {
-      const { stdout } = await execFileAsync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
-        windowsHide: true,
-        // P4: parametrizado para que a reconcileação possa limitar a probe ao
-        // orçamento restante. Uma query já em voo não pode ser interrompida a
-        // meio, por isso o transbordo do deadline do reap nascia daqui.
-        timeout: Math.max(1, timeoutMs),
-        maxBuffer: 4_000_000,
-      });
-      const text = stdout.trim();
-      if (!text) return [];
-      const parsed = JSON.parse(text) as Record<string, unknown> | Record<string, unknown>[];
-      const rows = Array.isArray(parsed) ? parsed : [parsed];
-      return rows
-        .map((raw) => ({
-          pid: Number(raw.ProcessId),
-          ppid: Number(raw.ParentProcessId) || 0,
-          name: raw.Name ? String(raw.Name) : undefined,
-          // ExecutablePath pode ser null sem privilégios — mantém "", nunca se inventa.
-          path: raw.ExecutablePath ? String(raw.ExecutablePath) : "",
-          commandLine: raw.CommandLine ? String(raw.CommandLine) : "",
-        }))
-        .filter((entry) => Number.isInteger(entry.pid) && entry.pid > 0);
-    } catch (error) {
-      console.warn(`[Service] CIM query falhou (${cimFilter}):`, (error as Error)?.message ?? error);
-      return [];
-    }
+    const { stdout } = await execFileAsync("powershell", ["-NoProfile", "-NonInteractive", "-Command", script], {
+      windowsHide: true,
+      // P4: parametrizado para que a reconcileação possa limitar a probe ao
+      // orçamento restante. Uma query já em voo não pode ser interrompida a
+      // meio, por isso o transbordo do deadline do reap nascia daqui.
+      timeout: Math.max(1, timeoutMs),
+      maxBuffer: 4_000_000,
+    });
+    const text = stdout.trim();
+    if (!text) return [];
+    const parsed = JSON.parse(text) as Record<string, unknown> | Record<string, unknown>[];
+    const rows = Array.isArray(parsed) ? parsed : [parsed];
+    return rows
+      .map((raw) => ({
+        pid: Number(raw.ProcessId),
+        ppid: Number(raw.ParentProcessId) || 0,
+        name: raw.Name ? String(raw.Name) : undefined,
+        // ExecutablePath pode ser null sem privilégios — mantém "", nunca se inventa.
+        path: raw.ExecutablePath ? String(raw.ExecutablePath) : "",
+        commandLine: raw.CommandLine ? String(raw.CommandLine) : "",
+        // Timestamp DA FONTE (CreationDate), não o instante da query. É a
+        // identidade usada para recusar ações sobre um PID reutilizado.
+        startedAt: raw.CreatedIso ? String(raw.CreatedIso) : undefined,
+      }))
+      .filter((entry) => Number.isInteger(entry.pid) && entry.pid > 0);
   }
 
   /** Identidade de UM PID por query-alvo — não enumera o SO (A1). */
   private async lookupProcessByPid(
     pid: number,
     timeoutMs?: number,
-  ): Promise<KillTargetInfo | undefined> {
+  ): Promise<(KillTargetInfo & { startedAt?: string }) | undefined> {
     const rows = await this.queryCimProcesses(`ProcessId=${pid}`, timeoutMs);
     return rows.find((entry) => entry.pid === pid);
   }
 
   private async findLiveProcessesByName(name: string, timeoutMs?: number): Promise<KillTargetInfo[]> {
-    return this.queryCimProcesses(`Name='${name.replace(/'/g, "''")}'`, timeoutMs);
+    // Reconcílio de alias é DIAGNÓSTICO depois de o taskkill já ter dito
+    // not-found; uma falha de CIM aqui não pode inventar uma instância viva.
+    // Por isso este é o único caminho tolerante explícito.
+    try {
+      return await this.queryCimProcesses(`Name='${name.replace(/'/g, "''")}'`, timeoutMs);
+    } catch {
+      return [];
+    }
   }
 
   /**
@@ -2480,8 +3823,14 @@ if (processInfo.path) {
    */
   private async killTargetStillAlive(pid: number, timeoutMs: number): Promise<boolean> {
     if (!isProcessAlive(pid)) return false;
-    const row = await this.lookupProcessByPid(pid, timeoutMs);
-    return !!row;
+    try {
+      const row = await this.lookupProcessByPid(pid, timeoutMs);
+      return !!row;
+    } catch {
+      // CIM indisponível: não provou ausência. "Vivo/desconhecido" é o lado
+      // seguro — evita retry e evita declarar morte sem testemunha.
+      return true;
+    }
   }
 
   /**
@@ -2538,9 +3887,85 @@ if (processInfo.path) {
     return { killed, survived, refusedProtected };
   }
 
+  private individualTermination: SafeProcessTermination | null = null;
+  private criticalRpcOperations = 0;
+
+  private terminationBlocked(identity?: TerminationIdentity): string | null {
+    const gate = this.clamDatabaseGate.state;
+    // Check actual work, not the enabled/disabled preference. No await follows
+    // this final gate before the native operation; protection is never suspended.
+    if (!this.pipeAuthRequired || !this.pipeToken || this.disposed || this.isShuttingDown ||
+        this.startupStateValue !== "ready" || this.criticalRpcOperations > 0 || process.env.CYBERSAFE_DEV_WINDOWS_READONLY === "1" ||
+        process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN === "1" ||
+        this.protectionTransition || this.protectionStopUnconfirmed || this.fileObservationReads > 0 ||
+        this.realtimeQueue.size > 0 || this.realtimeQueue.active > 0 || this.clamavPrefetches.size > 0 || this.scanAbortControllers.size > 0 ||
+        this.scanManager.getActiveScan() || this.updater.operationInProgress ||
+        gate.activeScans > 0 || gate.updatePending || gate.updateActive) return "critical-operation-or-untrusted-session";
+    if (identity) {
+      const cached = this.processes.find(p => p.pid === identity.pid);
+      if (!cached || !matchesSnapshotCreation(cached.startedAt,identity.creation) ||
+          classifyKillTarget({...cached, path:identity.path, name:identity.name}, this.killProtectionContext()) ||
+          this.ownChildPids.has(identity.pid)) return "protected-or-identity-unconfirmed";
+    }
+    return null;
+  }
+
+  private nativeTerminationOpen: ReturnType<typeof createWindowsTerminationOpener> | null = null;
+  private openIndividualProcess(pid:number) {
+    this.nativeTerminationOpen ??= createWindowsTerminationOpener();
+    return this.nativeTerminationOpen(pid);
+  }
+
+  private terminationController(): SafeProcessTermination {
+    if (!this.individualTermination) {
+      // Binding is lazy, after normal startup/readonly guards, never at import.
+      const open = (pid:number) => this.openIndividualProcess(pid);
+      this.individualTermination = new SafeProcessTermination({
+        open, blocked: identity => this.terminationBlocked(identity),
+        audit: event => {
+          void fs.appendFile(path.join(this.logsDir,"actions.log"), JSON.stringify({
+            timestamp:new Date().toISOString(), action:"process.termination", ...event,
+          })+"\n", "utf-8").catch(()=>{});
+          if (event.status === "killed") {
+            this.eventBus.publish("process.killed", "low", `Processo terminado pelo CyberSafe (PID ${event.pid})`, {
+              pid:event.pid, source:event.source, operationId:event.operationId, confirmed:true, scope:"single-process",
+            });
+          }
+        },
+      });
+    }
+    return this.individualTermination;
+  }
+
+  private async confirmIndividualProcess(ticket:unknown) {
+    const result = await this.individualTermination?.confirm(ticket) ?? {
+      success:false,status:"failed" as const,pid:0,error:"Confirmação ausente ou expirada.",
+    };
+    if (["killed","already-exited","reused","timeout"].includes(result.status)) {
+      // Do not remove rows by PID: the OS may already have reused it. Let an
+      // existing enumeration settle, then force the next processes-only refresh
+      // to ask Windows rather than serving the pre-operation TTL cache.
+      await this.processesEnumerating?.catch(()=>{});
+      this.processesEnumeratedAt=0;
+      this.processesAttempt=null;
+    }
+    return result;
+  }
+
   async killProcess(pid: number): Promise<ProcessKillResult> {
     if (!Number.isInteger(pid) || pid <= 0) {
       return { success: false, status: "failed", pid, error: "PID inválido" };
+    }
+
+    if (ProtectionEngineService.KILL_TERMINATION_DISABLED) {
+      // Fail-closed: sem ação, sem consulta, sem tentativa. A resposta diz a
+      // verdade — indisponibilidade, não uma falha inventada nem sucesso.
+      return {
+        success: false,
+        status: "failed",
+        pid,
+        error: "Terminação de processos indisponível: identidade não pode ser provada de ponta a ponta; nenhuma ação foi executada.",
+      };
     }
 
     // ── P4: orçamento global ──────────────────────────────────────────────
@@ -2557,30 +3982,154 @@ if (processInfo.path) {
     /** Timeout de uma etapa: o que resta do orçamento, nunca acima do tecto. */
     const step = (ceiling: number) => Math.max(0, Math.min(ceiling, remaining()));
 
-    let processInfo: KillTargetInfo | undefined = this.processes.find((p) => p.pid === pid);
-    // O processo existe mas não está no cache: ir ao OS, mas por QUERY-ALVO
-    // do PID (A1) — a listProcesses() completa custava ~2 s no meio do
-    // clique e era isso que tornava o modal lenta.
-    if (!processInfo && isProcessAlive(pid)) {
-      processInfo = await this.lookupProcessByPid(pid, step(ProtectionEngineService.CIM_QUERY_TIMEOUT_MS));
-    }
+    let processInfo: (KillTargetInfo & { startedAt?: string }) | undefined =
+      this.processes.find((p) => p.pid === pid);
+    const processInfoFromCache = processInfo !== undefined;
 
-    // Auto-proteção por PID/ppid/path (nome só como fallback).
-    const protection = classifyKillTarget(processInfo ?? { pid }, this.killProtectionContext());
-    if (protection) {
-      console.warn(`[Service] Blocked attempt to kill protected process PID: ${pid} (${protection})`);
+    // Auto-proteção por PID/ppid/path antes de qualquer query. Sem cache, o
+    // PID 4/self continua a ser recusado sem ir ao CIM; com cache, a identidade
+    // real é aplicada logo abaixo, uma única vez.
+    const protecaoInicial = classifyKillTarget(processInfo ?? { pid }, this.killProtectionContext());
+    if (protecaoInicial) {
+      console.warn(`[Service] Blocked attempt to kill protected process PID: ${pid} (${protecaoInicial})`);
       // A recusa acontece ANTES de qualquer taskkill, e portanto ANTES do
       // `logKillAttempt`. Sem esta linha a unica prova vivia num console.warn
       // efemero — foi o que impediu o diagnostico do falso positivo `internal`.
-      this.logKillBlocked("manual", processInfo ?? { pid }, protection, this.nextKillRequestId(pid));
+      this.logKillBlocked("manual", processInfo ?? { pid }, protecaoInicial, this.nextKillRequestId(pid));
       return {
         success: false,
         status: "protected",
         pid,
-        protectedReason: protection,
+        protectedReason: protecaoInicial,
         error: "Cannot terminate protected CyberSafe/system process",
       };
     }
+
+    // Sem cache: consultar o OS para CLASSIFICAR proteção, nunca para autorizar
+    // a ação. Uma linha fresca do CIM, sozinha, não prova que o PID selecionado
+    // pelo utilizador era este; falta a referência do snapshot.
+    let sourceError: unknown = null;
+    if (!processInfo && isProcessAlive(pid)) {
+      try {
+        processInfo = await this.lookupProcessByPid(pid, step(ProtectionEngineService.CIM_QUERY_TIMEOUT_MS));
+      } catch (error) {
+        sourceError = error;
+      }
+    }
+
+    // A linha do CIM (quando existe) pode revelar proteção por path/ancestral
+    // que o PID sozinho não revelava. Continua a ser recusa, nunca ação.
+    if (!processInfoFromCache) {
+      const protecaoFonte = classifyKillTarget(processInfo ?? { pid }, this.killProtectionContext());
+      if (protecaoFonte) {
+        this.logKillBlocked("manual", processInfo ?? { pid }, protecaoFonte, this.nextKillRequestId(pid));
+        return {
+          success: false,
+          status: "protected",
+          pid,
+          protectedReason: protecaoFonte,
+          error: "Cannot terminate protected CyberSafe/system process",
+        };
+      }
+      if (!processInfo) {
+        if (!isProcessAlive(pid)) return { success: true, status: "already-exited", pid };
+        return {
+          success: false,
+          status: "failed",
+          pid,
+          error: sourceError
+            ? `Identidade do processo não confirmada: a fonte CIM falhou (${(sourceError as Error)?.message ?? String(sourceError)}); terminação recusada.`
+            : `Identidade do processo não confirmada: o CIM não devolveu o PID ${pid}, mas o processo está vivo; terminação recusada.`,
+        };
+      }
+      // Existe linha, mas não existe referência de snapshot do utilizador.
+      // Nome/comando iguais não substituem a seleção que originou o pedido.
+      return {
+        success: false,
+        status: "failed",
+        pid,
+        target: { name: processInfo.name, path: processInfo.path },
+        error: `Identidade do processo não confirmada: o PID ${pid} não tem referência no snapshot; terminação recusada.`,
+      };
+    }
+
+    // ── Identidade de criação: a referência é o SNAPSHOT, não a idade do PID ──
+    // A comparação só autoriza com CreationDate válida dos dois lados. Uma data
+    // em falta/inválida/futura é "não provado" e recusa — nome/comando iguais
+    // não são identidade. A idade do processo não diz se a seleção que o
+    // utilizador viu ainda descreve o dono do PID; e a foto, por fresca que
+    // seja, não prova que o dono não mudou — a fonte é revalidada em TODA a
+    // ação (abaixo).
+    if (!processInfo) {
+      return {
+        success: false,
+        status: "failed",
+        pid,
+        error: "Identidade do processo não confirmada: referência de snapshot ausente; terminação recusada.",
+      };
+    }
+    const cacheCriacao = trustedCreationIdentity(processInfo.startedAt);
+    if (!cacheCriacao) {
+      return {
+        success: false,
+        status: "failed",
+        pid,
+        target: processInfo ? { name: processInfo.name, path: processInfo.path } : undefined,
+        error: "Identidade do processo não confirmada: CreationDate ausente ou inválida no snapshot; terminação recusada.",
+      };
+    }
+    // ── A fonte é consultada ANTES de agir, SEMPRE ─────────────────────────
+    // A idade da foto é metadado de cache, não identidade: dentro da própria
+    // janela de frescura o processo pode ter morrido e o PID sido reciclado.
+    // Uma foto de 1 ms não pode dispensar a fonte. (FINDING-FRESH-PID-REUSE:
+    // foto fresca + mesmo nome/comando com outra CreationDate chegava ao
+    // taskkill sem a fonte ser consultada.)
+    let fresco: (KillTargetInfo & { startedAt?: string }) | undefined;
+    try {
+      const linhas = await this.queryCimProcesses(
+        `ProcessId=${pid}`,
+        step(ProtectionEngineService.CIM_QUERY_TIMEOUT_MS),
+      );
+      fresco = linhas.find((entry) => entry.pid === pid);
+    } catch (error) {
+      // Não se provou que o alvo mudou NEM que morreu: não se age. Um CIM
+      // indisponível não é um PID morto.
+      return {
+        success: false,
+        status: "failed",
+        pid,
+        error: `Identidade do processo não confirmada: a fonte CIM falhou (${(error as Error)?.message ?? String(error)}); terminação recusada.`,
+      };
+    }
+    if (!fresco) {
+      this.dropCachedProcess(pid, processInfo, { tombstone: true, invalidateTruth: true });
+      return { success: true, status: "already-exited", pid };
+    }
+    const fonteCriacao = trustedCreationIdentity(fresco.startedAt);
+    if (!fonteCriacao) {
+      return {
+        success: false,
+        status: "failed",
+        pid,
+        target: { name: fresco.name, path: fresco.path },
+        error: "Identidade do processo não confirmada: a fonte não devolveu CreationDate válida; terminação recusada.",
+      };
+    }
+    const identidadeMudou = killTargetIdentity(fresco) !== killTargetIdentity(processInfo);
+    const criacaoMudou = fonteCriacao !== cacheCriacao;
+    if (identidadeMudou || criacaoMudou) {
+      // O registo cacheado descreve um processo que já não é este PID. Não se
+      // tombstone: o PID está vivo e pertence a outro processo.
+      this.dropCachedProcess(pid, processInfo, { tombstone: false, invalidateTruth: true });
+      return {
+        success: false,
+        status: "reused",
+        pid,
+        error: "PID reutilizado por outro processo; terminação recusada.",
+      };
+    }
+    // A linha fresca é a fonte para o resto do caminho (logs/target).
+    processInfo = fresco;
 
     // Já terminou: fora do snapshot e o PID não existe.
     if (!processInfo && !isProcessAlive(pid)) {
@@ -2695,8 +4244,20 @@ if (processInfo.path) {
       // morreu e os descendentes ficaram orfaos/re-parented — o taskkill do pai
       // nao os toca, e o utilizador ve janelas vivas com "o processo morreu".
       // Varre a arvore e mata cada PID individualmente; so depois e que se
-      // afirma seja o que for.
-      const sweep = await this.sweepProcessTree(pid, step);
+      // afirma seja o que for. Se o CIM falhar a meio, não há testemunha para
+      // dizer que a árvore caiu: falha explícita, nunca killed inventado.
+      let sweep: { killed: number[]; survived: number[]; refusedProtected: number[] };
+      try {
+        sweep = await this.sweepProcessTree(pid, step);
+      } catch (error) {
+        return {
+          success: false,
+          status: "failed",
+          pid,
+          exitCode: taskkill.exitCode,
+          error: `Árvore não confirmada: a fonte CIM falhou (${(error as Error)?.message ?? String(error)}); terminação não declarada.`,
+        };
+      }
       const rootAlive = await this.killTargetStillAlive(pid, step(ProtectionEngineService.KILL_ALIAS_QUERY_TIMEOUT_MS));
 
       if (!rootAlive && sweep.survived.length === 0) {
@@ -2771,7 +4332,18 @@ if (processInfo.path) {
         // faz `await options.probe(...)` e só DEPOIS verifica o deadline, pelo
         // que uma query sem limite transbordava o prazo do reap em 6 s.
         // `isProcessAlive` acima é síncrono e não consome orçamento.
-        const current = await this.lookupProcessByPid(candidate, step(ProtectionEngineService.CIM_QUERY_TIMEOUT_MS));
+        let current: (KillTargetInfo & { startedAt?: string }) | undefined;
+        try {
+          const linhas = await this.queryCimProcesses(
+            `ProcessId=${candidate}`,
+            step(ProtectionEngineService.CIM_QUERY_TIMEOUT_MS),
+          );
+          current = linhas.find((entry) => entry.pid === candidate);
+        } catch {
+          // Falha de CIM não é ausência: a streak NÃO avança e o processo não
+          // pode ser declarado morto por uma pergunta que não obteve resposta.
+          return { alive: true };
+        }
         if (!current) return { alive: (cimAbsentStreak += 1) < this.killProbeConfirmations };
         cimAbsentStreak = 0;
         return { alive: true, identity: killTargetIdentity(current) };
@@ -2935,6 +4507,8 @@ if (processInfo.path) {
    */
   private attachClientSocket(socket: net.Socket) {
     this.clients.add(socket);
+    const requests = new RpcRequestQueue(4);
+    socket.once("close", () => requests.close());
     let buffer = "";
 
     // Sem este handler, um EPIPE/ECONNRESET assíncrono (o Electron fecha o
@@ -2948,10 +4522,16 @@ if (processInfo.path) {
       for (const message of decoded.messages) {
         const request = message as RpcRequest;
         if (request.type !== "request") continue;
-        const response = await this.handleRequest(request);
-        // A resposta pode chegar depois de o socket já ter sido fechado
-        // (disconnect do Electron ou dispose() do próprio serviço).
-        this.safeWrite(socket, encodeMessage(response));
+        const enqueuedAt = performance.now();
+        requests.enqueue(INDEPENDENT_READ_METHODS.has(request.method), async () => {
+          const start = performance.now();
+          const response = await this.handleRequest(request);
+          // Só nomes canónicos e duração; nenhum payload, PID, caminho ou segredo.
+          if (process.env.CYBERSAFE_DEBUG_BRIDGE === "1" && INDEPENDENT_READ_METHODS.has(request.method)) {
+            console.log(`[rpc-latency] id=${/^req-\d+$/.test(request.id) ? request.id : "noncanonical"} method=${request.method} queueMs=${(start-enqueuedAt).toFixed(1)} executionMs=${(performance.now()-start).toFixed(1)} totalMs=${(performance.now()-enqueuedAt).toFixed(1)} ok=${response.ok}`);
+          }
+          this.safeWrite(socket, encodeMessage(response));
+        });
       }
     });
 
@@ -2964,22 +4544,121 @@ if (processInfo.path) {
     }
   }
 
-  async startPipeServer() {
-    this.server = net.createServer((socket) => {
-      this.attachClientSocket(socket);
 
-      // Auto-ativa a proteção quando a primeira UI/desktop se liga ao serviço,
-      // para que processos, ligações e monitorização fiquem ativos de imediato.
-      if (!this.isShuttingDown) {
-        void this.startProtection().catch((err) =>
-          console.error("[Service] Falha ao auto-iniciar proteção:", err),
-        );
+  /**
+   * Handshake de posse v2 — nenhum pedido, replay ou identidade é exposto antes
+   * de as DUAS partes provarem conhecer o segredo, e o segredo nunca passa pelo
+   * pipe.
+   *
+   * Fases: `auth-hello(clientNonce)` → `auth-challenge(serverNonce, prova do
+   * servidor)` → `auth-response(prova do cliente)` → `{auth, ok:true}` e só então
+   * `attachClientSocket`. As provas são HMAC do helper puro (`@cybersafe/core`),
+   * com o papel dentro do domínio: a prova do servidor não serve como prova do
+   * cliente, e vice-versa.
+   *
+   * Um `{auth, ok:true}` isolado — o que um listener arbitrário consegue enviar —
+   * NÃO autoriza nada, e um primeiro frame `{type:"auth", token}` (cliente
+   * legado v1) é recusado em vez de aceite: não há downgrade em produção.
+   */
+  private authenticateClientSocket(socket: net.Socket) {
+    if (this.authenticatingClients.size >= 64) { socket.destroy(); return; }
+    this.authenticatingClients.add(socket);
+    const token = this.pipeToken;
+    let buffer = "";
+    let fase: "hello" | "response" = "hello";
+    let clientNonce = "";
+    let serverNonce = "";
+    const cleanup = () => {
+      clearTimeout(deadline);
+      this.authenticatingClients.delete(socket);
+      socket.removeListener("data", onData);
+    };
+    /** A razão é sempre fixa e nossa: nunca ecoa frames nem valores recebidos. */
+    const reject = (razao: string) => {
+      cleanup();
+      socket.end(encodeMessage({ type: "auth", ok: false, error: razao }));
+      // Um cliente que não lê a recusa não pode manter o socket vivo.
+      const close = setTimeout(() => socket.destroy(), 100);
+      close.unref();
+      socket.once("close", () => clearTimeout(close));
+    };
+    const prazo = () => {
+      clearTimeout(deadline);
+      deadline = setTimeout(() => reject("Autenticação do pipe expirou"), 3000);
+      deadline.unref();
+    };
+    const onData = (chunk: Buffer) => {
+      buffer += chunk.toString();
+      if (Buffer.byteLength(buffer) > 4096) { reject("Handshake do pipe excedeu o limite de frame"); return; }
+      const newline = buffer.indexOf("\n");
+      if (newline < 0) return;
+      // O handshake é um frame por fase: mais do que isso é protocolo inválido,
+      // não uma cortesia a tolerar.
+      if (buffer.slice(newline + 1).length !== 0) { reject("Handshake do pipe com frames excedentes"); return; }
+      let message: any;
+      try { message = JSON.parse(buffer.slice(0, newline)); }
+      catch { reject("Handshake do pipe inválido"); return; }
+      buffer = "";
+
+      if (message?.v !== PIPE_AUTH_VERSION) { reject("Versão do protocolo do pipe não suportada"); return; }
+
+      if (fase === "hello") {
+        if (!token || message?.type !== "auth-hello" || !isPipeNonce(message?.nonce)) {
+          reject("Protocolo do pipe não suportado"); return;
+        }
+        clientNonce = message.nonce;
+        if (this.seenClientNonces.has(clientNonce)) { reject("Replay: nonce do pipe já foi usado"); return; }
+        this.seenClientNonces.add(clientNonce);
+        if (this.seenClientNonces.size > ProtectionEngineService.SEEN_NONCES_MAX) {
+          const maisAntigo = this.seenClientNonces.values().next().value;
+          if (maisAntigo !== undefined) this.seenClientNonces.delete(maisAntigo);
+        }
+        serverNonce = generatePipeNonce();
+        fase = "response";
+        prazo();
+        socket.write(encodeMessage({
+          type: "auth-challenge",
+          v: PIPE_AUTH_VERSION,
+          nonce: serverNonce,
+          proof: makePipeProof(token, "server", clientNonce, serverNonce),
+        }));
+        return;
       }
+
+      if (message?.type !== "auth-response" ||
+          !token ||
+          !verifyPipeProof(token, "client", clientNonce, serverNonce, message?.proof)) {
+        reject("Prova do cliente recusada"); return;
+      }
+      cleanup();
+      socket.write(encodeMessage({ type: "auth", ok: true }));
+      this.attachClientSocket(socket);
+    };
+    let deadline = setTimeout(() => reject("Autenticação do pipe expirou"), 3000);
+    deadline.unref();
+    socket.on("data", onData);
+    socket.on("error", () => socket.destroy());
+    socket.once("close", cleanup);
+  }
+
+  async startPipeServer(pipeName: string = PIPE_NAME) {
+    if (this.pipeAuthRequired && (!this.pipeToken || !/^[a-f0-9]{64}$/.test(this.pipeToken))) {
+      throw new Error("Credencial de autenticação do pipe ausente ou inválida");
+    }
+    if (!this.pipeAuthRequired) {
+      console.warn("[Service] AVISO S4: DEV externo sem autenticação do pipe; não utilizar em produção.");
+    }
+    this.server = net.createServer((socket) => {
+      if (this.pipeAuthRequired) this.authenticateClientSocket(socket);
+      else this.attachClientSocket(socket);
+
+      // Connecting/reconnecting is read-only. Only monitor.start/resume (or an
+      // explicitly scheduled pause expiry) may enable protection.
     });
 
     await new Promise<void>((resolve, reject) => {
       this.server?.once("error", reject);
-      this.server?.listen(PIPE_NAME, () => resolve());
+      this.server?.listen(pipeName, () => resolve());
     });
   }
 
@@ -3002,10 +4681,38 @@ if (processInfo.path) {
     }
   }
 
+  /**
+   * A escrita da preferência é melhor-esforço: o estado que o utilizador viu
+   * mudar já mudou. Mas uma falha não pode passar em branco nem contar como
+   * "preferência guardada" — fica registada com o motivo sanitizado.
+   */
+  private async registrarPreferencia(escrita: Promise<EscritaResultado>, descricao: string): Promise<void> {
+    const resultado = await escrita.catch((erro) => ({
+      ok: false, guardado: false, motivo: String((erro as Error)?.message ?? erro),
+    }));
+    if (!resultado.guardado) {
+      console.warn(`[Service] Preferência de proteção não gravada (${descricao}): ${resultado.motivo ?? "desconhecido"}`);
+    }
+  }
+
   private async dispatch(
     method: keyof ServiceCommandMap,
     payload: ServiceCommandMap[keyof ServiceCommandMap],
   ): Promise<any> {
+    // Across different pipe clients, a critical mutation can remain in flight
+    // while another client requests termination. Track the complete async span.
+    const critical = /^(scan\.|quarantine\.|trust\.)/.test(method) && !["scan.history","scan.getActive","scan.getLast","quarantine.list"].includes(method)
+      || ["definitions.update","analysis.restricted","process.analyze","threat.action"].includes(method);
+    if(critical) ++this.criticalRpcOperations;
+    try { return await this.dispatchTracked(method,payload); }
+    finally { if(critical) --this.criticalRpcOperations; }
+  }
+
+  private async dispatchTracked(
+    method: keyof ServiceCommandMap,
+    payload: ServiceCommandMap[keyof ServiceCommandMap],
+  ): Promise<any> {
+    await this.gateMethodDuringStartup(method as string);
     // Durante o shutdown deixamos de aceitar trabalho novo (scans, updates,
     // ligar proteção). O pedido de shutdown em si continua a ser atendido.
     if (this.isShuttingDown && SHUTDOWN_BLOCKED_METHODS.has(method as string)) {
@@ -3027,17 +4734,92 @@ if (processInfo.path) {
         return this.connections;
       case "quarantine.list":
         return this.quarantine.list();
+      // ── Protecao USB (R8) ──
+      // Leitura coalescida do estado e opt-in. Nenhum caminho/target vem do
+      // renderer: o auto-scan usa o dispositivo que ESTE servico confirmou.
+      case "usb.getState":
+        return this.usbRuntime.snapshot();
+      case "usb.configure":
+        return this.usbRuntime.configure(payload as { enabled: boolean });
+      // Análise MANUAL de um dispositivo USB (R8). Validacao estrita e
+      // resolucao das raizes ficam no runtime — nenhum caminho vem daqui.
+      case "usb.scan":
+        return this.usbRuntime.scan(payload);
+      case "usb.cancel":
+        return this.usbRuntime.cancel(payload);
       case "events.clear":
         return this.clearEvents();
       case "scan.artifact":
-        return this.scanArtifact((payload as { path: string }).path, "dashboard");
+        // Ficheiro escolhido pelo utilizador na UI: prioridade de utilizador.
+        return this.scanArtifact((payload as { path: string }).path, "dashboard", {
+          priority: "user",
+        });
       case "scan.fullSystem":
         this.runFullSystemScan();
         return { success: true };
       case "monitor.start":
+        // Nada é gravado: ligar agora não é pedir a retoma ao próximo arranque.
         return this.startProtection();
-      case "monitor.stop":
-        return this.stopProtection();
+      case "monitor.stop": {
+        // Só o pedido do utilizador revoga. `dispose()`/`shutdown()` chamam
+        // `stopProtection()` diretamente e não passam por aqui — fechar a app
+        // não é um OFF.
+        const vivo = await this.stopProtection();
+        if (!this.intentAtivo) {
+          return { ...vivo, revogacaoRetoma: "nao_confirmada" as const, motivoRevogacao: "isolamento_teste" };
+        }
+        // O estado observado e a persistência são respostas diferentes: um OFF
+        // que não se consegue gravar continua a ser um OFF agora, mas a retoma
+        // anterior pode sobreviver no registo e voltar a ligar ao arrancar.
+        return this.protectionStartup.ofManualConfirmado(vivo);
+      }
+      case "monitor.pause": {
+        // `durationMs` ausente = pausa até ativação manual. O payload chega
+        // como o próprio corpo do pedido neste transporte.
+        const raw = (payload as { durationMs?: number } | undefined)?.durationMs;
+        const durationMs = typeof raw === "number" ? raw : undefined;
+        const vivo = await this.pauseProtection(durationMs);
+        if (!this.intentAtivo) {
+          return { ...vivo, revogacaoRetoma: "nao_confirmada" as const, motivoRevogacao: "isolamento_teste" };
+        }
+        // Pausa SEM prazo é ficar desligado até ação manual. Gravar
+        // `pausedUntil:null` com `desired:"enabled"` faria a app retomar
+        // sozinha ao arranque — exatamente o contrário do pedido.
+        if (!(typeof durationMs === "number" && Number.isFinite(durationMs) && durationMs > 0)) {
+          return this.protectionStartup.ofManualConfirmado(vivo);
+        }
+        await this.registrarPreferencia(this.protectionStartup.registrarPausa(vivo.pausedUntil), "prazo de pausa");
+        return vivo;
+      }
+      case "monitor.resume": {
+        const resultado = await this.resumeProtection();
+        if (this.intentAtivo && resultado.ok) {
+          await this.registrarPreferencia(this.protectionStartup.registrarPausa(null), "limpar prazo de pausa");
+        }
+        return resultado;
+      }
+      case "protectionIntent.get":
+        // `protecaoAtiva` é o que o serviço observa agora, nunca o que está em
+        // disco: um `enabled` lido não prova proteção a correr.
+        return this.intentAtivo
+          ? this.protectionStartup.estado(this.protectionState)
+          : {
+              optin: "unknown" as const, registoConhecido: false, protecaoAtiva: this.protectionState,
+              pausedUntil: null, motivo: "isolamento_teste",
+            };
+      case "protectionIntent.setOptIn": {
+        const entrada = parseOptInPayload(payload);
+        if (!entrada.ok) return { ok: false, guardado: false, motivo: entrada.motivo };
+        return this.protectionStartup.definirOptin(entrada.enabled);
+      }
+      case "process.termination.prepare":
+        if (this.terminationBlocked()) return {ok:false,status:"protected",error:"Terminação indisponível durante operações críticas ou sessão não autenticada."};
+        try { return this.terminationController().prepare(payload); }
+        catch { return {ok:false,status:"failed",error:"Componente nativo de terminação indisponível; nenhuma ação executada."}; }
+      case "process.termination.confirm":
+        return this.confirmIndividualProcess((payload as {ticket?:unknown})?.ticket);
+      case "process.termination.cancel":
+        return this.individualTermination?.cancel((payload as {ticket?:unknown})?.ticket) ?? {cancelled:false};
       case "process.killTree":
         return this.killProcess((payload as { pid: number }).pid);
       case "quarantine.restore":
@@ -3056,7 +4838,7 @@ if (processInfo.path) {
       case "analysis.restricted":
         return this.runRestrictedAnalysis((payload as { path: string }).path);
       case "hardware.snapshot":
-        return this.hardware.getLastSnapshot() || await this.hardware.getSnapshot(this.processes);
+        return await this.readHardwareSnapshot();
       case "windows.healthSnapshot":
         return this.windowsHealth.getCached();
       case "pcstate.get":
@@ -3071,8 +4853,9 @@ if (processInfo.path) {
         const { type, targetPath } = payload as any;
         const id = await this.scanManager.startScan(type, targetPath);
         if (!id) {
-          console.warn("[ScanService] start rejected: another scan is already running");
-          return { id: "", success: false, error: "Já existe uma análise em curso. Cancele ou aguarde a conclusão." };
+          const error = "Já existe uma análise em curso. Cancele ou aguarde a conclusão.";
+          console.warn(`[ScanService] start rejected: ${error}`);
+          throw new Error(error);
         }
         // Correlação: o scanId é propagado para os logs de scan e eventos.
         console.log(`[ScanService] ${formatScanLog(id, `scan.start accepted type=${String(type)} target=${String(targetPath)} at=${new Date().toISOString()}`)}`);
@@ -3082,37 +4865,67 @@ if (processInfo.path) {
         // Snapshot for UI resync (remount / page navigation / missed event).
         return this.scanManager.getActiveScan() ?? null;
       }
+      case "scan.getLast": {
+        const id = (payload as { id?: unknown } | undefined)?.id;
+        if (id !== undefined && (typeof id !== "string" || !id)) {
+          throw new Error("Identificador de análise inválido.");
+        }
+        return this.scanManager.getLastScan(id as string | undefined);
+      }
+      case "scan.history": {
+        const historyPayload = (payload as { limit?: unknown; cursor?: unknown } | undefined) ?? {};
+        const limit = typeof historyPayload.limit === "number" ? historyPayload.limit : undefined;
+        const cursor = typeof historyPayload.cursor === "string" ? historyPayload.cursor : undefined;
+        return this.scanHistory.query(limit, cursor);
+      }
       case "scan.cancel": {
         const { id } = payload as any;
-        this.scanManager.cancelScan(id);
-        return { success: true };
+        // Estágio 1 — «recebido no handler». Antes de chamar o manager, e sem tocar no
+        // valor recebido: um id que não é UUID conta como `invalido`, nunca é ecoado.
+        // O ACK confirma apenas um cancelamento realmente aceite pelo manager.
+        // Um id desconhecido ou já terminal não representa uma nova ação.
+        linhaDeCancelamento(this.scanManager, "recebido", id);
+        const desfecho = this.scanManager.cancelScan(id);
+        return { success: desfecho === "cancelado" };
       }
       case "threat.action": {
-        const { id, action } = payload as any;
+        const { id, action, sha256 } = (payload ?? {}) as any;
+        if (typeof id !== "string" || id.length === 0 || id.length > 32768 || !["restore","delete","quarantine"].includes(action)) return {success:false,error:"Pedido de ação inválido."};
         let success = false;
 
         if (action === "restore") {
-          success = await this.quarantine.restore(id);
+          const { success: restored, error } = await this.quarantine.restore(id);
+          success = restored === true;
           if (success) void this.logHistory({ type: "threat.restored", id, timestamp: new Date().toISOString() });
+          return { success, ...(error !== undefined ? { error } : {}) };
         } else if (action === "delete") {
-          success = await this.quarantine.delete(id);
+          const result = await this.quarantine.delete(id);
+          success = result.success;
           if (success) void this.logHistory({ type: "threat.deleted", id, timestamp: new Date().toISOString() });
         } else if (action === "quarantine") {
            // For a manual quarantine, we'd need the threat event.
            // We can look it up in this.threats
-           const threat = this.threats.find(t => t.url === `file://${id}` || t.filePath === id);
+           if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(sha256)) return {success:false,error:"Confirme novamente a deteção: falta o digest do ficheiro autorizado."};
+           const threat = this.threats.find(t => (t.url === `file://${id}` || t.filePath === id) && t.sha256?.toLowerCase() === sha256.toLowerCase());
+           if (!threat) return {success:false,error:"Esta identidade de ficheiro não corresponde a uma deteção registada. Volte a analisar."};
            if (threat && threat.filePath) {
               const analysis = {
                 artifactPath: threat.filePath,
                 fileName: path.basename(threat.filePath),
-                sha256: "", // We might not have it in the threat obj directly if not saved
+                sha256: threat.sha256 ?? "",
                 verdict: "suspicious",
                 riskScore: threat.riskScore
               } as any;
 
-              const entry = await this.quarantine.quarantine(analysis);
-              success = !!entry;
-              if (success) void this.logHistory({ type: "threat.quarantined_manual", id, timestamp: new Date().toISOString() });
+              if (!threat.sha256 || !/^[a-f0-9]{64}$/i.test(threat.sha256)) {
+                this.eventBus.publish("quarantine.failed", "high", "Deteção sem digest verificável; volte a analisar o ficheiro antes de o isolar.", {artifactPath:threat.filePath,fileName:analysis.fileName});
+                return {success:false,error:"Volte a analisar o ficheiro: esta deteção não contém uma identidade verificável."};
+              }
+              success = await this.requestQuarantine(analysis, "manual");
+              if (success) {
+                threat.action = "quarantined";
+                void this.logHistory({ type: "threat.quarantined_manual", id, timestamp: new Date().toISOString() });
+              }
            }
         }
 

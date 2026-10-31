@@ -42,15 +42,14 @@ rule cs_probe_omega
 /**
  * Segunda regra, que NÃO casa com o buffer de sonda.
  *
- * Porque existe: `PROBE_RULE` sozinho é um corpus de UMA regra. O contrato de
- * cobertura classifica um corpus de uma só regra como `limited`/`degraded` —
- * uma regra não é uma base de deteção, e `Cobertura normal: 1 regra
- * carregada.` seria uma afirmação que o corpus não sustenta.
+ * Porque existe: `PROBE_RULE` sozinho é uma regra de sonda, não evidência de
+ * cobertura contra ameaças. O estado `active` comprova que o motor compilou;
+ * a cobertura permanece `unknown` até haver proveniência e eficácia validadas.
  *
  * Este teste quer provar outra coisa — que o motor carrega e que a regra deteta
  * — e essa prova é feita por `scanFile` e `match`, não por `status`. Assim o
- * corpus que alimenta o teste passa a justificar `active`/`normal` por
- * qualquer das duas vias, e a regra que não casa garante que
+ * corpus que alimenta o teste justifica `active` apenas pela compilação. A
+ * regra que não casa garante que
  * `matches.length === 1` continua a ser uma afirmação sobre a sonda.
  */
 const PROBE_RULE_SECUNDARIA = `
@@ -84,7 +83,11 @@ describe("YARA engine integrity", () => {
     await engine.load(rulesPath);
 
     assert.equal(engine.health.status, "active");
-    assert.equal(engine.health.coverage, "normal", "duas regras, uma delas deteta malware: cobertura normal");
+    assert.equal(
+      engine.health.coverage,
+      "unknown",
+      "duas regras de sonda comprovam execução do motor, não cobertura de ameaças",
+    );
     assert.equal(engine.isAvailable, true);
     // Mecanismo, não contagem exacta: interessa que o corpus foi contado como
     // tendo regras, não quantas. O scan abaixo é o que prova que a regra
@@ -98,6 +101,25 @@ describe("YARA engine integrity", () => {
     const bufferMatches = engine.match(PROBE_BUFFER);
     assert.equal(bufferMatches.length, 1);
     assert.equal(bufferMatches[0].ruleId, "cs_probe_omega");
+  });
+
+  test("recusa um ficheiro acima do limite de recursos antes do scan YARA", async () => {
+    const rulesPath = path.join(tmpDir, "bounded.yar");
+    await fs.writeFile(rulesPath, PROBE_RULE, "utf-8");
+    const oversizedPath = path.join(tmpDir, "oversized.bin");
+    const file = await fs.open(oversizedPath, "w");
+    try {
+      await file.truncate(100 * 1024 * 1024 + 1);
+    } finally {
+      await file.close();
+    }
+
+    const engine = new YaraEngine(rulesPath);
+    await engine.load(rulesPath);
+    await assert.rejects(
+      engine.scanFile(oversizedPath),
+      /exceeds the 100 MiB scan limit/,
+    );
   });
 
   test("ficheiro corrompido (JSON) reporta degradado e usou fallback, nunca falha em silêncio", async () => {
@@ -392,8 +414,15 @@ describe("Hash DB integrity", () => {
     const db = new SignatureDatabase();
     await db.load(dbPath);
 
-    assert.equal(db.health.status, "active");
-    assert.equal(db.size, 2);
+    // TP-PAP-FREEBUFF-YARA-HASHDB-P0: este ficheiro tem UMA entrada válida
+    // (`abcdef` não é SHA-256 e é descartado). Não cobre as assinaturas
+    // built-in obrigatórias, por isso não pode ser declarado `active`; a
+    // cobertura offline é reposta em memória para não perder deteção.
+    assert.equal(db.health.status, "degraded");
+    // A entrada do ficheiro é o próprio EICAR: repor os built-in em memória
+    // deixa exactamente a base embutida completa (sem duplicar esse hash).
+    assert.equal(db.size, BUILTIN_HASH_SIGNATURES.length);
+    assert.equal(db.match("abcdef"), undefined, "um valor que não é SHA-256 não entra na base");
     const hit = db.match(EICAR_HASH);
     assert.ok(hit);
     assert.equal(hit.family, "EICAR-Test-File");
@@ -555,7 +584,7 @@ describe("Score e degradação segura", () => {
 });
 
 describe("Sem regressões na análise", () => {
-  test("ficheiro limpo produz veredicto seguro sem exceções", async () => {
+  test("análise limpa concluída produz veredicto seguro sem exceções", async () => {
     const cleanPath = path.join(tmpDir, "notes.txt");
     await fs.writeFile(cleanPath, "nothing to see here", "utf-8");
 
@@ -563,7 +592,7 @@ describe("Sem regressões na análise", () => {
       signatures: new SignatureDatabase(),
       trust: new TrustEngine(),
       yara: new YaraEngine(path.join(tmpDir, "analyzer.yar")),
-      clamav: new ClamavBridge(),
+      clamav: { scanFile: async () => ({ detected: false, verdict: "clean" }) },
     };
     const analyzer = new MalwareAnalyzer(deps);
 

@@ -45,7 +45,7 @@ process.on("exit", () => {
 });
 
 /** Spawner que responde limpo; o que interessa aqui e o estado do BRIDGE. */
-function cleanSpawn(stdout = "Known viruses: 3628114\nScanned files: 1\nInfected files: 0\nTotal errors: 0\n") {
+function cleanSpawn(stdout = "----------- SCAN SUMMARY -----------\nKnown viruses: 3628114\nEngine version: 1.5.4\nScanned files: 1\nInfected files: 0\nTotal errors: 0\nTime: 0.001 sec\n") {
   return () => {
     let resolveOutcome;
     const outcome = new Promise((r) => {

@@ -1,0 +1,69 @@
+/* Camada de apresentação V2 da Quarentena — Q1 (escala) + Q2 decisão A
+ * (composição `QuarantineV2`).
+ *
+ * Fonte visual: `pap-design-lab-codex-20261027/v2/src/styles.css:1983-1998`
+ * (`.quarantine-row`: `display:flex`, `align-items:center`, `gap:18px`, nome
+ * 13px, detalhe 10px/5px, chapinha a `margin-left:auto`) e a anatomia de
+ * `QuarantineV2.tsx` (linha = nome + evidência + estado + acções).
+ *
+ * Q2, decisão A: cada `<li>` deixou de ser a grelha de três colunas onde os
+ * detalhes viviam como `col-span-full`. O `<li>` é agora INVÓLUCRO e dentro
+ * dele há (1) uma linha flexível do lab e (2) os irmãos dessa linha — região de
+ * detalhes `#…-detalhes`, portão de confirmação e a linha «a comunicar». O
+ * `display: block` abaixo não é uma preferência: é o que permite que o invólucro
+ * continue a herdar do primitivo `.row-item` (`index.css:354-363`) a aresta, o
+ * padding e o hover, sem herdar a grelha de 3 colunas que a linha do lab não
+ * tem. Enquanto a grelha mandasse, a primeira criança ficava num rasto de
+ * 2.25rem e a linha do lab não existia.
+ *
+ * O que continua NÃO copiado do lab, com razão:
+ *  - `.quarantine-actions` (`ultimate.css:532`, `display:flex; gap:4px`) é um
+ *    grupo de três botões de ÍCONE horizontais; as acções do produto são três
+ *    botões rotulados empilhados. Colar a classe diria uma anatomia que não há.
+ *  - `table`/`th`/`td` (`styles.css:1379-1400`): a entrada do produto tem razão
+ *    de isolamento, fita de aviso e região expansível por linha; não é uma
+ *    célula de uma linha. Fica para a entrega da tabela/filtros, não aqui.
+ *
+ * Continua sem importação por componente (é o `node:test`+`tsx` que parte com
+ * isso); a ligação à cascata é delta proposto separado em `main.tsx`. */
+
+/* Invólucro: herda aresta/padding/hover de `.row-item`, não a grelha. */
+.cs-v2 .v2-quarantine .row-item.quarantine-item {
+  display: block;
+}
+
+/* A linha do lab. */
+.cs-v2 .v2-quarantine .quarantine-row {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 18px;
+}
+
+.cs-v2 .v2-quarantine .quarantine-row > .icon-tile {
+  flex: 0 0 auto;
+}
+
+.cs-v2 .v2-quarantine .quarantine-row .quarantine-col {
+  flex: 1 1 16rem;
+}
+
+.cs-v2 .v2-quarantine .quarantine-row > .row-act {
+  flex: 0 0 auto;
+}
+
+.cs-v2 .v2-quarantine .quarantine-row .row-title {
+  font-size: 13px;
+}
+
+.cs-v2 .v2-quarantine .quarantine-row .row-meta {
+  font-size: 10px;
+  margin-top: 5px;
+}
+
+/* `.badge { margin-left: auto }` do lab, sobre a chapa de estado do produto:
+ * dentro da coluna de texto, a chapa vai para o fim da linha — descendente,
+ * como no Q1 (o portão de confirmação e a linha «a comunicar» têm as suas). */
+.cs-v2 .v2-quarantine .quarantine-row .state-chip {
+  margin-left: auto;
+}

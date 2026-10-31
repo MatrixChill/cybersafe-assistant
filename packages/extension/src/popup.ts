@@ -1,6 +1,7 @@
 import { analyzeUrlRisk } from "@cybersafe/shared-types";
 
-const HEALTH_URL = "http://localhost:4000/health";
+// S3: a API local escuta apenas em loopback IPv4. /health continua público.
+const HEALTH_URL = "http://127.0.0.1:4000/health";
 const FETCH_TIMEOUT_MS = 3500;
 
 /** Sonda a API local e mostra o estado real (ONLINE/OFFLINE/ERRO). */

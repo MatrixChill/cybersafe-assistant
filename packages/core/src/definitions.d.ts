@@ -6,7 +6,11 @@ export interface RiskThresholds {
 }
 export interface ProtectionSettings {
     thresholds: RiskThresholds;
-    autoQuarantine: boolean;
+    /**
+     * @deprecated Sem consumers. Não ativar — quarentena por decisão explícita.
+     * Removido de DEFAULT_SETTINGS; mantido opcional para compatibilidade.
+     */
+    autoQuarantine?: boolean;
     autoKillTree: boolean;
     restrictedAnalysis: boolean;
     scanTimeoutMs: number;

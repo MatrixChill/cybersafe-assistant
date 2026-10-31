@@ -1,0 +1,711 @@
+/* Primitivas V2 — regras estruturais transcritas de `v2/src/styles.css` e
+   `v2/src/ultimate.css`, selector por selector, com os mesmos valores.
+   Duas alteracoes mecanicas e nenhuma reinterpretacao:
+     1. cada selector e reancorado em `.cs-v2`, o involor do shell V2, para que
+        `table`, `dialog`, `button` ou `.field` do lab nao recaiam sobre paginas
+        que ainda usam Tailwind/shadcn;
+     2. os nomes de token levam o prefixo --v2- (mesma razao: uma so fonte).
+   Selector repetido no lab (dentro de @media) e deitado fora daqui: so a
+   primeira ocorrencia, que e a base. */
+.cs-v2 .page-head {
+display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 25px;
+}
+
+.cs-v2 .eyebrow {
+font-family: var(--v2-font-data);
+  font-size: 9px;
+  letter-spacing: 1.8px;
+  color: var(--v2-subtle);
+  margin-bottom: 10px;
+  font-weight: 500;
+}
+
+.cs-v2 .page-head p {
+font-size: 12px;
+  margin-top: 8px;
+}
+
+.cs-v2 .head-actions {
+display: flex;
+  align-items: center;
+  gap: 16px;
+  flex-shrink: 0;
+}
+
+.cs-v2 .date-label {
+font-size: 11px;
+  color: var(--v2-muted);
+}
+
+.cs-v2 .button {
+display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  min-height: 36px;
+  padding: 9px 13px;
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-control-radius);
+  background: var(--v2-raised);
+  font-size: 11px;
+  line-height: 1.2;
+  font-weight: 600;
+  transition:
+    background var(--v2-duration-fast),
+    border-color var(--v2-duration-fast),
+    transform var(--v2-duration-fast);
+  white-space: normal;
+}
+
+.cs-v2 .button:hover:not(:disabled) {
+background: var(--v2-hover);
+  border-color: var(--v2-border-strong);
+}
+
+.cs-v2 .button.primary {
+background: var(--v2-accent);
+  color: var(--v2-accent-ink);
+  border-color: var(--v2-accent);
+  box-shadow: var(--v2-button-shadow);
+}
+
+.cs-v2 .button.primary:hover:not(:disabled) {
+filter: brightness(1.07);
+}
+
+.cs-v2 .button.ghost {
+background: transparent;
+  border-color: transparent;
+}
+
+.cs-v2 .button:active:not(:disabled) {
+transform: translateY(1px);
+}
+
+.cs-v2 .panel {
+background: var(--v2-panel);
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-card-radius);
+  padding: 20px;
+  box-shadow: var(--v2-panel-shadow);
+  min-width: 0;
+}
+
+.cs-v2 .section-title {
+display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 17px;
+}
+
+.cs-v2 .section-title h2 {
+font-size: 14px;
+}
+
+.cs-v2 .section-title p {
+font-size: 11px;
+  margin-top: 4px;
+}
+
+.cs-v2 .text-link {
+font-size: 10px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  color: var(--v2-accent);
+  white-space: nowrap;
+}
+
+.cs-v2 .text-link:hover {
+text-decoration: underline;
+}
+
+.cs-v2 .caption {
+font-size: 10px;
+  line-height: 1.65;
+  color: var(--v2-muted);
+}
+
+.cs-v2 .mono {
+font-family: var(--v2-font-data);
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-v2 .muted {
+color: var(--v2-muted);
+}
+
+.cs-v2 .tiny-square {
+display: inline-block;
+  width: 5px;
+  height: 5px;
+  background: var(--v2-warn);
+  margin-right: 7px;
+  vertical-align: middle;
+}
+
+.cs-v2 .metric-label {
+display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: var(--v2-muted);
+  font-size: 10px;
+  letter-spacing: 0.5px;
+}
+
+.cs-v2 .badge {
+display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border: 1px solid var(--status-edge);
+  background: var(--status-bg);
+  color: var(--status-ink);
+  border-radius: 5px;
+  padding: 4px 6px;
+  font-size: 9px;
+  line-height: 1.2;
+  font-weight: 500;
+  white-space: nowrap;
+  max-width: 100%;
+}
+
+.cs-v2 .state-active {
+--status-ink: var(--v2-ok);
+  --status-bg: var(--v2-ok-bg);
+  --status-edge: var(--v2-ok-edge);
+}
+
+.cs-v2 .state-degraded {
+--status-ink: var(--v2-warn);
+  --status-bg: var(--v2-warn-bg);
+  --status-edge: var(--v2-warn-edge);
+}
+
+.cs-v2 .state-unavailable {
+--status-ink: var(--v2-muted);
+  --status-bg: var(--v2-inset);
+  --status-edge: var(--v2-border);
+}
+
+.cs-v2 .state-loading {
+--status-ink: var(--v2-accent);
+  --status-bg: var(--v2-accent-soft);
+  --status-edge: var(--v2-border-strong);
+}
+
+.cs-v2 .state-error {
+--status-ink: var(--v2-danger);
+  --status-bg: var(--v2-danger-bg);
+  --status-edge: var(--v2-danger-edge);
+}
+
+.cs-v2 .activity {
+display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 12px 0;
+  border-top: 1px solid var(--v2-border);
+}
+
+.cs-v2 .activity:first-child {
+border-top: 0;
+  padding-top: 0;
+}
+
+.cs-v2 .activity:last-child {
+padding-bottom: 0;
+}
+
+.cs-v2 .activity-icon {
+display: grid;
+  place-items: center;
+  width: 27px;
+  height: 27px;
+  border-radius: 50%;
+  background: var(--status-bg);
+  color: var(--status-ink);
+  flex-shrink: 0;
+}
+
+.cs-v2 .activity strong {
+font-size: 11px;
+  font-weight: 500;
+}
+
+.cs-v2 .activity p {
+font-size: 10px;
+  margin-top: 3px;
+}
+
+.cs-v2 .activity time {
+font-family: var(--v2-font-data);
+  font-size: 9px;
+  margin-left: auto;
+  white-space: nowrap;
+  color: var(--v2-subtle);
+}
+
+.cs-v2 .mini-metrics {
+display: flex;
+  gap: 35px;
+  margin-bottom: 12px;
+}
+
+.cs-v2 .mini-metrics > div > span {
+display: block;
+  color: var(--v2-muted);
+  font-size: 10px;
+}
+
+.cs-v2 .mini-metrics strong {
+display: block;
+  font-size: 24px;
+  font-weight: 500;
+  letter-spacing: -0.7px;
+  margin-top: 3px;
+  font-variant-numeric: tabular-nums;
+}
+
+.cs-v2 .chart {
+display: block;
+  width: 100%;
+  height: 54px;
+  color: var(--v2-chart);
+  overflow: visible;
+}
+
+.cs-v2 .chart.large {
+height: 170px;
+}
+
+.cs-v2 .panel-foot {
+display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--v2-subtle);
+  font-size: 9px;
+  padding-top: 12px;
+  margin-top: 9px;
+  border-top: 1px solid var(--v2-border);
+}
+
+.cs-v2 .notice {
+display: flex;
+  gap: 12px;
+  align-items: flex-start;
+  border: 1px solid var(--v2-warn-edge);
+  background: var(--v2-warn-bg);
+  color: var(--v2-warn);
+  padding: 16px 19px;
+  border-radius: var(--v2-control-radius);
+  margin-bottom: 24px;
+}
+
+.cs-v2 .notice strong {
+font-size: 12px;
+  font-weight: 500;
+}
+
+.cs-v2 .notice p {
+font-size: 11px;
+  margin-top: 2px;
+  color: var(--v2-muted);
+}
+
+.cs-v2 .notice.subtle {
+border-color: var(--v2-border);
+  background: var(--v2-inset);
+  color: var(--v2-muted);
+  margin-top: 20px;
+}
+
+.cs-v2 .notice.subtle p {
+margin: 0;
+}
+
+.cs-v2 .field {
+display: flex;
+  flex-direction: column;
+  gap: 9px;
+  font-size: 11px;
+  color: var(--v2-muted);
+  margin-top: 16px;
+}
+
+.cs-v2 .field select, .cs-v2 .field input:not([type="range"]) {
+border: 1px solid var(--v2-border);
+  background: var(--v2-inset);
+  color: var(--v2-text);
+  border-radius: var(--v2-control-radius);
+  padding: 10px 11px;
+  min-width: 0;
+  width: 100%;
+  font-size: 11px;
+}
+
+.cs-v2 .inset {
+padding: 18px;
+  background: var(--v2-inset);
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-control-radius);
+}
+
+.cs-v2 .inset p {
+font-size: 12px;
+  margin-top: 8px;
+}
+
+.cs-v2 .dialog-copy {
+font-size: 12px;
+  margin: 20px 0;
+}
+
+.cs-v2 .dialog-actions {
+display: flex;
+  gap: 10px;
+  justify-content: flex-end;
+  margin-top: 24px;
+}
+
+.cs-v2 dialog {
+border: 1px solid var(--v2-border-strong);
+  border-radius: var(--v2-card-radius);
+  background: var(--v2-panel);
+  color: var(--v2-text);
+  padding: 24px;
+  width: min(560px, calc(100vw - 40px));
+  max-height: calc(100dvh - 70px);
+  box-shadow: 0 24px 100px #0007;
+  overflow: auto;
+}
+
+.cs-v2 dialog::backdrop {
+background: #020812a8;
+  backdrop-filter: blur(4px);
+}
+
+.cs-v2 .dialog-head {
+display: flex;
+  justify-content: space-between;
+  gap: 24px;
+  align-items: center;
+  margin-bottom: 20px;
+}
+
+.cs-v2 .dialog-head h2 {
+font-size: 19px;
+}
+
+.cs-v2 .row-link {
+display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  padding: 17px 0;
+  border-top: 1px solid var(--v2-border);
+}
+
+.cs-v2 .row-link:first-of-type {
+border-top: 0;
+}
+
+.cs-v2 .row-link strong {
+font-size: 11px;
+}
+
+.cs-v2 .row-link p {
+font-size: 10px;
+  margin-top: 3px;
+}
+
+.cs-v2 .row-link:hover {
+color: var(--v2-accent);
+}
+
+.cs-v2 input[type="checkbox"] {
+accent-color: var(--v2-accent);
+  width: 16px;
+  height: 16px;
+  flex-shrink: 0;
+  cursor: pointer;
+}
+
+.cs-v2 .table-toolbar {
+display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 20px;
+  margin-bottom: 19px;
+}
+
+.cs-v2 .segmented {
+display: flex;
+  background: var(--v2-inset);
+  padding: 3px;
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-control-radius);
+}
+
+.cs-v2 .segmented button {
+background: none;
+  color: var(--v2-muted);
+  border-radius: calc(var(--v2-control-radius) - 2px);
+  padding: 7px 12px;
+  font-size: 10px;
+}
+
+.cs-v2 .segmented button[aria-pressed="true"] {
+background: var(--v2-raised);
+  color: var(--v2-text);
+  box-shadow: var(--v2-panel-shadow);
+}
+
+.cs-v2 .table-scroll {
+overflow-x: auto;
+}
+
+.cs-v2 table {
+border-collapse: collapse;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.cs-v2 th {
+font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+  color: var(--v2-subtle);
+  padding: 13px 12px;
+  border-block: 1px solid var(--v2-border);
+  background: var(--v2-inset);
+}
+
+.cs-v2 td {
+padding: 18px 12px;
+  border-bottom: 1px solid var(--v2-border);
+  color: var(--v2-muted);
+}
+
+.cs-v2 tr:last-child td {
+border-bottom: 0;
+}
+
+.cs-v2 td strong {
+color: var(--v2-text);
+  font-size: 11px;
+  font-weight: 500;
+}
+
+.cs-v2 td small {
+display: block;
+  font-size: 9px;
+  margin-top: 4px;
+  color: var(--v2-subtle);
+}
+
+.cs-v2 tbody tr:hover {
+background: var(--v2-hover);
+}
+
+.cs-v2 th button {
+display: flex;
+  gap: 8px;
+  align-items: center;
+  color: inherit;
+  font-size: inherit;
+  text-transform: inherit;
+  background: none;
+  padding: 0;
+}
+
+.cs-v2 .report-stats {
+display: flex;
+  gap: 40px;
+  padding: 25px 0;
+}
+
+.cs-v2 .report-stats strong {
+font-size: 30px;
+  display: block;
+}
+
+.cs-v2 .report-stats span {
+font-size: 11px;
+  color: var(--v2-muted);
+}
+
+.cs-v2 .neutral-tag {
+display: inline-flex;
+  align-items: center;
+  align-self: center;
+  border: 1px solid var(--v2-border);
+  background: var(--v2-inset);
+  padding: 5px 7px;
+  border-radius: 4px;
+  font-family: var(--v2-font-data);
+  font-size: 8px;
+  letter-spacing: 0.6px;
+  white-space: nowrap;
+  color: var(--v2-muted);
+}
+
+.cs-v2 .metric {
+padding: 20px;
+}
+
+.cs-v2 .metric-value {
+font-size: 34px;
+  letter-spacing: -1px;
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+  margin: 15px 0 0;
+}
+
+.cs-v2 .metric-value > span {
+font-size: 12px;
+  color: var(--v2-muted);
+  margin-left: 6px;
+  letter-spacing: 0;
+}
+
+.cs-v2 .metric > p {
+font-size: 9px;
+  border-top: 1px solid var(--v2-border);
+  padding-top: 11px;
+  margin-top: 9px;
+}
+
+.cs-v2 .metric .chart {
+height: 57px;
+}
+
+.cs-v2 .search-field {
+display: flex;
+  gap: 10px;
+  align-items: center;
+  background: var(--v2-inset);
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-control-radius);
+  padding: 9px 12px;
+  color: var(--v2-muted);
+}
+
+.cs-v2 .search-field input {
+border: 0;
+  outline: none;
+  background: none;
+  color: var(--v2-text);
+  font-size: 11px;
+  min-width: 0;
+  width: 210px;
+}
+
+.cs-v2 .search-field:focus-within {
+outline: 2px solid var(--v2-focus);
+  outline-offset: 2px;
+}
+
+.cs-v2 input::placeholder, .cs-v2 textarea::placeholder {
+color: var(--v2-subtle);
+}
+
+.cs-v2 .form-error {
+color: var(--v2-danger);
+  font-size: 11px;
+  margin-top: 12px;
+}
+
+.cs-v2 .empty {
+text-align: center;
+  padding: 40px;
+  color: var(--v2-muted);
+}
+
+.cs-v2 .empty h2 {
+margin: 18px 0 10px;
+}
+
+.cs-v2 .empty p {
+font-size: 12px;
+}
+
+.cs-v2 .sr-only {
+position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
+
+.cs-v2 .skip-link {
+position: fixed;
+  left: 250px;
+  top: -60px;
+  padding: 12px;
+  z-index: 100;
+  background: var(--v2-panel);
+  border: 2px solid var(--v2-focus);
+}
+
+.cs-v2 .skip-link:focus {
+top: 35px;
+}
+
+/* ═══ TOMS DO PRODUTO ══════════════════════════════════════════════════════
+   O lab pinta estados de cenário (`state-active`, `state-degraded`, …). O
+   produto tem cinco papéis próprios, medidos e nomeados: ok, aviso, crítico,
+   procedimento e não-medido. As cores vêm dos tokens do tema, o PAPEL é do
+   produto — por isso um tema novo não reinventa nenhum estado. `proc` usa o
+   acento porque é o que está a acontecer, nunca azul; `na` é neutro porque não
+   há leitura para afirmar. */
+.cs-v2 .badge.tone-ok,
+.cs-v2 .activity-icon.tone-ok {
+  --status-ink: var(--v2-ok);
+  --status-bg: var(--v2-ok-bg);
+  --status-edge: var(--v2-ok-edge);
+}
+.cs-v2 .badge.tone-warn,
+.cs-v2 .activity-icon.tone-warn {
+  --status-ink: var(--v2-warn);
+  --status-bg: var(--v2-warn-bg);
+  --status-edge: var(--v2-warn-edge);
+}
+.cs-v2 .badge.tone-crit,
+.cs-v2 .activity-icon.tone-crit {
+  --status-ink: var(--v2-danger);
+  --status-bg: var(--v2-danger-bg);
+  --status-edge: var(--v2-danger-edge);
+}
+.cs-v2 .badge.tone-proc,
+.cs-v2 .activity-icon.tone-proc {
+  --status-ink: var(--v2-accent);
+  --status-bg: var(--v2-accent-soft);
+  --status-edge: color-mix(in srgb, var(--v2-accent) 45%, transparent);
+}
+.cs-v2 .badge.tone-na,
+.cs-v2 .activity-icon.tone-na {
+  --status-ink: var(--v2-subtle);
+  --status-bg: var(--v2-inset);
+  --status-edge: var(--v2-border);
+}
+
+/* O `.field` do lab espera `label > texto + controlo`; as páginas do produto têm
+   campos com ícone. Nada aqui reescreve o `auth-field` de V1. */
+.cs-v2 .dialog-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 14px;
+}

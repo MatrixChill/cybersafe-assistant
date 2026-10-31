@@ -316,14 +316,27 @@ describe("REVIEW F3 — dispose e cleanup", () => {
       },
     });
 
-    // O spawner de produção nunca lança (o `spawn` do Node reporta o erro no
-    // evento 'error'), por isso isto é um cenário só de teste — mas mesmo assim
-    // a EXCEPÇÃO tem de passar pelo `finally` e devolver a vaga.
-    const res = await bridge.scanFile(path.join(tmp, "a.txt")).then(
-      (r) => r,
-      () => ({ rejected: true }),
-    );
-    assert.equal(res.rejected, true, "a excepção propaga-se, como antes");
+    // MUDANÇA DE CONTRATO (2026-10-05, P0 SCANNER_REAL_BATCH_STALL) — com
+    // justificação, e sem afrouxar a propriedade que este teste existe para
+    // provar.
+    //
+    // Antes, este teste afirmava `a excepção propaga-se`. Era verdade, e era
+    // exactamente o defeito: o `spawn()` do Node LANÇA de forma SÍNCRONA quando
+    // a command line é demasiado longa (ENAMETOOLONG medido com 765 ficheiros
+    // reais), não emite o evento 'error'. A excepção subia até ao
+    // `prefetchClamav` do serviço, que a tratava como "sem prefetch" e apagava
+    // o veredicto por ficheiro — devolvendo os 765 ficheiros ao clamscan
+    // individual, ~981 MB de cada vez. O P0 CLAMAV_RESOURCE_EXHAUSTION voltava
+    // pela porta do spawn.
+    //
+    // O contrato certo é o oposto do que se afirmava: uma falha de spawn é um
+    // RESULTADO (`unavailable`, com a causa), não uma excepção. A asserção da
+    // semaphore em baixo — a que dá nome ao teste — fica intacta e continua a
+    // ser o que se prova.
+    const res = await bridge.scanFile(path.join(tmp, "a.txt"));
+    assert.notEqual(res.detected, true, "um spawn que lançou não é uma deteção");
+    assert.notEqual(res.verdict, "clean", "um spawn que lançou não pode dizer 'limpo'");
+    assert.ok(res.reason || res.detail, "tem de haver causa visível do que aconteceu");
     // Se a vaga tivesse ficada presa, este segundo scan nunca voltaria.
     const second = await Promise.race([
       bridge.scanFile(path.join(tmp, "b.txt")).then(

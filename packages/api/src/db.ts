@@ -3,16 +3,42 @@ import fs from 'fs';
 import path from 'path';
 
 import os from 'os';
+import { validarArranqueApi } from './dev-isolation.js';
 
 // ── SQLite Database Setup ──
 
-// CYBERSAFE_DB_PATH permite aos testes usar uma DB isolada; o default é a DB real do serviço.
-const dbPath = process.env.CYBERSAFE_DB_PATH
-  ? path.resolve(process.env.CYBERSAFE_DB_PATH)
-  : path.join(os.homedir(), '.cybersafe-service', 'cybersafe.db');
+// A guarda corre ANTES do `mkdir` e do `new Database`: era aqui que um DEV sem configuração
+// criava `%USERPROFILE%\.cybersafe-service\` e abria a base de dados real do utilizador.
+// Produção explícita (NODE_ENV=production, o que o instalador define) mantém o default de sempre.
+const arranque = validarArranqueApi({ entrypoint: process.argv[1] ?? '', env: process.env });
+const dbPath = arranque.dbPath;
 fs.mkdirSync(path.dirname(dbPath), { recursive: true });
 
 const db = new Database(dbPath);
+
+/**
+ * Caminho resolvido da DB desta instância. Exportado para o diagnóstico de
+ * ciclo de vida (o registo vive ao lado da DB) e para as sondas poderem
+ * declarar o ficheiro que estão a usar sem o reconstruir.
+ */
+export const DATABASE_FILE_PATH = dbPath;
+// Logout must survive API restarts. Only token fingerprints are persisted.
+db.exec(`CREATE TABLE IF NOT EXISTS auth_revoked_tokens (
+  fingerprint TEXT PRIMARY KEY,
+  expiresAt REAL NOT NULL
+)`);
+export function isAuthTokenRevoked(fingerprint: string): boolean {
+  return !!db.prepare('SELECT 1 FROM auth_revoked_tokens WHERE fingerprint = ? AND expiresAt > ?').get(fingerprint, Date.now() / 1000);
+}
+export function revokeAuthToken(fingerprint: string, expiresAt: number): boolean {
+  return db.transaction(() => {
+    db.prepare('DELETE FROM auth_revoked_tokens WHERE expiresAt <= ?').run(Date.now() / 1000);
+    const { count } = db.prepare('SELECT COUNT(*) AS count FROM auth_revoked_tokens').get() as { count: number };
+    if (count >= 10000) return false;
+    db.prepare('INSERT OR REPLACE INTO auth_revoked_tokens (fingerprint, expiresAt) VALUES (?, ?)').run(fingerprint, expiresAt);
+    return true;
+  })();
+}
 
 /**
  * Fecha a ligacao singleton. Usada pelos testes no teardown: sem isto o
@@ -67,6 +93,77 @@ db.exec(`
 const usersColumns = db.prepare('PRAGMA table_info(users)').all() as { name: string }[];
 if (!usersColumns.some((column) => column.name === 'role')) {
   db.exec("ALTER TABLE users ADD COLUMN role TEXT NOT NULL DEFAULT 'user'");
+}
+
+// ── TP-MATRIX-FINAL-CONSENT ──
+// Duas tabelas e nada mais. `app_installation` guarda o identificador OPACO desta
+// instalação (UUID gerado por este processo e persistido cá): é o que faz um grant
+// criado noutro dispositivo — ou noutra reinstalação — não valer aqui. Não é
+// hardware ID, não é derivado do utilizador, não é segredo.
+// `process_consent_grants` guarda só METADADOS da escolha explícita: fornecedor
+// como hash (nunca URL nem chave), finalidade, lista de campos, datas, revogação e
+// revisão. Não existe coluna para métricas de processo nem para texto de conversa,
+// e é de propósito: um grant não pode transformar-se em contentor de dados.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS app_installation (
+    id TEXT PRIMARY KEY,
+    createdAt TEXT NOT NULL
+  );
+
+  CREATE TABLE IF NOT EXISTS process_consent_grants (
+    id TEXT PRIMARY KEY,
+    userId TEXT NOT NULL,
+    installationId TEXT NOT NULL,
+    providerKey TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    fields TEXT NOT NULL,
+    allowFutureProcesses INTEGER NOT NULL,
+    persistent INTEGER NOT NULL,
+    createdAt TEXT NOT NULL,
+    expiresAt TEXT NOT NULL,
+    revokedAt TEXT,
+    revision INTEGER NOT NULL
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_process_consent_conta
+    ON process_consent_grants (userId, installationId, revokedAt);
+`);
+
+// ── TP-MATRIX-R2-CONSENT ──
+// `process_consent_one_shots` é a autorização de UM envio, emitida e consumida por
+// este processo. O token nunca é guardado: guarda-se o SHA-256 dele, pelo que uma
+// leitura da base não devolve nenhuma chave utilizável. Guarda também o ALVO
+// (pid + início) porque a autorização é «para este processo», não «para processos em
+// geral» — e o início é o que distingue um pid reutilizado do processo que a pessoa
+// apontou. Continuam a não existir colunas para métricas, texto ou segredos.
+db.exec(`
+  CREATE TABLE IF NOT EXISTS process_consent_one_shots (
+    id TEXT PRIMARY KEY,
+    tokenHash TEXT NOT NULL UNIQUE,
+    userId TEXT NOT NULL,
+    installationId TEXT NOT NULL,
+    providerKey TEXT NOT NULL,
+    purpose TEXT NOT NULL,
+    fields TEXT NOT NULL,
+    targetPid INTEGER NOT NULL,
+    targetStartedAt TEXT NOT NULL,
+    createdAt TEXT NOT NULL,
+    expiresAt TEXT NOT NULL,
+    consumedAt TEXT,
+    revokedAt TEXT
+  );
+
+  CREATE INDEX IF NOT EXISTS idx_consent_one_shot_conta
+    ON process_consent_one_shots (userId, installationId, consumedAt, revokedAt);
+`);
+
+/**
+ * Devolve a ligação singleton para módulos que precisam de statements preparados
+ * sem abrir um segundo handle sobre o mesmo ficheiro. O teardown continua a ser
+ * exclusivamente o `closeDb()` acima — ninguém mais fecha a base.
+ */
+export function getDb() {
+  return db;
 }
 
 // ── Types ──

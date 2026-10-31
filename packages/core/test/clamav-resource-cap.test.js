@@ -385,7 +385,8 @@ describe("ClamavBridge — o veredicto vem do OUTPUT, não do exit code", () => 
   });
 
   it("exit 0 ⇒ clean, sem degradar", async () => {
-    const bridge = await bridgeWith({ spawn: makeFakeSpawner({ code: 0 }).spawn });
+    const target = path.join(tmp, "limpo.txt");
+    const bridge = await bridgeWith({ spawn: makeFakeSpawner({ code: 0, stdout: `${target}: OK\n----------- SCAN SUMMARY ----------\nKnown viruses: 1\nEngine version: 1.5.2\nScanned directories: 0\nScanned files: 1\nInfected files: 0\nTotal errors: 0\nData scanned: 0.00MiB\nTime: 0.01s\n` }).spawn });
     const res = await bridge.scanFile(path.join(tmp, "limpo.txt"));
     assert.equal(res.detected, false);
     assert.equal(res.verdict, "clean");

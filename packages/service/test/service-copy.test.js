@@ -89,7 +89,7 @@ describe("copy do service sem ingles", () => {
     assert.doesNotMatch(bridge, /Native engine spawn/i);
     assert.ok(bridge.includes("Ainda não verificado"));
     assert.ok(bridge.includes("Motor nativo ativo"));
-    assert.ok(bridge.includes("O arranque do motor nativo falhou"));
+    assert.ok(bridge.includes("Motor nativo presente mas a última invocação falhou"));
   });
 
   test("os motivos de bloqueio protegido sao PT-PT", () => {
@@ -142,8 +142,8 @@ describe("W2 — copy do fluxo de scanner, deteccao e bloqueio", () => {
     // As tres traducoes iguais as do workaround de UI, para o texto nao mudar
     // de roupa no ecra: a origem passa a dizer a mesma coisa que a UI inventava.
     assert.ok(engine.includes("Execução de script malicioso bloqueada (${info.appName})"));
-    assert.ok(engine.includes("Processo bloqueado por caminho: ${processInfo.name}"));
-    assert.ok(engine.includes("Processo bloqueado terminado (assinatura de malware): ${processInfo.name}"));
+    assert.ok(engine.includes("Deteção anterior neste caminho; processo não terminado: ${processInfo.name}"));
+    assert.ok(engine.includes("Assinatura detetada; processo não terminado: ${processInfo.name}"));
     assert.ok(engine.includes("Árvore de processos terminada ${pid}"));
     assert.doesNotMatch(engine, /Blocked malicious script execution|Blocked process by path|Killed blocked process|Killed process tree/);
   });
@@ -169,7 +169,7 @@ describe("W2 — copy do fluxo de scanner, deteccao e bloqueio", () => {
     assert.ok(engine.includes("Editor permitido ${publisher}"));
     assert.ok(engine.includes("Entrada de quarentena restaurada ${id}"));
     // "YARA"/"ClamAV"/"Hashes" sao os nomes dos componentes: nao se traduzem.
-    assert.ok(engine.includes("Definições atualizadas (YARA: ${result.yaraUpdated}"));
+    assert.ok(engine.includes("Definições atualizadas (YARA: ${response.yaraUpdated}"));
     assert.doesNotMatch(engine, /Allowed hash|Allowed publisher|Restored quarantine entry|Definitions updated/);
   });
 

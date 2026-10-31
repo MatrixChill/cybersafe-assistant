@@ -73,11 +73,11 @@ const yaraRulesPath = async () => {
   return path.join(dir, "analyzer.yar");
 };
 
-function makeAnalyzer(clamav) {
+function makeAnalyzer(clamav, yara = new YaraEngine()) {
   return new MalwareAnalyzer({
     signatures: new SignatureDatabase(),
     trust: new TrustEngine(),
-    yara: new YaraEngine(),
+    yara,
     clamav,
   });
 }
@@ -149,7 +149,11 @@ describe("P0 — ERROR nunca é publicado como SAFE (core/analysis.ts)", () => {
     );
   });
 
-  it("um 'clean' real CONTINUA a ser 'safe' (o patch não parte o caminho bom)", async () => {
+  it("YARA-X sem scanner não representa um buffer não avaliado como sem deteções", () => {
+    assert.throws(() => new YaraEngine().match(Buffer.from("fixture")), /not evaluated/i);
+  });
+
+  it("ClamAV clean e YARA avaliado sem matches continuam safe", async () => {
     const file = await tmpFile("limpo.txt", "totalmente limpo, nada a ver aqui");
     const analyzer = makeAnalyzer({
       async scanFile() {
@@ -158,13 +162,45 @@ describe("P0 — ERROR nunca é publicado como SAFE (core/analysis.ts)", () => {
       async isAvailable() {
         return true;
       },
-    });
+    }, { async scanFile() { return []; } });
+    // Both required engines evaluated this control; an uninitialised YARA
+    // engine is not a successful negative scan.
     const result = await analyzer.analyze(file, undefined, undefined, {
       clamavOutcome: { file, verdict: "clean" },
     });
 
     assert.equal(result.verdict, "safe", "um clean verdadeiro continua safe");
     assert.ok(!result.rulesTriggered.includes("scan_inconclusive"));
+  });
+
+  it("uma falha real de YARA-X nunca é convertida em resultado sem deteções", async () => {
+    const file = await tmpFile("yara-race.txt", "conteúdo benigno de teste");
+    const rulesPath = await yaraRulesPath();
+    await fs.writeFile(
+      rulesPath,
+      'rule benign_probe { strings: $a = "never matches" condition: $a }',
+      "utf8",
+    );
+    const yaraEngine = new YaraEngine(rulesPath);
+    await yaraEngine.load(rulesPath);
+    const analyzer = new MalwareAnalyzer({
+      signatures: new SignatureDatabase(),
+      trust: new TrustEngine(),
+      yara: {
+        async scanFile(filePath) {
+          await fs.unlink(filePath);
+          return yaraEngine.scanFile(filePath);
+        },
+      },
+    });
+
+    const result = await analyzer.analyze(file, undefined, undefined, {
+      clamavOutcome: { file, verdict: "clean" },
+    });
+
+    assert.equal(result.verdict, "inconclusive");
+    assert.ok(result.rulesTriggered.includes("scan_inconclusive"));
+    assert.ok(result.factors.some((factor) => factor.id === "yara-inconclusive"));
   });
 
   it("um 'detected' real continua a ser malicioso (o patch não atenua deteções)", async () => {

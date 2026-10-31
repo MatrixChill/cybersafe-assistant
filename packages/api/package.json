@@ -6,7 +6,7 @@
   "scripts": {
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
-"test": "npm run build && node --test test/ai-policy.test.js test/auth-role.test.js test/auth-role-production.test.js",
+    "test": "npm run build && node --import tsx --test test/lifecycle.test.js test/ai-policy.test.js test/ai-classify.test.js test/auth-role.test.js test/auth-role-production.test.js test/auth-jwt-secret.test.js test/auth-api-guard.test.js test/email-validation.test.js test/provision-admin.test.js test/rotate-jwt-secret.test.js test/verify-account-migration.test.js test/matrix-guard.test.js test/r6-matrix-boundaries.test.js test/r6-l8-request-shape.test.js test/r6-l10-normalizacao.test.js test/r6-l12-logout.test.js test/process-intelligence.test.js test/process-consent.test.js test/process-consent-r2.test.js test/recovery-process-validation.test.js test/recovery-process-chat.test.js test/preview-api-cors.test.js test/dist-auth13-inputs.test.js test/dev-isolation.test.js test/matrix-origin-contract.test.js",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
@@ -15,15 +15,16 @@
     "typecheck": "tsc -p tsconfig.json --noEmit"
   },
   "dependencies": {
+    "@cybersafe/core": "0.1.1",
     "@cybersafe/shared-types": "0.1.1",
     "@prisma/client": "^6.19.2",
-    "adm-zip": "^0.5.16",
+    "adm-zip": "0.6.1",
     "bcryptjs": "^3.0.3",
-    "better-sqlite3": "^12.10.0",
+    "better-sqlite3": "12.10.0",
     "dotenv": "^16.6.1",
     "express": "^5.1.0",
     "jsonwebtoken": "^9.0.3",
-    "multer": "^2.0.2",
+    "multer": "2.5.0",
     "openai": "^6.33.0"
   },
   "devDependencies": {

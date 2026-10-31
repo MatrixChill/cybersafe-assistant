@@ -133,8 +133,17 @@ describe("ProtectionDetails — badges de motor com tokens reais", () => {
  * (scanSession.ts:45-58) e o motor trabalha em lote. A promessa vivia na
  * superfície clicável principal da demo.
  */
-describe("Dashboard — copy das ações do Scanner é o escopo real", () => {
-  const source = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
+// Os cartões canónicos do Scanner (a origem do nome das análises).
+const { SCAN_ACTION_CARDS } = await import("../src/lib/scanSession");
+
+describe("Painel — o nome das análises é o do Scanner, e o escopo fica no Scanner", () => {
+  // Migração V2-FIRST: as ações do Painel deixaram de ser `ScanButton` com
+  // `label=`/`sub=` de V1; passaram a botões dentro de `Outras análises`. O que
+  // se trava é o vocabulário partilhado — comparado com o cartão CANÓNICO do
+  // Scanner, não com uma string repetida à mão neste teste.
+  const compact = (t: string) => t.replace(/\s+/g, " ");
+  const source = compact(readFileSync(new URL("../src/v2/dashboard/LabDashboard.tsx", import.meta.url), "utf8"));
+  const tituloDe = (kind: string) => SCAN_ACTION_CARDS.find((c) => c.kind === kind)!.title;
 
   test("não promete varredura total nem ficheiro a ficheiro", () => {
     assert.equal(/todo o computador/i.test(source), false, "o scan profundo exclui Windows e Program Files");
@@ -142,15 +151,26 @@ describe("Dashboard — copy das ações do Scanner é o escopo real", () => {
   });
 
   test("usa o par de termos do Scanner: Análise Rápida / Análise Profunda", () => {
-    assert.match(source, /label="Análise Rápida"/);
-    assert.match(source, /label="Análise Profunda"/);
-    assert.match(source, /label="Analisar uma Pasta"/);
-    assert.equal(/Verifi(?:cação|cação)\s+(?:rápida|completa)/i.test(source), false,
+    const acoes = [
+      { kind: "quick", rótulo: "Análise Rápida" },
+      { kind: "full", rótulo: "Análise Profunda" },
+      { kind: "folder", rótulo: "Analisar uma Pasta" },
+    ] as const;
+    for (const { kind, rótulo } of acoes) {
+      assert.match(source, new RegExp(`>\\s*${rótulo}\\s*<`), `faltou a ação «${rótulo}» no Painel`);
+      assert.ok(tituloDe(kind).startsWith(rótulo), `«${rótulo}» diverge do cartão do Scanner («${tituloDe(kind)}»)`) ;
+    }
+    assert.equal(/Verifi(?:caç|cação)\s+(?:rápida|completa)/i.test(source), false,
       '"Verificação" é o segundo nome para a mesma ação — proibido');
   });
 
-  test("a sub-copy da Análise Profunda descreve o escopo medido", () => {
-    assert.match(source, /Análise Profunda"\s+sub="Pastas do seu utilizador e arranques automáticos"/);
+  test("o escopo medido continua escrito no cartão do Scanner, não resumido no Painel", () => {
+    assert.doesNotMatch(source, /sub="Pastas do seu utilizador/, "a sub-copy de V1 não volta ao Painel");
+    const profunda = tituloDe("full");
+    assert.ok(profunda.length > 0);
+    const descricao = SCAN_ACTION_CARDS.find((c) => c.kind === "full")!.description;
+    assert.match(descricao, /pastas do seu utilizador e os arranques automáticos/, "o escopo real vive no Scanner");
+    assert.match(descricao, /Windows e Program Files ficam de fora/, "e diz o que fica de fora");
   });
 });
 

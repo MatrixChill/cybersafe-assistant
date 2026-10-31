@@ -14,6 +14,13 @@ interface TelemetrySparklineProps {
   showArea?: boolean;
   label?: string;
   unit?: string;
+  /**
+   * Nome acessível do gráfico (leitor de ecrã). Distinto do `label` visível:
+   * o rótulo curto («CPU») já aparece no cartão e repeti-lo não diz o que é o
+   * desenho. Sem nome nenhum, o SVG tem de continuar a identificar-se — nunca
+   * fica anónimo nem inventa uma métrica.
+   */
+  accessibleLabel?: string;
   /** Texto enquanto ainda não há amostras (estado inicial honesto). */
   emptyLabel?: string;
   /** Texto depois do prazo sem nenhuma amostra — nunca "a aguardar" eternamente. */
@@ -26,6 +33,44 @@ export const SPARKLINE_EMPTY_LABEL = "A recolher dados...";
 /** Sem provider/valores dentro do prazo: o gráfico assume a ausência de dados. */
 export const SPARKLINE_UNAVAILABLE_LABEL = "Sem dados disponíveis";
 export const SPARKLINE_UNAVAILABLE_AFTER_MS = 15_000;
+/**
+ * Nome acessível de último recurso. Neutro de propósito: sem nome do chamador,
+ * o gráfico declara que é telemetria — não se atreve a dizer que é CPU, RAM
+ * ou rede.
+ */
+export const SPARKLINE_DEFAULT_ACCESSIBLE_NAME = "Histórico de telemetria";
+
+export interface SparklineAccessibleNameInput {
+  accessibleLabel?: string;
+  label?: string;
+  hasSamples: boolean;
+  showUnavailable: boolean;
+  emptyLabel?: string;
+  unavailableLabel?: string;
+}
+
+/**
+ * Nome acessível derivado dos FACTOS do componente.
+ *
+ *  · com amostras: só o nome da métrica — o valor atual já está no cartão, e
+ *    repetir números no nome faria o leitor de ecrã anunciar cada actualização;
+ *  · sem amostras: o nome + o estado real («A recolher dados...» ou «Sem dados
+ *    disponíveis»), nunca um zero nem uma medição inventada;
+ *  · sem nome do chamador: o neutro, nunca uma métrica escolhida por nós.
+ */
+export function getSparklineAccessibleName({
+  accessibleLabel,
+  label,
+  hasSamples,
+  showUnavailable,
+  emptyLabel = SPARKLINE_EMPTY_LABEL,
+  unavailableLabel = SPARKLINE_UNAVAILABLE_LABEL,
+}: SparklineAccessibleNameInput): string {
+  const nome = (accessibleLabel ?? label ?? "").trim() || SPARKLINE_DEFAULT_ACCESSIBLE_NAME;
+  if (hasSamples) return nome;
+  const estado = showUnavailable ? unavailableLabel : emptyLabel;
+  return `${nome}: ${estado}`;
+}
 
 function getStats(samples: TelemetrySample[]): { min: number; max: number; avg: number; current: number } {
   if (samples.length === 0) return { min: 0, max: 0, avg: 0, current: 0 };
@@ -46,6 +91,7 @@ export function TelemetrySparkline({
   showArea = true,
   label,
   unit,
+  accessibleLabel,
   emptyLabel = SPARKLINE_EMPTY_LABEL,
   unavailableLabel = SPARKLINE_UNAVAILABLE_LABEL,
   unavailableAfterMs = SPARKLINE_UNAVAILABLE_AFTER_MS,
@@ -67,6 +113,17 @@ export function TelemetrySparkline({
 
   const showUnavailable = noDataForAWhile && !hasSamples;
 
+  // Nome acessível: identifica o gráfico (métrica + estado real). Sem
+  // `aria-live` — o gráfico não anuncia cada amostra nova.
+  const accessibleName = getSparklineAccessibleName({
+    accessibleLabel,
+    label,
+    hasSamples,
+    showUnavailable,
+    emptyLabel,
+    unavailableLabel,
+  });
+
   const buildPath = () => {
     if (samples.length < 2) return { line: "", area: "" };
     const w = width - padding * 2;
@@ -84,14 +141,22 @@ export function TelemetrySparkline({
   const { line, area } = buildPath();
 
   return (
-    <div className="flex flex-col gap-1">
+    <div className="flex flex-col gap-1 w-full max-w-full min-w-0">
       {(label || unit) && (
         <div className="flex items-baseline justify-between text-[10px] font-mono text-muted-foreground">
           {label && <span className="uppercase tracking-wider">{label}</span>}
           {unit && <span>{unit}</span>}
         </div>
       )}
-      <svg width={width} height={height} className="overflow-visible">
+      <svg
+        width={width}
+        height={height}
+        viewBox={`0 0 ${width} ${height}`}
+        className="overflow-visible w-full max-w-full"
+        role="img"
+        aria-label={accessibleName}
+      >
+        <title>{accessibleName}</title>
         {showArea && area && (
           <path d={area} fill={color || "var(--primary)"} opacity={0.1} />
         )}
@@ -135,7 +200,11 @@ export function getTelemetrySamples(key: string): TelemetrySample[] {
 export function useTelemetryHistory(key: string, intervalMs = 2000): TelemetrySample[] {
   const [samples, setSamples] = useState<TelemetrySample[]>(() => getTelemetrySamples(key));
   const keyRef = useRef(key);
-  keyRef.current = key;
+
+  // Sincronizar a ref fora da render: só é lida dentro do timer abaixo.
+  useEffect(() => {
+    keyRef.current = key;
+  }, [key]);
 
   useEffect(() => {
     const timer = setInterval(() => {

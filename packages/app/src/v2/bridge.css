@@ -1,0 +1,168 @@
+/* Ponte V2 → tokens de produto.
+
+   Porque existe: as paginas de V1 e o Tailwind leem `--background`, `--card`,
+   `--primary`, `--muted`, `--border`, `--sidebar-*`, `--cyber-*`. A camada V2
+   define `--v2-*`. Esta folha liga os dois conjuntos NUM SO sitio, para que a
+   escolha de identidade seja uma apenas e nao haja duas paletas vivas.
+
+   O selector leva tres predicados de atributo + `:root` de proposito: os blocos
+   por tema de V1 chegam a `(0,3,0)` (tema + material + modo), e uma ponte que
+   perdesse essas regras deixaria a app com dois aspetos ao mesmo tempo — o
+   «hibrido» que foi recusado. Assim, o que estiver em `--v2-*` ganha sempre.
+
+   Enquanto houver CSS de V1 vivo, esta folha existe. Ao migrar a ultima pagina,
+   ela e removida junto com os blocos de V1, e `--v2-*` passa a ser lido
+   diretamente. */
+
+html[data-v2-theme][data-v2-material]:root {
+  /* Superfícies e tinta. */
+  --background: var(--v2-bg);
+  --foreground: var(--v2-text);
+  --card: var(--v2-panel);
+  --card-foreground: var(--v2-text);
+  --popover: var(--v2-panel);
+  --popover-foreground: var(--v2-text);
+  --secondary: var(--v2-raised);
+  --secondary-foreground: var(--v2-text);
+  --muted: var(--v2-inset);
+  --muted-foreground: var(--v2-muted);
+  --input: var(--v2-inset);
+  --border: var(--v2-border);
+  --ring: var(--v2-focus);
+
+  /* A ação primária é o acento do tema; a tinta por cima vem do tema, porque
+     um ciano claro sobre texto branco não se lê (e inverte-los é que era o
+     erro). */
+  --primary: var(--v2-accent);
+  --primary-foreground: var(--v2-accent-ink);
+  --accent: var(--v2-accent);
+  --accent-foreground: var(--v2-accent-ink);
+
+  /* Sidebar e faixa: o shell V2 tem blocos próprios (--v2-sidebar, --v2-topbar),
+     mas `Sidebar.tsx` e `AppTitleBar.tsx` ainda leem os nomes de produto. */
+  --sidebar: var(--v2-sidebar);
+  --sidebar-foreground: var(--v2-text);
+  --sidebar-border: var(--v2-border);
+  --sidebar-primary: var(--v2-accent);
+  --sidebar-primary-foreground: var(--v2-accent-ink);
+  --sidebar-accent: var(--v2-accent-soft);
+  --sidebar-accent-foreground: var(--v2-text);
+  --sidebar-active: var(--v2-accent-soft);
+  --sidebar-ring: var(--v2-focus);
+
+  /* Semânticas de segurança: o VALOR passa a vir do tema V2 (`--v2-ok/warn/
+     danger`), mas o PAPEL continua do produto — verde é ok, amarelo é aviso,
+     vermelho é crítico, ciano é procedimento. Nenhum estado ganha azul. */
+  --cyber-green: var(--v2-ok);
+  --cyber-yellow: var(--v2-warn);
+  --cyber-red: var(--v2-danger);
+  --cyber-cyan: var(--v2-accent);
+  --cyber-pink: var(--v2-danger);
+  --cyber-purple: var(--v2-accent-soft);
+  --cyber-magenta: var(--v2-danger);
+
+  /* Os cinco estados derivados de V1 (`--state-*-ink/tint/edge`) são calculados
+     a partir de `--card`, `--foreground` e das `-text`. Como `--card` agora é o
+     painel V2, a rampa medida de V1 deixaria de ser a rampa pintada. Estes três
+     valores reancoram o cálculo no tema: em escuro o tinta sobe para o texto,
+     em claro desce para o fundo. A re-medição de contraste é trabalho declarado
+     em `out/`; enquanto não estiver medida, o texto de estado usa o TOM mais
+     seguro do tema (texto principal), nunca a cor de marca crua. */
+  --cyber-green-text: var(--v2-ok);
+  --cyber-yellow-text: var(--v2-warn);
+  --cyber-red-text: var(--v2-danger);
+  --cyber-cyan-text: var(--v2-accent);
+  --cyber-pink-text: var(--v2-danger);
+  --cyber-purple-text: var(--v2-accent);
+  --cyber-magenta-text: var(--v2-danger);
+
+  /* Destrutivo = o vermelho do tema, com o texto do tema por cima. */
+  --destructive: var(--v2-danger);
+  --destructive-foreground: var(--v2-text);
+
+  /* Grafos. */
+  --chart-1: var(--v2-chart);
+  --chart-2: var(--v2-ok);
+  --chart-3: var(--v2-warn);
+  --chart-4: var(--v2-danger);
+  --chart-5: var(--v2-accent-soft);
+
+  /* Raio e foco do shell, lidos por V1. */
+  --radius: var(--v2-card-radius);
+  --shell-radius-card: var(--v2-card-radius);
+  --shell-focus-color: var(--v2-focus);
+
+  /* Fundo da página e o gradiente do hero: V2 já traz ambos por tema. */
+  --surface-page: var(--v2-bg);
+  --surface-card: var(--v2-panel);
+  --hero-banner: var(--v2-hero);
+}
+
+/* ═══ EIXO DE MATERIAL ═══════════════════════════════════════════════════
+   Transcrito de `v2/src/v2.css` (regras `.app[data-material=…]`), lido no
+   `html` porque a app não tem o invólucro `.app`. `--v2-surface` é o que os
+   painéis pintam; `--v2-material-blur` é o desfoque; `--v2-material-border` é
+   a aresta. `solid` não desfoca e não translucida — é a saída medida para
+   máquinas onde `backdrop-filter` custa. */
+html[data-v2-theme][data-v2-material]:root {
+  --v2-surface: var(--v2-panel);
+  --v2-material-blur: none;
+  --v2-material-border: var(--v2-border);
+}
+html[data-v2-material="light"]:root {
+  --v2-surface: color-mix(in srgb, var(--v2-panel) 85%, transparent);
+  --v2-material-blur: blur(8px);
+}
+html[data-v2-material="frosted"]:root {
+  --v2-surface: color-mix(in srgb, var(--v2-panel) 76%, transparent);
+  --v2-material-blur: blur(26px) saturate(1.2);
+}
+html[data-v2-material="liquid"]:root {
+  --v2-surface: color-mix(in srgb, var(--v2-panel) 65%, transparent);
+  --v2-material-blur: blur(16px) saturate(1.5);
+  --v2-material-border: color-mix(in srgb, var(--v2-accent) 25%, var(--v2-border));
+}
+html[data-v2-material="advanced"]:root {
+  --v2-surface: color-mix(in srgb, var(--v2-panel) 48%, transparent);
+  --v2-material-blur: blur(22px) saturate(1.7);
+  --v2-material-border: color-mix(in srgb, var(--v2-accent) 40%, var(--v2-border));
+}
+
+/* O modo sólido, escolhido pelo utilizador ou imposto pelo perfil económico,
+   desliga o desfoque em todo o lado. É o mesmo travão que o lab usa com
+   `[data-performance="economy"]` e `.app[data-solid=true]`. */
+html[data-solid="true"]:root,
+html[data-v2-material="solid"]:root {
+  --v2-surface: var(--v2-panel);
+  --v2-material-blur: none;
+}
+
+/* ═══ EIXOS DE MOVIMENTO E DESEMPENHO ═════════════════════════════════════
+   Os tokens de duração por tema (`--v2-duration-*`) são o ritmo; com movimento
+   desligado ou reduzido, ou com a preferência do sistema por menos movimento,
+   as transições estruturais passam a 0 ms e as animações em loop param. Não é
+   uma preferência decorativa: `prefers-reduced-motion` já existia em V1. */
+html[data-v2-theme][data-v2-material]:root {
+  --v2-motion: 1;
+}
+html[data-v2-movement="off"]:root,
+html[data-v2-movement="reduced"]:root,
+html[data-reduced="true"]:root {
+  --v2-motion: 0;
+  --v2-duration-fast: 0ms;
+  --v2-duration-state: 0ms;
+}
+@media (prefers-reduced-motion: reduce) {
+  /* Os dois predicados repetem de proposito a condicao do bloco base: sem eles
+     esta regra ficava com menor precedencia do que `--v2-motion: 1` e a
+     preferencia do sistema nao vencía nada. */
+  html[data-v2-theme][data-v2-material]:root {
+    --v2-motion: 0;
+    --v2-duration-fast: 0ms;
+    --v2-duration-state: 0ms;
+  }
+}
+html[data-v2-performance="economy"]:root {
+  --v2-material-blur: none;
+  --v2-surface: var(--v2-panel);
+}

@@ -1,0 +1,21 @@
+import { test } from "node:test";
+import assert from "node:assert/strict";
+import os from "node:os"; import fs from "node:fs"; import path from "node:path";
+const root=fs.mkdtempSync(path.join(os.tmpdir(),"cs-ag36-ai-"));
+const before=process.cwd();process.chdir(root);
+process.env.CYBERSAFE_AI_PARENT_CONFIG="1";
+let calls=0;let responseStatus=200;
+const originalFetch=globalThis.fetch;
+globalThis.fetch=async (url)=>{calls++;assert.ok(String(url).startsWith("https://api.groq.com/openai/v1/") || String(url).startsWith("https://api.openai.com/v1/"));const body=responseStatus===200?(String(url).includes("/models")?{object:"list",data:[]}:{choices:[{message:{content:"Resposta sintética sem rede"}}]}):{error:{message:"fixture",type:"invalid_request_error"}};return new Response(JSON.stringify(body),{status:responseStatus,headers:{"content-type":"application/json"}});};
+const ai=await import("../dist/ai.js");process.chdir(before);
+const message=(apiKey,provider="groq")=>({type:"cybersafe-ai-configure",id:"12345678-1234-4234-8234-123456789abc",provider,apiKey});
+test("configuration, verification, response and removal use real AI code with SDK fetch stub",async()=>{
+ assert.equal(ai.aiEnabled,false);assert.equal(await ai.checkAiAvailability(),false);assert.equal(calls,0);
+ assert.equal(ai.applyParentAiConfiguration(message("synthetic-not-a-real-provider-key")),true);
+ assert.equal(calls,0,"saving must not contact a provider");assert.equal(ai.aiEnabled,true);
+ assert.equal(await ai.checkAiAvailability(),true);assert.equal(calls,1);
+ assert.equal(await ai.chatCompletion([{role:"user",content:"Olá"}]),"Resposta sintética sem rede");
+ ai.applyParentAiConfiguration(message(null));const prior=calls;assert.equal(await ai.checkAiAvailability(),false);await assert.rejects(()=>ai.chatCompletion([{role:"user",content:"Olá"}]),e=>e.kind==="no_provider");assert.equal(calls,prior);
+ responseStatus=401;ai.applyParentAiConfiguration(message("synthetic-not-a-real-provider-key"));assert.equal(await ai.checkAiAvailability(),false);assert.equal(ai.aiAvailabilityError(),"auth");
+ ai.applyParentAiConfiguration(message(null));globalThis.fetch=originalFetch;fs.rmSync(root,{recursive:true,force:true});
+});

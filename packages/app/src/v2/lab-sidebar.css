@@ -1,0 +1,223 @@
+.cs-v2.cs-v2-shell .lab-sidebar {
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--v2-border);
+  background: var(--v2-sidebar);
+  min-height: 0;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 26px 23px 24px;
+  min-height: 92px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .brand-mark {
+  width: 36px;
+  height: 40px;
+  position: relative;
+  color: var(--v2-accent);
+  display: grid;
+  place-items: center;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .brand-mark i {
+  position: absolute;
+  height: 7px;
+  width: 7px;
+  border-top: 1.5px solid var(--v2-accent);
+  border-right: 1.5px solid var(--v2-accent);
+  transform: rotate(45deg);
+  left: 14px;
+  top: 14px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .brand strong {
+  font-size: 20px;
+  letter-spacing: -0.7px;
+  line-height: 1.1;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .brand strong span {
+  font-size: 9px;
+  vertical-align: super;
+  margin-left: 3px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .brand small {
+  display: block;
+  color: var(--v2-muted);
+  letter-spacing: 3px;
+  font-size: 8px;
+  margin-top: 5px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .workspace-label {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-control-radius);
+  margin: 0 14px 18px;
+  padding: 11px;
+  background: var(--v2-inset);
+}
+.cs-v2.cs-v2-shell .lab-sidebar .workspace-avatar {
+  width: 29px;
+  height: 29px;
+  background: var(--v2-accent-soft);
+  border: 1px solid var(--v2-border);
+  display: grid;
+  place-items: center;
+  color: var(--v2-accent);
+  font-family: var(--v2-font-data);
+  font-size: 10px;
+  border-radius: 6px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .workspace-label strong {
+  font-size: 11px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .workspace-label small {
+  display: block;
+  color: var(--v2-muted);
+  font-size: 9px;
+  margin-top: 2px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .workspace-label > svg {
+  margin-left: auto;
+  color: var(--v2-muted);
+}
+.cs-v2.cs-v2-shell .lab-sidebar nav {
+  overflow: auto;
+  scrollbar-width: thin;
+  scrollbar-color: var(--v2-border) transparent;
+  flex: 1;
+  padding: 0 10px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .nav-group {
+  margin: 0 0 17px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .nav-label {
+  padding: 0 14px 7px;
+  font-size: 9px;
+  letter-spacing: 1.3px;
+  color: var(--v2-subtle);
+  font-weight: 600;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .nav-group button {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  min-height: 37px;
+  padding: 8px 13px;
+  color: var(--v2-muted);
+  border-radius: var(--v2-control-radius);
+  position: relative;
+  margin-bottom: 3px;
+  font-size: 12px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .nav-group button:hover {
+  background: var(--v2-hover);
+  color: var(--v2-text);
+}
+.cs-v2.cs-v2-shell .lab-sidebar .nav-group button small {
+  font-family: var(--v2-font-data);
+  font-size: 8px;
+  border: 1px solid var(--v2-border);
+  padding: 2px 4px;
+  margin-left: auto;
+  border-radius: 3px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .nav-indicator {
+  height: 5px;
+  width: 5px;
+  border-radius: 50%;
+  background: var(--v2-accent);
+  margin-left: auto;
+}
+.cs-v2.cs-v2-shell .lab-sidebar-bottom {
+  padding: 13px 19px 10px;
+  border-top: 1px solid var(--v2-border);
+}
+.cs-v2.cs-v2-shell .lab-sidebar .isolation {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  font-size: 10px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .isolation small {
+  display: block;
+  font-size: 9px;
+  color: var(--v2-muted);
+  margin-top: 2px;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .isolation-dot {
+  height: 6px;
+  width: 6px;
+  border: 1px solid var(--v2-accent);
+  border-radius: 50%;
+  background: var(--v2-accent-soft);
+}
+.cs-v2.cs-v2-shell .lab-sidebar .collapse-button {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 15px 0 0;
+  color: var(--v2-muted);
+  background: none;
+  font-size: 10px;
+}
+@media (min-width: 1600px) {
+  .cs-v2.cs-v2-shell .lab-sidebar .nav-group button {
+    min-height: 40px;
+  }
+}
+@media (max-width: 1050px) {
+  .cs-v2.cs-v2-shell .lab-sidebar .brand {
+    padding: 25px 20px;
+  }
+  .cs-v2.cs-v2-shell .lab-sidebar .brand > span:last-child,
+  .cs-v2.cs-v2-shell .lab-sidebar .workspace-label,
+  .cs-v2.cs-v2-shell .lab-sidebar .nav-label,
+  .cs-v2.cs-v2-shell .lab-sidebar .nav-group button > span,
+  .cs-v2.cs-v2-shell .lab-sidebar .nav-group button small,
+  .cs-v2.cs-v2-shell .lab-sidebar .nav-indicator,
+  .cs-v2.cs-v2-shell .lab-sidebar .isolation,
+  .cs-v2.cs-v2-shell .lab-sidebar .collapse-button {
+    display: none;
+  }
+  .cs-v2.cs-v2-shell .lab-sidebar .nav-group button {
+    justify-content: center;
+    padding: 10px;
+  }
+  .cs-v2.cs-v2-shell .lab-sidebar nav {
+    padding-top: 14px;
+  }
+  .cs-v2.cs-v2-shell .lab-sidebar .nav-group {
+    border-bottom: 1px solid var(--v2-border);
+    padding-bottom: 12px;
+  }
+}
+@media (max-width: 760px) {
+  .cs-v2.cs-v2-shell .lab-sidebar .brand {
+    padding: 22px 12px;
+  }
+  .cs-v2.cs-v2-shell .lab-sidebar nav {
+    padding: 0 5px;
+  }
+  .cs-v2.cs-v2-shell .lab-sidebar .nav-group button {
+    padding: 10px;
+  }
+}
+
+.cs-v2.cs-v2-shell .lab-sidebar{margin:12px 0 12px 12px;border:1px solid var(--v2-material-border);border-radius:18px;background:linear-gradient(160deg,color-mix(in srgb,var(--v2-accent) 6%,transparent),transparent 45%),color-mix(in srgb,var(--v2-sidebar) 86%,transparent);backdrop-filter:var(--v2-material-blur);box-shadow:inset 0 1px #ffffff12,0 20px 50px #0002}
+.cs-v2.cs-v2-shell .lab-sidebar .brand{padding:21px 17px;min-height:80px}.cs-v2.cs-v2-shell .lab-sidebar .brand-mark i{display:none}.cs-v2.cs-v2-shell .lab-sidebar .brand img{border-radius:10px;width:38px;height:38px}.cs-v2.cs-v2-shell .lab-sidebar .brand strong{font-size:20px}.cs-v2.cs-v2-shell .lab-sidebar .workspace-label{margin:0 12px 10px}.cs-v2.cs-v2-shell .lab-sidebar .nav-group{margin-bottom:9px}.cs-v2.cs-v2-shell .lab-sidebar nav{padding:0 10px}.cs-v2.cs-v2-shell .lab-sidebar .nav-group button{min-height:36px;border-radius:9px}.cs-v2.cs-v2-shell .lab-sidebar-bottom{padding:10px}.cs-v2.cs-v2-shell .lab-sidebar [data-performance="economy"] .sidebar{backdrop-filter:none}
+
+.cs-v2.cs-v2-shell .lab-sidebar{width:calc(var(--v2-sidebar-width) - 12px);margin:12px 0 12px 12px;font-family:var(--v2-font-ui);font-size:14px;}
+.cs-v2.cs-v2-shell .topbar{min-height:64px;font-size:14px;}
+.cs-v2.cs-v2-shell main[data-presentation="lab-v2"]{background:none;}
+.cs-v2 .v2-migration-note{padding:10px 24px;margin:0;color:var(--v2-muted);font:11px var(--v2-font-data);background:var(--v2-inset);border-bottom:1px solid var(--v2-border);}
+.cs-v2.cs-v2-shell .lab-sidebar button{font-family:inherit;text-align:left;cursor:pointer;}
+.cs-v2.cs-v2-shell .lab-sidebar .brand{background:transparent;border:0;width:100%;}
+.cs-v2.cs-v2-shell .lab-sidebar .nav-group button{width:100%;border:0;}
+.cs-v2.cs-v2-shell .lab-sidebar[data-collapsed=true]{width:64px;}
+.cs-v2.cs-v2-shell .lab-sidebar[data-collapsed=true] .brand>span:last-child,.cs-v2.cs-v2-shell .lab-sidebar[data-collapsed=true] .workspace-label,.cs-v2.cs-v2-shell .lab-sidebar[data-collapsed=true] .nav-label,.cs-v2.cs-v2-shell .lab-sidebar[data-collapsed=true] .nav-group button>span,.cs-v2.cs-v2-shell .lab-sidebar[data-collapsed=true] .sidebar-bottom span{display:none;}
+.cs-v2.cs-v2-shell .lab-sidebar[data-collapsed=true] .brand{padding:20px 12px;}
+@media(min-width:1600px){.cs-v2{--v2-sidebar-width:242px;}}
+@media(max-width:1279px){.cs-v2{--v2-sidebar-width:198px;}}
+@media(max-width:1023px){.cs-v2{--v2-sidebar-width:76px;}.cs-v2.cs-v2-shell .lab-sidebar .brand>span:last-child,.cs-v2.cs-v2-shell .lab-sidebar .workspace-label,.cs-v2.cs-v2-shell .lab-sidebar .nav-label,.cs-v2.cs-v2-shell .lab-sidebar .nav-group button>span{display:none;}}

@@ -144,4 +144,30 @@ describe("GPU temperature sensor mapping", () => {
     assert.equal(gpu.temperature, null);
     assert.equal(gpu.temperatureStatus, "unavailable");
   });
+
+  /**
+   * P1 MEDIDO (2026-10-10): o cartão mostrava "Não detetada" no PC do
+   * utilizador, que tem uma AMD Radeon RX 5600 XT — o motor publicava `gpu: null`
+   * porque a deteção (tick lento, 10 s) ainda não tinha corrido. "Sem leitura"
+   * passava a ser lido como "não existe placa". O snapshot passa a dizer a
+   * diferença: `available: true` com placa, `available: false` só sem nenhum
+   * controlador reportado.
+   */
+  it("uma placa detetada publica available: true mesmo sem sensor térmico", () => {
+    const engine = engineWithGpu();
+    const gpu = engine.buildGpuSnapshot();
+
+    assert.equal(gpu.available, true, "placa detetada não pode ser dada como ausente");
+    assert.equal(gpu.model, "AMD Radeon RX 5600 XT");
+    assert.equal(gpu.temperature, null, "e a ausência de sensor continua a ser dita");
+    assert.equal(gpu.temperatureStatus, "unavailable");
+  });
+
+  it("sem nenhum controlador reportado, o snapshot diz available: false", () => {
+    const engine = new HardwareHealthEngine();
+    engine.slowMetrics.gpu = { model: "Não disponível neste sistema", available: false };
+
+    const gpu = engine.buildGpuSnapshot();
+    assert.equal(gpu.available, false, "é este o único caso em que a UI pode dizer 'não detetada'");
+  });
 });

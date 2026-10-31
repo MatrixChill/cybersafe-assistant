@@ -1,0 +1,98 @@
+{
+  "component": {
+    "name": "ascii_tree",
+    "version": "0.1.1",
+    "publishedAt": "2018-06-05T19:32:11Z",
+    "declaredLicense": "MIT",
+    "declaredAuthors": [
+      "d.maetzke@bpressure.net"
+    ],
+    "declaredRepository": "https://github.com/bpressure/ascii_tree",
+    "repositoryHttpStatus": 404,
+    "archive": {
+      "file": "ascii_tree-0.1.1.crate",
+      "bytes": 1781,
+      "sha256": "ca6c635b3aa665c649ad1415f1573c85957dfa47690ec27aebe7ec17efe3c643"
+    },
+    "members": {
+      "Cargo.toml.orig": {
+        "sha256": "a3b4a8d0f0a78f537d1465c3ee84003ceeca3d72fa89941472f7bcde6d7e6a68"
+      },
+      "Cargo.toml": {
+        "sha256": "f7198a0431382e6e143df8b946524c458cbf5545973bee076eaa9b066dc158df"
+      },
+      "README.md": {
+        "sha256": "1e189afe942afb60820c1d9a1a2692644696d83ebecff6ac9eec7fdc22f735cc"
+      },
+      "src/lib.rs": {
+        "sha256": "bac03f38670fad3a4aa476fef6f6bd21c439b2ea3951210c93a17ad37e39c54a"
+      }
+    }
+  },
+  "chain": [
+    "@litko/yara-x@0.5.0",
+    "yara-x@1.10.0",
+    "yara-x-parser@1.10.0",
+    "ascii_tree@0.1.1"
+  ],
+  "chainEvidence": {
+    "yaraXCargoLock": {
+      "source": "https://raw.githubusercontent.com/VirusTotal/yara-x/v1.10.0/Cargo.lock",
+      "bytes": 123735,
+      "sha256": "a54e67e432b3bf29b5d429d15b71d47fd8c758dfad87e6c8053d5abd6ee8660b"
+    },
+    "yaraXParserArchive": {
+      "file": "yara-x-parser-1.10.0.crate",
+      "bytes": 149995,
+      "sha256": "737302dc499551357351b08d1d242447d1f58327653c17ca74b2d4e2a462bf61"
+    }
+  },
+  "absenceOfNotice": {
+    "searchedMembers": [
+      "Cargo.toml.orig",
+      "Cargo.toml",
+      "README.md",
+      "src/lib.rs"
+    ],
+    "patterns": [
+      "copyright",
+      "(c)",
+      "©"
+    ],
+    "matches": 0,
+    "licenseFileInArchive": false,
+    "includeListDeclaredByCrate": [
+      ".gitignore",
+      "Cargo.toml",
+      "src/*.rs",
+      "README.md"
+    ],
+    "statement": "Nenhum aviso de copyright autêntico foi encontrado para ascii_tree 0.1.1; o upstream nunca publicou LICENSE/COPYING/NOTICE nem linha de titularidade."
+  },
+  "packagedMitText": {
+    "file": "MIT.txt",
+    "bytes": 1078,
+    "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+    "origin": "template SPDX MIT já publicado em assets/licenses/rust/textos/SPDX-MIT--b05785f9.txt",
+    "placeholderPreserved": "<year> <copyright holders>",
+    "notAnUpstreamNotice": true
+  },
+  "assessment": {
+    "gateState": "BLOCKED",
+    "mitObligation": "Incluir o aviso de copyright e a permissão MIT em cópias ou porções substanciais.",
+    "satisfied": "Texto integral da permissão MIT incluído; autor identificado apenas pelo metadado oficial do crate.",
+    "notSatisfied": "Não existe aviso de copyright autêntico publicado pelo detentor; o placeholder do template não foi preenchido por não haver titular/ano verificados.",
+    "conclusion": "Resolução documental de boa-fé preparada, mas não é a notice canónica e não demonstra literalmente o requisito do aviso de copyright. O gate permanece BLOCKED até decisão do utilizador ou confirmação autorizada do titular.",
+    "notLegalAdvice": true,
+    "thirdPartyContacted": false
+  },
+  "evidenceReferences": {
+    "finding": {
+      "file": "FINDING-ASCII_TREE-20261024.md",
+      "sha256": "dcd350998f0c4382f0c09af2764310eead926e33b9ca41dc1ddf7ddf5dd3df26"
+    },
+    "crateArchive": {
+      "sha256": "ca6c635b3aa665c649ad1415f1573c85957dfa47690ec27aebe7ec17efe3c643"
+    }
+  }
+}

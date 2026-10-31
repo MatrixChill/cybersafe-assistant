@@ -95,7 +95,7 @@ async function createHarness({ delayMs = 0, threatFiles = [] } = {}) {
     switch (method) {
       case "scan.start": {
         const id = await manager.startScan(payload.type, payload.targetPath);
-        if (!id) return { id: "", success: false, error: "Já existe uma análise em curso." };
+        if (!id) throw new Error("Já existe uma análise em curso.");
         return { id, success: true };
       }
       case "scan.getActive":
@@ -273,10 +273,11 @@ describe("Scan event pipeline (real pipe protocol)", () => {
       assert.ok(snapshot, "getActive must expose the running scan");
       assert.equal(snapshot.id, first.id);
 
-      const second = await client.request("scan.start", { type: "custom", targetPath: scanDir });
-      assert.equal(second.success, false, "a second concurrent scan must be refused");
-      assert.equal(second.id, "");
-      assert.ok(second.error, "the refusal must carry a user-facing reason");
+      await assert.rejects(
+        client.request("scan.start", { type: "custom", targetPath: scanDir }),
+        /Já existe uma análise em curso/,
+        "a second concurrent scan must be refused with a protocol error"
+      );
 
       const cancel = await client.request("scan.cancel", { id: first.id });
       assert.equal(cancel.success, true);
@@ -293,7 +294,35 @@ describe("Scan event pipeline (real pipe protocol)", () => {
     }
   });
 
-  it("terminates explicitly when no files are found (zero-file scan)", async () => {
+  it("second scan.start during an active scan rejects at protocol level (envelope ok=false)", async () => {
+    const scanDir = await makeTempDir("scan-red");
+    await fs.mkdir(path.join(scanDir, "files"), { recursive: true });
+    for (let i = 0; i < 10; i++) {
+      await fs.writeFile(path.join(scanDir, "files", `f${i}.txt`), "x");
+    }
+
+    const harness = await createHarness({ delayMs: 50 });
+    const client = await connectClient(harness.pipeName);
+
+    try {
+      const first = await client.request("scan.start", { type: "custom", targetPath: scanDir });
+      assert.equal(first.success, true);
+
+      await assert.rejects(
+        client.request("scan.start", { type: "custom", targetPath: scanDir }),
+        /Já existe uma análise em curso/,
+        "protocol envelope must be ok=false for a refused scan.start"
+      );
+
+      const cancel = await client.request("scan.cancel", { id: first.id });
+      assert.equal(cancel.success, true);
+    } finally {
+      client.close();
+      await harness.close();
+    }
+  });
+
+  it("terminates explicitly when no files are found (zero-file scan) as failed, never completed", async () => {
     const emptyDir = await makeTempDir("scan-empty");
     const harness = await createHarness();
     const client = await connectClient(harness.pipeName);
@@ -302,10 +331,11 @@ describe("Scan event pipeline (real pipe protocol)", () => {
       const start = await client.request("scan.start", { type: "custom", targetPath: emptyDir });
       assert.equal(start.success, true);
 
-      await waitFor(() => client.events.some((event) => event.status === "completed"));
-      const terminal = client.events.filter((event) => event.status === "completed").at(-1);
-      assert.equal(terminal.progress, 100);
+      await waitFor(() => client.events.some((event) => event.status === "failed"));
+      assert.equal(client.events.some((event) => event.status === "completed"), false, "alvo vazio nao pode ser completed");
+      const terminal = client.events.filter((event) => event.status === "failed").at(-1);
       assert.equal(terminal.filesScanned, 0);
+      assert.match(terminal.error, /Nenhum ficheiro/);
     } finally {
       client.close();
       await harness.close();

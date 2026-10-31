@@ -150,7 +150,7 @@ const QUERIES: Record<PowerShellQuery, QueryDefinition> = {
     timeoutMs: 15000,
     script: [
       "$ErrorActionPreference = 'SilentlyContinue'",
-      "Get-NetFirewallProfile -ErrorAction SilentlyContinue | Select-Object Name,Enabled | ConvertTo-Json -Compress",
+      "Get-NetFirewallProfile -ErrorAction SilentlyContinue | Select-Object Name,@{Name='Enabled';Expression={ if ($_.Enabled -eq 1) { $true } elseif ($_.Enabled -eq 0) { $false } else { $null } }} | ConvertTo-Json -Compress",
     ].join("\n"),
   },
 };
@@ -162,8 +162,48 @@ export interface PowerShellResult<T> {
   timedOut?: boolean;
 }
 
+// Shared by all executor instances in THIS Node process. Opaque third-party
+// providers and other processes are deliberately not claimed to be covered.
+const sharedWaiting: PowerShellExecutor[] = [];
+const queryClock = () => typeof performance !== "undefined" ? performance.now() : Date.now();
+const sharedQueryMetrics: Record<string, { submitted:number; started:number; timeouts:number; queueTimeouts:number; closed:number; queueMs:number; runMs:number }> = {};
+let sharedOwned = 0;
+let sharedDraining = false;
+const SHARED_QUERY_LIMIT = 2;
+const SHARED_QUEUE_LIMIT = 64;
+const sharedStats = { submitted: 0, deduplicated: 0, started: 0, closed: 0, timedOut: 0, rejected: 0, peak: 0 };
+export function powerShellAdmissionSnapshot() {
+  return { ...sharedStats, byQuery:Object.fromEntries(Object.entries(sharedQueryMetrics).map(([k,v])=>[k,{...v}])), active: sharedOwned, queued: sharedWaiting.reduce((n, e) => n + e.waitingCount, 0), limit: SHARED_QUERY_LIMIT, queueLimit: SHARED_QUEUE_LIMIT, scope: "PowerShellExecutor instances in this Node process" };
+}
+
 export class PowerShellExecutor {
-  private running = new Set<ChildProcess>();
+  private running = new Map<ChildProcess, () => void>();
+  private pending = new Map<PowerShellQuery, Promise<PowerShellResult<unknown>>>();
+  private queue: Array<{ start: () => void; cancel: () => void; interactive:boolean; queuedAt:number }> = [];
+  private disposed = false;
+  // Bound the eight-query snapshot burst independently of destructive RPCs.
+  private readonly maxConcurrent = 2;
+
+  get waitingCount(): number { return this.queue.length; }
+
+  private drain(): void {
+    if (!this.disposed && this.queue.length && !sharedWaiting.includes(this)) sharedWaiting.push(this);
+    if (sharedDraining) return;
+    sharedDraining = true;
+    try {
+      while (sharedOwned < SHARED_QUERY_LIMIT && sharedWaiting.length) {
+        const aged = sharedWaiting.findIndex(e => e.queue.length && queryClock()-e.queue[0].queuedAt >= 1000);
+        const preferred = sharedWaiting.findIndex(e => e.queue.some(q => q.interactive));
+        const next = sharedWaiting.splice(aged >= 0 ? aged : Math.max(0,preferred),1)[0];
+        if (next.disposed || !next.queue.length) continue;
+        if (next.running.size >= next.maxConcurrent) { sharedWaiting.push(next); break; }
+        const priority = queryClock()-next.queue[0].queuedAt >= 1000 ? 0 : Math.max(0,next.queue.findIndex(q=>q.interactive));
+        next.queue.splice(priority,1)[0].start();
+        // Round-robin owners: one busy health collector cannot monopolise the queue.
+        if (!next.disposed && next.queue.length && !sharedWaiting.includes(next)) sharedWaiting.push(next);
+      }
+    } finally { sharedDraining = false; }
+  }
 
   /**
    * Executa uma consulta allowlistada fixa. NÃO aceita comandos arbitrários.
@@ -179,8 +219,49 @@ export class PowerShellExecutor {
       return { ok: false, data: null, error: `Unknown whitelisted query: ${String(query)}` };
     }
 
-    return new Promise<PowerShellResult<T>>((resolve) => {
-      const child = spawn("powershell", [
+    if (this.disposed) return { ok: false, data: null, error: "PowerShell executor disposed" };
+    const existing = this.pending.get(query);
+    if (existing) { sharedStats.deduplicated++; return existing as Promise<PowerShellResult<T>>; }
+    if (sharedWaiting.reduce((n, e) => n + e.waitingCount, 0) >= SHARED_QUEUE_LIMIT) {
+      sharedStats.rejected++;
+      return { ok: false, data: null, error: "Shared PowerShell read queue is full" };
+    }
+    sharedStats.submitted++;
+
+    const submittedAt = queryClock();
+    const metric = sharedQueryMetrics[query] ??= {submitted:0,started:0,timeouts:0,queueTimeouts:0,closed:0,queueMs:0,runMs:0};
+    metric.submitted++;
+    const deadline = submittedAt + def.timeoutMs;
+    let resolveResult!: (result: PowerShellResult<T>) => void;
+    const result = new Promise<PowerShellResult<T>>(resolve => { resolveResult = resolve; });
+    this.pending.set(query, result);
+    const cancelled = (): PowerShellResult<T> => ({ ok: false, data: null, error: "PowerShell executor disposed" });
+    const queued = {
+      interactive: query === "tcpConnections" || query === "systemInfo",
+      queuedAt:submittedAt,
+      cancel: () => {
+        clearTimeout(queueTimer);
+        this.pending.delete(query);
+        resolveResult(cancelled());
+      },
+      start: () => {
+      clearTimeout(queueTimer);
+      if (queryClock() >= deadline) {
+        sharedStats.timedOut++;
+        metric.queueTimeouts++;
+        this.pending.delete(query);
+        resolveResult({ ok: false, data: null, timedOut: true, error: "PowerShell query budget expired before spawn" });
+        return;
+      }
+      let child: ChildProcess;
+      const startedAt = queryClock();
+      metric.started++;
+      metric.queueMs += startedAt-submittedAt;
+      sharedOwned++;
+      sharedStats.started++;
+      sharedStats.peak = Math.max(sharedStats.peak, sharedOwned);
+      try {
+        child = spawn("powershell", [
         "-NoProfile",
         "-NonInteractive",
         "-ExecutionPolicy",
@@ -188,43 +269,63 @@ export class PowerShellExecutor {
         "-Command",
         `${PS_UTF8_PREFIX}\n${def.script}`,
       ], { windowsHide: true });
-
-      this.running.add(child);
+      } catch (error) {
+        sharedOwned--;
+        this.pending.delete(query);
+        resolveResult({ ok: false, data: null, error: `PowerShell spawn error: ${String(error)}` });
+        return;
+      }
 
       let stdout = "";
       let stderr = "";
       let settled = false;
+      const resolve = (value: PowerShellResult<T>) => {
+        if (settled) return;
+        settled = true;
+        clearTimeout(timer);
+        resolveResult(value);
+      };
+      let released = false;
+      const release = () => {
+        if (released) return;
+        released = true;
+        this.running.delete(child);
+        sharedOwned--;
+        sharedStats.closed++;
+        metric.closed++;
+        metric.runMs += queryClock()-startedAt;
+        this.pending.delete(query);
+        this.drain();
+      };
 
       const timer = setTimeout(() => {
         if (settled) return;
-        settled = true;
-        try {
-          child.kill();
-        } catch {
-          /* ignore */
-        }
-        this.running.delete(child);
+        sharedStats.timedOut++;
+        metric.timeouts++;
         resolve({ ok: false, data: null, error: `PowerShell query '${query}' timed out`, timedOut: true });
-      }, def.timeoutMs);
+        // A kill request is not proof of exit. Retain ownership and the slot
+        // until close, preventing replacement children piling up on failure.
+        try { child.kill(); } catch { /* retained for disposal */ }
+      }, Math.max(1, deadline - queryClock()));
 
-      child.stdout.on("data", (chunk: Buffer) => {
-        stdout += chunk.toString("utf8");
+      this.running.set(child, () => {
+        resolve(cancelled());
+        try { child.kill(); } catch { /* still owned until close */ }
       });
-      child.stderr.on("data", (chunk: Buffer) => {
-        stderr += chunk.toString("utf8");
+      child.stdout?.on("data", (chunk: Buffer) => {
+        if (!settled) stdout += chunk.toString("utf8");
+      });
+      child.stderr?.on("data", (chunk: Buffer) => {
+        if (!settled) stderr += chunk.toString("utf8");
       });
       child.on("error", (err) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        this.running.delete(child);
         resolve({ ok: false, data: null, error: `PowerShell spawn error: ${err.message}` });
+        // Failed spawn has no live process. Other errors still await close.
+        if (child.pid === undefined) release();
       });
       child.on("close", (code) => {
+        release();
         if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        this.running.delete(child);
         try {
           if (code !== 0 && !stdout.trim()) {
             resolve({ ok: false, data: null, error: stderr.trim() || `PowerShell exited with code ${code}` });
@@ -236,19 +337,32 @@ export class PowerShellExecutor {
           resolve({ ok: false, data: null, error: `Failed to parse PowerShell JSON output: ${String(err)}` });
         }
       });
-    });
+    } };
+    // Waiting and execution share the original per-query budget. No child
+    // starts if capacity remains stuck; neither timeout nor retry is enlarged.
+    const queueTimer = setTimeout(() => {
+      const index = this.queue.indexOf(queued);
+      if (index < 0) return;
+      this.queue.splice(index, 1);
+      if (!this.queue.length) { const owner = sharedWaiting.indexOf(this); if (owner >= 0) sharedWaiting.splice(owner, 1); }
+      sharedStats.timedOut++;
+      metric.queueTimeouts++;
+      this.pending.delete(query);
+      resolveResult({ ok: false, data: null, error: `PowerShell query '${query}' queue timed out`, timedOut: true });
+    }, def.timeoutMs);
+    this.queue.push(queued);
+    this.drain();
+    return result;
   }
 
   /** Termina quaisquer processos PowerShell ainda em execução (ex.: no encerramento). */
   killAll() {
-    for (const child of this.running) {
-      try {
-        child.kill();
-      } catch {
-        /* ignore */
-      }
-    }
-    this.running.clear();
+    if (this.disposed) return;
+    this.disposed = true;
+    const owner = sharedWaiting.indexOf(this);
+    if (owner >= 0) sharedWaiting.splice(owner, 1);
+    for (const entry of this.queue.splice(0)) entry.cancel();
+    for (const cancel of this.running.values()) cancel();
   }
 }
 
@@ -434,14 +548,25 @@ async function runDisks(exec: PowerShellExecutor): Promise<WindowsDiskInfo[]> {
 }
 
 async function runFirewall(exec: PowerShellExecutor): Promise<WindowsFirewallState> {
-  const res = await exec.run<Array<{ Name?: string; Enabled?: boolean }>>("firewallProfiles");
-  if (!res.ok || !res.data) {
+  const res = await exec.run<Array<{ Name?: string; Enabled?: unknown }>>("firewallProfiles");
+  if (!res.ok || !Array.isArray(res.data)) {
     return { enabled: false, profiles: [], available: false };
   }
-  const profiles = res.data.map((raw) => ({
-    name: String(raw?.Name || "unknown"),
-    enabled: raw?.Enabled !== false,
-  }));
+  const profiles: WindowsFirewallState["profiles"] = [];
+  for (const raw of res.data) {
+    const value = raw?.Enabled;
+    let enabled: boolean;
+    if (value === true || value === 1 || value === "True" || value === "true") {
+      enabled = true;
+    } else if (value === false || value === 0 || value === "False" || value === "false") {
+      enabled = false;
+    } else {
+      // The shared contract represents unknown through available=false.
+      // Do not publish an invented per-profile enabled/disabled state.
+      return { enabled: false, profiles: [], available: false };
+    }
+    profiles.push({ name: String(raw?.Name || "unknown"), enabled });
+  }
   const enabled = profiles.length > 0 ? profiles.every((p) => p.enabled) : false;
   return { enabled, profiles, available: profiles.length > 0 };
 }

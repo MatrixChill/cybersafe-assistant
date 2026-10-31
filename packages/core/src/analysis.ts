@@ -16,8 +16,8 @@ import {
   type SignatureRecord,
 } from "./signatures.js";
 import type { TrustEngine } from "./trust.js";
-import type { YaraEngine } from "./yara.js";
-import type { ClamavBridge, ClamavFileOutcome } from "./clamav.js";
+import { MAX_YARA_SCAN_FILE_BYTES, YaraScanError, type YaraEngine, type YaraMatch } from "./yara.js";
+import type { ClamavBridge, ClamavFileOutcome, ClamavJobPriority } from "./clamav.js";
 import { scoreThreat, type AuthenticodeStatus } from "./scoring.js";
 
 const MAGIC_NUMBERS: Record<string, string> = {
@@ -63,7 +63,7 @@ export class MalwareAnalyzer {
     artifactPath: string,
     signer?: string,
     signatureStatus: AuthenticodeStatus = "unavailable",
-    options?: { signal?: AbortSignal; clamavOutcome?: ClamavFileOutcome },
+    options?: { signal?: AbortSignal; clamavOutcome?: ClamavFileOutcome; priority?: ClamavJobPriority },
   ): Promise<AnalysisResult> {
     // A signer name, or lack of one, does not establish signature validity.
     const verifiedSigner = signatureStatus === "verified" || signatureStatus === "trusted" ? signer : undefined;
@@ -74,20 +74,45 @@ export class MalwareAnalyzer {
     const stats = statSync(artifactPath);
     
     // Gatekeeper para arquivos gigantes (previne crash de memória e lentidão)
-    if (stats.size > 100 * 1024 * 1024) { // 100MB limit
+    if (stats.size > MAX_YARA_SCAN_FILE_BYTES) {
       return this.generateResultForLargeFile(artifactPath, sha256, stats, fileName, extension, verifiedSigner, signatureStatus);
     }
 
     const fileHandle = await fs.open(artifactPath, "r");
     const header = Buffer.alloc(8192);
-    const { bytesRead } = await fileHandle.read(header, 0, header.length, 0);
-    await fileHandle.close();
+    let bytesRead = 0;
+    try {
+      ({ bytesRead } = await fileHandle.read(header, 0, header.length, 0));
+    } finally {
+      // Uma falha de leitura não pode deixar o descriptor aberto.
+      await fileHandle.close().catch(() => undefined);
+    }
     const sample = header.slice(0, Math.max(bytesRead, 1));
     const magic = detectMagic(sample);
     const entropy = Number(calculateEntropy(sample).toFixed(2));
     
-    // Scan completo com YARA
-    const yaraMatches = await this.deps.yara.scanFile(artifactPath);
+    // Uma falha do motor YARA é uma lacuna de análise, nunca uma lista vazia de
+    // deteções: zero matches só é válido quando o scanner terminou a leitura.
+    let yaraMatches: YaraMatch[] = [];
+    let yaraScanInconclusive = false;
+    // Um prazo vencido não é a mesma coisa que um erro de leitura: o motor
+    // chegou a correr e pode ter visto parte do ficheiro. O factor publicado
+    // diz qual dos dois aconteceu, para o utilizador não ler "motor avariado"
+    // quando o que houve foi um ficheiro lento.
+    let yaraTimedOut = false;
+    const timing = process.env.CYBERSAFE_DEBUG_SCAN === "1";
+    const yaraStarted = timing ? Date.now() : 0;
+    try {
+      yaraMatches = await this.deps.yara.scanFile(artifactPath, { signal: options?.signal });
+    } catch (error) {
+      yaraScanInconclusive = true;
+      yaraTimedOut = error instanceof YaraScanError && error.code === "timeout";
+      console.error(
+        "[Analysis] O motor YARA não conseguiu avaliar o ficheiro.",
+        error instanceof Error ? error.name : "unknown error",
+      );
+    }
+    if (timing) console.log(`[ScanPerf] ENGINE_PHASE engine=yara elapsedMs=${Date.now() - yaraStarted} outcome=${yaraTimedOut ? "timeout" : yaraScanInconclusive ? "error" : "completed"}`);
     const strongYaraMatches = yaraMatches.filter(match => match.evidence === "strong").length;
     
     // Scan com ClamAV — só quando o binário existe; nunca simula proteção.
@@ -102,6 +127,7 @@ export class MalwareAnalyzer {
     let clamavDetected = false;
     let clamavVerdict: "detected" | "clean" | "error" | undefined;
     let clamavDetail: string | undefined;
+    const clamavStarted = timing ? Date.now() : 0;
     if (options?.clamavOutcome) {
       // BATCH (Fase 4). O veredicto já foi obtido numa única invocação para
       // todos os ficheiros; aqui só se consome. O caminho por omissão continua
@@ -111,12 +137,37 @@ export class MalwareAnalyzer {
       clamavVerdict = options.clamavOutcome.verdict;
       clamavDetail = options.clamavOutcome.detail;
     } else if (this.deps.clamav) {
-      const clamResult = await this.deps.clamav.scanFile(artifactPath, { signal: options?.signal });
-      clamavDetected = clamResult.detected;
-      clamavVerdict = clamResult.verdict ?? (clamResult.detected ? "detected" : "clean");
-      clamavDetail = clamResult.detail;
+      // A prioridade desce até à vaga global: uma análise automática de
+      // ficheiro/processo é BACKGROUND e nunca pode ultrapassar o scan que o
+      // utilizador pediu (P0 SCANNER_RUNTIME_ZERO_PROGRESS). Sem isto, os
+      // `scanId=n/a` enchiam a fila à frente do Quick Scan.
+      try {
+        const clamResult = await this.deps.clamav.scanFile(artifactPath, {
+          signal: options?.signal,
+          priority: options?.priority,
+        });
+        clamavDetected = clamResult.detected;
+        clamavVerdict = clamResult.verdict ?? (clamResult.detected ? "detected" : "error");
+        clamavDetail = clamResult.detail;
+      } catch (error) {
+        // Uma exceção do motor não pode apagar uma deteção já obtida noutro
+        // motor nem pode ser lida como "sem ameaça". O detalhe é estático:
+        // não expõe caminhos, stack ou mensagens do processo.
+        clamavDetected = false;
+        clamavVerdict = "error";
+        clamavDetail = "O motor antivírus não conseguiu avaliar este ficheiro.";
+        console.error(
+          "[Analysis] ClamAV não conseguiu avaliar o ficheiro.",
+          error instanceof Error ? error.name : "unknown error",
+        );
+      }
     }
-    const scanInconclusive = clamavVerdict === "error";
+    if (timing) console.log(`[ScanPerf] ENGINE_PHASE engine=clamav elapsedMs=${Date.now() - clamavStarted} source=${options?.clamavOutcome ? "batch-cache" : "direct"} outcome=${clamavVerdict ?? "unavailable"}`);
+    const analysisCancelled = options?.signal?.aborted === true;
+    const scanInconclusive =
+      analysisCancelled ||
+      yaraScanInconclusive ||
+      (clamavVerdict !== "clean" && clamavVerdict !== "detected");
 
     const signatureMatch = this.deps.signatures.match(sha256);
 
@@ -203,12 +254,37 @@ export class MalwareAnalyzer {
       factors: scanInconclusive
         ? [
             ...score.factors,
-            {
-              id: "clamav-inconclusive",
-              label: clamavDetail ?? "O motor de scan não conseguiu avaliar este ficheiro",
-              weight: 0,
-              category: "heuristic" as const,
-            },
+            ...(yaraScanInconclusive
+              ? [yaraTimedOut
+                  ? {
+                      id: "yara-timeout",
+                      label: "O motor YARA excedeu o tempo limite e não concluiu a análise deste ficheiro.",
+                      weight: 0,
+                      category: "heuristic" as const,
+                    }
+                  : {
+                      id: "yara-inconclusive",
+                      label: "O motor YARA não conseguiu avaliar este ficheiro.",
+                      weight: 0,
+                      category: "heuristic" as const,
+                    }]
+              : []),
+            ...(clamavVerdict !== "clean" && clamavVerdict !== "detected"
+              ? [{
+                  id: "clamav-inconclusive",
+                  label: clamavDetail ?? "O motor de scan não conseguiu avaliar este ficheiro",
+                  weight: 0,
+                  category: "heuristic" as const,
+                }]
+              : []),
+            ...(analysisCancelled
+              ? [{
+                  id: "scan-cancelled",
+                  label: "Análise cancelada antes de concluir: o resultado não é um veredicto de segurança.",
+                  weight: 0,
+                  category: "policy" as const,
+                }]
+              : []),
           ]
         : score.factors,
       recommendedAction: score.recommendedAction,
@@ -228,13 +304,17 @@ export class MalwareAnalyzer {
   private generateResultForLargeFile(artifactPath: string, sha256: string, stats: any, fileName: string, extension: string, signer?: string, signatureStatus: AuthenticodeStatus = "unavailable"): AnalysisResult {
     const trust = this.deps.trust.evaluate({ sha256, artifactPath, signer });
     const rules = new Set<HeuristicRuleId>();
+    const signature = this.deps.signatures.match(sha256);
+    const knownBadHash = !!signature && signature.source !== DEV_CANARY_SIGNATURE.source;
+    if (knownBadHash) rules.add("known_bad_hash");
+    rules.add("scan_inconclusive");
     
     if (trust.publisherTrusted) rules.add("trusted_publisher");
     if (trust.systemPathTrusted) rules.add("trusted_system_path");
     if (signatureStatus === "unsigned" && (extension === ".exe" || extension === ".msi")) rules.add("unsigned_binary");
 
     const score = scoreThreat({
-      signatureMatch: false,
+      signatureMatch: knownBadHash,
       yaraMatches: 0,
       signatureStatus,
       rulesTriggered: Array.from(rules),
@@ -245,17 +325,17 @@ export class MalwareAnalyzer {
       artifactPath,
       fileName,
       sha256,
-      verdict: score.verdict,
+      verdict: score.verdict === "safe" ? "inconclusive" : score.verdict,
       severity: score.severity,
       riskScore: score.riskScore,
-      confidence: 0.5,
+      confidence: knownBadHash ? 0.99 : 0.3,
       rulesTriggered: Array.from(rules),
-      factors: score.factors,
+      factors: [...score.factors, {id:"large-file-limit",category:"heuristic",label:"Ficheiro acima de 100 MiB: análise de conteúdo não realizada por limite de recursos.",weight:0}],
       recommendedAction: score.recommendedAction,
       signer,
       publisherTrusted: trust.publisherTrusted,
       systemPathTrusted: trust.systemPathTrusted,
-      isExecutable: true,
+      isExecutable: EXECUTABLE_EXTENSIONS.has(extension),
       magicNumber: undefined,
       detectedExtension: extension,
       extension,

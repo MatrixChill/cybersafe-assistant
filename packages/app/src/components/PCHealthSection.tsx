@@ -1,4 +1,4 @@
-import { useState, useEffect } from "react";
+import { useRef, useState, useEffect } from "react";
 import {
   ShieldCheck,
   ShieldAlert,
@@ -16,10 +16,71 @@ import {
   CircleAlert,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import type { WindowsHealthSnapshot, WindowsHealthStatus } from "@cybersafe/shared-types";
+import { classeDeUso } from "@/lib/healthBands";
+import type { WindowsFirewallState, WindowsHealthSnapshot, WindowsHealthStatus } from "@cybersafe/shared-types";
 import { buildHealthAlertsFromSnapshot } from "@cybersafe/shared-types";
 import type { HealthAlert, HealthAlertSeverity } from "@cybersafe/shared-types";
 import { isAppShuttingDown, onAppShutdown, runUnlessShuttingDown } from "@/lib/shutdownState";
+import { withDeadline } from "@/lib/deadline";
+import {
+  estadoTcp,
+  estadoTcpTitle,
+  formatEndpoint,
+  formatOwningProcess,
+  formatRemote,
+} from "@/lib/netConnectionsView";
+
+/**
+ * Prazo máximo de UMA leitura de saúde do Windows.
+ *
+ * Medido nesta máquina: o motor responde em ~3 s (51 KB de snapshot). Uma
+ * resposta que não chegue em 20 s é, para o utilizador, ausência de resposta — e
+ * tem de terminar num estado honesto em vez de girar para sempre.
+ */
+export const WINDOWS_HEALTH_TIMEOUT_MS = 20_000;
+export const WINDOWS_HEALTH_TIMEOUT_TEXT =
+  "A saúde do Windows não respondeu no prazo esperado. O serviço pode estar ocupado.";
+export const WINDOWS_HEALTH_ERROR_TEXT =
+  "Erro de leitura da saúde do Windows. O serviço pode não estar ativo.";
+
+/**
+ * O que a linha do Firewall do Windows pode dizer, e com que palavra.
+ *
+ * Os três estados não são um: «A verificar…» é um pedido em voo, «Não
+ * verificado» é ausência de leitura fiável e «Não foi possível verificar» é uma
+ * rejeição. Confundi-los produz o defeito que este produto já apanhou: uma
+ * leitura falhada mostrada como «desligado». E o firewall da Microsoft não é o
+ * filtro WFP do CyberSafe — por isso a linha se chama «Firewall do Windows» e o
+ * estado neutro nunca herda a cor do «Desligado».
+ */
+// eslint-disable-next-line react-refresh/only-export-components
+export function estadoFirewallPC(
+  firewall: WindowsFirewallState | null | undefined,
+  aVerificar = false,
+  falhaDeLeitura = false,
+): { valor: string; detalhe: string; cor?: "ok" | "crit" } {
+  if (firewall?.available) {
+    const perfis = (firewall.profiles ?? [])
+      .map((p) => `${FIREWALL_PROFILE_PT[p.name] ?? p.name}:${p.enabled ? "ativo" : "desligado"}`)
+      .join(" · ");
+    return firewall.enabled
+      ? { valor: "Ativo", detalhe: perfis || "leitura confirmada; perfis não nomeados", cor: "ok" }
+      : { valor: "Desligado", detalhe: perfis || "pelo menos um perfil sem proteção", cor: "crit" };
+  }
+  if (aVerificar) {
+    return { valor: "A verificar…", detalhe: "pedido em voo ao serviço de saúde do Windows" };
+  }
+  if (falhaDeLeitura) {
+    return {
+      valor: "Não foi possível verificar",
+      detalhe: "a leitura falhou — isto não é uma afirmação sobre o firewall",
+    };
+  }
+  return {
+    valor: "Não verificado",
+    detalhe: "sem leitura fiável — ausência de leitura não é firewall desligado",
+  };
+}
 
 function statusMeta(status: WindowsHealthStatus) {
   switch (status) {
@@ -30,7 +91,7 @@ function statusMeta(status: WindowsHealthStatus) {
     case "critical":
       return { label: "CRÍTICO", color: "text-cyber-red", bg: "bg-cyber-red/10", border: "border-cyber-red/30", Icon: ShieldAlert };
     default:
-      return { label: "DESCONHECIDO", color: "text-muted-foreground", bg: "bg-white/5", border: "border-white/10", Icon: ShieldQuestion };
+      return { label: "DESCONHECIDO", color: "text-muted-foreground", bg: "bg-secondary/50", border: "border-border", Icon: ShieldQuestion };
   }
 }
 
@@ -53,7 +114,13 @@ const ALERT_MEANING: Record<string, string> = {
   "disk-attention": "Ainda há espaço, mas pode faltar para atualizações e novos ficheiros.",
   "firewall-disabled": "O PC está exposto a tentativas de acesso pela rede sem proteção.",
   "many-cpu-processes": "O processador está saturado; janelas e jogos podem correr aos soluços.",
-  "service-down": "Funções como impressão, atualizações ou proteção podem deixar de funcionar.",
+  // Limitação dito ao utilizador, porque é facto e não opinião: a regra do
+  // motor só pergunta «está a correr?» e nunca lê o tipo de arranque. Um
+  // serviço em arranque manual, que o Windows pára por omissão até ser
+  // preciso, aparece aqui exatamente como uma falha. A severidade é do motor e
+  // não se mexe aqui; o que se mexe é não deixar a frase afirmar mais do que
+  // foi medido.
+  "service-down": "Um serviço do Windows não está a correr neste momento. O CyberSafe ainda não lê o tipo de arranque, por isso um serviço em arranque manual pode aparecer aqui sem ser uma falha real.",
 };
 
 function alertMeaning(alert: HealthAlert): string {
@@ -65,20 +132,10 @@ function alertMeaning(alert: HealthAlert): string {
   }
 }
 
-// Rotulos PT-PT para strings de estado vindas do backend (evita ingles visivel).
-const TCP_STATE_PT: Record<string, string> = {
-  Established: "Estabelecida",
-  Listen: "À escuta",
-  SynSent: "A conectar",
-  SynReceived: "A conectar",
-  FinWait1: "A fechar",
-  FinWait2: "A fechar",
-  LastAck: "Último reconhecimento",
-  Closing: "A fechar",
-  Closed: "Fechada",
-  TimeWait: "Em espera de fecho",
-  CloseWait: "Aguarda fecho",
-};
+// Os rotulos de estado TCP vivem em `@/lib/netConnectionsView` — uma so copia,
+// com o mapa NUMERICO medido contra a fonte (inclui 100 = Bound). A tabela local
+// que aqui estava imprimia o codigo cru sempre que nao reconhecia o valor, e foi
+// assim que a coluna «Estado» mostrou «100».
 
 const FIREWALL_PROFILE_PT: Record<string, string> = {
   Domain: "Domínio",
@@ -174,7 +231,7 @@ function MetricTile({ icon: Icon, label, value, sub, color }: {
   color?: string;
 }) {
   return (
-    <div className="bg-black/20 border border-white/5 rounded-lg p-4 flex flex-col gap-1">
+    <div className="bg-black/20 border border-border rounded-lg p-4 flex flex-col gap-1">
       <div className="flex items-center gap-2 text-xs text-muted-foreground uppercase tracking-wider">
         <Icon className="w-4 h-4 text-primary" />
         {label}
@@ -213,7 +270,7 @@ function ProcessTable({ processes, title, coloredBy }: {
                 const val = coloredBy === "cpu" ? p.cpuPercent : p.memoryMb;
                 const hi = coloredBy === "cpu" ? p.cpuPercent > 50 : p.memoryMb > 2000;
                 return (
-                  <tr key={p.pid} className="border-b border-white/5 last:border-0">
+                  <tr key={p.pid} className="border-b border-border last:border-0">
                     <td className="px-3 py-2 font-mono truncate max-w-[160px]" title={p.path || p.name}>{p.name}</td>
                     <td className="px-3 py-2 font-mono text-muted-foreground">{p.pid}</td>
                     <td className={cn("px-3 py-2 font-mono font-bold", hi ? "text-cyber-red" : "text-foreground")}>
@@ -234,6 +291,10 @@ export default function PCHealthSection() {
   const [health, setHealth] = useState<WindowsHealthSnapshot | null>(null);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  /** Motivo factual do último insucesso (timeout ou erro). null = sem falha. */
+  const [readError, setReadError] = useState<string | null>(null);
+  /** Uma leitura em voo de cada vez: o poll de 12 s não empilha pedidos. */
+  const inFlight = useRef(false);
 
   const fetchHealth = async () => {
     if (!window.electronAPI) {
@@ -243,16 +304,32 @@ export default function PCHealthSection() {
     }
     // Encerramento em curso: sem leituras novas ao serviço.
     if (isAppShuttingDown()) return;
+    if (inFlight.current) return;
+    inFlight.current = true;
     setRefreshing(true);
     try {
-      const snap = await window.electronAPI.getWindowsHealth();
+      // Prazo duro: sem isto, um pedido que nunca responde deixava a secção em
+      // "A recolher dados de saúde do Windows..." indefinidamente.
+      const result = await withDeadline(
+        window.electronAPI.getWindowsHealth(),
+        WINDOWS_HEALTH_TIMEOUT_MS,
+      );
       if (isAppShuttingDown()) return;
-      setHealth(snap);
-    } catch (e) {
+      if (result.kind === "value") {
+        setHealth(result.value);
+        setReadError(null);
+        return;
+      }
+      if (result.kind === "timeout") {
+        console.error(`[WindowsHealth] leitura excedeu ${WINDOWS_HEALTH_TIMEOUT_MS}ms`);
+        setReadError(WINDOWS_HEALTH_TIMEOUT_TEXT);
+        return;
+      }
       // Cancelamento esperado durante o shutdown; erro real continua a ser logado.
-      if (isAppShuttingDown()) return;
-      console.error("[WindowsHealth] fetch error", e);
+      console.error("[WindowsHealth] fetch error", result.error);
+      setReadError(WINDOWS_HEALTH_ERROR_TEXT);
     } finally {
+      inFlight.current = false;
       setLoading(false);
       setRefreshing(false);
     }
@@ -284,7 +361,10 @@ export default function PCHealthSection() {
     return (
       <div className="w-full bg-card cyber-border rounded-xl p-6 flex flex-col items-center justify-center gap-3 text-center">
         <Flame className="w-10 h-10 text-muted-foreground opacity-30" />
-        <p className="text-sm text-muted-foreground font-mono">Indisponível. O serviço Windows pode não estar ativo.</p>
+        {/* Honesto: diz-se o motivo real (timeout/erro) quando existe, em vez de um load infinito. */}
+        <p className="text-sm text-muted-foreground font-mono">
+          {readError ?? "Indisponível. O serviço Windows pode não estar ativo."}
+        </p>
         <button
           onClick={() => void fetchHealth()}
           className="px-4 py-2 text-sm font-mono bg-primary/10 text-primary hover:bg-primary/20 rounded-lg"
@@ -298,14 +378,23 @@ export default function PCHealthSection() {
   const meta = statusMeta(health.overallStatus);
   const StatusIcon = meta.Icon;
   const topDisk = [...health.disks].sort((a, b) => b.usagePercent - a.usagePercent)[0];
+  /** Uma decisão por render, não três chamadas soltas no JSX: o estado do
+      firewall é uma coisa só, com três origens diferentes de ignorância. */
+  const firewallPC = estadoFirewallPC(health.firewall, refreshing, readError !== null);
 
   return (
     <section className="space-y-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold flex items-center gap-2">
-          <ShieldCheck className="w-5 h-5 text-primary" />
-          Saúde e Segurança do PC
-        </h2>
+        <div>
+          {/* Terceiro domínio da página: `health.score` é uma avaliação derivada
+              dos dados do Windows, não uma medição direta. Não é a proteção nem
+              a carga instantânea; a etiqueta diz de onde vem. */}
+          <span className="mb-1 block font-mono text-xs uppercase tracking-[0.09em] text-muted-foreground">Avaliação com dados do Windows</span>
+          <h2 className="flex items-center gap-2 text-lg font-semibold">
+            <ShieldCheck className="w-5 h-5 text-primary" />
+            Saúde e Segurança do PC
+          </h2>
+        </div>
         <button
           onClick={() => void fetchHealth()}
           disabled={refreshing}
@@ -334,7 +423,12 @@ export default function PCHealthSection() {
           </div>
         </div>
         <div className="text-right">
-          <span className="text-xs text-muted-foreground uppercase tracking-wider block">Score</span>
+          <span
+            className="text-xs text-muted-foreground uppercase tracking-wider block"
+            title="Nota de saúde do computador, medida pelo motor de estado do Windows. Não é a nota de proteção do Painel: mede outra coisa, e os dois números não se somam."
+          >
+            Saúde do PC
+          </span>
           <span className={cn("text-4xl font-mono font-bold", meta.color)}>{health.score}</span>
         </div>
       </div>
@@ -346,14 +440,14 @@ export default function PCHealthSection() {
           label="RAM"
           value={health.system.available ? `${health.system.ramUsagePercent}%` : "—"}
           sub={health.system.available ? `${health.system.availableRamGb.toFixed(1)} / ${health.system.totalRamGb.toFixed(1)} GB livres` : "indisponível"}
-          color={health.system.ramUsagePercent >= 90 ? "text-cyber-red" : health.system.ramUsagePercent >= 75 ? "text-cyber-yellow" : "text-cyber-green"}
+          color={health.system.available ? classeDeUso("ram", health.system.ramUsagePercent) : "text-muted-foreground"}
         />
         <MetricTile
           icon={HardDrive}
           label="Disco principal"
           value={topDisk ? `${topDisk.usagePercent}%` : "—"}
           sub={topDisk ? `${topDisk.freeGb.toFixed(1)} GB livres` : "indisponível"}
-          color={topDisk && topDisk.usagePercent >= 95 ? "text-cyber-red" : topDisk && topDisk.usagePercent >= 85 ? "text-cyber-yellow" : "text-cyber-green"}
+          color={topDisk ? classeDeUso("disk", topDisk.usagePercent) : "text-muted-foreground"}
         />
         <MetricTile
           icon={Server}
@@ -363,10 +457,10 @@ export default function PCHealthSection() {
         />
         <MetricTile
           icon={Wifi}
-          label="Firewall"
-          value={health.firewall.available ? (health.firewall.enabled ? "Ativo" : "Desligado") : "—"}
-          sub={health.firewall.available ? health.firewall.profiles.map((p) => `${FIREWALL_PROFILE_PT[p.name] ?? p.name}:${p.enabled ? "ativo" : "desligado"}`).join(" · ") : "indisponível"}
-          color={!health.firewall.available ? undefined : health.firewall.enabled ? "text-cyber-green" : "text-cyber-red"}
+          label="Firewall do Windows"
+          value={firewallPC.valor}
+          sub={firewallPC.detalhe}
+          color={firewallPC.cor === "ok" ? "text-cyber-green" : firewallPC.cor === "crit" ? "text-cyber-red" : undefined}
         />
       </div>
 
@@ -417,25 +511,42 @@ export default function PCHealthSection() {
           </div>
           <div className="overflow-x-auto max-h-64 overflow-y-auto">
             <table className="w-full text-sm text-left">
-              <thead className="text-xs text-muted-foreground uppercase bg-secondary/50 sticky top-0">
+              {/* Cabecalho PEGAJOSO e OPACO. Estava `bg-secondary/50`: translucido
+                  por cima de linhas que passam por baixo, ou seja liam-se as
+                  linhas ATRAVES do cabecalho durante o scroll. Os cantos
+                  arredondados sairam pelo mesmo motivo: num cabecalho fixo
+                  deixavam ver os cantos das linhas a passar. */}
+              <thead className="connections-thead text-xs text-muted-foreground uppercase sticky top-0 z-10">
                 <tr>
-                  <th className="px-3 py-2 rounded-tl-lg">Processo</th>
+                  <th className="px-3 py-2">Processo</th>
                   <th className="px-3 py-2">Local</th>
                   <th className="px-3 py-2">Remoto</th>
-                  <th className="px-3 py-2 rounded-tr-lg">Estado</th>
+                  <th className="px-3 py-2">Estado</th>
                 </tr>
               </thead>
               <tbody>
-                {health.connections.map((c, i) => (
-                  <tr key={i} className="border-b border-white/5 last:border-0">
-                    <td className="px-3 py-2 font-mono truncate max-w-[140px]">
-                      {c.owningProcessName || c.owningProcessPid || "—"}
-                    </td>
-                    <td className="px-3 py-2 font-mono text-muted-foreground">{c.localAddress}:{c.localPort}</td>
-                    <td className="px-3 py-2 font-mono text-muted-foreground">{c.remoteAddress}:{c.remotePort}</td>
-                    <td className="px-3 py-2 font-mono">{TCP_STATE_PT[c.state] ?? c.state}</td>
-                  </tr>
-                ))}
+                {health.connections.map((c, i) => {
+                  const estado = estadoTcp(c.state);
+                  return (
+                    <tr key={i} className="border-b border-border last:border-0">
+                      <td
+                        className="px-3 py-2 font-mono truncate max-w-[140px]"
+                        title={c.owningProcessName ?? undefined}
+                      >
+                        {formatOwningProcess(c.owningProcessName, c.owningProcessPid)}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-muted-foreground tabular-nums">
+                        {formatEndpoint(c.localAddress, c.localPort)}
+                      </td>
+                      <td className="px-3 py-2 font-mono text-muted-foreground tabular-nums">
+                        {formatRemote(estado, c.remoteAddress, c.remotePort)}
+                      </td>
+                      <td className="px-3 py-2 font-mono whitespace-nowrap" title={estadoTcpTitle(estado)}>
+                        {estado.label}
+                      </td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

@@ -1,0 +1,24 @@
+import {test} from 'node:test';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import {createRequire} from 'node:module';
+import {randomBytes,createCipheriv,createDecipheriv} from 'node:crypto';
+const require=createRequire(import.meta.url);
+const ts=require('typescript');
+const source=fs.readFileSync(new URL('../src/auth-session-store.ts',import.meta.url),'utf8');
+const Module=require('node:module');const compiled=new Module('auth-session-store');
+compiled.paths=[];compiled._compile(ts.transpileModule(source,{compilerOptions:{module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText,'auth-session-store.cjs');
+const {createAuthSessionStore}=compiled.exports;
+// Test encryption adapter. Actual Windows DPAPI is tested by the Electron harness.
+const key=randomBytes(32);
+const encryption={isEncryptionAvailable:()=>true,encryptString(s){const iv=randomBytes(12);const c=createCipheriv('aes-256-gcm',key,iv);const body=Buffer.concat([c.update(s,'utf8'),c.final()]);return Buffer.concat([iv,c.getAuthTag(),body])},decryptString(b){const d=createDecipheriv('aes-256-gcm',key,b.subarray(0,12));d.setAuthTag(b.subarray(12,28));return Buffer.concat([d.update(b.subarray(28)),d.final()]).toString()}};
+const token='fixture.payload.signature';
+const root=()=>fs.mkdtempSync(path.join(os.tmpdir(),'cybersafe-session-store-'));
+test('persistent session is encrypted and read by a new storage instance',()=>{const dir=root();createAuthSessionStore(dir,encryption).write(token,true);assert.equal(createAuthSessionStore(dir,encryption).read(),token);assert.equal(fs.readFileSync(path.join(dir,'secrets/auth-session.bin')).includes(token),false)});
+test('temporary session exists only in this instance and removes previous persistence',()=>{const dir=root();const store=createAuthSessionStore(dir,encryption);store.write(token,true);store.write(token,false);assert.equal(store.read(),token);assert.equal(createAuthSessionStore(dir,encryption).read(),null)});
+test('logout removes persisted session',()=>{const dir=root();const store=createAuthSessionStore(dir,encryption);store.write(token,true);store.clear();assert.equal(createAuthSessionStore(dir,encryption).read(),null)});
+test('corrupt ciphertext never authenticates',()=>{const dir=root();const store=createAuthSessionStore(dir,encryption);store.write(token,true);fs.writeFileSync(path.join(dir,'secrets/auth-session.bin'),'corrupt fixture');assert.equal(createAuthSessionStore(dir,encryption).read(),null)});
+test('no encryption means no plaintext persistence fallback',()=>{const dir=root();const store=createAuthSessionStore(dir,{...encryption,isEncryptionAvailable:()=>false});assert.throws(()=>store.write(token,true));assert.equal(fs.existsSync(path.join(dir,'secrets')),false)});
+test('invalid payload or nonregular storage is refused',()=>{const dir=root();const store=createAuthSessionStore(dir,encryption);assert.throws(()=>store.write('bad',true));fs.mkdirSync(path.join(dir,'secrets'));fs.mkdirSync(path.join(dir,'secrets/auth-session.bin'));assert.throws(()=>store.write(token,true));assert.throws(()=>store.clear())});

@@ -10,6 +10,7 @@ import {
   activeScanDetail,
   activeScanTitle,
   buildResultSummary,
+  conciseResultSummary,
   decideScanEvent,
   decideScanRecovery,
   formatEta,
@@ -20,6 +21,7 @@ import {
   normalizeScanState,
   normalizeScanType,
   scanEtaSeconds,
+  scanPrimaryBar,
   scanProgressPercent,
   scanRateLabel,
   scanScopeFor,
@@ -31,6 +33,7 @@ import {
   resultFollowUpNote,
   resultFilesWithoutDetections,
   resultFilesWithoutDetectionsNote,
+  terminalResultLabels,
   uiStatusForState,
 } from "../src/lib/scanSession";
 
@@ -252,60 +255,92 @@ describe("naming das análises (UX para leigos)", () => {
 
 describe("resumo final por tipo de análise", () => {
   test("análise rápida concluída sem ameaças", () => {
-    const summary = buildResultSummary({ scope: "computer", type: "quick", status: "completed", filesScanned: 800, threatsFound: 0 });
+    const summary = buildResultSummary({ scope: "computer", type: "quick", status: "completed", filesConsidered: 800, threatsFound: 0 });
     assert.equal(
       summary,
-      "A análise rápida do computador foi concluída. Foram verificados 800 ficheiros em áreas prioritárias do sistema e não foram encontradas ameaças.",
+      "A análise rápida do computador foi concluída. Foram analisados 800 ficheiros em áreas prioritárias do sistema e não foram encontradas ameaças.",
     );
   });
 
   test("análise rápida com ameaças", () => {
-    const summary = buildResultSummary({ scope: "computer", type: "quick", status: "completed", filesScanned: 143, threatsFound: 3 });
-    assert.match(summary, /Foram verificados 143 ficheiros/);
+    const summary = buildResultSummary({ scope: "computer", type: "quick", status: "completed", filesConsidered: 143, threatsFound: 3 });
+    assert.match(summary, /Foram analisados 143 ficheiros/);
     assert.match(summary, /foram encontradas 3 ameaças/);
   });
 
   test("análise profunda descreve o scope real", () => {
-    const summary = buildResultSummary({ scope: "computer", type: "full", status: "completed", filesScanned: 12000, threatsFound: 0 });
+    const summary = buildResultSummary({ scope: "computer", type: "full", status: "completed", filesConsidered: 12000, threatsFound: 0 });
     assert.match(summary, /A análise profunda do computador foi concluída/);
     assert.match(summary, /pastas do seu utilizador e nos arranques automáticos/);
   });
 
   test("ficheiro único", () => {
-    const clean = buildResultSummary({ scope: "file", type: "custom", status: "completed", filesScanned: 1, threatsFound: 0, targetName: "invoice.pdf" });
-    assert.equal(clean, "A análise do ficheiro «invoice.pdf» foi concluída: 1 ficheiro verificado e não foram encontradas ameaças.");
-    const dirty = buildResultSummary({ scope: "file", type: "custom", status: "completed", filesScanned: 1, threatsFound: 1, targetName: "evil.exe" });
+    const clean = buildResultSummary({ scope: "file", type: "custom", status: "completed", filesConsidered: 1, threatsFound: 0, targetName: "invoice.pdf" });
+    assert.equal(clean, "A análise do ficheiro «invoice.pdf» foi concluída: Foi analisado 1 ficheiro e não foram encontradas ameaças.");
+    const dirty = buildResultSummary({ scope: "file", type: "custom", status: "completed", filesConsidered: 1, threatsFound: 1, targetName: "evil.exe" });
     assert.match(dirty, /foi encontrada 1 ameaça/);
   });
 
   test("pasta", () => {
-    const summary = buildResultSummary({ scope: "folder", type: "custom", status: "completed", filesScanned: 42, threatsFound: 0, targetName: "Downloads" });
+    const summary = buildResultSummary({ scope: "folder", type: "custom", status: "completed", filesConsidered: 42, threatsFound: 0, targetName: "Downloads" });
     assert.match(summary, /A análise da pasta «Downloads» foi concluída/);
-    assert.match(summary, /42 ficheiros verificados dentro da pasta/);
+    assert.match(summary, /Foram analisados 42 ficheiros dentro da pasta/);
+  });
+
+  test("considerados ≠ analisados: o resumo diz os dois números (nunca 'verificados 800')", () => {
+    const summary = buildResultSummary({
+      scope: "computer",
+      type: "quick",
+      status: "completed",
+      filesConsidered: 800,
+      filesAnalyzed: 663,
+      filesExcluded: 137,
+      threatsFound: 0,
+    });
+    assert.match(summary, /Foram analisados 663 de 800 ficheiros considerados/);
+    assert.match(summary, /137 ficheiros foram ignorados pelas exclusões/);
+    assert.doesNotMatch(summary, /800 ficheiros verificados/);
+    assert.doesNotMatch(summary, /analisados 800/);
   });
 
   test("sem ficheiros, cancelada e falhada", () => {
     assert.match(
-      buildResultSummary({ scope: "folder", type: "custom", status: "completed", filesScanned: 0, threatsFound: 0, targetName: "Vazia" }),
+      buildResultSummary({ scope: "folder", type: "custom", status: "completed", filesConsidered: 0, threatsFound: 0, targetName: "Vazia" }),
       /Não foram encontrados ficheiros/,
     );
     assert.match(
-      buildResultSummary({ scope: "file", type: "custom", status: "completed", filesScanned: 0, threatsFound: 0 }),
+      buildResultSummary({ scope: "file", type: "custom", status: "completed", filesConsidered: 0, threatsFound: 0 }),
       /não pôde ser verificado/,
     );
     assert.match(
-      buildResultSummary({ scope: "computer", type: "quick", status: "cancelled", filesScanned: 120, threatsFound: 0 }),
-      /cancelada depois de verificar 120 ficheiros/,
+      buildResultSummary({ scope: "computer", type: "quick", status: "cancelled", filesConsidered: 120, threatsFound: 0 }),
+      // TP-A5-D1: este caso NAO tem `filesAnalyzed` — o motor nunca reportou a
+      // contagem de analisados. O assert antigo ("depois de analisar 120
+      // ficheiros considerados") exigia o fallback considerados->analisados que
+      // A5 corrigiu; agora exige o honesto, com os considerados ainda ditos.
+      /cancelada: o motor não indicou quantos dos 120 ficheiros considerados chegaram a ser analisados/,
     );
     assert.match(
-      buildResultSummary({ scope: "computer", type: "quick", status: "failed", filesScanned: 0, threatsFound: 0, error: "sem ligação" }),
+      buildResultSummary({ scope: "computer", type: "quick", status: "failed", filesConsidered: 0, threatsFound: 0, error: "sem ligação" }),
       /Não foi possível concluir a análise: sem ligação/,
+    );
+    // Cancelamento a meio: dose os dois números, senão "120" parece completo.
+    assert.match(
+      buildResultSummary({
+        scope: "computer",
+        type: "quick",
+        status: "cancelled",
+        filesConsidered: 800,
+        filesAnalyzed: 120,
+        threatsFound: 0,
+      }),
+      /Análise cancelada: 120 de 800 ficheiros considerados chegaram a ser analisados/,
     );
   });
 
   test("erros de leitura são mencionados no resumo", () => {
-    const summary = buildResultSummary({ scope: "computer", type: "quick", status: "completed", filesScanned: 10, threatsFound: 0, filesFailed: 2 });
-    assert.match(summary, /2 ficheiros não puderam ser analisado\(s\)/);
+    const summary = buildResultSummary({ scope: "computer", type: "quick", status: "completed", filesConsidered: 10, threatsFound: 0, filesFailed: 2 });
+    assert.match(summary, /2 ficheiros não puderam ser analisados/);
   });
 });
 
@@ -315,7 +350,12 @@ describe("truthfulness do resultado (nenhuma deteção ≠ garantia absoluta)", 
   test("o cartão deixou de dizer \"Ficheiros Seguros\"", () => {
     assert.equal(SCAN_RESULT_LABELS.filesWithoutDetections, "Ficheiros sem deteções");
     assert.equal(/seguro/i.test(SCAN_RESULT_LABELS.filesWithoutDetections), false);
-    assert.equal(SCAN_RESULT_LABELS.filesChecked, "Ficheiros Verificados");
+    // "Considerados" (candidatos) e "Analisados pelos motores" são factos
+    // diferentes: o rótulo antigo chamava "Ficheiros Verificados" a um número
+    // que incluía ficheiros nunca enviados a motor nenhum.
+    assert.equal(SCAN_RESULT_LABELS.filesConsidered, "Ficheiros considerados");
+    assert.equal(SCAN_RESULT_LABELS.filesAnalyzed, "Analisados pelos motores");
+    assert.equal(/verificad/i.test(SCAN_RESULT_LABELS.filesConsidered), false);
     assert.equal(SCAN_RESULT_LABELS.threatsFound, "Ameaças Encontradas");
   });
 
@@ -325,10 +365,10 @@ describe("truthfulness do resultado (nenhuma deteção ≠ garantia absoluta)", 
 
   test("nenhuma frase do resultado promete segurança absoluta", () => {
     const scenarios = [
-      { scope: "computer" as const, type: "quick" as const, filesScanned: 800, threatsFound: 0 },
-      { scope: "computer" as const, type: "full" as const, filesScanned: 12000, threatsFound: 0 },
-      { scope: "file" as const, type: "custom" as const, filesScanned: 1, threatsFound: 0, targetName: "nota.txt" },
-      { scope: "folder" as const, type: "custom" as const, filesScanned: 42, threatsFound: 0, targetName: "Docs" },
+      { scope: "computer" as const, type: "quick" as const, filesConsidered: 800, threatsFound: 0 },
+      { scope: "computer" as const, type: "full" as const, filesConsidered: 12000, threatsFound: 0 },
+      { scope: "file" as const, type: "custom" as const, filesConsidered: 1, threatsFound: 0, targetName: "nota.txt" },
+      { scope: "folder" as const, type: "custom" as const, filesConsidered: 42, threatsFound: 0, targetName: "Docs" },
     ];
     for (const scenario of scenarios) {
       const summary = buildResultSummary({ ...scenario, status: "completed" });
@@ -349,7 +389,7 @@ describe("truthfulness do resultado (nenhuma deteção ≠ garantia absoluta)", 
   });
 
   test("nenhum resumo afirma verificar todo o sistema", () => {
-    const summary = buildResultSummary({ scope: "computer", type: "full", status: "completed", filesScanned: 500, threatsFound: 0 });
+    const summary = buildResultSummary({ scope: "computer", type: "full", status: "completed", filesConsidered: 500, threatsFound: 0 });
     for (const forbidden of [/todo o sistema/i, /sistema completo/i, /todo o computador/i]) {
       assert.equal(forbidden.test(summary), false, `promessa falsa em: ${summary}`);
     }
@@ -742,10 +782,10 @@ describe("recuperação de análise — a decisão, não a tela", () => {
 });
 
 /**
- * Copy de quarentena coerente com o backend: engine.ts:1062 coloca os casos
- * CRÍTICOS em quarentena automaticamente; medium/high ficam só na página
- * Ameaças. O texto antigo mandava o utilizador "colocar os ficheiros em
- * quarentena" mesmo quando os críticos já lá estavam — instrução duplicada.
+ * Copy de quarentena coerente com o backend REAL (GUI-TEST-01, 15/10): a
+ * política efetiva é `warn` — engine.ts só auto-quarenta com
+ * `automatic-high-confidence` + critical + malicious + conf≥0.99 + known_bad_hash,
+ * que não está ativo. O texto antigo afirmava quarentena automática; isto corrige.
  */
 describe("resultFollowUpNote — quarentena honesta", () => {
   test("sem ameaças: nenhuma nota de follow-up", () => {
@@ -758,13 +798,12 @@ describe("resultFollowUpNote — quarentena honesta", () => {
     assert.equal(resultFollowUpNote("running", 3), null);
   });
 
-  test("com ameaças: diz que críticos vão para quarentena sozinhos e aponta as restantes", () => {
+  test("com ameaças: nega isolamento automático e aponta a página Ameaças", () => {
     const note = resultFollowUpNote("completed", 2);
     assert.ok(note);
-    assert.match(note, /quarentena automaticamente/);
+    assert.match(note, /Nenhum ficheiro foi isolado automaticamente/);
     assert.match(note, /Ameaças/);
-    // Não pode mandar quarentear tudo (os críticos já estão quarentenados).
-    assert.equal(/coloca os ficheiros em quarentena\./.test(note), false, note);
+    assert.equal(/quarentena automaticamente/.test(note), false, note);
   });
 });
 
@@ -772,14 +811,15 @@ describe("resultFollowUpNote — quarentena honesta", () => {
  * O cartão de "sem deteções" do resultado. A regra do produto: nunca
  * tranquilizar quando há ameaça, nunca dar conclusão sem análise concluída,
  * e nunca mostrar 0 quando o valor não é conhecido. O número só pode vir de
- * `filesAnalyzed` (os ficheiros que realmente chegaram aos motores) — usar
+ * `filesAnalyzed` menos ameaças e resultados inconclusivos — usar
  * `filesScanned` incluiria os excluídos, que nunca foram verificados.
  */
 describe("resultFilesWithoutDetections — cartão honesto por estado", () => {
-  test("concluída: analyzed - ameaças, nunca negativo", () => {
-    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 100, threatsFound: 3 }), 97);
-    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 2, threatsFound: 5 }), 0);
-    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 80, threatsFound: 0 }), 80);
+  test("concluída: analisados menos ameaças e inconclusivos, nunca negativo", () => {
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 100, threatsFound: 3, filesInconclusive: 0 }), 97);
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 2, threatsFound: 5, filesInconclusive: 0 }), 0);
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 80, threatsFound: 0, filesInconclusive: 0 }), 80);
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 80, threatsFound: 2, filesInconclusive: 3 }), 75);
   });
 
   test("em curso, cancelada ou falhada: sem contagem (null, nunca 0)", () => {
@@ -789,12 +829,13 @@ describe("resultFilesWithoutDetections — cartão honesto por estado", () => {
   });
 
   test("concluída sem filesAnalyzed reportado: dados indisponíveis, não se inventa", () => {
-    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: undefined, threatsFound: 0 }), null);
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: undefined, threatsFound: 0, filesInconclusive: 0 }), null);
+    assert.equal(resultFilesWithoutDetections({ status: "completed", filesAnalyzed: 4, threatsFound: 0 }), null);
   });
 
   test("a nota explica a base quando existe e diz por que falta quando não existe", () => {
     assert.match(
-      resultFilesWithoutDetectionsNote({ status: "completed", filesAnalyzed: 97, threatsFound: 0 }),
+      resultFilesWithoutDetectionsNote({ status: "completed", filesAnalyzed: 97, threatsFound: 0, filesInconclusive: 0 }),
       /97 ficheiros? enviados aos motores/,
     );
     assert.match(
@@ -808,6 +849,26 @@ describe("resultFilesWithoutDetections — cartão honesto por estado", () => {
     assert.match(
       resultFilesWithoutDetectionsNote({ status: "completed", filesAnalyzed: undefined, threatsFound: 1 }),
       /não reportou/,
+    );
+  });
+
+  test("a nota separa o total enviado aos motores dos resultados inconclusivos", () => {
+    assert.equal(
+      resultFilesWithoutDetectionsNote({
+        status: "completed",
+        filesAnalyzed: 97,
+        threatsFound: 0,
+        filesInconclusive: 3,
+      }),
+      "de 97 ficheiros enviados aos motores; 3 tiveram resultados inconclusivos",
+    );
+    assert.match(
+      resultFilesWithoutDetectionsNote({
+        status: "completed",
+        filesAnalyzed: 97,
+        threatsFound: 0,
+      }),
+      /estado conclusivo dos 97 ficheiros não foi reportado/,
     );
   });
 
@@ -827,7 +888,15 @@ describe("resultFilesWithoutDetections — cartão honesto por estado", () => {
  */
 describe("showNoThreatsReassurance — gate dos 7 estados", () => {
   const stateWith = (overrides: Record<string, unknown> = {}) =>
-    normalizeScanState(scanState({ status: "completed", phase: "finalizing", progress: 100, ...overrides }))!;
+    normalizeScanState(scanState({
+      status: "completed",
+      phase: "finalizing",
+      progress: 100,
+      filesAnalyzed: 1,
+      filesFailed: 0,
+      filesInconclusive: 0,
+      ...overrides,
+    }))!;
 
   test("proibido: scan ainda não terminou (idle, preparar, gathering, scanning, finalizar)", () => {
     const live = stateWith();
@@ -862,5 +931,139 @@ describe("showNoThreatsReassurance — gate dos 7 estados", () => {
 
   test("permitido apenas: concluída, com estado e zero ameaças", () => {
     assert.equal(showNoThreatsReassurance("completed", stateWith({ threatsFound: 0 })), true);
+  });
+
+  test("proibido: análise concluída com ficheiro inconclusivo não tranquiliza", () => {
+    assert.equal(
+      showNoThreatsReassurance(
+        "completed",
+        stateWith({ threatsFound: 0, filesAnalyzed: 1, filesFailed: 0, filesInconclusive: 1 }),
+      ),
+      false,
+    );
+  });
+
+  test("inconclusivos são preservados na normalização do estado de scan", () => {
+    const state = normalizeScanState(scanState({ filesInconclusive: 2 }));
+    assert.equal(state?.filesInconclusive, 2);
+  });
+
+  test("resultado concluído com ficheiro inconclusivo usa estado parcial, não verde", () => {
+    assert.deepEqual(
+      terminalResultLabels("completed", stateWith({
+        threatsFound: 0,
+        filesAnalyzed: 2,
+        filesFailed: 0,
+        filesInconclusive: 1,
+      })),
+      {
+        titulo: "Análise concluída com verificações inconclusivas",
+        chip: "Parcial",
+        tom: "yellow",
+      },
+    );
+  });
+
+  test("resumo quick identifica ficheiros inconclusivos", () => {
+    const summary = conciseResultSummary({
+      scope: "computer",
+      type: "quick",
+      status: "completed",
+      filesConsidered: 2,
+      filesAnalyzed: 2,
+      filesExcluded: 0,
+      filesFailed: 0,
+      filesInconclusive: 1,
+      threatsFound: 0,
+    });
+
+    test("resumo geral identifica ficheiros inconclusivos sem os contar como limpos", () => {
+      const summary = buildResultSummary({
+        scope: "folder",
+        type: "custom",
+        status: "completed",
+        filesConsidered: 3,
+        filesAnalyzed: 3,
+        filesFailed: 0,
+        filesExcluded: 0,
+        filesInconclusive: 1,
+        threatsFound: 0,
+      });
+      assert.match(summary, /não foram encontradas ameaças/);
+      assert.match(summary, /1 ficheiro teve um resultado inconclusivo/);
+    });
+    assert.match(summary, /Não foram detetadas ameaças no ficheiro com resultado conclusivo/);
+    assert.match(summary, /1 ficheiro.*inconclusiv/);
+  });
+
+  test("resultado desconhecido ou sem ficheiros analisados não tranquiliza", () => {
+    assert.equal(
+      showNoThreatsReassurance("completed", stateWith({ filesInconclusive: undefined })),
+      false,
+    );
+    assert.equal(
+      showNoThreatsReassurance("completed", stateWith({ filesAnalyzed: 0 })),
+      false,
+    );
+    assert.equal(
+      showNoThreatsReassurance("completed", stateWith({ filesFailed: 1 })),
+      false,
+    );
+  });
+});
+
+// P0 UX (15/10, apos recuo 97%->17% na C3): a barra principal e UMA, monotonica
+// e so do eixo global (ficheiros com ciclo fechado). A percentagem da ETAPA de
+// assinaturas NUNCA vai para a barra — vive em texto (activeScanDetail). Sem
+// trabalho global fechado: indeterminada honesta, nunca % que possa recuar.
+describe("scanPrimaryBar — fonte da percentagem da barra", () => {
+  test("pipeline com trabalho fechado ganha sempre", () => {
+    const st = scanState({ status: "running", phase: "scanning", filesTotal: 1000, filesScanned: 400, filesInEngineBatch: 900, filesAnalyzed: 900 });
+    const bar = scanPrimaryBar(st);
+    assert.deepEqual(bar, { percent: 40, source: "pipeline" });
+  });
+
+  test("batch ativo sem pipeline fechado: barra INDETERMINADA, nunca % de etapa", () => {
+    const st = scanState({ status: "running", phase: "scanning", filesTotal: 16421, filesScanned: 0, filesInEngineBatch: 16409, filesAnalyzed: 2646 });
+    const bar = scanPrimaryBar(st);
+    assert.deepEqual(bar, { percent: null, source: "nenhum" });
+  });
+
+  test("total conhecido sem trabalho fechado: indeterminado (o 0 cru deixava a barra presa)", () => {
+    const bar = scanPrimaryBar(scanState({ status: "running", phase: "scanning", filesTotal: 500, filesScanned: 0 }));
+    assert.deepEqual(bar, { percent: null, source: "nenhum" });
+  });
+
+  test("sem total nem etapa: null + fonte nenhuma (barra indeterminada)", () => {
+    const bar = scanPrimaryBar(scanState({ status: "running", phase: "scanning", filesTotal: undefined, filesScanned: 0 }));
+    assert.equal(bar.percent, null);
+    assert.equal(bar.source, "nenhum");
+  });
+
+  test("terminal: percentagem do pipeline, nao da etapa", () => {
+    const st = scanState({ status: "completed", phase: "finalizing", progress: 100, filesTotal: 100, filesScanned: 100, filesInEngineBatch: 0, filesAnalyzed: 100 });
+    const bar = scanPrimaryBar(st);
+    assert.equal(bar.source, "pipeline");
+    assert.equal(bar.percent, 100);
+  });
+
+  test("monotoncia entre fases: 97% etapa -> 17% pipeline NAO recua a barra (etapa nunca alimenta a barra)", () => {
+    const etapa = scanPrimaryBar(scanState({ status: "running", phase: "scanning", filesTotal: 16421, filesScanned: 0, filesInEngineBatch: 15917, filesAnalyzed: 15917 }));
+    const global = scanPrimaryBar(scanState({ status: "running", phase: "scanning", filesTotal: 16421, filesScanned: 2792, filesInEngineBatch: 0, filesAnalyzed: 16409 }));
+    assert.equal(etapa.percent, null);
+    assert.equal(global.percent, 17);
+    assert.ok(global.percent >= 0 && (etapa.percent ?? 0) <= 100);
+    // regra: transicao etapa->global e null->17 (nunca 97->17).
+  });
+});
+
+describe("activeScanDetail — fase de assinaturas com contagem real", () => {
+  test("com verificados: diz 'Fase de assinaturas: done de total'", () => {
+    const d = activeScanDetail("folder", "custom", "scanning", "H:", 16409, 2646);
+    assert.match(d, /Fase de assinaturas: 2646 de 16409 verificados pelo motor/);
+  });
+  test("sem verificados: comportamento antigo preservado", () => {
+    const d = activeScanDetail("folder", "custom", "scanning", "H:", 16409, 0);
+    assert.match(d, /16409 ficheiros de uma só vez/);
   });
 });

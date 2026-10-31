@@ -161,7 +161,16 @@ export function getUserFeatures(accountType: AccountType, plan: PlanType): Featu
     return [...new Set([...planFeatures, ...accountSpecific, ...allFeatures])];
   }
   if (plan === "pro") {
-    return [...planFeatures, ...accountSpecific];
+    // Compatibilidade, não bónus: o `pro` foi escrito como lista fechada, por isso
+    // um titular legado de `pro` PERDIA o essencial do `free` — `canAccess(SCANNER,
+    // "personal", "pro")` era `false` e a sidebar escondia-lhe a Análise de
+    // Segurança, o PC Center e as Ameaças (medido a 13/10: SCANNER, THREATS,
+    // DASHBOARD_BASIC, MONITOR_BASIC, QUARANTINE e AI_ASSISTANT todos `false` em
+    // `pro`). Não é de somar entitlements futuros: é a base gratuita continuar a
+    // base gratuita quando o plano sobe. As negações de negócio (USB_PROTECTION,
+    // REPORTS, DEVICE_MANAGEMENT para `personal`) ficam como estavam porque a
+    // lista somada é apenas `PLANS.free.features`.
+    return [...new Set([...PLANS.free.features, ...planFeatures, ...accountSpecific])];
   }
   return planFeatures;
 }
@@ -230,6 +239,20 @@ export function canAccess(feature: FeatureKey, accountType: AccountType, plan: P
   // sem deixar de ser uma conta Personal.
   if (feature === FEATURES.BUSINESS_SECURITY_CENTER) {
     return accountType === "business" || role === "admin";
+  }
+  // REPORTS obedece à MESMA razão do centro de empresa, desde 13/10: é
+  // isolamento de CONTA, não preço. Antes dependia só do plano, e esta edição
+  // não sabe atribuir planos — `POST /auth/register` ignora `plan` e nasce
+  // `free` (`packages/api/src/index.ts:322-325`), não existe mutation de conta
+  // que mude plano, e `getNextPlan`/`isUpgradeAvailable`/`getUserLimits`/
+  // `isProFeature`/`NAV_FEATURE_MAP` não têm um único consumidor em
+  // `packages/app/src`. Uma conta de empresa criada hoje não podia abrir o
+  // relatório do Painel de Relatórios — um paywall sem porta.
+  // Não alarga nada: `personal` continua sem REPORTS em qualquer plano e
+  // qualquer role, e REPORTS_ADVANCED / USB_PROTECTION / DEVICE_MANAGEMENT
+  // ficam exatamente como estavam.
+  if (feature === FEATURES.REPORTS) {
+    return accountType === "business";
   }
   return getUserFeatures(accountType, plan).includes(feature);
 }

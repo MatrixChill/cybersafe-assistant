@@ -34,7 +34,7 @@ const TOKENS_CRUS = /\b(degraded|unavailable|active|error)\b/i;
 const PATHS = /[A-Za-z]:\\|packages\\|\.exe|\.json|\.cvd|freshclam|Loaded \d/;
 
 describe("WS-B 1 — copy humana por motor (dados reais)", () => {
-  test("YARA: Ativo, conta a regra real, nunca o detail cru", () => {
+  test("YARA: Ativo, conta as regras carregadas, nunca o detail cru", () => {
     const c = engineContextCopy("yara", REAL.yara);
     assert.equal(c.estado, "Ativo");
     assert.match(c.texto, /1 regra carregada/i, c.texto);
@@ -53,15 +53,16 @@ describe("WS-B 1 — copy humana por motor (dados reais)", () => {
     assert.doesNotMatch(c.contexto!, /abrangente/i);
   });
 
-  test("coverage='normal' é a única que diz cobertura normal", () => {
+  test("coverage='normal' legado sem evidência não afirma cobertura normal", () => {
     const c = engineContextCopy("yara", { ...REAL.yara, coverage: "normal" });
-    assert.match(c.contexto!, /cobertura normal/i, c.contexto);
+    assert.match(c.contexto!, /Cobertura não verificada/i, c.contexto);
+    assert.doesNotMatch(c.contexto!, /Cobertura normal/i, c.contexto);
   });
 
-  test("coverage='unknown' diz que não foi determinado — nunca 'normal'", () => {
+  test("coverage='unknown' diz que não foi verificado — nunca 'normal'", () => {
     const c = engineContextCopy("yara", { ...REAL.yara, coverage: "unknown" });
-    assert.match(c.contexto!, /não determinada/i, c.contexto);
-    assert.doesNotMatch(c.contexto!, /cobertura normal/i, "não determinada nunca se traduz como normal");
+    assert.match(c.contexto!, /não verificada/i, c.contexto);
+    assert.doesNotMatch(c.contexto!, /cobertura normal/i, "não verificada nunca se traduz como normal");
   });
 
   test("SEM coverage (serviço antigo) diz que não foi comunicada — não inventa", () => {

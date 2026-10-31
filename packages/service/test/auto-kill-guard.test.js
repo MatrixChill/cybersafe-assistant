@@ -62,6 +62,8 @@ function processEntry(overrides) {
  */
 function engineWithSpy(events) {
   const engine = new ProtectionEngineService(TEST_BASE_DIR);
+  // Estes casos verificam o guard de auto-kill com proteção activa.
+  engine.protectionState = true;
   const calls = [];
   engine.runAutoKill = async (pid) => {
     calls.push(pid);
@@ -113,17 +115,16 @@ describe("auto-kill por PATH - passa pelo guard do kill manual", () => {
     assert.match(ev.summary, /protegid/i, `e porquê: ${ev.summary}`);
   });
 
-  it("T3: alvo normal com blockedPath REAL -> terminateProcessTree chamado EXACTAMENTE 1 vez, com o PID certo", async () => {
+  it("T3: alvo normal com deteção por caminho requer decisão manual, sem auto-kill", async () => {
     const events = [];
     const { engine, calls } = engineWithSpy(events);
     engine.blockedPaths.add("c:\\temp\\alvo.exe");
 
     await engine.handleProcessStart(processEntry({ pid: 5151 }));
 
-    assert.equal(calls.length, 1, "o auto-kill continua funcional: uma unica chamada");
-    assert.deepEqual(calls, [5151], "com o PID do alvo");
+    assert.equal(calls.length, 0, "a deteção não autoriza terminar processos automaticamente");
     assert.equal(events.length, 1);
-    assert.equal(events[0].type, "process.blocked", "o kill normal publica o que ja publicava");
+    assert.equal(events[0].type, "process.suspicious", "não afirmar bloqueio ou encerramento");
   });
 });
 
@@ -151,7 +152,7 @@ describe("auto-kill por HASH - passa pelo guard do kill manual", () => {
     assert.match(events[0].summary, /n[aã]o foi/, "o texto diz que nao foi terminado");
   });
 
-  it("T4: alvo normal com blockedHash REAL -> chamado EXACTAMENTE 1 vez, com o PID certo", async () => {
+  it("T4: alvo normal com deteção por hash requer decisão manual, sem auto-kill", async () => {
     const events = [];
     const { engine, calls } = engineWithSpy(events);
     const sha = "b".repeat(64);
@@ -160,10 +161,9 @@ describe("auto-kill por HASH - passa pelo guard do kill manual", () => {
 
     await engine.handleProcessStart(processEntry({ pid: 7171 }));
 
-    assert.equal(calls.length, 1, "o auto-kill por hash continua funcional");
-    assert.deepEqual(calls, [7171]);
+    assert.equal(calls.length, 0, "a deteção por hash não autoriza encerramento automático");
     assert.equal(events.length, 1);
-    assert.equal(events[0].type, "process.killed", "o kill normal por hash publica o que ja publicava");
+    assert.equal(events[0].type, "process.suspicious", "não afirmar encerramento");
   });
 });
 
@@ -228,7 +228,7 @@ describe("T6 - no maximo um kill por ronda, e zero em alvo protegido", () => {
     for (let ronda = 0; ronda < 3; ronda++) {
       const antes = calls.length;
       await engine.handleProcessStart(processEntry({ pid: 8181 }));
-      assert.equal(calls.length - antes, 1, `ronda ${ronda}: exactamente uma chamada`);
+      assert.equal(calls.length - antes, 0, `ronda ${ronda}: nenhuma chamada automática`);
     }
     assert.ok(calls.every((pid) => pid === 8181), `so o PID do alvo: ${JSON.stringify(calls)}`);
   });

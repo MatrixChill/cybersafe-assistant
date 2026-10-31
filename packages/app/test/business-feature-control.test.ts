@@ -71,10 +71,18 @@ test("canUserAccess usa a mesma regra com fallbacks defensivos", () => {
   // Payload antigo sem role → tratado como "user"
   assert.ok(!canUserAccess(FEATURES.BUSINESS_SECURITY_CENTER, { type: "personal", plan: "premium" }));
   assert.ok(canUserAccess(FEATURES.BUSINESS_SECURITY_CENTER, { type: "business", plan: "free" }));
-  // Admin personal vê; business pro continua a ver reports (regra por plano intacta)
+  // Admin personal vê; business pro continua a ver reports.
   assert.ok(canUserAccess(FEATURES.BUSINESS_SECURITY_CENTER, { type: "personal", plan: "premium", role: "admin" }));
   assert.ok(canUserAccess(FEATURES.REPORTS, { type: "business", plan: "pro", role: "user" }));
-  assert.ok(!canUserAccess(FEATURES.REPORTS, { type: "business", plan: "free", role: "user" }));
+  // MUDANÇA DELIBERADA DE POLÍTICA (13/10, edição académica gratuita) — não é
+  // enfraquecimento: REPORTS passou a regla de **tipo de conta**, como o Centro
+  // de Segurança logo acima. A versão anterior exigia `pro`, e este produto não
+  // tem caminho nenhum para atribuir planos (`api/src/index.ts:322-325` ignora
+  // `plan` e nasce `free`; não há mutation de conta; `getNextPlan`/
+  // `isUpgradeAvailable` não têm consumidores) — era um paywall sem porta para a
+  // conta de empresa criada hoje. O isolamento personal/business mantém-se
+  // integralmente: as negações de `personal` (incluindo admin) não foram tocadas.
+  assert.ok(canUserAccess(FEATURES.REPORTS, { type: "business", plan: "free", role: "user" }));
 });
 
 // ─── Entitlement premium-leak regression tests ────────────────────────────────
@@ -168,6 +176,9 @@ test("free and pro plan access is unchanged by the premium fix", () => {
   // Business pro: gets BUSINESS_SPECIFIC_FEATURES
   assert.ok(canAccess(FEATURES.REPORTS, "business", "pro"),
     "business pro must have REPORTS (business-specific)");
-  assert.ok(!canAccess(FEATURES.REPORTS, "business", "free"),
-    "business free must NOT have REPORTS");
+  // Idem à mudança de política acima (13/10): REPORTS é de CONTA, não de plano.
+  // «business free» passa a ter Relatórios; o que continua proibido é atravessar
+  // o isolamento de conta — ver as negações de `personal` logo acima, intocadas.
+  assert.ok(canAccess(FEATURES.REPORTS, "business", "free"),
+    "business free deve ter REPORTS (regra de tipo de conta, não de plano)");
 });

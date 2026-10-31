@@ -1,0 +1,50 @@
+{
+  "component": {
+    "version": "1.2.1",
+    "lockSource": "registry+https://github.com/rust-lang/crates.io-index",
+    "archiveSha256": "c834641d8ad1b348c9ee86dec3b9840d805acd5f24daa5f90c788951a52ff59b",
+    "declaredLicense": "CC0-1.0",
+    "declaredRepository": "https://github.com/hasenbanck/ppmd-rust",
+    "sourceNoticeLines": [
+      {
+        "member": "src/lib.rs",
+        "line": 26,
+        "text": "//! ## License"
+      },
+      {
+        "member": "src/lib.rs",
+        "line": 28,
+        "text": "//! The code in this crate is in the public domain as the original code by their authors."
+      }
+    ],
+    "members": {
+      "Cargo.toml": {
+        "sha256": "acd51bf94cd219b65ed71c51da636dc3e86349c54697c39045cc6734d4db1778",
+        "bytes": 1089
+      },
+      "Cargo.toml.orig": {
+        "sha256": "0778dfcdc1c8efb9e17170537f8b40976016dc1cdc69cfbfd8e772d71fc12c2d",
+        "bytes": 620
+      },
+      "README.md": {
+        "sha256": "a5fa42e270a544992f4a2e92e6341c464695dde1683cf93fe21d23524172dc1a",
+        "bytes": 1486
+      },
+      "src/lib.rs": {
+        "sha256": "3f0155ef04a08aed372fff8afd8c35e3c6acd4417e13e1155c44e88be02f4262",
+        "bytes": 4737
+      }
+    }
+  },
+  "canonicalTerms": {
+    "url": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt",
+    "finalUrl": "https://creativecommons.org/publicdomain/zero/1.0/legalcode.txt",
+    "status": 200,
+    "retrievedAtUtc": "2026-10-24T21:06:47.611789+00:00",
+    "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+    "bytes": 7048
+  },
+  "basis": "Author declaration CC0-1.0 in checksum-verified 1.2.1 archive, reinforced by dedication in README and lib.rs; canonical version 1.0 terms from Creative Commons. This is not MIT-0 or a licence imported from 1.5.0.",
+  "redistributionNotes": "CC0 sections 2 and 3 provide waiver/unconditional fallback, not an attribution-copying clause. Section 4 excludes patents/trademarks and rights of others. Preserve original acknowledgement and dedication supplied here; no invented copyright or licence grant.",
+  "scope": "Documentary package licensing, not legal certification of all rights and not bytewise proof of embedded Rust dependencies."
+}

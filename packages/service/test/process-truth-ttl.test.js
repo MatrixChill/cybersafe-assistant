@@ -31,6 +31,9 @@ import * as path from "node:path";
  */
 const TEST_BASE_DIR = mkdtempSync(path.join(os.tmpdir(), "cybersafe-p0-process-truth-ttl-"));
 
+/** P1-PROCESS-TRUTH: o contrato devolve `{ processes, truth }`; aqui fala-se do inventário. */
+const listaDeProcessos = async (engine) => (await engine.listProcesses()).processes;
+
 
 function entry(overrides) {
   return {
@@ -98,7 +101,7 @@ describe("processes.list — cache hit e cache miss", () => {
     assert.equal(calls.enumerations, 1);
     // Envelhece o cache para alem da janela, sem esperar por ela.
     engine.processesEnumeratedAt = Date.now() - ProtectionEngineService.PROCESS_TRUTH_TTL_MS - 1;
-    const list = await engine.listProcesses();
+    const list = await listaDeProcessos(engine);
     assert.equal(calls.enumerations, 2, "cache velho tem de reconciliar a pedido");
     assert.equal(list.length, 1, "e devolve a verdade, nao o cache velho");
   });
@@ -118,7 +121,7 @@ describe("processes.list — cache hit e cache miss", () => {
     assert.equal(enumerations, 1);
 
     engine.processMonitor.emit("process.started", entry({ pid: 200, name: "node.exe" }));
-    const list = await engine.listProcesses();
+    const list = await listaDeProcessos(engine);
     assert.equal(enumerations, 1, "o evento ja.trouxe a verdade: o pedido nao pode re-enumerar");
     assert.ok(
       list.some((p) => p.pid === 200),
@@ -143,7 +146,7 @@ describe("processes.list — cache hit e cache miss", () => {
       return [entry({ pid: 100, name: "base.exe" }), entry({ pid: 500, name: "node.exe" })];
     };
     engine.bindWatchers();
-    const list = await engine.listProcesses();
+    const list = await listaDeProcessos(engine);
     assert.ok(
       list.some((p) => p.pid === 500),
       "o processo que nasceu durante a enumeracao nao pode desaparecer da lista",
@@ -151,7 +154,7 @@ describe("processes.list — cache hit e cache miss", () => {
     // E o pedido seguinte e um HIT: a corrida nao invalidou a frescura para
     // sempre (foi isso que custava 6 enumeracoes por minuto a mais).
     const before = calls;
-    const segunda = await engine.listProcesses();
+    const segunda = await listaDeProcessos(engine);
     assert.equal(calls, before, "a reconciliacao pôs a frescura, não uma re-enumeração");
     assert.ok(segunda.some((p) => p.pid === 500));
   });
@@ -163,7 +166,7 @@ describe("processes.list — cache hit e cache miss", () => {
 
     // Saida natural: o SO ja nao o tem.
     engine.processMonitor.emit("process.exited", morto);
-    const depois = await engine.listProcesses();
+    const depois = await listaDeProcessos(engine);
     assert.equal(
       depois.some((p) => p.pid === 400),
       false,
@@ -175,7 +178,7 @@ describe("processes.list — cache hit e cache miss", () => {
     const truth = [vivo, morto];
     engine.processMonitor.list = async () => truth;
     engine.processesEnumeratedAt = 0;
-    const reconciliado = await engine.listProcesses();
+    const reconciliado = await listaDeProcessos(engine);
     assert.equal(
       reconciliado.some((p) => p.pid === 400),
       false,

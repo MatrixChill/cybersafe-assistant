@@ -33,10 +33,18 @@ function renderIdle(): string {
   );
 }
 
+/* O render acontece DENTRO de cada `test()`, não no corpo do `describe`.
+   Não é estilo: é o que faz este ficheiro falhar o gate. Um throw no corpo de
+   um `describe` é impresso como `✖ failing tests:` mas o test runner do Node
+   (v24.13.0) conta `tests 0 / fail 0` e devolve `exit 0` — foi assim que este
+   ficheiro esteve verde enquanto o render rebentava (ver F2 em
+   output/manual-retest/7H-DESIGN-QODER-2026-10-13.md). Dentro de `test()` o
+   mesmo throw conta como falha e muda o exit. Os nomes dos três testes e todas
+   as asserções ficam exatamente como estavam; `renderIdle()` é puro, por isso
+   renderizar três vezes não muda o que se afirma. */
 describe("FileScannerPage — idle/sem dados renderizado", () => {
-  const html = renderIdle();
-
   test("mostra o painel de escolha com as quatro análises", () => {
+    const html = renderIdle();
     assert.match(html, /O que pretende analisar\?/);
     assert.match(html, /Análise Rápida do Computador/);
     assert.match(html, /Análise Profunda do Computador/);
@@ -45,6 +53,7 @@ describe("FileScannerPage — idle/sem dados renderizado", () => {
   });
 
   test("não mostra cartão nem frase de tranquilização sem scan terminado", () => {
+    const html = renderIdle();
     assert.equal(html.includes(SCAN_RESULT_LABELS.filesWithoutDetections), false);
     assert.equal(html.includes("Análise concluída"), false);
     assert.equal(html.includes(NO_DETECTIONS_NOTE), false);
@@ -53,7 +62,9 @@ describe("FileScannerPage — idle/sem dados renderizado", () => {
   });
 
   test("não mostra painel de resultado sem dados do motor", () => {
+    const html = renderIdle();
     assert.equal(html.includes(SCAN_RESULT_LABELS.threatsFound), false);
-    assert.equal(html.includes(SCAN_RESULT_LABELS.filesChecked), false);
+    assert.equal(html.includes(SCAN_RESULT_LABELS.filesConsidered), false);
+    assert.equal(html.includes(SCAN_RESULT_LABELS.filesAnalyzed), false);
   });
 });

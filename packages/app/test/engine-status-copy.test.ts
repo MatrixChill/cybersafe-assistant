@@ -69,7 +69,12 @@ describe("2 — ReportsPage e MonitorPage nao passam raw status", () => {
     // O fallback `?? "degraded"` devolvia um ESTADO INVENTADO quando nao havia
     // ProtectionLevel: um diagnostico falso, do tipo que a packet proibiu.
     assert.doesNotMatch(src, /\?\?\s*"degraded"/, "ainda inventa 'degraded' sem dados");
-    assert.ok(src.includes("engineStatusText"), "tem de passar pela fonte unica de verdade");
+    // HORA 3/G1: o status do Monitor e ProtectionStatus, nao EngineSubsystemStatus.
+    // Passa pela mesma fonte unica (lib/protectionHealth), agora pelo mapa certo:
+    // protectionStatusText. (Antes fazia `engineStatusText(status as cast)` e
+    // escrevia "Estado desconhecido" com protecao critical.)
+    assert.ok(src.includes("protectionStatusText"), "tem de passar pela fonte unica de verdade");
+    assert.doesNotMatch(src, /as EngineSubsystemStatus/, "o cast de vocabulario nao pode voltar");
   });
 
   test("ProtectionDetails e o terceiro sitio, e usa a mesma fonte", () => {
