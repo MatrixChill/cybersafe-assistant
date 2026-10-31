@@ -4,8 +4,10 @@ import { createHash } from "node:crypto";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { spawnSync } from "node:child_process";
 
 import { CLAMAV_SEED_SCHEMA, verifyClamavSeedBundle } from "../clamav-seed-bundle.mjs";
+import { buildAppManifest } from "../package-windows.mjs";
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "cybersafe-seed-gate-"));
 after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
@@ -41,6 +43,23 @@ function fixture(name, { extra = null } = {}) {
   if (extra) fs.writeFileSync(path.join(dir, extra), "EXTRA");
   return { dir, expected };
 }
+
+test("packaging refuses a configured seed while native publication is unavailable", () => {
+  const input = {
+    clamavSeedDir: ROOT, productVersion: "0.1.10-internal.pap-r6.20261031",
+    desktopManifest: { name: "desktop", build: { productName: "CyberSafe", directories: {}, win: {} } },
+    tarballs: { "@cybersafe/core": "core.tgz", "@cybersafe/service": "service.tgz", "@cybersafe/shared-types": "shared.tgz", api: "api.tgz" }, desktopDir: ROOT, outDir: ROOT,
+  };
+  assert.throws(() => buildAppManifest(input), /CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED/);
+});
+
+test("preparer refuses writes before creating a requested output", () => {
+  const out = path.join(ROOT, "must-not-be-created");
+  const result = spawnSync(process.execPath, [new URL("../prepare-clamav-seed.mjs", import.meta.url).pathname.replace(/^\/(?=[A-Za-z]:)/, ""), "--source", ROOT, "--out", out], { encoding: "utf8" });
+  assert.equal(result.status, 1);
+  assert.match(result.stderr, /CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED/);
+  assert.equal(fs.existsSync(out), false);
+});
 
 describe("gate da semente ClamAV", () => {
   test("aceita exactamente os três ficheiros e a licença com hashes fixados", () => {

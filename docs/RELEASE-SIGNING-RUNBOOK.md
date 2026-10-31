@@ -2,8 +2,13 @@
 
 Estado em 2026-10-31: **NÃO PROVISIONADO**. `packages/desktop/src/updater/release-trust.json`
 tem `enabled: false`, `publicKeyPem` vazio e `pinnedKeyFingerprint` vazio. Nenhuma
-chave de produção foi gerada nesta lane e nenhum segredo foi escrito no repo,
-nos logs ou no payload. A aprovação é humana e ainda não foi dada.
+chave foi ativada em produção e nenhum segredo foi escrito no repo,
+nos logs ou no payload. Foi gerado um par PROPOSTO fora do repo, com ACL apenas
+do utilizador; aprovação humana **PENDING**. Fingerprint SHA-256/SPKI:
+`3982C36398918D077A417DDA02E6E7FF6C1F70622684DA4FB43673652E4C8FB6`.
+Pública: `C:/Users/caioc/.cybersafe-keys/pap-r6-20261031/public.pem`.
+Não regenerar o par nem ler a privada para relatórios. Não ativar trust sem
+aprovação; freeze técnico não equivale a autorização criptográfica.
 
 ## O que já está implementado
 
@@ -52,8 +57,8 @@ o proprietário aprova, não a chave privada.
    - secret `RELEASE_ED25519_PRIVATE_KEY` (PEM completo);
    - secret `RELEASE_ED25519_PUBLIC_KEY` (PEM público);
    - variable `RELEASE_ED25519_FINGERPRINT` (fingerprint aprovado).
-4. Só depois da aprovação, atualizar `release-trust.json` com a chave pública,
-   o fingerprint e `enabled: true`. A chave pública pode ser commitada; a
+4. Só depois da aprovação da chave E da infraestrutura/feed, atualizar
+   `release-trust.json` com a chave pública, o fingerprint e `enabled: true`. A chave pública pode ser commitada; a
    privada nunca.
 5. Correr o workflow `release-sign` com um manifesto revisto e verificar a
    assinatura com `--verify`. O updater continua em modo manual: a assinatura

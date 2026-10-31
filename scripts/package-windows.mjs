@@ -82,7 +82,7 @@ const VENDOR_FIX = "node scripts/vendor-clamav.mjs";
 const VENDOR_OFFER_NAME = "SOURCE-OFFER.txt";
 // Textos e manifesto revistos: publicação explícita fora do asar.
 const licensesDir = path.join(root, "assets", "licenses");
-/** Semente ClamAV opcional mas OBRIGATÓRIA para uma candidata (ver runPipeline). */
+/** Seed input is diagnostic only until a reviewed native publisher exists. */
 const clamavSeedDir = process.env.CYBERSAFE_CLAMAV_SEED_DIR?.trim()
   ? path.resolve(process.env.CYBERSAFE_CLAMAV_SEED_DIR)
   : null;
@@ -538,6 +538,7 @@ export function candidateOutput(shellDir, id) {
 }
 
 export function buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir: outputDir, desktopDir: shellDir, clamavDir = vendorClamavDir, clamavSeedDir: seedDir = null, licensesFrom = licensesDir, candidateId, productVersion }) {
+  if (seedDir) throw new Error("CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED: publicação automática bloqueada; não gerar setup com seed inoperacional");
   // A versão do produto vem de `product-version.json` (fonte única), não do
   // `package.json` do desktop: é este campo que o electron-builder usa para o
   // nome do artefacto, para `${VERSION}` do NSIS, para `app.getVersion()` e para
@@ -611,7 +612,6 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
         // sai com o motor indisponível e nenhum aviso no setup.
         { from: yaraVendorDir, to: "yara" },
         { from: clamavDir, to: "clamav" },
-        ...(seedDir ? [{ from: seedDir, to: "clamav-seed" }] : []),
         { from: licensesFrom, to: "licenses" },
       ],
       win: { ...desktopManifest.build.win, icon: path.join(shellDir, "src", "assets", "icon.ico") },
@@ -1542,7 +1542,7 @@ function checkReport() {
   const licensing = estadoManifestoObrigacao(path.join(licensesDir, "PROVENANCE.json"));
   const yara = verifyYaraVendor();
   return {
-    ok: checks.every((check) => check.exists) && bundle.ok && yara.ok && freeze.ok && (!seed || seed.ok) && licensing.estado === "prova-fecha",
+    ok: checks.every((check) => check.exists) && bundle.ok && yara.ok && freeze.ok && !clamavSeedDir && licensing.estado === "prova-fecha",
     licensing,
     yara: {
       ok: yara.ok,
@@ -1578,8 +1578,8 @@ function checkReport() {
       problems: freeze.problems.slice(0, 20),
     },
     seed: seed
-      ? { ok: seed.ok, dir: seed.dir, filesChecked: seed.filesChecked, bytesChecked: seed.bytesChecked, version: seed.version, problems: seed.problems }
-      : { ok: null, dir: null, problems: ["CYBERSAFE_CLAMAV_SEED_DIR não definido; a candidata não pode ser produzida sem semente"] },
+      ? { ok: false, integrityOk: seed.ok, dir: seed.dir, filesChecked: seed.filesChecked, bytesChecked: seed.bytesChecked, version: seed.version, problems: [...seed.problems, "CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED: integridade não prova publicação segura"] }
+      : { ok: false, dir: null, publicationEnabled: false, problems: ["CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED: candidata bloqueada independentemente da cache disponível"] },
     checks: checks.map(({ id, exists, path: checkPath, fix }) => ({ id, exists, path: checkPath, fix })),
   };
 }
@@ -1618,19 +1618,9 @@ function runPipeline() {
     console.error(`[package] BLOQUEIO ${licensing.estado === "obrigacao-vigente" ? "licencas-obrigacao-em-aberto" : "licencas-manifesto-de-obrigacao-insuficiente"}: ${licensing.detalhe}`);
     process.exit(1);
   }
-  if (candidateId && !clamavSeedDir) {
-    console.error("[package] candidata sem CYBERSAFE_CLAMAV_SEED_DIR: recusada (ClamAV offline não ficaria provado)");
-    console.error("[package] prepara a semente com: node scripts/prepare-clamav-seed.mjs --source <cache> --out <pasta>");
+  if (candidateId || clamavSeedDir) {
+    console.error("[package] CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED: candidata bloqueada até publicação nativa segura e revisão; nada foi empacotado");
     process.exit(1);
-  }
-  if (clamavSeedDir) {
-    const seedCheck = verifyClamavSeedBundle(clamavSeedDir);
-    if (!seedCheck.ok) {
-      for (const problem of seedCheck.problems) log(`SEED ${problem}`);
-      console.error("[package] semente ClamAV inválida: nada foi empacotado");
-      process.exit(1);
-    }
-    log(`     semente ClamAV ok: ${seedCheck.filesChecked} ficheiros, ${(seedCheck.bytesChecked / 1024 / 1024).toFixed(1)} MiB, versão ${seedCheck.version}`);
   }
   const missingInputs = preflightChecks({ clamavSeedDir }).filter((check) => !check.exists);
   if (missingInputs.length > 0) {
