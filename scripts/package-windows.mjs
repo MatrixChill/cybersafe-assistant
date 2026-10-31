@@ -51,7 +51,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { verifySourceFreeze } from "./source-freeze.mjs";
-import { readProductVersion, verifyBuiltRenderer } from "./app-version.mjs";
+import { PRODUCT_VERSION_FILE, readProductVersion, verifyBuiltRenderer } from "./app-version.mjs";
 import {
   assertPinnedManifestSpecs,
   describeStagingDrift,
@@ -529,7 +529,14 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
   // nome do artefacto, para `${VERSION}` do NSIS, para `app.getVersion()` e para
   // a chave `DisplayVersion` na desinstalação. Manter as três superfícies
   // (instalador, aplicação, renderer) na mesma versão depende disto.
-  const version = productVersion ?? desktopManifest.version;
+  //
+  // Obrigatória de propósito: a primeira tentativa desta candidata caiu para
+  // `desktopManifest.version` (0.1.2) e gerou um setup que não podia ser
+  // upgrade. Um fallback silencioso é pior do que falhar o build.
+  if (typeof productVersion !== "string" || productVersion.trim() === "") {
+    throw new Error("buildAppManifest exige productVersion (product-version.json), não o version de packages/desktop");
+  }
+  const version = productVersion;
   return {
     name: desktopManifest.name,
     productName: desktopManifest.build.productName,
@@ -1674,6 +1681,8 @@ function runPipeline() {
  */
 export function stageWorkspaces() {
   let stagingRoot = null;
+  const productVersion = readProductVersion({ root }).version;
+  log(`     versão canónica do produto: ${productVersion} (${PRODUCT_VERSION_FILE})`);
   // ── 1. Compilar o que vai dentro do pacote ─────────────────────────────────
   log("1/8  compilar workspaces (dist) …");
   // `@cybersafe/native-windows` faz falta aqui: o passo 3 empacota o `dist` dele e
@@ -1683,6 +1692,14 @@ export function stageWorkspaces() {
     runNpm(["run", "build", "-w", workspace], { cwd: root });
   }
   run("node", [path.join(root, "scripts", "stage-renderer.mjs")], { cwd: root });
+  const rendererIdentity = verifyBuiltRenderer({
+    distDir: path.join(desktopDir, "dist"),
+    version: productVersion,
+  });
+  if (!rendererIdentity.ok) {
+    throw new Error(`renderer com identidade divergente: ${rendererIdentity.problems.join("; ")}`);
+  }
+  log(`     renderer: versão ${rendererIdentity.version}, commit ${rendererIdentity.commit ?? "desconhecido"}`);
 
   // ── 2. Árvore de trabalho fora do repositório ──────────────────────────────
   stagingRoot = fs.mkdtempSync(path.join(os.tmpdir(), "cybersafe-package-"));
@@ -1770,7 +1787,7 @@ export function stageWorkspaces() {
   const scanEngine = path.join(root, "packages", "native-engine", "build", "Release", "scan-engine.exe");
   if (!fs.existsSync(scanEngine)) throw new Error(`scan-engine.exe ausente: ${scanEngine} (corre npm run build:native)`);
 
-  const appManifest = buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir, desktopDir, candidateId });
+  const appManifest = buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir, desktopDir, candidateId, productVersion });
   fs.writeFileSync(path.join(appDir, "package.json"), `${JSON.stringify(appManifest, null, 2)}\n`);
 
   // ── 6. Conteúdo do shell (renderer + main + preload + assets) ──────────────

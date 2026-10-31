@@ -90,6 +90,7 @@ test("native ABI: generated manifest disables the builder rebuild and keeps unpa
     desktopManifest: { name: "@cybersafe/desktop", version: "0.1.1", type: "module", main: "dist/main.js", build: { productName: "CyberSafe Assistant" } },
     tarballs: { "@cybersafe/core": "c.tgz", "@cybersafe/shared-types": "s.tgz", "@cybersafe/service": "v.tgz", api: "a.tgz" },
     electronVersion: "33.4.11", scanEngine: "scan-engine.exe", outDir: "out", desktopDir: "desktop",
+    productVersion: "0.1.10-internal.pap-r6.20261031",
   });
   assert.equal(manifest.build.npmRebuild, false);
   assert.deepEqual(manifest.build.asarUnpack, ["**/*.node", "**/node_modules/better-sqlite3/**"]);

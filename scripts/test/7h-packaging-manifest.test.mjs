@@ -32,6 +32,7 @@ import { execFileSync } from "node:child_process";
 import * as url from "node:url";
 
 import { buildAppManifest, preflightChecks } from "../package-windows.mjs";
+import { readProductVersion } from "../app-version.mjs";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");
@@ -56,6 +57,7 @@ function manifest(overrides = {}) {
     scanEngine: path.join(REPO_ROOT, "packages", "native-engine", "build", "Release", "scan-engine.exe"),
     outDir: path.join(DESKTOP_DIR, "release"),
     desktopDir: DESKTOP_DIR,
+    productVersion: readProductVersion({ root: REPO_ROOT }).version,
     ...overrides,
     ...(overrides.tarballs ? { tarballs } : {}),
   });
@@ -78,8 +80,10 @@ describe("manifesto da aplicação empacotada", () => {
 
   it("copia a identidade e o ponto de entrada do shell", () => {
     const m = manifest();
+    const canonical = readProductVersion({ root: REPO_ROOT }).version;
     assert.equal(m.name, desktopManifest.name);
-    assert.equal(m.version, desktopManifest.version);
+    assert.equal(m.version, canonical);
+    assert.notEqual(m.version, desktopManifest.version, "o build não pode cair para a versão interna do desktop");
     assert.equal(m.main, desktopManifest.main);
     assert.equal(m.type, desktopManifest.type);
     assert.equal(m.private, true);
@@ -153,6 +157,10 @@ describe("manifesto da aplicação empacotada", () => {
     assert.equal(path.basename(path.dirname(licensesEntry.from)), "assets");
     assert.equal(m.build.directories.output, path.join(DESKTOP_DIR, "release"));
     assert.equal(m.build.electronVersion, "33.4.11", "a versão do Electron tem de ser a realmente instalada");
+  });
+
+  it("exige productVersion explícita; não há fallback silencioso para 0.1.2", () => {
+    assert.throws(() => manifest({ productVersion: undefined }), /productVersion/);
   });
 
   it("o alvo do instalador continua a ser o NSIS do config do desktop", () => {

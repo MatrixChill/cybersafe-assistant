@@ -517,6 +517,7 @@ describe("publicação do bundle no pacote", () => {
       scanEngine: path.join(REPO_ROOT, "packages", "native-engine", "build", "Release", "scan-engine.exe"),
       outDir: path.join(REPO_ROOT, "packages", "desktop", "release"),
       desktopDir: path.join(REPO_ROOT, "packages", "desktop"),
+      productVersion: "0.1.10-internal.pap-r6.20261031",
     });
     const entry = manifest.build.extraResources.find((resource) => resource.to === "clamav");
     assert.ok(entry, "o bundle ClamAV tem de ser publicado (to: \"clamav\" ⇒ resources/clamav)");
