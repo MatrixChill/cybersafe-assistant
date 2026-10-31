@@ -92,7 +92,8 @@ test("native ABI: generated manifest disables the builder rebuild and keeps unpa
     electronVersion: "33.4.11", scanEngine: "scan-engine.exe", outDir: "out", desktopDir: "desktop",
   });
   assert.equal(manifest.build.npmRebuild, false);
-  assert.deepEqual(manifest.build.asarUnpack, ["**/*.node", "**/node_modules/better-sqlite3/**", "**/node_modules/@litko/**"]);
+  assert.deepEqual(manifest.build.asarUnpack, ["**/*.node", "**/node_modules/better-sqlite3/**"]);
+  assert.ok(!manifest.build.asarUnpack.some((pattern) => pattern.includes("@litko")));
 });
 
 test("native ABI: stage rebuilds and verifies before the builder handoff", () => {

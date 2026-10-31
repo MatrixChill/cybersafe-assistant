@@ -9,8 +9,12 @@
  * de licença documentados não cobrem:
  *
  *   better-sqlite3       lock/U 12.10.0  →  payload QA1 12.11.1
- *   @litko/yara-x        lock/U  0.5.0   →  payload QA1  0.5.2
- *   @litko/yara-x-win32-x64-msvc  lock 0.5.0 → payload QA1 0.5.1
+ *
+ * O pin de @litko/yara-x (e do binário de plataforma) foi RETIRADO em
+ * 2026-10-31: o motor passou a ser o YARA clássico oficial, chamado por
+ * processo (vendor/yara), e o binding Node-API deixou de ser dependência do
+ * código executável. Manter o pin exigia uma entrada no lock que já não
+ * existe e voltava a arrastar a cadeia ascii_tree para o inventário.
  *
  * Correção: os manifestos dos workspaces passam a declarar a versão exacta do
  * lock (`assertPinnedManifestSpecs`) e o pipeline MEDE a árvore instalada
@@ -33,21 +37,6 @@ export const STAGING_VERSION_PINS = [
     ownerManifest: "packages/api/package.json",
     reason: "QA1 instalou 12.11.1 a partir de `^12.10.0` sem lock no staging; o lock e a verificação de ABI usam 12.10.0",
     candidates: ["node_modules/better-sqlite3/package.json"],
-  },
-  {
-    name: "@litko/yara-x",
-    ownerManifest: "packages/core/package.json",
-    reason: "QA1 instalou 0.5.2 a partir de `^0.5.0`; o lock e os avisos (PROVENANCE/THIRD-PARTY-NOTICES) documentam 0.5.0",
-    candidates: ["node_modules/@litko/yara-x/package.json"],
-  },
-  {
-    name: "@litko/yara-x-win32-x64-msvc",
-    reason: "binário nativo do wrapper; QA1 instalou 0.5.1 e os avisos documentam 0.5.0",
-    candidates: [
-      "node_modules/@litko/yara-x-win32-x64-msvc/package.json",
-      "node_modules/@litko/yara-x/node_modules/@litko/yara-x-win32-x64-msvc/package.json",
-    ],
-    platforms: [{ os: "win32", cpu: "x64" }],
   },
 ];
 

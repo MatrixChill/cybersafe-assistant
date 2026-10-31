@@ -2,5 +2,6 @@
   "schema": 1,
   "perfil": "PAP_BETA_TEST",
   "distribuicao": "NAO_AUTORIZADA",
-  "pendencia": "ascii_tree@0.1.1"
+  "pendencia": null,
+  "nota": "Perfil histórico de QA. A pendência ascii_tree@0.1.1 foi encerrada por não distribuição (motor YARA clássico; @litko/yara-x removido do grafo). Este marcador não autoriza distribuição; o perfil PAP_BETA_TEST fica desativado."
 }

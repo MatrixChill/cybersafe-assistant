@@ -1,0 +1,3 @@
+# Ficheiros cujo sha256 e publicado em manifests de proveniencia:
+# o checkout tem de preservar os bytes exatos (LF), em qualquer sistema.
+vendor/yara/COPYING.txt text eol=lf

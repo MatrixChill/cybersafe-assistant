@@ -1,8 +1,10 @@
-# ascii_tree 0.1.1 — resolução documental pendente (NÃO fecha o gate)
+# ascii_tree 0.1.1 — registo histórico (NÃO DISTRIBUÍDO)
 
-**Estado: BLOCKED.** Este documento preserva a evidência disponível e explica por que o
-licenciamento continua pendente. Não é a notice canónica do detentor, não declara
-conformidade jurídica e não foi enviado a ninguém.
+**Estado: HISTÓRICO / NÃO APLICÁVEL ao artefacto atual (2026-10-31).** O binding
+@litko/yara-x foi removido do manifesto e do lock; o motor em uso é o YARA clássico
+4.6.0. A crate ascii_tree 0.1.1 não é alcançável por nenhum artefacto produzido a
+partir deste repositório. O texto abaixo fica preservado como registo documental da
+investigação; não é a notice canónica do detentor nem uma declaração de conformidade.
 
 ## Identificação verificada
 

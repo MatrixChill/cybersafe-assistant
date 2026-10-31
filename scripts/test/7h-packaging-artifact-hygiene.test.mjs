@@ -149,7 +149,6 @@ describe("higiene do artefacto empacotado", () => {
     const unpacked = path.join(WIN_UNPACKED, "resources", "app.asar.unpacked");
     for (const entry of [
       "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
-      "node_modules/@litko/yara-x/node_modules/@litko/yara-x-win32-x64-msvc/yara-x.win32-x64-msvc.node",
     ]) {
       assert.ok(fs.existsSync(path.join(unpacked, entry)), `tem de estar desempacotado: ${entry}`);
     }

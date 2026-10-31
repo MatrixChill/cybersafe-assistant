@@ -15,7 +15,8 @@
  *      desapareceram, que as versões fixadas se mantêm, que a ABI é 130 e que
  *      não sobreviveu nenhum caminho do staging;
  *   4. sonda no Electron 33.4.11 (CWD fora do repo): SQLite CREATE/INSERT/
- *      SELECT/reopen e uma regra YARA-X explícita de teste em ficheiro benigno.
+ *      SELECT/reopen. O YARA clássico é medido em packages/core/test/
+ *      yara-classic-engine.test.js; este probe já não carrega @litko/yara-x.
  *
  * Não gera candidata, não corre electron-builder, não toca no gate. A árvore
  * de staging é removida quando o teste passa; numa falha fica o caminho no log.
@@ -51,7 +52,7 @@ describe(
   "staging de produção — pinos, ABI 130 e runtime",
   { skip: !enabled && "define CYBERSAFE_STAGING_E2E=1 para correr (build de workspaces + npm install + rebuild nativo)" },
   () => {
-    it("stageWorkspaces produz uma árvore fixada, sem metadados de instalação, e o Electron executa SQLite e YARA", () => {
+    it("stageWorkspaces produz uma árvore fixada, sem metadados de instalação, e o Electron executa SQLite", () => {
       const electronVersion = JSON.parse(fs.readFileSync(path.join(REPO_ROOT, "node_modules", "electron", "package.json"), "utf8")).version;
       assert.equal(electronVersion, "33.4.11", "a versão do Electron do repositório mudou: reconfirmar headers e ABI");
       const targetAbi = electronAbi(electronVersion);
@@ -78,19 +79,11 @@ describe(
         for (const relative of [
           "node_modules/better-sqlite3/package.json",
           "node_modules/better-sqlite3/build/Release/better_sqlite3.node",
-          "node_modules/@litko/yara-x/package.json",
           "node_modules/@cybersafe/core/package.json",
           "node_modules/@cybersafe/core/definitions/yara/default.yar",
         ]) {
           assert.equal(fs.existsSync(path.join(appDir, ...relative.split("/"))), true, `recurso de runtime ausente: ${relative}`);
         }
-
-        // O binário nativo do YARA-X pode ficar içado ou aninhado no wrapper.
-        const yaraAddon = [
-          "node_modules/@litko/yara-x-win32-x64-msvc/yara-x.win32-x64-msvc.node",
-          "node_modules/@litko/yara-x/node_modules/@litko/yara-x-win32-x64-msvc/yara-x.win32-x64-msvc.node",
-        ].some((relative) => fs.existsSync(path.join(appDir, ...relative.split("/"))));
-        assert.equal(yaraAddon, true, "binário nativo do YARA-X ausente no staging");
 
         // Versões fixadas continuam a ser as do lock (medição pós-stage).
         const staged = verifyStagedVersions(appDir, expected);
@@ -131,11 +124,7 @@ describe(
         assert.equal(probe.betterSqlite3.selected, true);
         assert.equal(probe.betterSqlite3.persistedAfterReopen, 1);
         assert.match(probe.betterSqlite3.sqliteVersion, /^3\.\d+\.\d+$/);
-        assert.equal(probe.yara.wrapperVersion, "0.5.0");
-        assert.equal(probe.yara.nativeVersion, "0.5.0");
-        assert.equal(probe.yara.compiled, true);
-        assert.equal(probe.yara.matched, true, `regra de teste não casou: ${JSON.stringify(probe.yara)}`);
-        assert.deepEqual(probe.yara.matchedRules, ["cybersafe_qa2_benign_marker"]);
+        assert.equal(probe.benignFileUsed, true);
         assert.ok(!path.resolve(probe.cwd).toLowerCase().startsWith(REPO_ROOT.toLowerCase()), `CWD dentro do repo: ${probe.cwd}`);
         assert.ok(!fs.readFileSync(PROBE, "utf8").includes("EICAR"));
         process.stderr.write(`${JSON.stringify(probe)}\n`);

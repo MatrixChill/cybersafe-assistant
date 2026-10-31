@@ -45,17 +45,24 @@
     }
   ],
   "obrigacaoPorResolver": {
-    "texto": "252/253 documentalmente cobertos: 251 com texto oficial versionado previamente recolhido + ppmd-rust 1.2.1 por declaração CC0 versionada/dedicação original e termos oficiais CC0 1.0. ascii_tree 0.1.1 continua pendente. A distinção dos critérios de evidência é preservada; nenhum pacote foi removido.",
-    "bloqueador": true,
+    "texto": "ENCERRADA POR PROVA DE NÃO DISTRIBUIÇÃO (2026-10-31): o motor executável é o YARA clássico oficial 4.6.0; o binding @litko/yara-x foi removido do manifesto e do lock e nenhum .node do YARA-X entra no payload. A cadeia Rust que continha ascii_tree 0.1.1 não é alcançável. O registo documental abaixo é histórico e não foi apagado nem reescrito como se o titular tivesse publicado aviso.",
+    "bloqueador": false,
+    "evidencia": [
+      "Código executável: packages/core/src/yara.ts importa ./yara-classic.js; dist/yara.js não referencia @litko; resolveYaraClassicBinaries() usa vendor/yara/yara64.exe e yarac64.exe.",
+      "Grafo npm após remoção: package-lock.json sem qualquer entrada @litko/yara-x (0 ocorrências); ascii_tree era uma crate Rust dentro do .node pré-compilado do binding, não uma dependência npm separada.",
+      "Payload histórico 0.1.9 R4: PAYLOAD-MANIFEST.json com 0 caminhos @litko e 0 ficheiros .node do YARA-X; resources/yara/yara64.exe e yarac64.exe presentes e cobertos por vendor/yara/VENDOR.json.",
+      "vendor/yara/VENDOR.json: YARA 4.6.0 BSD-3-Clause, yara64.exe sha256 6b4897b945f408080645ec06e2d2540f067a57a68d5e5830781cdc1d88fc41e2, yarac64.exe sha256 1e9ff85a0d866501b86879f32032573afe8f49c2b6714df8678a89e9b4458178, COPYING.txt sha256 efdabc1c1f655528b8c3a59b03668d446746d87273fab76f8af800b6e8891bd2."
+    ],
     "residuos": [
       {
         "componente": "ascii_tree",
         "versao": "0.1.1",
+        "estado": "historico-nao-distribuido",
         "motivo": "material inacessível: o depósito declarado em `Cargo.toml.orig` E na metadata oficial da plataforma crates.io (https://github.com/bpressure/ascii_tree) responde HTTP 404 «Not Found» na API de repositórios. Sem âncora de commit (o arquivo não traz `.cargo_vcs_info.json`) e com o `include` do próprio crate a excluir ficheiros de licença (`[\".gitignore\", \"Cargo.toml\", \"src/*.rs\", \"README.md\"]`), não há caminho versionado para o texto MIT nem para a linha de copyright."
       }
     ],
     "progresso": "classificação por metadados (kind/target/crate-type lidos do índice esparso e do arquivo-fonte oficial, checksums iguais ao Cargo.lock) + texto por componente com sha256, origem e linhas de copyright copiadas do próprio texto; exclusões host/proc-macro registadas com justificação, sem lhes atribuir obrigação. Na última passagem dirigida: três dos cinco resíduos fecharam (r-efi pelo AUTHORS que viaja dentro do arquivo verificado; crc-catalog e cranelift-assembler-x64 no commit exacto registado pelo próprio `.cargo_vcs_info.json`, este último pelo ancestral do workspace com identidade do depósito provada por comparação byte-a-byte do manifesto do path_in_vcs).; Codex confirmou a declaração CC0 e dedicação no próprio arquivo 1.2.1; ausência de ficheiro LICENSE separado não foi tratada como obrigação de atribuição que a CC0 não estabelece.",
-    "faltaExactamente": "ascii_tree 0.1.1: obter texto/aviso de copyright do detentor/upstream associado à versão, ou confirmação autorizada dos termos e aviso a redistribuir. A declaração MIT existe; aviso específico não recuperado. Não inventar ano/titularidade.",
+    "faltaExactamente": "Nada para o artefacto atual: a obrigação só existiria se a cadeia YARA-X voltasse a ser distribuída. Nesse caso, o requisito histórico mantém-se: obter texto/aviso de copyright do detentor/upstream associado à versão, ou confirmação autorizada dos termos e aviso a redistribuir. Não inventar ano/titularidade.",
     "evidenciaFechoParcial": "resolutions/ppmd-rust-1.2.1/SOURCE-PROOF.json"
   },
   "limitações": [

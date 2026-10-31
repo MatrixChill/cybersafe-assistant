@@ -108,9 +108,13 @@ describe("manifesto da aplicação empacotada", () => {
 
   it("mantém os módulos nativos fora do asar", () => {
     const m = manifest();
-    for (const pattern of ["**/*.node", "**/node_modules/better-sqlite3/**", "**/node_modules/@litko/**"]) {
+    for (const pattern of ["**/*.node", "**/node_modules/better-sqlite3/**"]) {
       assert.ok(m.build.asarUnpack.includes(pattern), `o asarUnpack tem de cobrir ${pattern}`);
     }
+    assert.ok(
+      !m.build.asarUnpack.some((pattern) => pattern.includes("@litko")),
+      "o YARA-X saiu do grafo: não pode voltar ao asarUnpack",
+    );
   });
 
   it("publica scan-engine.exe, ClamAV e licenças em resources/ além do ícone e da saída", () => {

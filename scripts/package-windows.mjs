@@ -569,7 +569,7 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
       // gate de ABI é obrigatório no stage.
       npmRebuild: false,
       // Módulos nativos não podem ser carregados de dentro do asar.
-      asarUnpack: ["**/*.node", "**/node_modules/better-sqlite3/**", "**/node_modules/@litko/**"],
+      asarUnpack: ["**/*.node", "**/node_modules/better-sqlite3/**"],
       // `extraResources` do manifesto é explícito (não herdado do desktop) de
       // propósito: a árvore de staging vive FORA do repositório, por isso o
       // `from` relativo ao desktop apontaria para o sítio errado. O bundle vai
