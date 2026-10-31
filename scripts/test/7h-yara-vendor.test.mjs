@@ -140,4 +140,19 @@ describe("vendor/yara — integridade medida", () => {
       fs.rmSync(dir, { recursive: true, force: true });
     }
   });
+
+  it("recusa um subdirectório VAZIO (não tem ficheiros para comparar)", () => {
+    const dir = tempCopy();
+    try {
+      fs.mkdirSync(path.join(dir, "empty-dir"));
+      const report = verifyYaraVendor({ dir });
+      assert.equal(report.ok, false);
+      assert.ok(
+        report.problems.some((problem) => problem.includes("empty-dir") && problem.includes("subdirectório")),
+        report.problems.join("; "),
+      );
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
 });

@@ -1334,13 +1334,18 @@ export function verifyYaraVendor(options = {}) {
   }
   if (rootStat.isSymbolicLink() || !rootStat.isDirectory()) {
     problems.push(`${requestedDir}: vendor é um link/junction ou não é directório`);
+    return result; // NÃO ler nada através de uma raiz inválida
   }
+  let resolvedRoot;
   try {
-    if (norm(fs.realpathSync.native(dir)) !== norm(dir)) {
-      problems.push(`${requestedDir}: caminho resolvido fora do vendor (link/junction num parent)`);
-    }
+    resolvedRoot = fs.realpathSync.native(dir);
   } catch {
     problems.push(`${requestedDir}: caminho não resolvível`);
+    return result;
+  }
+  if (norm(resolvedRoot) !== norm(dir)) {
+    problems.push(`${requestedDir}: caminho resolvido fora do vendor (link/junction num parent)`);
+    return result; // um parent linkado já provou que a leitura não é confiável
   }
 
   // ── Travessia: recusa QUALQUER link antes de ler; junta colisões de caixa ─
@@ -1368,7 +1373,9 @@ export function verifyYaraVendor(options = {}) {
         continue;
       }
       if (stat.isDirectory()) {
-        walk(full, rel);
+        // A allowlist é PLANA: o extraResources copiaria este directório
+        // inteiro (mesmo vazio) sem que nenhum ficheiro fosse medido.
+        problems.push(`${rel}: subdirectório não permitido (a allowlist é plana)`);
         continue;
       }
       if (!stat.isFile()) {
