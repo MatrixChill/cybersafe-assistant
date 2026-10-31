@@ -458,6 +458,12 @@ function serviceEnv(pipeToken: string | undefined): NodeJS.ProcessEnv {
   };
   const bundledClamscan = path.join(process.resourcesPath, "clamav", "clamscan.exe");
   if (fs.existsSync(bundledClamscan)) env[CLAMAV_BINARY_ENV] = bundledClamscan;
+  // Semente offline: só é publicada quando o manifesto está presente. O
+  // serviço verifica hashes/licença e só copia se ainda não houver base.
+  const bundledClamavSeed = path.join(process.resourcesPath, "clamav-seed");
+  if (fs.existsSync(path.join(bundledClamavSeed, "SEED-MANIFEST.json"))) {
+    env.CYBERSAFE_CLAMAV_SEED_DIR = bundledClamavSeed;
+  }
   // DIST-ISOLATION: num build EMPACOTADO o serviço filho NÃO pode herdar o
   // otim-in de isolamento via `...process.env` — há de o apagar explicitamente.
   // Em dev (não empacotado) as variáveis ficam preservadas. `app.isPackaged` é

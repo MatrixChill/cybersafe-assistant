@@ -59,6 +59,7 @@ import {
   verifyStagedVersions,
 } from "./staging-dependency-pins.mjs";
 import { stripStagingInstallMetadata } from "./staging-install-metadata.mjs";
+import { verifyClamavSeedBundle } from "./clamav-seed-bundle.mjs";
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const desktopDir = path.join(root, "packages", "desktop");
@@ -81,6 +82,10 @@ const VENDOR_FIX = "node scripts/vendor-clamav.mjs";
 const VENDOR_OFFER_NAME = "SOURCE-OFFER.txt";
 // Textos e manifesto revistos: publicação explícita fora do asar.
 const licensesDir = path.join(root, "assets", "licenses");
+/** Semente ClamAV opcional mas OBRIGATÓRIA para uma candidata (ver runPipeline). */
+const clamavSeedDir = process.env.CYBERSAFE_CLAMAV_SEED_DIR?.trim()
+  ? path.resolve(process.env.CYBERSAFE_CLAMAV_SEED_DIR)
+  : null;
 
 /**
  * npm via `node npm-cli.js`: evita o `shell` do Windows (o caminho do projeto tem
@@ -139,7 +144,7 @@ const PREFLIGHT = [
 ];
 
 /** Junta os inputs fixos com os `include` de cada pacote do workspace. */
-export function preflightChecks() {
+export function preflightChecks({ clamavSeedDir: seedDir = null } = {}) {
   const checks = [...PREFLIGHT];
   for (const pkg of WORKSPACE_PACKAGES) {
     for (const entry of pkg.include) {
@@ -147,6 +152,15 @@ export function preflightChecks() {
         id: `workspace:${pkg.name}/${entry}`,
         path: path.join(root, "packages", pkg.dir, entry),
         fix: `npm run build -w ${pkg.name}`,
+      });
+    }
+  }
+  if (seedDir) {
+    for (const name of ["SEED-MANIFEST.json", "COPYING.txt", "main.cvd", "daily.cld", "bytecode.cvd"]) {
+      checks.push({
+        id: `seed-clamav:${name}`,
+        path: path.join(seedDir, name),
+        fix: "node scripts/prepare-clamav-seed.mjs --source <cache oficial verificada> --out <pasta>",
       });
     }
   }
@@ -523,7 +537,7 @@ export function candidateOutput(shellDir, id) {
   return {output: path.join(shellDir, "release", `candidate-${id}`), artifactName: '${productName}-${version}-candidate-' + id + '-setup.${ext}'};
 }
 
-export function buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir: outputDir, desktopDir: shellDir, clamavDir = vendorClamavDir, licensesFrom = licensesDir, candidateId, productVersion }) {
+export function buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir: outputDir, desktopDir: shellDir, clamavDir = vendorClamavDir, clamavSeedDir: seedDir = null, licensesFrom = licensesDir, candidateId, productVersion }) {
   // A versão do produto vem de `product-version.json` (fonte única), não do
   // `package.json` do desktop: é este campo que o electron-builder usa para o
   // nome do artefacto, para `${VERSION}` do NSIS, para `app.getVersion()` e para
@@ -597,6 +611,7 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
         // sai com o motor indisponível e nenhum aviso no setup.
         { from: yaraVendorDir, to: "yara" },
         { from: clamavDir, to: "clamav" },
+        ...(seedDir ? [{ from: seedDir, to: "clamav-seed" }] : []),
         { from: licensesFrom, to: "licenses" },
       ],
       win: { ...desktopManifest.build.win, icon: path.join(shellDir, "src", "assets", "icon.ico") },
@@ -1515,7 +1530,8 @@ export function estadoManifestoObrigacao(file) {
 }
 
 function checkReport() {
-  const checks = preflightChecks();
+  const checks = preflightChecks({ clamavSeedDir });
+  const seed = clamavSeedDir ? verifyClamavSeedBundle(clamavSeedDir) : null;
   // Integridade REAL do bundle (bytes + sha256 de cada ficheiro, fonte
   // correspondente e licenças). O `--check` nunca descarrega nada: isto é
   // apenas leitura do disco.
@@ -1526,7 +1542,7 @@ function checkReport() {
   const licensing = estadoManifestoObrigacao(path.join(licensesDir, "PROVENANCE.json"));
   const yara = verifyYaraVendor();
   return {
-    ok: checks.every((check) => check.exists) && bundle.ok && yara.ok && freeze.ok && licensing.estado === "prova-fecha",
+    ok: checks.every((check) => check.exists) && bundle.ok && yara.ok && freeze.ok && (!seed || seed.ok) && licensing.estado === "prova-fecha",
     licensing,
     yara: {
       ok: yara.ok,
@@ -1561,6 +1577,9 @@ function checkReport() {
       counts: freeze.counts,
       problems: freeze.problems.slice(0, 20),
     },
+    seed: seed
+      ? { ok: seed.ok, dir: seed.dir, filesChecked: seed.filesChecked, bytesChecked: seed.bytesChecked, version: seed.version, problems: seed.problems }
+      : { ok: null, dir: null, problems: ["CYBERSAFE_CLAMAV_SEED_DIR não definido; a candidata não pode ser produzida sem semente"] },
     checks: checks.map(({ id, exists, path: checkPath, fix }) => ({ id, exists, path: checkPath, fix })),
   };
 }
@@ -1599,7 +1618,21 @@ function runPipeline() {
     console.error(`[package] BLOQUEIO ${licensing.estado === "obrigacao-vigente" ? "licencas-obrigacao-em-aberto" : "licencas-manifesto-de-obrigacao-insuficiente"}: ${licensing.detalhe}`);
     process.exit(1);
   }
-  const missingInputs = preflightChecks().filter((check) => !check.exists);
+  if (candidateId && !clamavSeedDir) {
+    console.error("[package] candidata sem CYBERSAFE_CLAMAV_SEED_DIR: recusada (ClamAV offline não ficaria provado)");
+    console.error("[package] prepara a semente com: node scripts/prepare-clamav-seed.mjs --source <cache> --out <pasta>");
+    process.exit(1);
+  }
+  if (clamavSeedDir) {
+    const seedCheck = verifyClamavSeedBundle(clamavSeedDir);
+    if (!seedCheck.ok) {
+      for (const problem of seedCheck.problems) log(`SEED ${problem}`);
+      console.error("[package] semente ClamAV inválida: nada foi empacotado");
+      process.exit(1);
+    }
+    log(`     semente ClamAV ok: ${seedCheck.filesChecked} ficheiros, ${(seedCheck.bytesChecked / 1024 / 1024).toFixed(1)} MiB, versão ${seedCheck.version}`);
+  }
+  const missingInputs = preflightChecks({ clamavSeedDir }).filter((check) => !check.exists);
   if (missingInputs.length > 0) {
     for (const check of missingInputs) {
       log(`FALTA ${check.id}  ${check.path}  → ${check.fix}`);
@@ -1787,7 +1820,7 @@ export function stageWorkspaces() {
   const scanEngine = path.join(root, "packages", "native-engine", "build", "Release", "scan-engine.exe");
   if (!fs.existsSync(scanEngine)) throw new Error(`scan-engine.exe ausente: ${scanEngine} (corre npm run build:native)`);
 
-  const appManifest = buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir, desktopDir, candidateId, productVersion });
+  const appManifest = buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir, desktopDir, clamavSeedDir, candidateId, productVersion });
   fs.writeFileSync(path.join(appDir, "package.json"), `${JSON.stringify(appManifest, null, 2)}\n`);
 
   // ── 6. Conteúdo do shell (renderer + main + preload + assets) ──────────────

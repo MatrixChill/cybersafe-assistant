@@ -80,6 +80,7 @@ import { canAutoQuarantine, loadQuarantinePolicy, type QuarantinePolicy } from "
 import { isTransientFsError, TRANSIENT_SCAN_ERROR_WINDOW_MS } from "./scan-error.js";
 import { DefinitionUpdater, agendadorDefinicoesDeveArrancar, recuperacaoYaraPermitida } from "./updater.js";
 import { ClamDatabaseGate } from "./clam-database-gate.js";
+import { seedClamavDatabase } from "./clamav-seed.js";
 import { resolverCorpusYara } from "./dev-test-yara.js";
 import { ScanManager, linhaDeCancelamento } from "./scan-manager.js";
 import { ScanHistory } from "./scan-history.js";
@@ -938,6 +939,16 @@ export class ProtectionEngineService {
     this.quarantinePolicy = await loadQuarantinePolicy(path.join(this.baseDir, "protection-policy.json"));
     await fs.mkdir(this.logsDir, { recursive: true });
     await this.seedDefinitions();
+    const clamavSeed = await seedClamavDatabase({
+      seedDir: process.env.CYBERSAFE_CLAMAV_SEED_DIR,
+      definitionsDir: this.definitionsDir,
+      log: (message) => console.log(`[Service] ${message}`),
+    });
+    if (clamavSeed.status === "invalid") {
+      // Fail-closed: a base existente não é tocada e o probe dirá `degraded` se
+      // não houver outra base. O arranque não é fabricado como saudável.
+      console.warn(`[Service] seed ClamAV recusado: ${clamavSeed.reason}`);
+    }
     await this.quarantine.init();
 await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.json"));
       // Se o package não trouxe hashes embutidos, garante um ficheiro com a base offline
@@ -1076,7 +1087,9 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
   private async seedDefinitions(): Promise<void> {
     try {
       const bundled = this.bundledDefinitionsDir;
-      const subDirs = ["yara", "hashes", "clamav"] as const;
+      // ClamAV tem um caminho próprio: a semente é um extraResource (fora do
+      // asar) e exige manifesto/hashes; ver `seedClamavDatabase`.
+      const subDirs = ["yara", "hashes"] as const;
       for (const sub of subDirs) {
         const srcDir = path.join(bundled, sub);
         const dstDir = path.join(this.definitionsDir, sub);
