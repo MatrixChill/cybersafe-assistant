@@ -1,28 +1,42 @@
 /**
- * Decisões puras do instalador do serviço Windows (node-windows).
+ * Identidade e posse do serviço Windows (node-windows).
  *
- * DEFEITO MEDIDO NO PROCEDIMENTO: `src/windows-service.ts` registava o serviço
- * com `script = src/index.ts` e `--import=tsx`. Uma instalação a partir de uma
- * árvore de código cria um serviço que aponta para um ficheiro de TypeScript e
- * para uma árvore que pode ser movida/apagada — o SCM fica a tentar arrancar um
- * caminho inexistente (Event ID 7000) para sempre.
+ * O SCM NÃO usa o DisplayName como chave: node-windows deriva
+ * `id = name.replace(/[^\w]/gi, "").toLowerCase()` e cria
+ * `<scriptDir>/daemon/<id>.exe` + `<scriptDir>/daemon/<id>.xml`.
+ * Para "CyberSafe Engine" isso é `cybersafeengine` e
+ * `.../daemon/cybersafeengine.exe` — exactamente a forma do registo órfão
+ * observado (árvore de Downloads já inexistente). Consultar pelo DisplayName
+ * ("CyberSafe Engine") falhava e o `catch` anterior mascarava o erro como
+ * "ausente".
  *
- * Estas funções não tocam no SCM: recebem o estado observado e devolvem uma
- * decisão. O CLI só instala/desinstala quando a decisão permite, e a
- * desinstalação só remove um serviço cujo ImagePath pertence à raiz instalada.
+ * Estas funções são puras: não consultam o SCM, não instalam nem removem nada.
+ * O query é classificado como absent/present/error; erro NUNCA é ausência.
  */
 import path from "node:path";
 
 export const WINDOWS_SERVICE_NAME = "CyberSafe Engine";
+export const DAEMON_DIR = "daemon";
 
-export interface ExistingService {
-  name: string;
-  imagePath: string | null;
+export function serviceIdForName(name: string): string {
+  return name.replace(/[^\w]/gi, "").toLowerCase();
 }
 
-export type ServicePlan =
-  | { ok: true; scriptPath: string }
-  | { ok: false; reason: string };
+export const WINDOWS_SERVICE_ID = serviceIdForName(WINDOWS_SERVICE_NAME);
+
+/** Wrapper real criado por node-windows para um dado script. */
+export function wrapperExecutableFor(scriptPath: string, name: string = WINDOWS_SERVICE_NAME): string {
+  return path.join(path.dirname(scriptPath), DAEMON_DIR, `${serviceIdForName(name)}.exe`);
+}
+
+export function wrapperConfigFor(scriptPath: string, name: string = WINDOWS_SERVICE_NAME): string {
+  return path.join(path.dirname(scriptPath), DAEMON_DIR, `${serviceIdForName(name)}.xml`);
+}
+
+export type ServiceQuery =
+  | { state: "absent" }
+  | { state: "present"; commandLine: string }
+  | { state: "error"; detail: string };
 
 export type ServiceDecision = { ok: true } | { ok: false; reason: string };
 
@@ -31,86 +45,149 @@ function normalize(value: string): string {
   return process.platform === "win32" ? resolved.toLowerCase() : resolved;
 }
 
-/** `target` está dentro de `root` (ou é o próprio root)? */
-export function isInsideRoot(root: string, target: string): boolean {
-  const rel = path.relative(normalize(root), normalize(target));
-  return rel === "" || (!rel.startsWith("..") && !path.isAbsolute(rel));
-}
-
-/** Raiz de desenvolvimento: nunca serve para registar um serviço. */
-export function looksLikeSourceRoot(root: string): boolean {
-  return /(^|[\\/])packages[\\/]service[\\/]src($|[\\/])/i.test(root) || /(^|[\\/])Downloads([\\/]|$)/i.test(root);
+/**
+ * ImagePath é uma command line, não um caminho puro: quotes, argumentos,
+ * `%SystemRoot%` e escapes de `"` têm de ser interpretados.
+ */
+export function parseWindowsCommandLine(
+  commandLine: string,
+  env: NodeJS.ProcessEnv = process.env,
+): { executable: string | null; args: string[] } {
+  const expanded = commandLine.replace(/%([^%]+)%/g, (whole, key: string) => {
+    const value = env[key] ?? env[key.toUpperCase()] ?? env[key.toLowerCase()];
+    return typeof value === "string" ? value : whole;
+  });
+  const tokens: string[] = [];
+  let current = "";
+  let hasToken = false;
+  let inQuotes = false;
+  let i = 0;
+  while (i < expanded.length) {
+    const ch = expanded[i];
+    if (ch === "\\") {
+      let slashes = 0;
+      while (i < expanded.length && expanded[i] === "\\") {
+        slashes += 1;
+        i += 1;
+      }
+      if (i < expanded.length && expanded[i] === '"') {
+        current += "\\".repeat(Math.floor(slashes / 2));
+        if (slashes % 2 === 1) {
+          current += '"';
+        } else {
+          inQuotes = !inQuotes;
+        }
+        i += 1;
+      } else {
+        current += "\\".repeat(slashes);
+      }
+      hasToken = true;
+      continue;
+    }
+    if (ch === '"') {
+      inQuotes = !inQuotes;
+      hasToken = true;
+      i += 1;
+      continue;
+    }
+    if (!inQuotes && (ch === " " || ch === "\t")) {
+      if (hasToken) {
+        tokens.push(current);
+        current = "";
+        hasToken = false;
+      }
+      i += 1;
+      continue;
+    }
+    current += ch;
+    hasToken = true;
+    i += 1;
+  }
+  if (hasToken) tokens.push(current);
+  return { executable: tokens[0] ?? null, args: tokens.slice(1) };
 }
 
 /**
- * Resolve o entry point empacotado. Só `dist/index.js` (ou `.exe`) dentro da
- * raiz instalada, existente, e nunca um ficheiro `.ts`/árvore de código.
+ * Classifica a saída de `reg query`. Código != 0 só é "absent" quando a
+ * mensagem é explicitamente de chave/valor inexistente; acesso negado e
+ * qualquer outro erro são `error` (fail-closed).
  */
-export function resolvePackagedServiceScript(
-  installRoot: string | null | undefined,
-  exists: (file: string) => boolean,
-): ServicePlan {
-  const root = (installRoot ?? "").trim();
-  if (!root) return { ok: false, reason: "CYBERSAFE_SERVICE_INSTALL_ROOT não está definido" };
-  if (!path.isAbsolute(root)) return { ok: false, reason: "CYBERSAFE_SERVICE_INSTALL_ROOT tem de ser absoluto" };
-  if (looksLikeSourceRoot(root)) return { ok: false, reason: "raiz de desenvolvimento não pode registar um serviço" };
-  const scriptPath = path.join(root, "dist", "index.js");
-  const extension = path.extname(scriptPath).toLowerCase();
-  if (extension === ".ts") return { ok: false, reason: "entry point TypeScript não é um serviço válido" };
-  if (extension !== ".js" && extension !== ".exe") return { ok: false, reason: "entry point tem de ser .js ou .exe" };
-  if (!isInsideRoot(root, scriptPath)) return { ok: false, reason: "entry point fora da raiz instalada" };
-  if (!exists(scriptPath)) return { ok: false, reason: `entry point inexistente: ${scriptPath}` };
-  return { ok: true, scriptPath };
+export function classifyRegQuery(result: { exitCode: number | null; stdout: string; stderr: string }): ServiceQuery {
+  const stdout = result.stdout ?? "";
+  const stderr = result.stderr ?? "";
+  if (result.exitCode === 0) {
+    const match = stdout.match(/ImagePath\s+REG_[A-Z_]+\s+(.+)/i);
+    return match
+      ? { state: "present", commandLine: match[1].trim() }
+      : { state: "error", detail: "reg query devolveu 0 sem ImagePath" };
+  }
+  if (
+    /(não é possível encontrar|nao e possivel encontrar|não foi possível encontrar|nao foi possivel encontrar|não conseguiu localizar|nao conseguiu localizar|não foi encontrado|unable to find|the system cannot find)/i.test(
+      stderr,
+    )
+  ) {
+    return { state: "absent" };
+  }
+  const line = stderr.split(/\r?\n/).map((part) => part.trim()).find(Boolean) ?? "reg query falhou";
+  return { state: "error", detail: line.slice(0, 160) };
 }
 
-/**
- * Instalação: exige plataforma Windows, identidade canónica e ausência de
- * conflito (um serviço com o mesmo nome a apontar para fora da raiz).
- */
+/** Instalação: ausência é ok; erro falha; presença exige o wrapper exacto. */
 export function decideInstall(input: {
   platform: NodeJS.Platform;
-  installRoot: string | null | undefined;
   scriptPath: string;
-  exists: (file: string) => boolean;
-  existing: ExistingService | null;
+  query: ServiceQuery;
+  name?: string;
 }): ServiceDecision {
   if (input.platform !== "win32") return { ok: false, reason: "serviço Windows só existe em win32" };
+  if (!path.isAbsolute(input.scriptPath)) return { ok: false, reason: "script tem de ser absoluto" };
   if (path.extname(input.scriptPath).toLowerCase() === ".ts") {
     return { ok: false, reason: "entry point TypeScript não é um serviço válido" };
   }
-  const plan = resolvePackagedServiceScript(input.installRoot, input.exists);
-  if (!plan.ok) return plan;
-  if (normalize(plan.scriptPath) !== normalize(input.scriptPath)) {
-    return { ok: false, reason: "script não corresponde ao entry point empacotado validado" };
+  if (input.query.state === "error") {
+    return { ok: false, reason: `consulta ao serviço falhou: ${input.query.detail}` };
   }
-  const existing = input.existing;
-  if (existing) {
-    if (existing.name !== WINDOWS_SERVICE_NAME) return { ok: false, reason: "identidade do serviço divergente" };
-    if (!existing.imagePath) return { ok: false, reason: "registo existente sem ImagePath legível" };
-    if (!isInsideRoot(String(input.installRoot), existing.imagePath)) {
-      return { ok: false, reason: "já existe um serviço com este nome a apontar para outro caminho" };
-    }
+  if (input.query.state === "absent") return { ok: true };
+  const parsed = parseWindowsCommandLine(input.query.commandLine);
+  if (!parsed.executable) return { ok: false, reason: "ImagePath sem executável" };
+  const expected = wrapperExecutableFor(input.scriptPath, input.name);
+  if (normalize(parsed.executable) !== normalize(expected)) {
+    return { ok: false, reason: "serviço com o mesmo id aponta para outro wrapper" };
+  }
+  return { ok: true };
+}
+
+/** Desinstalação: só o wrapper exacto desta instalação; erro falha. */
+export function decideUninstall(input: {
+  platform: NodeJS.Platform;
+  scriptPath: string;
+  query: ServiceQuery;
+  name?: string;
+}): ServiceDecision & { alreadyAbsent?: boolean } {
+  if (input.platform !== "win32") return { ok: false, reason: "serviço Windows só existe em win32" };
+  if (!path.isAbsolute(input.scriptPath)) return { ok: false, reason: "script tem de ser absoluto" };
+  if (input.query.state === "error") {
+    return { ok: false, reason: `consulta ao serviço falhou: ${input.query.detail}` };
+  }
+  if (input.query.state === "absent") return { ok: true, alreadyAbsent: true };
+  const parsed = parseWindowsCommandLine(input.query.commandLine);
+  if (!parsed.executable) return { ok: false, reason: "ImagePath sem executável: posse não provada" };
+  const expected = wrapperExecutableFor(input.scriptPath, input.name);
+  if (normalize(parsed.executable) !== normalize(expected)) {
+    return { ok: false, reason: "serviço não pertence a esta instalação" };
   }
   return { ok: true };
 }
 
 /**
- * Desinstalação: só remove o serviço quando o ImagePath pertence à raiz
- * instalada. Sem ImagePath legível, não se assume posse.
+ * O CLI é legado e não é usado pelo NSIS nem pelo produto empacotado (que corre
+ * o serviço como processo filho). Mutações ficam explicitamente desactivadas:
+ * só diagnóstico, sem fingir uma instalação suportada.
  */
-export function decideUninstall(input: {
-  platform: NodeJS.Platform;
-  installRoot: string | null | undefined;
-  existing: ExistingService | null;
-}): ServiceDecision & { alreadyAbsent?: boolean } {
-  if (input.platform !== "win32") return { ok: false, reason: "serviço Windows só existe em win32" };
-  const root = (input.installRoot ?? "").trim();
-  if (!root || !path.isAbsolute(root)) return { ok: false, reason: "raiz instalada não validada" };
-  if (!input.existing) return { ok: true, alreadyAbsent: true };
-  if (input.existing.name !== WINDOWS_SERVICE_NAME) return { ok: false, reason: "identidade do serviço divergente" };
-  if (!input.existing.imagePath) return { ok: false, reason: "ImagePath ausente: posse não provada" };
-  if (!isInsideRoot(root, input.existing.imagePath)) {
-    return { ok: false, reason: "serviço não pertence a esta instalação" };
-  }
-  return { ok: true };
+export function legacyMutationPolicy(): { allowed: false; reason: string } {
+  return {
+    allowed: false,
+    reason:
+      "CLI legacy fora do NSIS: instalar/desinstalar serviços está desactivado; use apenas status/diagnóstico",
+  };
 }
