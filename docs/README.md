@@ -6,6 +6,8 @@
 |-----------|-----------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Camadas, fluxo de pedidos, motores, serviço e segurança aplicada |
 | [ROADMAP.md](./ROADMAP.md) | Estado real, validação pendente e próximos passos |
+| [PAP-TRANSFERENCIA-20261031.md](./PAP-TRANSFERENCIA-20261031.md) | Transferência para a revisão do relatório PAP: factos, lacunas e capítulos a atualizar |
+| [../PAP-EVIDENCIAS-TECNICAS/README.md](../PAP-EVIDENCIAS-TECNICAS/README.md) | Índice dos oito documentos de evidência técnica |
 | [FAQ-ENTREGA-PROFESSOR.md](./FAQ-ENTREGA-PROFESSOR.md) | Perguntas típicas (Electron, motor, C++, indústria) |
 | [POWERSHELL-WINDOWS-LAYER.md](./POWERSHELL-WINDOWS-LAYER.md) | Camada PowerShell read-only e limites |
 | [WINDOWS-KERNEL-E-DRIVERS.md](./WINDOWS-KERNEL-E-DRIVERS.md) | Para que serve driver de kernel; por que não é a primeira etapa |

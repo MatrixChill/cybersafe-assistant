@@ -24,11 +24,20 @@
 
 > **Estado de validação (2026-10-31).** O código deste repositório corresponde ao snapshot de
 > desenvolvimento de 2026-10-30 e inclui a correção do ciclo de vida da janela
-> (`Object has been destroyed`). A candidata interna **0.1.10** foi testada manualmente em máquina
-> virtual e o crash de encerramento **deixou de se reproduzir nesse teste manual**; continua a ser
-> uma candidata interna, sem assinatura e não publicada. O instalador **0.1.9 (PAP R4)** não
-> continha esta correção e não deve ser usado como referência do estado atual. Este repositório
-> não publica instaladores, bases de assinaturas nem releases.
+> (`Object has been destroyed`). A candidata interna **0.1.10** (`0.1.10-internal.pap-r5.20261031`,
+> SHA-256 `46718bcd…bd75`) foi instalada e ensaiada manualmente em máquina virtual: o crash de
+> encerramento **deixou de se reproduzir nesse ensaio** e arranque, motores, serviço, API e
+> Gestor de Tarefas foram reportados como funcionais. Continua a ser uma candidata interna, sem
+> assinatura e não publicada.
+>
+> A 0.1.10 **não é o artefacto final da PAP**: o primeiro ecrã do instalador mostra o texto interno
+> «0.1.8», o renderer empacotado identifica-se como «0.1.9» e o painel de Atualizações mostra
+> «Compilação desconhecida»/«Código desconhecido». São defeitos de **empacotamento e proveniência**,
+> não de produto: o delta de código face à 0.1.9 são dois ficheiros
+> (`resources/app/dist/main.js` e `resources/app/package.json`). A correção está identificada e
+> exige uma candidata seguinte. O instalador **0.1.9 (PAP R4)** não continha a correção do ciclo de
+> vida e não representa o estado atual. Este repositório não publica instaladores, bases de
+> assinaturas nem releases.
 
 ---
 
@@ -57,10 +66,11 @@ O **CyberSafe Assistant** é uma aplicação desktop para Windows que reúne, nu
 - **quarentena** e resposta a ameaças, com histórico e relatórios exportáveis;
 - **gestão do sistema** — gestor de tarefas (só leitura), PC Center, otimização e proteção USB.
 
-O projeto nasce no âmbito do **Projeto de Aptidão Profissional (PAP)** de um curso de
-cibersegurança. Serve simultaneamente como produto funcional e como evidência do processo de
-engenharia: cada capacidade é implementada, testada e documentada, e o produto **declara o que não
-sabe** em vez de simular estados (motores indisponíveis aparecem como indisponíveis).
+O projeto nasce no âmbito do **Projeto de Aptidão Profissional (PAP)** do curso de
+**Programador/a de Informática**. Serve simultaneamente como produto funcional e como evidência
+do processo de engenharia: cada capacidade é implementada, testada e documentada, e o produto
+**declara o que não sabe** em vez de simular estados (motores indisponíveis aparecem como
+indisponíveis).
 
 ## Funcionalidades
 
@@ -73,7 +83,7 @@ sabe** em vez de simular estados (motores indisponíveis aparecem como indispon�
 | **Quarentena** | Isolamento com metadados, restauro controlado e política de confiança |
 | **Histórico** | Sessões de análise persistidas com resultados, contagens e estado terminal |
 | **Relatórios** | Relatório consolidado A4 exportável em PDF, com impressão como alternativa |
-| **Gestor de Tarefas** | Processos com CPU/RAM e terminação sujeita a política de segurança — operações destrutivas desativadas por decisão de produto |
+| **Gestor de Tarefas** | Processos com CPU/RAM; **terminação individual** de aplicações comuns, com confirmação, elegibilidade decidida pelo serviço e processos protegidos (CyberSafe e sistema) excluídos — indisponível em sessão de leitura |
 | **PC Center** | Saúde do sistema: CPU, RAM, disco, bateria, GPU, temperatura e diagnósticos |
 | **Monitorização** | Processos, hardware e eventos de segurança em tempo real |
 | **Otimizar** | Sugestões de limpeza e otimização com base no estado medido |
@@ -223,6 +233,34 @@ estados, segurança de *pipes*, ciclo de vida do arranque). Testes que dependem 
 motores externos ou de uma instalação real estão fora do que a CI consegue provar — e são
 marcados como validação manual.
 
+**Estado dos testes.** No conjunto dirigido de autenticação, persistência, quarentena e *pipe*
+(documentado em `PAP-EVIDENCIAS-TECNICAS/TESTES-AUTOMATICOS-VERIFICADOS.md`): **315 PASS / 1 FAIL /
+0 SKIP** em 316 testes. O FAIL está identificado e explicado: a expectativa de
+`threat-history-storage.test.js` ficou desatualizada face à reposição de assinaturas embutidas
+(`ensureOfflineCoverage`), que é comportamento intencional do produto. **A suíte completa não foi
+executada** e não é declarada como aprovada.
+
+### Ensaios manuais em máquina virtual (candidata 0.1.10)
+
+A tabela separa **o que foi comunicado** por quem executou o ensaio manual do **que está
+verificado por evidência neste repositório**. Nenhum resultado manual é apresentado como
+verificado quando não existe registo.
+
+| Ensaio | Resultado comunicado (manual, VM) | Evidência verificável neste repositório |
+|---|---|---|
+| EICAR detetado e enviado para quarentena | Detetado e isolado | Testes automatizados de EICAR em YARA, base de hashes e ClamAV (`packages/core/test/*eicar*`, `clamav-*`, `yara-*`); **não** existe log da execução manual |
+| Restauro a partir da quarentena | Ficheiro restaurado | `service-r5-quarantine-restore-result` 5/5 e `core-quarantine-restore-safety` 6/6 (logs em `PAP-EVIDENCIAS-TECNICAS/logs/`) |
+| Persistência após reinício (conta, histórico, quarentena, consentimentos) | Mantida | `auth-session-restart` 1/1, `r6-l11-persistence` 5/5, `r7-l3-history` 17/17, `core/recovery-quarantine` 7/7 |
+| Encerramento sem `Object has been destroyed` | Deixou de se reproduzir | Correção no ciclo de vida da janela (`isDestroyed()` em `cancel()`/`dispose()`) e suíte desktop 597/597 reportada na lane de empacotamento |
+| Motores, serviço, API e Gestor de Tarefas | Funcionais | Testes por área (ver `PAP-EVIDENCIAS-TECNICAS/`); a execução no instalador não tem log neste repositório |
+
+**Efeitos 3D na máquina virtual — limitação real, não defeito.** O `CoreScene` só é montado quando
+`gpu` está ligado (`gpu = webgl && !lowPower`). Com o perfil de desempenho em `auto` e **4 ou menos
+CPUs lógicas** — o caso da VM usada nos ensaios — o perfil é tratado como económico, o `gpu` fica
+desligado e a cena 3D **nunca é montada**: fica o orbital estático, sem mensagem de erro. Não é uma
+regressão de WebGL; se o WebGL falhasse com `gpu` ligado, apareceria «Variante estática · 3D
+indisponível». O comportamento não foi alterado antes da PAP e continua por explicar na interface.
+
 ## Segurança e limitações
 
 - **Não é um antivírus certificado.** Não substitui o Microsoft Defender e não oferece garantia
@@ -253,6 +291,8 @@ Se encontrares um problema de segurança, não abras uma issue pública com deta
 - [Arquitetura](docs/ARCHITECTURE.md) — camadas, fluxos e contratos
 - [Roadmap](docs/ROADMAP.md) — fases e prioridades honestas
 - [FAQ de entrega](docs/FAQ-ENTREGA-PROFESSOR.md) — perguntas típicas sobre o projeto
+- [Transferência para revisão da PAP](docs/PAP-TRANSFERENCIA-20261031.md) — factos comprovados, lacunas e o que o relatório pode afirmar
+- [Evidências técnicas da PAP](PAP-EVIDENCIAS-TECNICAS/README.md) — oito documentos com provas, limitações e índice de reprodução
 - [Camada PowerShell / Windows](docs/POWERSHELL-WINDOWS-LAYER.md)
 - [Toolchain C++ no Windows](docs/TOOLCHAIN-CPP-WINDOWS.md)
 - [Motor nativo](packages/native-engine/README.md) — compilar e testar o `scan-engine`

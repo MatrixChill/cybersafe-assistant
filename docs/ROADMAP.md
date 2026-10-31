@@ -7,15 +7,19 @@ está **planeado**. Não é uma promessa de datas.
 
 - Monorepo TypeScript com serviço de fundo, shell Electron, renderer React e API REST.
 - Scanner com YARA, base de hashes, ClamAV e motor nativo C++ integrado por *bridge*.
-- Quarentena, histórico, relatórios em PDF, gestor de tarefas (leitura), PC Center,
-  otimização, monitorização, proteção USB, assistente MATRIX e atualizações — com testes
-  automatizados por área.
+- Quarentena, histórico, relatórios em PDF, gestor de tarefas (com terminação individual
+  confirmada), PC Center, otimização, monitorização, proteção USB, assistente MATRIX e
+  atualizações — com testes automatizados por área.
 - Instalador NSIS personalizado construído e compilado offline; **execução e validação em
   máquina limpa pendentes**.
 - O código do repositório corresponde ao snapshot de 2026-10-30 e inclui a correção do ciclo de
   vida da janela (`Object has been destroyed`).
-- A candidata interna **0.1.10** foi testada manualmente em VM: o encerramento deixou de
-  reproduzir o crash nesse teste manual. Não é uma release; repetir numa instalação final.
+- A candidata interna **0.1.10** foi instalada e ensaiada manualmente em VM: o encerramento deixou
+  de reproduzir o crash nesse ensaio. Não é uma release; repetir numa instalação final.
+- A 0.1.10 **não serve como artefacto final**: o instalador mostra o texto interno «0.1.8», o
+  renderer empacotado identifica-se como «0.1.9» e o painel de Atualizações mostra
+  «Compilação desconhecida»/«Código desconhecido». São defeitos de empacotamento e proveniência;
+  a correção está identificada e exige uma candidata seguinte.
 - O instalador **0.1.9 (PAP R4)** não continha a correção e não representa o estado atual.
 
 ## Fase 1 — Fechar a validação (prioridade alta)
