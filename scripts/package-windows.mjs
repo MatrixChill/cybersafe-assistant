@@ -51,6 +51,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { verifySourceFreeze } from "./source-freeze.mjs";
+import { readProductVersion, verifyBuiltRenderer } from "./app-version.mjs";
 import {
   assertPinnedManifestSpecs,
   describeStagingDrift,
@@ -462,16 +463,69 @@ export function verifyClamavBundle(options = {}) {
  * (o `name` do pacote) em vez de `%APPDATA%\CyberSafe Assistant`. Isto foi
  * medido a 13/10/2026 no `app.asar` entregue a 11/10.
  */
+/**
+ * Recursos do NSIS consumidos pelo electron-builder (não os `!include` internos
+ * do script, que o próprio NSIS resolve a partir do includer).
+ */
+const NSIS_RESOURCE_KEYS = [
+  "include",
+  "script",
+  "license",
+  "installerIcon",
+  "uninstallerIcon",
+  "installerHeader",
+  "installerHeaderIcon",
+  "installerSidebar",
+  "uninstallerSidebar",
+];
+
+/**
+ * Torna absolutos os caminhos do bloco `nsis`, resolvidos contra
+ * `buildResources`, e FALHA FECHADO se um deles apontar para um ficheiro que
+ * não existe.
+ *
+ * Motivo medido: a candidata 0.1.10 saiu com o texto «0.1.8» no instalador
+ * porque o config usado nesse empacotamento não declarava `include` e o
+ * electron-builder apanhou um `installer.nsh` de 5 linhas deixado em
+ * `buildResources`, enquanto o instalador desenhado (que usa `${VERSION}`)
+ * ficou por usar. Um caminho relativo que não resolve é exactamente esse
+ * acidente — por isso aqui é erro, não omissão.
+ */
+export function absolutizeNsisResources(nsis, buildResourcesDir) {
+  if (!nsis || typeof nsis !== "object") return nsis;
+  const next = { ...nsis };
+  for (const key of NSIS_RESOURCE_KEYS) {
+    const value = next[key];
+    if (typeof value !== "string" || value.trim() === "") continue;
+    if (path.isAbsolute(value)) {
+      if (!fs.existsSync(value)) throw new Error(`nsis.${key} aponta para um ficheiro inexistente: ${value}`);
+      continue;
+    }
+    const resolved = path.join(buildResourcesDir, value);
+    if (!fs.existsSync(resolved)) {
+      throw new Error(`nsis.${key} = ${JSON.stringify(value)} não existe em ${buildResourcesDir}; o instalador desenhado seria substituído pelo de omissão`);
+    }
+    next[key] = resolved;
+  }
+  return next;
+}
+
 export function candidateOutput(shellDir, id) {
   if (typeof id !== "string" || !/^[0-9]{8}-[0-9]{6}-[a-f0-9]{8}$/.test(id)) throw new Error("Invalid candidate identifier");
   return {output: path.join(shellDir, "release", `candidate-${id}`), artifactName: '${productName}-${version}-candidate-' + id + '-setup.${ext}'};
 }
 
-export function buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir: outputDir, desktopDir: shellDir, clamavDir = vendorClamavDir, licensesFrom = licensesDir, candidateId }) {
+export function buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir: outputDir, desktopDir: shellDir, clamavDir = vendorClamavDir, licensesFrom = licensesDir, candidateId, productVersion }) {
+  // A versão do produto vem de `product-version.json` (fonte única), não do
+  // `package.json` do desktop: é este campo que o electron-builder usa para o
+  // nome do artefacto, para `${VERSION}` do NSIS, para `app.getVersion()` e para
+  // a chave `DisplayVersion` na desinstalação. Manter as três superfícies
+  // (instalador, aplicação, renderer) na mesma versão depende disto.
+  const version = productVersion ?? desktopManifest.version;
   return {
     name: desktopManifest.name,
     productName: desktopManifest.build.productName,
-    version: desktopManifest.version,
+    version,
     private: true,
     description: desktopManifest.description,
     author: desktopManifest.author,
@@ -487,6 +541,9 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
     },
     build: {
       ...desktopManifest.build,
+      ...(desktopManifest.build?.nsis
+        ? { nsis: absolutizeNsisResources(desktopManifest.build.nsis, path.join(shellDir, "build")) }
+        : {}),
       ...(candidateId ? { artifactName: candidateOutput(shellDir, candidateId).artifactName } : {}),
       electronVersion,
       // Saída no sítio habitual do projeto (release/ está ignorado pelo git).

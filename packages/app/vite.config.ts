@@ -33,9 +33,18 @@ function cspDevPolicy(): Plugin {
 }
 
 // Identidade REAL do build (P0-7): versao do renderer + carimbo de compilacao + commit.
-// Falha de leitura NAO parte o build — cai em valores declarados, nunca fingidos.
+// Fonte canónica: product-version.json (raiz). FALHA FECHADO se inválida/ilegível.
+// package.json do workspace é apenas fallback de desenvolvimento.
 let appVersion = 'desconhecida'
-try { appVersion = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')).version ?? appVersion } catch { /* mantem */ }
+try {
+  const pvPath = path.resolve(__dirname, '../../product-version.json')
+  const pv = JSON.parse(fs.readFileSync(pvPath, 'utf8'))
+  if (pv && typeof pv.version === 'string') appVersion = pv.version
+} catch (error) {
+  try {
+    appVersion = JSON.parse(fs.readFileSync(path.resolve(__dirname, 'package.json'), 'utf8')).version ?? appVersion
+  } catch { /* mantem */ }
+}
 const candidateVersion = process.env.CYBERSAFE_BUILD_VERSION?.trim();
 if (candidateVersion) {
   if (!/^\d+\.\d+\.\d+(?:-[A-Za-z0-9.-]+)?$/.test(candidateVersion)) throw new Error('Invalid candidate build version');
