@@ -10,6 +10,7 @@ import {
 import { timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
+import { StringDecoder } from "node:string_decoder";
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFile } from "node:child_process";
@@ -33,7 +34,10 @@ import {
   YaraEngine,
   MalwareAnalyzer,
   QuarantineManager,
-  decodeMessages,
+  decodeMessagesBounded,
+  RPC_MAX_FRAME_BYTES,
+  RPC_MAX_REST_BYTES,
+  RPC_MAX_MESSAGES_PER_CHUNK,
   encodeMessage,
   classifyKillTarget,  isAliasStubTarget,
   isProcessAlive,
@@ -81,6 +85,7 @@ import { isTransientFsError, TRANSIENT_SCAN_ERROR_WINDOW_MS } from "./scan-error
 import { DefinitionUpdater, agendadorDefinicoesDeveArrancar, recuperacaoYaraPermitida } from "./updater.js";
 import { ClamDatabaseGate } from "./clam-database-gate.js";
 import { seedClamavDatabase } from "./clamav-seed.js";
+import { shouldPublishEngineUnavailable, ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS } from "./engine-health-notifications.js";
 import { resolverCorpusYara } from "./dev-test-yara.js";
 import { ScanManager, linhaDeCancelamento } from "./scan-manager.js";
 import { ScanHistory } from "./scan-history.js";
@@ -389,6 +394,9 @@ export class ProtectionEngineService {
   private readonly realtimeRecovery = new RealtimeRecovery();
   private quarantinePolicy: QuarantinePolicy = "warn";
   private lastClamavAvailability: boolean | undefined;
+  private lastClamavStatus: string | undefined;
+  /** Última notificação de indisponibilidade (dedupe de flapping). */
+  private lastClamavUnavailablePublishedAt: number | undefined;
   private fileObservationReads = 0;
   private realtimeDroppedEvents = 0;
   private overflowNoticeAt = -Infinity;
@@ -966,7 +974,12 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // Nunca o caminho: só o que foi provado. O registo do serviço é lido por gente externa.
       console.log(`[Service] corpus YARA de TESTE montado: ${corpusYara.motivo}`);
     }
+    const yaraT0 = performance.now();
     await this.yara.load(corpusYara.path);
+    // Instrumentação sanitizada: só estado e duração, nunca caminhos/regras.
+    // Existe para o próximo ensaio na VM conseguir distinguir «motor lento» de
+    // «motor indisponível» sem repetir o arranque à adivinha.
+    console.log(`[Service] engine-init yaraMs=${Math.round(performance.now() - yaraT0)} coverage=${this.yara.health.coverage}`);
     // Corpus só de teste (EICAR/canário) é o que a interface mostra como
     // DEGRADADO. O scheduler só volta a tentar daqui a 6 horas, por isso um
     // corpus que falhou uma vez ficava horas no estado degradado. Uma única
@@ -985,7 +998,9 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     // ClamAV (Workstream C): corre o probe UMA vez no arranque — binário +
     // base de assinaturas. Sem isto, protection.getState mostra clamav
     // "Not checked" para sempre mesmo com o clamscan instalado.
+    const clamavT0 = performance.now();
     await this.clamav.isAvailable();
+    console.log(`[Service] engine-init clamavMs=${Math.round(performance.now() - clamavT0)} status=${this.clamav.health.status}`);
 
     // ── DEFINIÇÕES NÃO DEPENDEM DA PROTEÇÃO ESTAR LIGADA ─────────────────────
     //
@@ -2569,11 +2584,18 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
   }
 
   getProtectionState(): ProtectionState {
-    const available = this.clamav.health.status === "active";
-    if (this.lastClamavAvailability === true && !available) {
-      this.eventBus.publish("engine.health", "high", "O ClamAV deixou de conseguir analisar; os resultados podem ser inconclusivos.", {engine:"ClamAV",essentialUnavailable:true,status:this.clamav.health.status});
+    const status = this.clamav.health.status;
+    const available = status === "active";
+    const now = Date.now();
+    const previous = this.lastClamavAvailability === undefined
+      ? null
+      : { engine: "ClamAV", available: this.lastClamavAvailability, status: this.lastClamavStatus ?? "unknown" };
+    if (shouldPublishEngineUnavailable(previous, { engine: "ClamAV", available, status }, now, this.lastClamavUnavailablePublishedAt, ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS)) {
+      this.eventBus.publish("engine.health", "high", "O ClamAV deixou de conseguir analisar; os resultados podem ser inconclusivos.", {engine:"ClamAV",essentialUnavailable:true,status});
+      this.lastClamavUnavailablePublishedAt = now;
     }
     this.lastClamavAvailability = available;
+    this.lastClamavStatus = status;
     const recentThreats = this.threats.slice(0, 10);
     const maxRisk = recentThreats.length > 0
       ? Math.max(...recentThreats.map(t => t.riskScore))
@@ -4515,23 +4537,41 @@ if (processInfo.path) {
    */
   private attachClientSocket(socket: net.Socket) {
     this.clients.add(socket);
-    const requests = new RpcRequestQueue(4);
+    const requests = new RpcRequestQueue(4, 64);
     socket.once("close", () => requests.close());
     let buffer = "";
+    // AUD-002: `chunk.toString()` cortava um caractere multibyte ao meio e
+    // deixava U+FFFD no payload. O StringDecoder recompõe os bytes entre chunks.
+    const decoder = new StringDecoder("utf8");
 
     // Sem este handler, um EPIPE/ECONNRESET assíncrono (o Electron fecha o
     // pipe antes de lermos a resposta) subia como uncaught exception.
     socket.on("error", (err) => this.handleSocketFailure(socket, err));
 
-    socket.on("data", async (chunk) => {
-      buffer += chunk.toString();
-      const decoded = decodeMessages(buffer);
+    socket.on("data", (chunk: Buffer) => {
+      if (socket.destroyed) return;
+      buffer += decoder.write(chunk);
+      const decoded = decodeMessagesBounded(buffer, {
+        maxFrameBytes: RPC_MAX_FRAME_BYTES,
+        maxRestBytes: RPC_MAX_REST_BYTES,
+        maxMessages: RPC_MAX_MESSAGES_PER_CHUNK,
+      });
       buffer = decoded.rest;
+      if (decoded.error) {
+        // Limite/JSON inválido: fechar é mais seguro do que continuar a
+        // interpretar bytes de um cliente que não respeita o contrato.
+        this.closeClientForProtocol(socket, requests, decoded.error);
+        return;
+      }
       for (const message of decoded.messages) {
         const request = message as RpcRequest;
-        if (request.type !== "request") continue;
+        if (!request || typeof request !== "object" || request.type !== "request") continue;
+        if (!this.isValidRpcEnvelope(request)) {
+          this.closeClientForProtocol(socket, requests, "invalid-envelope");
+          return;
+        }
         const enqueuedAt = performance.now();
-        requests.enqueue(INDEPENDENT_READ_METHODS.has(request.method), async () => {
+        const accepted = requests.enqueue(INDEPENDENT_READ_METHODS.has(request.method), async () => {
           const start = performance.now();
           const response = await this.handleRequest(request);
           // Só nomes canónicos e duração; nenhum payload, PID, caminho ou segredo.
@@ -4540,6 +4580,16 @@ if (processInfo.path) {
           }
           this.safeWrite(socket, encodeMessage(response));
         });
+        if (!accepted) {
+          // Backpressure explícito: o cliente recebe uma recusa com o id do
+          // pedido. Nunca empurrar para uma fila sem tecto, nem desaparecer.
+          this.safeWrite(socket, encodeMessage({
+            id: request.id,
+            type: "response",
+            ok: false,
+            error: "Serviço ocupado: demasiados pedidos pendentes nesta ligação.",
+          }));
+        }
       }
     });
 
@@ -4552,6 +4602,29 @@ if (processInfo.path) {
     }
   }
 
+
+  /**
+   * Contrato mínimo do envelope. Os limites de comprimento existem para que a
+   * própria validação não seja um caminho de memória ilimitada.
+   */
+  private isValidRpcEnvelope(request: RpcRequest): boolean {
+    return typeof request.id === "string" && request.id.length > 0 && request.id.length <= 64 &&
+      typeof request.method === "string" && request.method.length > 0 && request.method.length <= 64;
+  }
+
+  /**
+   * Fecho controlado por violação de protocolo (nunca por um pedido válido).
+   * A razão é fixa e nossa: não ecoa bytes recebidos.
+   */
+  private closeClientForProtocol(socket: net.Socket, requests: RpcRequestQueue, reason: string) {
+    requests.close();
+    this.clients.delete(socket);
+    if (socket.destroyed || this.isShuttingDown) return;
+    console.warn(`[Service] ligação RPC encerrada: ${reason}`);
+    this.safeWrite(socket, encodeMessage({ type: "error", error: "Protocolo RPC inválido; ligação encerrada." }));
+    const timer = setTimeout(() => socket.destroy(), 100);
+    timer.unref();
+  }
 
   /**
    * Handshake de posse v2 — nenhum pedido, replay ou identidade é exposto antes
