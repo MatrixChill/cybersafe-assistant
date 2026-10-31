@@ -534,6 +534,11 @@ export class ProtectionEngineService {
     this.definitionsDir = path.join(this.baseDir, "definitions");
     this.clamav = new ClamavBridge({
       definitionsDir: this.definitionsDir,
+      fallbackDatabaseDir: async () => {
+        const seed = await seedClamavDatabase({ seedDir: process.env.CYBERSAFE_CLAMAV_SEED_DIR, definitionsDir: this.definitionsDir });
+        if (seed.status === "invalid") console.warn(`[Service] ${seed.reason}`);
+        return seed.status === "readonly-ready" ? seed.databaseDir : null;
+      },
       acquireDatabaseLease: (scanId) => {
         const attempt = this.clamDatabaseGate.tryAcquireScanLease();
         if (process.env.CYBERSAFE_DEBUG_SCAN === "1") {
@@ -939,16 +944,6 @@ export class ProtectionEngineService {
     this.quarantinePolicy = await loadQuarantinePolicy(path.join(this.baseDir, "protection-policy.json"));
     await fs.mkdir(this.logsDir, { recursive: true });
     await this.seedDefinitions();
-    const clamavSeed = await seedClamavDatabase({
-      seedDir: process.env.CYBERSAFE_CLAMAV_SEED_DIR,
-      definitionsDir: this.definitionsDir,
-      log: (message) => console.log(`[Service] ${message}`),
-    });
-    if (clamavSeed.status === "invalid") {
-      // Fail-closed: a base existente não é tocada e o probe dirá `degraded` se
-      // não houver outra base. O arranque não é fabricado como saudável.
-      console.warn(`[Service] seed ClamAV recusado: ${clamavSeed.reason}`);
-    }
     await this.quarantine.init();
 await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.json"));
       // Se o package não trouxe hashes embutidos, garante um ficheiro com a base offline

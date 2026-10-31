@@ -1,5 +1,134 @@
 # CyberSafe — intensive close / continuidade técnica A–K
 
+## ESTADO ATUAL — revisão funcional posterior a87dada8
+
+Esta secção substitui as conclusões técnicas do checkpoint histórico abaixo;
+resultados antigos são preservados, não reescritos. Owner Freebuff Builder,
+modelo GPT-6.1 Sol, mesma lane/branch. Codex tree não alterada.
+**BLOCKED_WITH_EVIDENCE para release: aguarda revisão/freeze novo/payload/VM.**
+O stop de87dada8 NÃO foi aceite nem integrado;327fe12 também não integrado.
+
+### A–C: decisão e implementação mínima
+
+Comparadas duas opções:
+1. Publisher Windows: exige operações no-clobber ligadas a parent handles,
+   ownership de temporários, recovery sem apagar publicados e protocolo com o
+   freshclam real. A arquitectura actual não oferece esse protocolo; aumentar
+   a superfície nativa para copiar uma base não é necessário ao requisito offline.
+2. **Escolhida:** recurso privado empacotado, imutável por contrato do produto,
+   usado read-only por `clamscan --database=<resources/clamav-seed>`; nenhuma
+   publicação/cópia/rename/delete no perfil. O runtime nunca passa esse path ao
+   freshclam. Este mantém exclusivamente `definitions/clamav` e o gate/leases.
+
+Threat model: protege dados contra operações do próprio seed, repetição,
+interrupção e concorrência normal com freshclam/outra instância. Não promete
+resistência a administrador/malware com capacidade de substituir código ou
+recursos da própria aplicação per-user. Imutável significa nenhum writer do
+produto, NÃO ACL Windows inviolável. Links estáticos de resources/parents são
+recusados antes de ler conteúdo; não alegar defesa contra junction swap hostil
+concorrente. Eliminar publicação elimina a necessidade de retenção de handles
+para uma transacção de escrita: não há essa transacção.
+
+Ficheiros: core/src/clamav.ts acrescenta callback read-only ao collector;
+service/src/clamav-seed.ts valida pins fixos, manifesto exacto, licença e hashes
+em cada probe; engine.ts liga callback sem publicação em init; main.ts preserva
+path resources e corrige comentário. Scripts package-windows/prepare-clamav-seed
+permitem recurso read-only verificado e retiram bloqueio incondicional. Candidata
+sem seed é recusada. Preparador só build, output exclusivamente novo, COPYFILE_EXCL,
+sem rollback/cleanup; workspace de build é de confiança, não perfil runtime.
+Verifier estático recusa parents/manifestos ligados e entradas não regulares.
+
+### D: selecção, frescura, concorrência e recovery
+
+Fallback só quando não há datadir explícito e TODOS os candidatos existentes
+estão missing/empty. Ready existente (mesmo parcial/velho) e unreadable impedem
+fallback: nunca misturar seed com DB existente nem mascarar permissões.
+ENOTDIR passa a unreadable, não missing. Assinatura symlink dá unreadable.
+Freshclam tem path de escrita separado; seeds não participam no seu rollback.
+Gate de processo permanece: não se afirma exclusão global entre serviços.
+Como a seed não escreve em nenhum DB, duas instâncias não podem clobber/apagar
+publicados do seed. Concorrência entre freshclam de serviços distintos é limite
+preexistente, não resolvido nem agravado com publisher novo.
+
+Freshclam com sucesso já dispara isAvailable(true) no engine (linha de wiring
+existente); próximo probe prefere DB mutável. Falha de rede/binário não copia
+seed para destino nem muda timestamp. Se algum DB parcial apareceu, exige-se
+recovery pelo updater; não se compõe artificialmente uma base com seed.
+Provas single-flight, leases, budgets e fail-closed mantidos.
+
+Frescura seed usa epoch do cabeçalho daily, NÃO mtime da cópia/instalador.
+Data inválida/desconhecida nunca é fresh. Daily verificado:29Oct2026,
+1793255056. Base com >7 dias mantém degraded; carga positiva e scan real
+continuam obrigatórios para afirmar funcionamento. A seed é finita, não
+substitui actualizações online indefinidamente.
+
+### E–F: trust e licenças
+
+Trust continua disabled; fingerprint proposto3982C36398918D077A417DDA02E6E7FF6C1F70622684DA4FB43673652E4C8FB6
+PENDING humano. Nenhuma privada lida/alterada, sem Authenticode e sem execução
+automática. Licença seed COPYING18738B SHA0c4fd2fa9733fc9122503797648710851e4ee6d9e4969dd33fcbd8c63cd2f584.
+Pins runtime/build com teste de igualdade. Daily CLD vem da cache anteriormente
+verificada; hash de proveniência não é assinatura independente CVD. Sem rede.
+
+### G–H: evidências novas (logs ../logs-release-20261031)
+
+- readonly-fallback-RED.log:2FAIL esperados antes implementação,3PASS;
+  callback read-only inexistente. Detectado depois ENOTDIR e leitura curta de
+  header; corrigidos, sem enfraquecer assertivas.
+- readonly-regressions.log: **144PASS/0FAIL/0SKIP**, exit0, execução final após
+  último delta. Core proof/parser/recovery, seed, gate41casos incluindo YARA,
+  frescura, scheduler/reprobe, update truth, packaging e lifecycle.
+- Core e service builds TypeScript exit0 após último delta; desktop Vite build
+  exit0 (readonly-build.log; core/service stdout também capturado na sessão).
+- readonly-real-clamav-proof.log: **PASS** ClamAV1.5.4 real da lane, prova de carga
+  +UM ficheiro benigno limpo com datadir da seed; todos os hashes antes/depois
+  iguais, nenhum definitionsDir criado, sem rede/serviço/perfil instalado.
+  Ensaio anterior ao ajuste de tratamento de leitura curta/erro de header;
+  bytes reais tinham512B completos, percurso funcional não alterado.
+- readonly-preflight.json:exit1, seed4recursos/175916377B íntegros, YARA/Clam
+  bundles ok, zero inputs ausentes; freeze7b294a5 divergente. NÃO preflight PASS.
+- Build8/typechecks/native/API/app/updater anteriores abaixo reutilizáveis para
+  ficheiros sem delta; não somar execuções sobrepostas nem alegar payload novo.
+
+YARA baseline reproduzida por `git archive 7b294a5` em ../baseline-yara-7b294a5.
+Build próprio shared/core/native/service; dependências externas via junctions,
+@cybersafe aponta para os pacotes BASELINE, não para lane corrente. A primeira
+configuração de junction falhou resolução de deps; reparada antes da medição.
+Binários clássicos são os mesmos pins aprovados. Comando:CYBERSAFE_YARA_BIN_DIR
+apontado ao vendor da lane, node --test --test-name-pattern='publica regras
+compiláveis com warnings|classifica módulos YARA não suportados'
+packages/service/test/p1-1-clam-db-gate.test.js.
+Log yara-baseline-7b294a5-FAIL.log: **0PASS/2FAIL/0SKIP**, exit1.
+CONFIRMADO baseline, não nova regressão Clam.
+
+Contrato clássico medido: condition:true =>[]diagnostics; string$a="a" usada
+=>warning slow-scan; import inexistente=>error unknown-module. Updater preserva
+categoria incompatible-module e origem. Teste agora usa fixture que realmente
+emite warning clássico e exige slow-scan/origem, exige unknown-module/categoria,
+rejeição da fonte e continuação de fonte compatível. NÃO introduz códigos X
+fictícios nem reduz assertions a simples sucesso. Duas falhas fechadas no POST.
+
+### I–K: entrega e pendências
+
+Sem novo setup, freeze, instalação, VM, publicação, push/tag ou agentes extra.
+Setup r6 anterior preservado clean-install-only, appId=com.cybersafe.assistant;
+SHA24beb5b7c01887accba946a07cf21bf7c1adeea56974505da4cd035814abf72c.
+Artefacto antigo NÃO contém esta seed; não o apresentar como corrigido.
+Próximo gate Codex: rever delta funcional (sobre87dada8; árvoreCodex não recebeu
+327fe12/87dada8, portanto usar delta completo desde7b294a5), aprovar commit/freeze
+exactos. Só depois gerar um novo payload e medir seed/ABI130/recursos/motores,
+0@litko/ascii_tree runtime, versão/renderer/NSIS/SHA e inventário. Aprovação nova
+não é autorização de trust/VM/publicação. CI continua parcial.
+
+Humanos: chave/feed/Authenticode; VM separada e autorizada. Checklist/rollback
+mantém snapshot limpo, hash, clean install manual, conta/histórico/quarentena,
+benignos,motores,PDF,encerramento,WebGL/fallback,logs; rollback snapshot, nunca
+apagar dados para testar. Sem upgrade aprovado, exclusões ou backendMATRIX novo.
+Reverter código exige revert revisto; NÃO voltar ao publisher inseguro327fe12.
+
+---
+## CHECKPOINT HISTÓRICO87dada8 (superado pela secção actual)
+
 Packet: TP-FREEBUFF-INTENSIVE-CLOSE-20261031. Data: 2026-10-31.
 Owner: Freebuff Builder; auditor/integrador: Codex Lead.
 Lane: `C:/Users/caioc/.cybersafe-integration/pap-freebuff-final-release-20261031/repo`.

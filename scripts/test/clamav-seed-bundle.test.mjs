@@ -44,20 +44,21 @@ function fixture(name, { extra = null } = {}) {
   return { dir, expected };
 }
 
-test("packaging refuses a configured seed while native publication is unavailable", () => {
+test("packaging includes a verified read-only resource separately from mutable definitions", () => {
   const input = {
     clamavSeedDir: ROOT, productVersion: "0.1.10-internal.pap-r6.20261031",
     desktopManifest: { name: "desktop", build: { productName: "CyberSafe", directories: {}, win: {} } },
     tarballs: { "@cybersafe/core": "core.tgz", "@cybersafe/service": "service.tgz", "@cybersafe/shared-types": "shared.tgz", api: "api.tgz" }, desktopDir: ROOT, outDir: ROOT,
   };
-  assert.throws(() => buildAppManifest(input), /CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED/);
+  const manifest = buildAppManifest(input);
+  assert.deepEqual(manifest.build.extraResources.find(entry => entry.to === "clamav-seed"), { from: ROOT, to: "clamav-seed" });
 });
 
-test("preparer refuses writes before creating a requested output", () => {
+test("build preparer rejects unpinned input before creating output", () => {
   const out = path.join(ROOT, "must-not-be-created");
   const result = spawnSync(process.execPath, [new URL("../prepare-clamav-seed.mjs", import.meta.url).pathname.replace(/^\/(?=[A-Za-z]:)/, ""), "--source", ROOT, "--out", out], { encoding: "utf8" });
   assert.equal(result.status, 1);
-  assert.match(result.stderr, /CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED/);
+  assert.match(result.stderr, /ENOENT|CLAMAV_SEED_INVALID/);
   assert.equal(fs.existsSync(out), false);
 });
 

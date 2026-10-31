@@ -1,6 +1,6 @@
 import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { readdir, rm, stat, writeFile } from "node:fs/promises";
+import { open, readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import * as path from "node:path";
@@ -712,6 +712,8 @@ export interface ClamavBridgeOptions {
   datadir?: string;
   /** Override do directório de definições gerido pela app (default `<home>/.cybersafe-service/definitions`). */
   definitionsDir?: string;
+  /** Verified packaged, read-only database; never a freshclam target. Revalidated on probe. */
+  fallbackDatabaseDir?: () => Promise<string | null>;
   /** Envelhecimento máximo aceite nas assinaturas. Default: 7 dias. */
   maxSignatureAgeMs?: number;
   /** Timeout de um scan individual. Default: 10 s. */
@@ -2370,7 +2372,7 @@ return {
 export const spawnClamav: ClamavSpawnFn = (file, args, request, hooks) =>
   createSpawnClamav(hooks ?? {})(file, args, request);
 
-export type ClamavDbSource = "explicit" | "app-definitions" | "clamconf" | "platform-default";
+export type ClamavDbSource = "explicit" | "app-definitions" | "clamconf" | "platform-default" | "packaged-fallback";
 export type ClamavDbState = "missing" | "unreadable" | "empty" | "ready";
 
 /** Um directório candidato onde a base de assinaturas pode viver. */
@@ -2824,7 +2826,7 @@ export async function probeDatabaseDir(dir: string, source: ClamavDbSource): Pro
     entries = await readdir(dir, { withFileTypes: true });
   } catch (err: any) {
     const code = err?.code;
-    if (code !== "ENOENT" && code !== "ENOTDIR") {
+    if (code !== "ENOENT") {
       return { ...base, state: "unreadable", error: code ?? String(err?.message ?? err) };
     }
     return base;
@@ -2833,7 +2835,9 @@ export async function probeDatabaseDir(dir: string, source: ClamavDbSource): Pro
   const signatureFiles: string[] = [];
   let newestMtimeMs = 0;
   for (const entry of entries) {
-    if (!entry.isFile() || !isSignatureFile(entry.name)) continue;
+    if (!isSignatureFile(entry.name)) continue;
+    if (entry.isSymbolicLink()) return { ...base, state: "unreadable", error: "linked-signature" };
+    if (!entry.isFile()) continue;
     signatureFiles.push(entry.name);
     // mtime só para frescura; uma falha aqui não invalida a assinatura.
     try {
@@ -3539,7 +3543,37 @@ export class ClamavBridge {
       return true;
     });
 
-    return Promise.all(unique.map((entry) => probeDatabaseDir(entry.dir, entry.source)));
+    const candidates = await Promise.all(unique.map((entry) => probeDatabaseDir(entry.dir, entry.source)));
+    // Never hide an explicit selection, an existing signature set (even stale or
+    // partial), or an unreadable location. No publication, merging or cleanup.
+    if (!this.options.datadir && candidates.every((candidate) => candidate.state === "missing" || candidate.state === "empty")) {
+      const fallback = await this.options.fallbackDatabaseDir?.();
+      if (fallback) {
+        const candidate = await probeDatabaseDir(fallback, "packaged-fallback");
+        // Packaging/copy mtimes do not renew signature freshness. Use the daily
+        // header's publication epoch; unknown/invalid age must not become active.
+        let publishedAt = 0;
+        const daily = candidate.signatureFiles.find(name => /^daily\.(cvd|cld)$/i.test(name));
+        if (daily) {
+          try {
+            const handle = await open(path.join(fallback, daily), "r");
+            try {
+            const header = Buffer.alloc(512);
+            const { bytesRead } = await handle.read(header, 0, header.length, 0);
+            const text = header.subarray(0, bytesRead).toString("ascii").trim();
+            const epoch = text.startsWith("ClamAV-VDB:") ? Number(text.split(":").at(-1)) : NaN;
+            if (Number.isSafeInteger(epoch) && epoch > 0 && epoch * 1000 <= Date.now()) publishedAt = epoch * 1000;
+            } finally { await handle.close(); }
+          } catch {
+            candidate.state = "unreadable";
+            candidate.error = "packaged-daily-unreadable";
+          }
+        }
+        candidate.newestMtimeMs = publishedAt || 1;
+        candidates.push(candidate);
+      }
+    }
+    return candidates;
   }
 
   /**

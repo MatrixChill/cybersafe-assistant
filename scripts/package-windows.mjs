@@ -538,7 +538,6 @@ export function candidateOutput(shellDir, id) {
 }
 
 export function buildAppManifest({ desktopManifest, tarballs, electronVersion, scanEngine, outDir: outputDir, desktopDir: shellDir, clamavDir = vendorClamavDir, clamavSeedDir: seedDir = null, licensesFrom = licensesDir, candidateId, productVersion }) {
-  if (seedDir) throw new Error("CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED: publicação automática bloqueada; não gerar setup com seed inoperacional");
   // A versão do produto vem de `product-version.json` (fonte única), não do
   // `package.json` do desktop: é este campo que o electron-builder usa para o
   // nome do artefacto, para `${VERSION}` do NSIS, para `app.getVersion()` e para
@@ -612,6 +611,7 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
         // sai com o motor indisponível e nenhum aviso no setup.
         { from: yaraVendorDir, to: "yara" },
         { from: clamavDir, to: "clamav" },
+        ...(seedDir ? [{ from: seedDir, to: "clamav-seed" }] : []),
         { from: licensesFrom, to: "licenses" },
       ],
       win: { ...desktopManifest.build.win, icon: path.join(shellDir, "src", "assets", "icon.ico") },
@@ -1542,7 +1542,7 @@ function checkReport() {
   const licensing = estadoManifestoObrigacao(path.join(licensesDir, "PROVENANCE.json"));
   const yara = verifyYaraVendor();
   return {
-    ok: checks.every((check) => check.exists) && bundle.ok && yara.ok && freeze.ok && !clamavSeedDir && licensing.estado === "prova-fecha",
+    ok: checks.every((check) => check.exists) && bundle.ok && yara.ok && freeze.ok && (!candidateId || Boolean(seed?.ok)) && (!seed || seed.ok) && licensing.estado === "prova-fecha",
     licensing,
     yara: {
       ok: yara.ok,
@@ -1578,8 +1578,8 @@ function checkReport() {
       problems: freeze.problems.slice(0, 20),
     },
     seed: seed
-      ? { ok: false, integrityOk: seed.ok, dir: seed.dir, filesChecked: seed.filesChecked, bytesChecked: seed.bytesChecked, version: seed.version, problems: [...seed.problems, "CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED: integridade não prova publicação segura"] }
-      : { ok: false, dir: null, publicationEnabled: false, problems: ["CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED: candidata bloqueada independentemente da cache disponível"] },
+      ? { ...seed, mode: "packaged-readonly", publicationEnabled: false }
+      : { ok: !candidateId, dir: null, mode: "not-provided", publicationEnabled: false, problems: candidateId ? ["CLAMAV_SEED_REQUIRED: candidata offline exige recurso read-only verificado"] : [] },
     checks: checks.map(({ id, exists, path: checkPath, fix }) => ({ id, exists, path: checkPath, fix })),
   };
 }
@@ -1618,9 +1618,12 @@ function runPipeline() {
     console.error(`[package] BLOQUEIO ${licensing.estado === "obrigacao-vigente" ? "licencas-obrigacao-em-aberto" : "licencas-manifesto-de-obrigacao-insuficiente"}: ${licensing.detalhe}`);
     process.exit(1);
   }
-  if (candidateId || clamavSeedDir) {
-    console.error("[package] CLAMAV_SEED_NATIVE_BOUNDARY_REQUIRED: candidata bloqueada até publicação nativa segura e revisão; nada foi empacotado");
-    process.exit(1);
+  if (candidateId && !clamavSeedDir) {
+    throw new Error("CLAMAV_SEED_REQUIRED: candidata offline exige recurso read-only verificado");
+  }
+  if (clamavSeedDir) {
+    const seed = verifyClamavSeedBundle(clamavSeedDir);
+    if (!seed.ok) throw new Error(`CLAMAV_SEED_INVALID: ${seed.problems.join("; ")}`);
   }
   const missingInputs = preflightChecks({ clamavSeedDir }).filter((check) => !check.exists);
   if (missingInputs.length > 0) {

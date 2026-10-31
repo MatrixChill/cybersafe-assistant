@@ -458,8 +458,8 @@ function serviceEnv(pipeToken: string | undefined): NodeJS.ProcessEnv {
   };
   const bundledClamscan = path.join(process.resourcesPath, "clamav", "clamscan.exe");
   if (fs.existsSync(bundledClamscan)) env[CLAMAV_BINARY_ENV] = bundledClamscan;
-  // Semente offline: só é publicada quando o manifesto está presente. O
-  // serviço verifica hashes/licença e só copia se ainda não houver base.
+  // Base offline read-only, separada do perfil. O serviço verifica pins e
+  // licença em cada probe; freshclam nunca recebe este directório.
   const bundledClamavSeed = path.join(process.resourcesPath, "clamav-seed");
   if (fs.existsSync(path.join(bundledClamavSeed, "SEED-MANIFEST.json"))) {
     env.CYBERSAFE_CLAMAV_SEED_DIR = bundledClamavSeed;

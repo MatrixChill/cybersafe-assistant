@@ -79,6 +79,11 @@ export function verifyClamavSeedBundle(dir, { expected = EXPECTED_CLAMAV_SEED } 
   const manifestPath = path.join(dir, CLAMAV_SEED_MANIFEST_FILENAME);
   let entries;
   try {
+    for (let parent = path.resolve(dir); ; parent = path.dirname(parent)) {
+      const stat = fs.lstatSync(parent);
+      if (stat.isSymbolicLink() || !stat.isDirectory()) return { ok: false, dir, manifestPath, filesChecked: 0, bytesChecked: 0, version: CLAMAV_SEED_VERSION, problems: ["raiz/parent não regular"] };
+      if (path.dirname(parent) === parent) break;
+    }
     const root = fs.lstatSync(dir);
     if (root.isSymbolicLink() || !root.isDirectory()) {
       return { ok: false, dir, manifestPath, filesChecked: 0, bytesChecked: 0, version: CLAMAV_SEED_VERSION, problems: ["raiz não é um directório regular"] };
@@ -101,6 +106,8 @@ export function verifyClamavSeedBundle(dir, { expected = EXPECTED_CLAMAV_SEED } 
     seen.add(key);
     if (!ALLOWED.has(entry.name)) problems.push(`ficheiro extra não listado: ${entry.name}`);
   }
+  if (problems.length) return { ok: false, dir, manifestPath, filesChecked: 0, bytesChecked: 0, version: CLAMAV_SEED_VERSION, problems };
+  if (!regularFile(manifestPath, problems)) return { ok: false, dir, manifestPath, filesChecked: 0, bytesChecked: 0, version: CLAMAV_SEED_VERSION, problems };
   let manifest = null;
   try {
     manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));

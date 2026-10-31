@@ -749,7 +749,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
     const path = await import("node:path");
     const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-warning-"));
     const rulesBySource = new Map([
-      ["MALW_Eicar.yar", "rule warning_probe { condition: true }"],
+      ["MALW_Eicar.yar", 'rule warning_probe { strings: $a = "a" condition: $a }'],
       ["packer_compiler_signatures.yar", "rule source_packer { condition: filesize > 10 }"],
       ["crypto_signatures.yar", "rule source_crypto { condition: filesize > 20 }"],
       ["RANSOM_MS17-010_Wannacrypt.yar", "rule source_ransomware { condition: filesize > 30 }"],
@@ -773,7 +773,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
 
       assert.equal(result.yaraUpdated, true);
       assert.ok(
-        result.warnings.some((warning) => /MALW_Eicar\.yar.*invariant_expr/.test(warning)),
+        result.warnings.some((warning) => /MALW_Eicar\.yar.*slow-scan/.test(warning)),
         "o warning tem de identificar a fonte e o código do compilador",
       );
       assert.ok(
@@ -820,7 +820,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
 
       assert.equal(result.yaraUpdated, true);
       assert.ok(
-        result.errors.some((error) => /MALW_Eicar\.yar.*incompatible-module.*E010/.test(error)),
+        result.errors.some((error) => /MALW_Eicar\.yar.*incompatible-module.*unknown-module/.test(error)),
         "módulo desconhecido deve ser classificado com a origem e o código estável",
       );
       assert.doesNotMatch(published, /unsupported_module/);
