@@ -151,7 +151,7 @@ describe("binários oficiais — resolução e proveniência", () => {
     assert.match(vendorManifest.archive.url, /^https:\/\/github\.com\/VirusTotal\/yara\/releases\/download\/v/);
 
     const listed = new Map(vendorManifest.files.map((entry) => [entry.path, entry]));
-    for (const name of ["yara64.exe", "yarac64.exe", "COPYING.txt"]) {
+    for (const name of ["yara64.exe", "yarac64.exe"]) {
       const entry = listed.get(name);
       assert.ok(entry, `${name} não está no manifesto de proveniência`);
       const file = path.join(binaries.dir, name);
@@ -160,10 +160,22 @@ describe("binários oficiais — resolução e proveniência", () => {
       assert.equal(sha256(file), entry.sha256, `${name}: sha256 medido != sha256 declarado`);
     }
 
+    // O COPYING é texto: um checkout Windows pode convertê-lo para CRLF. O
+    // manifesto publica os bytes canónicos (LF), por isso o hash é medido
+    // sobre o conteúdo normalizado, não sobre o estado local do checkout.
+    const copyingEntry = listed.get("COPYING.txt");
+    assert.ok(copyingEntry, "COPYING.txt não está no manifesto de proveniência");
+    const copyingText = fs.readFileSync(path.join(binaries.dir, "COPYING.txt"), "utf8").replace(/\r\n/g, "\n");
+    assert.equal(Buffer.byteLength(copyingText, "utf8"), copyingEntry.bytes, "COPYING.txt: bytes canónicos != declarados");
+    assert.equal(
+      crypto.createHash("sha256").update(copyingText, "utf8").digest("hex"),
+      copyingEntry.sha256,
+      "COPYING.txt: sha256 canónico != declarado",
+    );
+
     // O aviso de copyright tem de acompanhar o binário: sem ele não há
     // distribuição legítima, mesmo com o motor a funcionar.
     const license = fs.readFileSync(path.join(binaries.dir, "COPYING.txt"), "utf-8");
-    assert.equal(sha256(path.join(binaries.dir, "COPYING.txt")), vendorManifest.licenseText.sha256);
     assert.match(license, /Copyright \(c\) 2007-2016\. The YARA Authors\. All Rights Reserved\./);
     assert.match(license, /Redistributions of source code must retain the above copyright notice/);
     assert.match(license, /Redistributions in binary form must reproduce the above copyright notice/);

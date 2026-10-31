@@ -1,3 +1,4 @@
 # Ficheiros cujo sha256 e publicado em manifests de proveniencia:
-# o checkout tem de preservar os bytes exatos (LF), em qualquer sistema.
-vendor/yara/COPYING.txt text eol=lf
+# -text = sem conversao de fim de linha; o checkout escreve os bytes do blob
+# (LF) tal como estao no indice, inclusive em Windows com core.autocrlf=true.
+vendor/yara/COPYING.txt -text
