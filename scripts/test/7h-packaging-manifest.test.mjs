@@ -184,7 +184,7 @@ describe("pré-verificação dos inputs", () => {
       assert.ok(checks.some((check) => check.id.startsWith(`workspace:${pkg}/`)), `${pkg} tem de ser verificado`);
     }
     assert.ok(checks.some((check) => check.id === "binario:scan-engine.exe"));
-    for (const id of ["binario:yara64.exe", "binario:yarac64.exe", "licenca:yara/COPYING.txt"]) {
+    for (const id of ["binario:yara64.exe", "binario:yarac64.exe", "binario:yara/vcruntime140.dll", "licenca:yara/COPYING.txt"]) {
       assert.ok(checks.some((check) => check.id === id), `${id} tem de ser verificado antes do build`);
     }
     assert.ok(checks.some((check) => check.id === "icone:icon.ico"));

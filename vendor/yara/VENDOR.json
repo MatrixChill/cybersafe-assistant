@@ -18,7 +18,7 @@
     "name": "COPYING.txt",
     "url": "https://raw.githubusercontent.com/VirusTotal/yara/v4.6.0/COPYING",
     "sha256": "efdabc1c1f655528b8c3a59b03668d446746d87273fab76f8af800b6e8891bd2",
-    "note": "texto integral da licença BSD-3-Clause com o aviso de copyright do upstream."
+    "note": "texto integral da licença BSD-3-Clause com o aviso de copyright do upstream. O git trata o ficheiro como -text para o checkout preservar os bytes LF."
   },
   "files": [
     {
@@ -35,7 +35,16 @@
       "path": "COPYING.txt",
       "bytes": 1493,
       "sha256": "efdabc1c1f655528b8c3a59b03668d446746d87273fab76f8af800b6e8891bd2"
+    },
+    {
+      "path": "vcruntime140.dll",
+      "bytes": 119888,
+      "sha256": "02c6aa0e6e624411a9f19b0360a7865ab15908e26024510e5c38a9c08362c35a",
+      "role": "runtime MSVC app-local de yara64.exe/yarac64.exe (STATUS_DLL_NOT_FOUND na VM016 sem ele)",
+      "source": "Microsoft Visual C++ 2015-2022 x64 Redistributable; Authenticode Status=Valid, signer CN=Microsoft Windows Software Compatibility Publisher; copiado do payload preservado 0.1.10 R5. Não é o binário inbox de System32 (sha256 diferente).",
+      "redistribution": "Microsoft Visual C++ Redistributable — ficheiro runtime redistribuível com a aplicação; o texto da licença Microsoft não é reescrito nem inventado aqui."
     }
   ],
-  "generatedAt": "2026-10-27T22:18:46.442Z"
+  "generatedAt": "2026-10-27T22:18:46.442Z",
+  "updatedAt": "2026-10-31T21:10:00.000Z"
 }

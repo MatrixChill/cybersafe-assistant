@@ -81,7 +81,15 @@ histórico documental; não descrevem o conteúdo do artefacto atual.
    Binários publicados em resources/yara:
      yara64.exe  2426368 B  sha256 6b4897b945f408080645ec06e2d2540f067a57a68d5e5830781cdc1d88fc41e2
      yarac64.exe 2371584 B  sha256 1e9ff85a0d866501b86879f32032573afe8f49c2b6714df8678a89e9b4458178
-   Dependência de runtime: VCRUNTIME140.dll (Microsoft Visual C++ 2015-2022 x64).
+   Dependência de runtime: VCRUNTIME140.dll (Microsoft Visual C++ 2015-2022 x64),
+   publicada APP-LOCAL em resources/yara para o loader do Windows a encontrar
+   ao lado de yara64.exe/yarac64.exe (sem ela, o processo não chega a main —
+   STATUS_DLL_NOT_FOUND, o modo de falha medido na VM016).
+     vcruntime140.dll  119888 B  sha256 02c6aa0e6e624411a9f19b0360a7865ab15908e26024510e5c38a9c08362c35a
+     Authenticode: Status=Valid; signer CN=Microsoft Windows Software Compatibility Publisher, O=Microsoft Corporation.
+     Origem: Microsoft Visual C++ 2015-2022 x64 Redistributable, copiado do
+     payload preservado 0.1.10 R5; NÃO é o ficheiro inbox de System32
+     (sha256 d1f4225df2cd877dbf130d5668a021dce3f94118455ff5ec952061c30afc9ce7).
    Não depende de @litko/yara-x nem da árvore Rust YARA-X.
 
 Equivalência binário ↔ registry (registo histórico do binding removido; separada das licenças acima)

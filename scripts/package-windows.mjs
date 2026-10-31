@@ -75,6 +75,7 @@ let candidateId;
  */
 const vendorClamavDir = path.join(root, "vendor", "clamav");
 const vendorManifestPath = path.join(vendorClamavDir, "VENDOR.json");
+const yaraVendorDir = path.join(root, "vendor", "yara");
 const VENDOR_FIX = "node scripts/vendor-clamav.mjs";
 /** Metadados que o `vendor-clamav.mjs` gera e que TÊM de estar no bundle. */
 const VENDOR_OFFER_NAME = "SOURCE-OFFER.txt";
@@ -130,6 +131,7 @@ const PREFLIGHT = [
   { id: "binario:yara64.exe", path: path.join(root, "vendor", "yara", "yara64.exe"), fix: "repor vendor/yara (YARA 4.6.0 oficial + VENDOR.json)" },
   { id: "binario:yarac64.exe", path: path.join(root, "vendor", "yara", "yarac64.exe"), fix: "repor vendor/yara (YARA 4.6.0 oficial + VENDOR.json)" },
   { id: "licenca:yara/COPYING.txt", path: path.join(root, "vendor", "yara", "COPYING.txt"), fix: "repor vendor/yara/COPYING.txt (BSD-3-Clause do upstream)" },
+  { id: "binario:yara/vcruntime140.dll", path: path.join(root, "vendor", "yara", "vcruntime140.dll"), fix: "repor vendor/yara/vcruntime140.dll (MSVC 2015-2022 x64, assinado)" },
   { id: "bundle-clamav:VENDOR.json", path: vendorManifestPath, fix: VENDOR_FIX },
   { id: "bundle-clamav:clamscan.exe", path: path.join(vendorClamavDir, "clamscan.exe"), fix: VENDOR_FIX },
   { id: "licencas:THIRD-PARTY-NOTICES.txt", path: path.join(licensesDir, "THIRD-PARTY-NOTICES.txt"), fix: "repor os assets de licenças revistos e o respectivo manifesto" },
@@ -586,7 +588,7 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
         // YARA clássico oficial: `resolveYaraClassicBinaries()` procura
         // `resources/yara` no artefacto empacotado. Sem esta entrada, o build
         // sai com o motor indisponível e nenhum aviso no setup.
-        { from: path.join(root, "vendor", "yara"), to: "yara" },
+        { from: yaraVendorDir, to: "yara" },
         { from: clamavDir, to: "clamav" },
         { from: licensesFrom, to: "licenses" },
       ],
@@ -1290,6 +1292,87 @@ function regularNonEmpty(file) {
   };
 }
 
+/**
+ * VERIFICAÇÃO REAL do vendor YARA — bytes e sha256, não nomes de ficheiros.
+ *
+ * O `--check` e o pipeline falham FECHADO se o `VENDOR.json` não descrever os
+ * quatro ficheiros obrigatórios (dois executáveis, a licença e o runtime
+ * app-local) ou se qualquer byte divergir do manifesto. Isto existe porque a
+ * VM016 mostrou o modo de falha caro: o `yarac64.exe` importa VCRUNTIME140.dll,
+ * o loader do Windows não a encontra ao lado do executável e o processo nunca
+ * chega a `main` (STATUS_DLL_NOT_FOUND). A presença do `.exe` não prova que o
+ * motor arranca; o runtime tem de viajar ao lado dele e ser medido.
+ *
+ * Não segue symlinks e não lê ficheiros fora do directório do vendor.
+ */
+export function verifyYaraVendor(options = {}) {
+  const dir = options.dir ?? yaraVendorDir;
+  const manifestPath = options.manifestPath ?? path.join(dir, "VENDOR.json");
+  const problems = [];
+  const result = { ok: false, problems, manifestPath, version: null, filesChecked: 0, bytesChecked: 0, runtimeBundled: false };
+
+  let manifest;
+  try {
+    manifest = JSON.parse(fs.readFileSync(manifestPath, "utf8"));
+  } catch (error) {
+    problems.push(`${manifestPath}: manifesto ausente ou ilegível (${error instanceof Error ? error.message : String(error)})`);
+    return result;
+  }
+  if (manifest.engine !== "yara-classic") problems.push(`engine inesperado: ${JSON.stringify(manifest.engine)}`);
+  if (manifest.version !== "4.6.0") problems.push(`versão inesperada: ${JSON.stringify(manifest.version)}`);
+  if (manifest.license !== "BSD-3-Clause") problems.push(`licença inesperada: ${JSON.stringify(manifest.license)}`);
+  if (!Array.isArray(manifest.files)) {
+    problems.push("VENDOR.json sem lista `files`");
+    return result;
+  }
+
+  const listed = new Map(manifest.files.map((entry) => [String(entry.path ?? "").replaceAll("\\", "/").toLowerCase(), entry]));
+  for (const name of ["yara64.exe", "yarac64.exe", "COPYING.txt", "vcruntime140.dll"]) {
+    if (!listed.has(name.toLowerCase())) problems.push(`${name}: ausente do VENDOR.json`);
+  }
+
+  for (const entry of manifest.files) {
+    const rel = String(entry.path ?? "").replaceAll("\\", "/");
+    if (!rel || rel.includes("..") || path.isAbsolute(rel)) {
+      problems.push(`caminho inválido no manifesto: ${rel}`);
+      continue;
+    }
+    const file = path.join(dir, ...rel.split("/"));
+    let stat;
+    try {
+      stat = fs.lstatSync(file);
+    } catch {
+      problems.push(`${rel}: ausente do disco`);
+      continue;
+    }
+    if (stat.isSymbolicLink() || !stat.isFile()) {
+      problems.push(`${rel}: não é um ficheiro regular`);
+      continue;
+    }
+    result.filesChecked += 1;
+    result.bytesChecked += stat.size;
+    if (stat.size !== entry.bytes) {
+      problems.push(`${rel}: ${stat.size} B != ${entry.bytes} B declarados`);
+      continue;
+    }
+    if (sha256OfFile(file) !== entry.sha256) {
+      problems.push(`${rel}: sha256 diferente do manifesto`);
+    }
+  }
+
+  result.version = typeof manifest.version === "string" ? manifest.version : null;
+  // Mede o ficheiro NO DISCO, não só a entrada no manifesto: um manifesto que
+  // liste o runtime com o ficheiro apagado continua a ser uma falha.
+  try {
+    const runtimeStat = fs.lstatSync(path.join(dir, "vcruntime140.dll"));
+    result.runtimeBundled = runtimeStat.isFile() && !runtimeStat.isSymbolicLink();
+  } catch {
+    result.runtimeBundled = false;
+  }
+  result.ok = problems.length === 0;
+  return result;
+}
+
 export function estadoManifestoObrigacao(file) {
   const stat = regularNonEmpty(file);
   const insuficiente = (detalhe, bloqueador = null) => ({ estado: "manifesto-insuficiente", detalhe, bloqueador, evidencias: [] });
@@ -1341,9 +1424,18 @@ function checkReport() {
   // aprovado (ou se o manifesto não existir). É um gate, não um relatório.
   const freeze = verifySourceFreeze();
   const licensing = estadoManifestoObrigacao(path.join(licensesDir, "PROVENANCE.json"));
+  const yara = verifyYaraVendor();
   return {
-    ok: checks.every((check) => check.exists) && bundle.ok && freeze.ok && licensing.estado === "prova-fecha",
+    ok: checks.every((check) => check.exists) && bundle.ok && yara.ok && freeze.ok && licensing.estado === "prova-fecha",
     licensing,
+    yara: {
+      ok: yara.ok,
+      version: yara.version,
+      filesChecked: yara.filesChecked,
+      bytesChecked: yara.bytesChecked,
+      runtimeBundled: yara.runtimeBundled,
+      problems: yara.problems,
+    },
     mode: "check",
     flags: { dir: dirOnly, keep: keepStaging, check: checkOnly },
     builds: [...BUILD_WORKSPACES.map((w) => `npm run build -w ${w}`), "node scripts/stage-renderer.mjs"],
@@ -1427,6 +1519,17 @@ function runPipeline() {
     process.exit(1);
   }
   log(`     bundle ClamAV ok: ${bundleCheck.filesChecked} ficheiros, ${(bundleCheck.bytesChecked / 1024 / 1024).toFixed(1)} MiB, versão ${bundleCheck.version}${bundleCheck.sourceBundled ? ", fonte correspondente incluída" : ""}`);
+
+  // YARA clássico: bytes e sha256 do executável, licença E runtime app-local.
+  // A existência do `.exe` não prova que o loader encontra VCRUNTIME140.dll ao
+  // lado dele — o modo de falha medido na VM016. Falha FECHADO.
+  const yaraCheck = verifyYaraVendor();
+  if (!yaraCheck.ok) {
+    for (const problem of yaraCheck.problems) log(`YARA ${problem}`);
+    console.error("[package] vendor/yara inválido: nada foi empacotado");
+    process.exit(1);
+  }
+  log(`     YARA clássico ok: ${yaraCheck.filesChecked} ficheiros, ${yaraCheck.bytesChecked} B, versão ${yaraCheck.version}${yaraCheck.runtimeBundled ? ", VCRUNTIME140 app-local" : ""}`);
 
   // ── 0c. Pins de versão do staging (TP-QA2-PACKAGING-ENGINES) ───────────────
   // Antes de compilar/instalar: os manifestos dos workspaces têm de declarar a
