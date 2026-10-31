@@ -2,6 +2,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
   ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS,
+  engineUnavailableKey,
   shouldPublishEngineUnavailable,
 } from '../dist/engine-health-notifications.js';
 
@@ -13,14 +14,24 @@ test('R7: uma transição real de disponível para indisponível anuncia', () =>
   assert.equal(shouldPublishEngineUnavailable(on(), off(), agora, undefined), true);
 });
 
-test('R7: flapping dentro da janela de arrefecimento não repete a notificação', () => {
-  const publishedAt = agora - 1000;
-  assert.equal(shouldPublishEngineUnavailable(on(), off(), agora, publishedAt), false);
+test('R7: a MESMA fingerprint dentro da janela não repete a notificação', () => {
+  const notice = { key: engineUnavailableKey(off()), at: agora - 1000 };
+  assert.equal(shouldPublishEngineUnavailable(on(), off(), agora, notice), false);
 });
 
-test('R7: depois da janela, uma nova transição volta a anunciar', () => {
-  const publishedAt = agora - (ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS + 1);
-  assert.equal(shouldPublishEngineUnavailable(on(), off(), agora, publishedAt), true);
+test('R7: a mesma fingerprint volta a anunciar depois da janela', () => {
+  const notice = { key: engineUnavailableKey(off()), at: agora - (ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS + 1) };
+  assert.equal(shouldPublishEngineUnavailable(on(), off(), agora, notice), true);
+});
+
+test('R7: uma indisponibilidade DIFERENTE após recuperação não é ocultada pela janela', () => {
+  const notice = { key: engineUnavailableKey(off('degraded')), at: agora - 1000 };
+  assert.equal(shouldPublishEngineUnavailable(on(), off('unavailable'), agora, notice), true);
+});
+
+test('R7: motores distintos têm fingerprints distintas', () => {
+  const notice = { key: engineUnavailableKey(off('degraded', 'ClamAV')), at: agora - 1000 };
+  assert.equal(shouldPublishEngineUnavailable(on('Native'), off('degraded', 'Native'), agora, notice), true);
 });
 
 test('R7: já indisponível não gera uma segunda notificação', () => {
@@ -33,8 +44,4 @@ test('R7: voltar a estar disponível nunca anuncia indisponibilidade', () => {
 
 test('R7: arranque sem leitura prévia não anuncia uma queda que não foi observada', () => {
   assert.equal(shouldPublishEngineUnavailable(null, off(), agora, undefined), false);
-});
-
-test('R7: motores distintos não partilham a decisão por nome', () => {
-  assert.equal(shouldPublishEngineUnavailable(on('Native'), off('unavailable', 'Native'), agora, undefined), true);
 });

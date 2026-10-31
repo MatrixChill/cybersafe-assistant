@@ -20,6 +20,9 @@ function fixture(){
  const sandbox={ipcRegistered:false,isQuitting:false,ipcMain:{handle:(name,handler)=>handlers.set(name,handler)},
   mainWindow:{webContents:contents},app:{isPackaged:false},process:{platform:"win32"},path,pathToFileURL,__dirname:"fixture-only",
   trustedIpcHandler,guardedServiceRequest,reportWindowPreferences,
+  // Seam do fixture (pre-existente): registerIpc chama este registo no arranque;
+  // o canal de credenciais de IA não é exercido por este teste.
+  registerAiCredentialsIpc:()=>{},currentAiStore:{},registerProcessTerminationIpc:()=>{},
   client:{request:async(topic,payload)=>{effects.push([topic,payload]);return {id:payload?.id,status:"completed"};}},
  };
  vm.runInNewContext(compile(fn("registerIpc"))+"\nregisterIpc();",sandbox);

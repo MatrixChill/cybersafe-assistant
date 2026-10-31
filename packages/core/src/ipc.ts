@@ -50,6 +50,8 @@ export function decodeMessages(buffer: string): { messages: any[]; rest: string 
 export const RPC_MAX_FRAME_BYTES = 512 * 1024;
 export const RPC_MAX_REST_BYTES = 1024 * 1024;
 export const RPC_MAX_MESSAGES_PER_CHUNK = 256;
+/** Tecto do buffer agregado antes de qualquer split: evita arrays gigantes. */
+export const RPC_MAX_BUFFER_BYTES = 2 * 1024 * 1024;
 
 export type RpcDecodeError =
   | "frame-too-large"
@@ -61,6 +63,7 @@ export interface RpcDecodeLimits {
   maxFrameBytes?: number;
   maxRestBytes?: number;
   maxMessages?: number;
+  maxBufferBytes?: number;
 }
 
 export interface BoundedDecodeResult {
@@ -73,16 +76,28 @@ export function decodeMessagesBounded(buffer: string, limits: RpcDecodeLimits = 
   const maxFrame = limits.maxFrameBytes ?? RPC_MAX_FRAME_BYTES;
   const maxRest = limits.maxRestBytes ?? RPC_MAX_REST_BYTES;
   const maxMessages = limits.maxMessages ?? RPC_MAX_MESSAGES_PER_CHUNK;
-  const parts = buffer.split("\n");
-  const rest = parts.pop() ?? "";
-  // Um `rest` sem newline é o caso que cresce indefinidamente: sem este tecto
-  // uma ligação que nunca envia "\n" acumulava tudo em memória.
-  if (rest.length > maxRest) return { messages: [], rest: "", error: "rest-too-large" };
+  const maxBuffer = limits.maxBufferBytes ?? RPC_MAX_BUFFER_BYTES;
+  // Os limites são de BYTES UTF-8, não de `string.length`: um caractere pode
+  // ocupar 2–4 bytes e um frame minúsculo em caracteres pode ser enorme em
+  // memória. A soma é verificada ANTES de qualquer split/scан, para não
+  // materializar um array de milhões de elementos.
+  if (Buffer.byteLength(buffer, "utf8") > maxBuffer) return { messages: [], rest: "", error: "rest-too-large" };
   const messages: any[] = [];
-  for (const raw of parts) {
+  let start = 0;
+  let scanned = 0;
+  // Mais linhas vazias do que mensagens permitidas não podem custar trabalho
+  // ilimitado: o orçamento de varrimento fecha o caso de flood de "\n".
+  const maxScanned = Math.max(1, maxMessages) * 4;
+  for (;;) {
+    const newline = buffer.indexOf("\n", start);
+    if (newline === -1) break;
+    if (++scanned > maxScanned) return { messages, rest: "", error: "too-many-messages" };
+    const raw = buffer.slice(start, newline);
+    start = newline + 1;
+    // Bytes do frame RAW, antes de trim: padding não contorna o tecto.
+    if (Buffer.byteLength(raw, "utf8") > maxFrame) return { messages, rest: "", error: "frame-too-large" };
     const line = raw.trim();
     if (!line) continue;
-    if (line.length > maxFrame) return { messages, rest: "", error: "frame-too-large" };
     if (messages.length >= maxMessages) return { messages, rest: "", error: "too-many-messages" };
     try {
       messages.push(JSON.parse(line));
@@ -90,5 +105,7 @@ export function decodeMessagesBounded(buffer: string, limits: RpcDecodeLimits = 
       return { messages, rest: "", error: "invalid-json" };
     }
   }
+  const rest = buffer.slice(start);
+  if (Buffer.byteLength(rest, "utf8") > maxRest) return { messages: [], rest: "", error: "rest-too-large" };
   return { messages, rest, error: null };
 }

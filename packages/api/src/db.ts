@@ -4,7 +4,7 @@ import path from 'path';
 
 import os from 'os';
 import { validarArranqueApi } from './dev-isolation.js';
-import { sampleEventsAllowed, SAMPLE_EVENTS_ENV } from './sample-events.js';
+import { sampleEventsAllowed, SAMPLE_EVENTS_ENV, seedSampleThreatEventsWith } from './sample-events.js';
 
 // ── SQLite Database Setup ──
 
@@ -326,29 +326,9 @@ export { SAMPLE_EVENTS_ENV, sampleEventsAllowed };
 /** Insere a amostra de desenvolvimento. Só corre com opt-in explícito. */
 export async function seedSampleThreatEvents(env: NodeJS.ProcessEnv = process.env): Promise<number> {
   if (!sampleEventsAllowed(env)) return 0;
-  const eventCount = db.prepare('SELECT COUNT(*) as c FROM threat_events').get() as { c: number };
-  if (eventCount.c > 0) return 0;
-  await prisma.threatEvent.createMany({
-    data: [
-      {
-        source: "dashboard",
-        url: "file://suspicious-file.exe",
-        domain: "file-scan",
-        severity: "critical",
-        confidence: 0.98,
-        rulesTriggered: ["dangerous_file_extension", "heuristic_match"],
-        createdAt: new Date(Date.now() - 1000 * 60 * 5)
-      },
-      {
-        source: "extension",
-        url: "http://phishing-site.net/login",
-        domain: "phishing-site.net",
-        severity: "high",
-        confidence: 0.85,
-        rulesTriggered: ["known_phishing_domain"],
-        createdAt: new Date(Date.now() - 1000 * 60 * 15)
-      }
-    ]
+  return seedSampleThreatEventsWith({
+    env,
+    countThreatEvents: () => (db.prepare('SELECT COUNT(*) as c FROM threat_events').get() as { c: number }).c,
+    createThreatEvents: (data) => prisma.threatEvent.createMany({ data }),
   });
-  return 2;
 }

@@ -11,6 +11,10 @@ import { timingSafeEqual } from "node:crypto";
 import * as fs from "node:fs/promises";
 import * as net from "node:net";
 import { StringDecoder } from "node:string_decoder";
+
+// AUD-002 (review): tectos do lado do socket, além do decoder.
+const RPC_MAX_PENDING_PER_CLIENT = 64;
+const RPC_MAX_OUTBOUND_BYTES = 2 * 1024 * 1024;
 import * as os from "node:os";
 import * as path from "node:path";
 import { execFile } from "node:child_process";
@@ -85,7 +89,7 @@ import { isTransientFsError, TRANSIENT_SCAN_ERROR_WINDOW_MS } from "./scan-error
 import { DefinitionUpdater, agendadorDefinicoesDeveArrancar, recuperacaoYaraPermitida } from "./updater.js";
 import { ClamDatabaseGate } from "./clam-database-gate.js";
 import { seedClamavDatabase } from "./clamav-seed.js";
-import { shouldPublishEngineUnavailable, ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS } from "./engine-health-notifications.js";
+import { shouldPublishEngineUnavailable, engineUnavailableKey, ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS } from "./engine-health-notifications.js";
 import { resolverCorpusYara } from "./dev-test-yara.js";
 import { ScanManager, linhaDeCancelamento } from "./scan-manager.js";
 import { ScanHistory } from "./scan-history.js";
@@ -395,8 +399,8 @@ export class ProtectionEngineService {
   private quarantinePolicy: QuarantinePolicy = "warn";
   private lastClamavAvailability: boolean | undefined;
   private lastClamavStatus: string | undefined;
-  /** Última notificação de indisponibilidade (dedupe de flapping). */
-  private lastClamavUnavailablePublishedAt: number | undefined;
+  /** Última notificação de indisponibilidade POR MOTIVO (dedupe de flapping). */
+  private lastClamavUnavailablePublish: { key: string; at: number } | undefined;
   private fileObservationReads = 0;
   private realtimeDroppedEvents = 0;
   private overflowNoticeAt = -Infinity;
@@ -2590,9 +2594,10 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     const previous = this.lastClamavAvailability === undefined
       ? null
       : { engine: "ClamAV", available: this.lastClamavAvailability, status: this.lastClamavStatus ?? "unknown" };
-    if (shouldPublishEngineUnavailable(previous, { engine: "ClamAV", available, status }, now, this.lastClamavUnavailablePublishedAt, ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS)) {
+    const nextEngine = { engine: "ClamAV", available, status };
+    if (shouldPublishEngineUnavailable(previous, nextEngine, now, this.lastClamavUnavailablePublish, ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS)) {
       this.eventBus.publish("engine.health", "high", "O ClamAV deixou de conseguir analisar; os resultados podem ser inconclusivos.", {engine:"ClamAV",essentialUnavailable:true,status});
-      this.lastClamavUnavailablePublishedAt = now;
+      this.lastClamavUnavailablePublish = { key: engineUnavailableKey(nextEngine), at: now };
     }
     this.lastClamavAvailability = available;
     this.lastClamavStatus = status;
@@ -4506,6 +4511,14 @@ if (processInfo.path) {
       this.clients.delete(socket);
       return false;
     }
+    // Backpressure de saída: um peer que não lê acumulava respostas (incluindo
+    // recusas "busy") sem limite no buffer do socket. Fechar é preferível a
+    // crescer memória em nome de um cliente que não consome.
+    if (socket.writableLength > RPC_MAX_OUTBOUND_BYTES) {
+      this.clients.delete(socket);
+      socket.destroy();
+      return false;
+    }
     try {
       socket.write(payload, (err) => {
         if (err) this.handleSocketFailure(socket, err);
@@ -4537,19 +4550,21 @@ if (processInfo.path) {
    */
   private attachClientSocket(socket: net.Socket) {
     this.clients.add(socket);
-    const requests = new RpcRequestQueue(4, 64);
+    const requests = new RpcRequestQueue(4, RPC_MAX_PENDING_PER_CLIENT);
     socket.once("close", () => requests.close());
     let buffer = "";
     // AUD-002: `chunk.toString()` cortava um caractere multibyte ao meio e
     // deixava U+FFFD no payload. O StringDecoder recompõe os bytes entre chunks.
     const decoder = new StringDecoder("utf8");
+    // Marcado antes de qualquer escrita: nenhum chunk posterior é aceite.
+    const state = { protocolClosed: false };
 
     // Sem este handler, um EPIPE/ECONNRESET assíncrono (o Electron fecha o
     // pipe antes de lermos a resposta) subia como uncaught exception.
     socket.on("error", (err) => this.handleSocketFailure(socket, err));
 
     socket.on("data", (chunk: Buffer) => {
-      if (socket.destroyed) return;
+      if (state.protocolClosed || socket.destroyed) return;
       buffer += decoder.write(chunk);
       const decoded = decodeMessagesBounded(buffer, {
         maxFrameBytes: RPC_MAX_FRAME_BYTES,
@@ -4560,14 +4575,14 @@ if (processInfo.path) {
       if (decoded.error) {
         // Limite/JSON inválido: fechar é mais seguro do que continuar a
         // interpretar bytes de um cliente que não respeita o contrato.
-        this.closeClientForProtocol(socket, requests, decoded.error);
+        this.closeClientForProtocol(socket, requests, state, decoded.error);
         return;
       }
       for (const message of decoded.messages) {
         const request = message as RpcRequest;
         if (!request || typeof request !== "object" || request.type !== "request") continue;
         if (!this.isValidRpcEnvelope(request)) {
-          this.closeClientForProtocol(socket, requests, "invalid-envelope");
+          this.closeClientForProtocol(socket, requests, state, "invalid-envelope");
           return;
         }
         const enqueuedAt = performance.now();
@@ -4583,6 +4598,11 @@ if (processInfo.path) {
         if (!accepted) {
           // Backpressure explícito: o cliente recebe uma recusa com o id do
           // pedido. Nunca empurrar para uma fila sem tecto, nem desaparecer.
+          // Peer que não lê: recusas ilimitadas também enchem o socket.
+          if (socket.writableLength > RPC_MAX_OUTBOUND_BYTES) {
+            this.closeClientForProtocol(socket, requests, state, "outbound-backpressure");
+            return;
+          }
           this.safeWrite(socket, encodeMessage({
             id: request.id,
             type: "response",
@@ -4614,14 +4634,34 @@ if (processInfo.path) {
 
   /**
    * Fecho controlado por violação de protocolo (nunca por um pedido válido).
-   * A razão é fixa e nossa: não ecoa bytes recebidos.
+   *
+   * `state.protocolClosed` é marcado ANTES de qualquer escrita: entre a decisão
+   * e o `destroy` ainda chegam chunks, e nenhum pode ser aceite/enfileirado.
+   * `pause()` trava leitura nova; o fecho é determinístico — uma vez por
+   * ligação — e a razão é fixa, sem eco de bytes recebidos.
    */
-  private closeClientForProtocol(socket: net.Socket, requests: RpcRequestQueue, reason: string) {
+  private closeClientForProtocol(
+    socket: net.Socket,
+    requests: RpcRequestQueue,
+    state: { protocolClosed: boolean },
+    reason: string,
+  ) {
+    if (state.protocolClosed) return;
+    state.protocolClosed = true;
     requests.close();
     this.clients.delete(socket);
-    if (socket.destroyed || this.isShuttingDown) return;
+    try {
+      socket.pause();
+    } catch {
+      /* socket já inutilizável */
+    }
+    if (socket.destroyed || this.isShuttingDown) {
+      socket.destroy();
+      return;
+    }
     console.warn(`[Service] ligação RPC encerrada: ${reason}`);
     this.safeWrite(socket, encodeMessage({ type: "error", error: "Protocolo RPC inválido; ligação encerrada." }));
+    socket.end();
     const timer = setTimeout(() => socket.destroy(), 100);
     timer.unref();
   }

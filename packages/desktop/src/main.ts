@@ -1828,7 +1828,7 @@ if (!gotTheLock) {
     // Identidade REAL do artefacto: o carimbo escrito pelo staging do renderer.
     // Sem carimbo, build/commit ficam ausentes e a UI diz «desconhecida» — nunca
     // se inventa um valor a partir da versão ou do nome do ficheiro.
-    const installedIdentity = readBuildIdentity(app.getAppPath());
+    const installedIdentity = readBuildIdentity(app.getAppPath(), app.getVersion());
     appUpdater = createProductionUpdater({
       cacheDir: updaterCacheDir(app.getPath("userData")),
       runtimeSupported: app.isPackaged && process.platform === "win32",

@@ -16,13 +16,29 @@ test('an unterminated frame cannot grow the rest without bound', () => {
   const decoded = decodeMessagesBounded('x'.repeat(33), limits);
   assert.equal(decoded.error, 'rest-too-large');
   assert.equal(decoded.rest, '');
-  assert.deepEqual(decoded.messages, []);
 });
 
-test('a single oversized frame is refused by name', () => {
-  const decoded = decodeMessagesBounded(`${JSON.stringify({ a: 'y'.repeat(80) })}\n`, limits);
+test('padding is counted BEFORE trim: spaces do not bypass the frame cap', () => {
+  const padded = `${' '.repeat(60)}${JSON.stringify({ a: 1 })}`;
+  assert.ok(padded.trim().length < 64, 'o JSON depois do trim cabe no tecto de caracteres');
+  const decoded = decodeMessagesBounded(`${padded}\n`, limits);
   assert.equal(decoded.error, 'frame-too-large');
-  assert.deepEqual(decoded.messages, []);
+});
+
+test('the frame cap is UTF-8 BYTES, not UTF-16 code units', () => {
+  const multibyte = JSON.stringify({ v: 'ç'.repeat(35) });
+  assert.ok(multibyte.length < 64, `caracteres abaixo do tecto: ${multibyte.length}`);
+  assert.ok(Buffer.byteLength(multibyte, 'utf8') > 64, 'bytes acima do tecto');
+  assert.equal(decodeMessagesBounded(`${multibyte}\n`, limits).error, 'frame-too-large');
+  assert.equal(decodeMessagesBounded(`${JSON.stringify({ v: 'ç'.repeat(10) })}\n`, limits).error, null);
+});
+
+test('the aggregate buffer is bounded before any split', () => {
+  assert.equal(decodeMessagesBounded('x'.repeat(200), { ...limits, maxBufferBytes: 64 }).error, 'rest-too-large');
+});
+
+test('a flood of empty lines is bounded by the scan budget', () => {
+  assert.equal(decodeMessagesBounded(`${'\n'.repeat(40)}`, limits).error, 'too-many-messages');
 });
 
 test('too many frames in one chunk are refused, not partially executed', () => {
@@ -39,7 +55,7 @@ test('invalid JSON is contained as a decode error instead of throwing', () => {
 });
 
 test('UTF-8 split across chunks is reassembled by the real framing', () => {
-  const payload = Buffer.from(`${encodeMessage({ name: 'Proteção' })}`, 'utf8');
+  const payload = Buffer.from(`${encodeMessage({ name: 'Proteção 🛡' })}`, 'utf8');
   const cut = payload.indexOf(Buffer.from('ç', 'utf8')) + 1; // dentro do caractere
   const decoder = new StringDecoder('utf8');
   let buffer = '';
@@ -51,7 +67,7 @@ test('UTF-8 split across chunks is reassembled by the real framing', () => {
     assert.equal(decoded.error, null);
     messages.push(...decoded.messages);
   }
-  assert.deepEqual(messages, [{ name: 'Proteção' }]);
+  assert.deepEqual(messages, [{ name: 'Proteção 🛡' }]);
   assert.equal(buffer, '');
 });
 
