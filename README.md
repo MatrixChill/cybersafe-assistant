@@ -22,6 +22,14 @@
 > **não estão aprovados para distribuição**. O CyberSafe Assistant **não substitui** o Microsoft
 > Defender nem qualquer antivírus certificado, e **não garante deteção** de todo o malware.
 
+> **Estado de validação (2026-10-31).** O código deste repositório corresponde ao snapshot de
+> desenvolvimento de 2026-10-30 e inclui a correção do ciclo de vida da janela
+> (`Object has been destroyed`). A candidata interna **0.1.10** foi testada manualmente em máquina
+> virtual e o crash de encerramento **deixou de se reproduzir nesse teste manual**; continua a ser
+> uma candidata interna, sem assinatura e não publicada. O instalador **0.1.9 (PAP R4)** não
+> continha esta correção e não deve ser usado como referência do estado atual. Este repositório
+> não publica instaladores, bases de assinaturas nem releases.
+
 ---
 
 ## Índice

@@ -12,6 +12,11 @@ está **planeado**. Não é uma promessa de datas.
   automatizados por área.
 - Instalador NSIS personalizado construído e compilado offline; **execução e validação em
   máquina limpa pendentes**.
+- O código do repositório corresponde ao snapshot de 2026-10-30 e inclui a correção do ciclo de
+  vida da janela (`Object has been destroyed`).
+- A candidata interna **0.1.10** foi testada manualmente em VM: o encerramento deixou de
+  reproduzir o crash nesse teste manual. Não é uma release; repetir numa instalação final.
+- O instalador **0.1.9 (PAP R4)** não continha a correção e não representa o estado atual.
 
 ## Fase 1 — Fechar a validação (prioridade alta)
 
