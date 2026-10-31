@@ -1,0 +1,41 @@
+{
+  "schema": 1,
+  "engine": "yara-classic",
+  "version": "4.6.0",
+  "releaseTag": "v4.6.0",
+  "repository": "https://github.com/VirusTotal/yara",
+  "license": "BSD-3-Clause",
+  "archive": {
+    "name": "yara-4.6.0-2443-win64.zip",
+    "url": "https://github.com/VirusTotal/yara/releases/download/v4.6.0/yara-4.6.0-2443-win64.zip",
+    "bytes": 2238893,
+    "sha256": "5e7124f173ed442458429ac0f79a4db2c024cc183c595737d477a7575d81e6dc",
+    "keptAt": ".archives/yara-4.6.0-2443-win64.zip",
+    "published": false,
+    "note": "arquivo oficial preservado para proveniência; NÃO é publicado no artefacto (extraResources com filtro)."
+  },
+  "licenseText": {
+    "name": "COPYING.txt",
+    "url": "https://raw.githubusercontent.com/VirusTotal/yara/v4.6.0/COPYING",
+    "sha256": "efdabc1c1f655528b8c3a59b03668d446746d87273fab76f8af800b6e8891bd2",
+    "note": "texto integral da licença BSD-3-Clause com o aviso de copyright do upstream."
+  },
+  "files": [
+    {
+      "path": "yara64.exe",
+      "bytes": 2426368,
+      "sha256": "6b4897b945f408080645ec06e2d2540f067a57a68d5e5830781cdc1d88fc41e2"
+    },
+    {
+      "path": "yarac64.exe",
+      "bytes": 2371584,
+      "sha256": "1e9ff85a0d866501b86879f32032573afe8f49c2b6714df8678a89e9b4458178"
+    },
+    {
+      "path": "COPYING.txt",
+      "bytes": 1493,
+      "sha256": "efdabc1c1f655528b8c3a59b03668d446746d87273fab76f8af800b6e8891bd2"
+    }
+  ],
+  "generatedAt": "2026-10-27T22:18:46.442Z"
+}
