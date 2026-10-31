@@ -107,6 +107,7 @@ export function toAppUpdateSnapshot(s: UpdateSnapshot): AppUpdateSnapshot {
     checkedAt: s.checkedAt,
     error: s.error,
     canInstall: s.canInstall,
+    manualDownloadOnly: s.manualDownloadOnly,
     requiresElevation: s.requiresElevation,
     automaticCheckEnabled: s.automaticCheckEnabled,
   };

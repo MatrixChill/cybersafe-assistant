@@ -34,7 +34,7 @@ export const PRODUCT_VERSION_FILE = "product-version.json";
  * opcional de pré-lançamento. Recusa espaços, barras e `+build` (que o nome do
  * artefacto não aceita sem escapar).
  */
-const VERSION_RE = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z][0-9A-Za-z.-]*)?$/;
+const VERSION_RE = /^(0|[1-9]\d*)\.(0|[1-9]\d*)\.(0|[1-9]\d*)(?:-(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*)(?:\.(?:0|[1-9]\d*|\d*[A-Za-z-][0-9A-Za-z-]*))*)?$/;
 
 export function isValidVersion(value) {
   return typeof value === "string" && VERSION_RE.test(value);
@@ -72,6 +72,8 @@ export function readProductVersion({ root = DEFAULT_ROOT } = {}) {
   }
   return {
     version: data.version,
+    productVersion: data.version.split("-")[0],
+    windowsVersion: `${data.version.split("-")[0]}.0`,
     channel: typeof data.channel === "string" ? data.channel : null,
     codename: typeof data.codename === "string" ? data.codename : null,
   };

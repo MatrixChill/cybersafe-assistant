@@ -30,6 +30,7 @@ export interface AppUpdateSnapshot {
   error?: { code: AppUpdateErrorCode; message: string };
   /** Main sets true only after integrity/authenticity/publisher/policy checks. */
   canInstall: boolean;
+  manualDownloadOnly?: boolean;
   requiresElevation?: boolean;
   automaticCheckEnabled: boolean;
 }
@@ -40,6 +41,7 @@ export interface AppUpdateBridge {
   getSnapshot(): Promise<AppUpdateSnapshot>;
   check(): Promise<AppUpdateResult>;
   download(): Promise<AppUpdateResult>;
+  revealDownload?(): Promise<AppUpdateResult>;
   cancel(): Promise<AppUpdateResult>;
   defer(): Promise<AppUpdateResult>;
   /** UI confirms first; main revalidates artifact/version and rejects active/unknown scans. */

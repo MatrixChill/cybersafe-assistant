@@ -7,7 +7,7 @@ import { configureAiChild } from "./ai-api-channel.js";
 import { windowsAppIdentity } from "./app-identity.js";
 import { createAuthSessionStore } from "./auth-session-store.js";
 import { registerAuthSessionIpc } from "./auth-session-ipc.js";
-import { app, BrowserWindow, dialog, ipcMain, Menu, Notification, Tray, nativeImage, nativeTheme, screen, safeStorage } from "electron";
+import { app, shell, BrowserWindow, dialog, ipcMain, Menu, Notification, Tray, nativeImage, nativeTheme, screen, safeStorage } from "electron";
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -40,7 +40,7 @@ import {
 // do IPC; a máquina e os adaptadores vivem em src/updater/*. Hoje UNCONFIGURED
 // (sem feed/chave/editor), adaptadores bloqueados, nada de rede/fs/instalador.
 import {
-  createUnconfiguredUpdater,
+  updaterCacheDir,
   failureResult,
   failureSnapshot,
   toAppUpdateSnapshot,
@@ -48,6 +48,7 @@ import {
   validateAutomaticInput,
   validateInstallRequest,
 } from "./updater/bridge.js";
+import { createProductionUpdater } from "./updater/production.js";
 import type { Updater } from "./updater/updater.js";
 import type { UpdaterResult } from "./updater/index.js";
 import { PIPE_NAME, CLAMAV_BINARY_ENV, stripDevIsolationEnv } from "@cybersafe/core";
@@ -1435,6 +1436,7 @@ function registerIpc(
     appUpdater ? toAppUpdateSnapshot(appUpdater.snapshotCopy()) : failureSnapshot("unconfigured", updateVersion(), "updater não inicializado"));
   handle("app:update-check", () => withUpdater((u) => u.check()));
   handle("app:update-download", () => withUpdater((u) => u.download()));
+  handle("app:update-reveal", () => withUpdater((u) => u.revealVerifiedDownload((file) => shell.showItemInFolder(file))));
   handle("app:update-cancel", () => withUpdater((u) => u.cancel()));
   handle("app:update-defer", () => withUpdater((u) => u.defer()));
   handle("app:update-install", async (_event, req: unknown) => {
@@ -1816,7 +1818,8 @@ if (!gotTheLock) {
     // Updater: hoje UNCONFIGURED (sem feed/chave/editor). `runtimeSupported` só
     // em Windows empacotado; dev/portable ⇒ `unsupported` honesto. Nenhum adapter
     // real é exercitado neste estado.
-    appUpdater = createUnconfiguredUpdater({
+    appUpdater = createProductionUpdater({
+      cacheDir: updaterCacheDir(app.getPath("userData")),
       runtimeSupported: app.isPackaged && process.platform === "win32",
       installedVersion: app.getVersion(),
     });

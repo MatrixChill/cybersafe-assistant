@@ -353,6 +353,7 @@ export const CANAIS_NEGADOS: ReadonlySet<string> = new Set([
   "dialog:open-folder",
   "app:update-check",
   "app:update-download",
+  "app:update-reveal",
   "app:update-install",
   "app:update-cancel",
   "app:update-defer",

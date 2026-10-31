@@ -983,8 +983,8 @@ describe("efeitos fora do IPC", () => {
     assert.match(fonteMain, /if \(fronteiraLeituraWindows\.activo\) return;/, "configureAutoStart tem de sair cedo no modo");
   });
 
-  it("actualizador: nenhum agendamento automático; só `createUnconfiguredUpdater`", () => {
-    assert.match(fonteMain, /appUpdater = createUnconfiguredUpdater\(\{/, "o arranque usa o updater não configurado");
+  it("actualizador: nenhum agendamento automático; configuração pública fixada no build", () => {
+    assert.match(fonteMain, /appUpdater = createProductionUpdater\(\{/, "o arranque usa a configuração pública de produção");
     assert.match(
       fonteMain,
       /runtimeSupported: app\.isPackaged && process\.platform === "win32"/,

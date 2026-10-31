@@ -16,6 +16,8 @@ import type {
 
 export interface UpdaterDeps {
   config: ConfigResolution;
+  /** Academic policy: reveal verified bytes only, never execute. */
+  manualDownloadOnly?: boolean;
   /** `app.isPackaged && !portable` (e win32 para publisher NSIS); senão `unsupported`. */
   runtimeSupported: boolean;
   installed: VersionInfo;

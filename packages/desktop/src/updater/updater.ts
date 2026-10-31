@@ -61,7 +61,7 @@ export class Updater {
     this.cache = new CacheStore(deps.cacheFs, deps.config.ok ? deps.config.config.cacheDir : path.resolve("."));
     const automatic = deps.config.ok ? deps.config.config.automaticCheckEnabled : false;
     if (deps.config.ok) this.resolvedConfig = deps.config.config;
-    this.snapshot = baseSnapshot(deps.installed, automatic);
+    this.snapshot = { ...baseSnapshot(deps.installed, automatic), manualDownloadOnly: deps.manualDownloadOnly === true };
     if (!deps.runtimeSupported) {
       this.snapshot = { ...this.snapshot, phase: "unsupported", error: { code: "unsupported", message: "runtime portable/dev: atualização não suportada" } };
     } else if (!deps.config.ok) {
@@ -187,16 +187,6 @@ export class Updater {
       if (!validation.ok) return this.fail("invalid-manifest", validation.message);
       const manifest = validation.manifest;
 
-      if (isDowngrade(manifest.version, this.deps.installed.version)) {
-        this.validated = undefined;
-        return this.fail("downgrade", `versão ${manifest.version} é anterior à instalada ${this.deps.installed.version}`);
-      }
-      if (!isUpgrade(manifest.version, this.deps.installed.version)) {
-        this.validated = undefined;
-        this.set({ phase: "upToDate", latest: undefined, canInstall: false, checkedAt, error: undefined });
-        return this.ok();
-      }
-
       // AUTENTICAR O MANIFESTO ANTES de promover a release / permitir download.
       // Assinatura inválida ⇒ NOTAS não confiáveis nunca são mostradas e NÃO há download.
       try {
@@ -212,6 +202,16 @@ export class Updater {
       } catch {
         this.validated = undefined;
         return this.fail("untrusted-metadata", "verificador de assinatura falhou (fail-closed)");
+      }
+
+      if (isDowngrade(manifest.version, this.deps.installed.version)) {
+        this.validated = undefined;
+        return this.fail("downgrade", `versão ${manifest.version} é anterior à instalada ${this.deps.installed.version}`);
+      }
+      if (!isUpgrade(manifest.version, this.deps.installed.version)) {
+        this.validated = undefined;
+        this.set({ phase: "upToDate", latest: undefined, canInstall: false, checkedAt, error: undefined });
+        return this.ok();
       }
 
       this.validated = manifest;
@@ -305,6 +305,11 @@ export class Updater {
       const finalPath = artifactFinalPath(config.cacheDir, manifest.version, manifest.file.sha256);
       this.artifactPath = finalPath;
 
+      if (this.deps.manualDownloadOnly === true) {
+        this.set({ phase: "downloaded", canInstall: false, progress: { downloadedBytes: data.length, totalBytes: data.length }, error: undefined });
+        return this.ok();
+      }
+
       try {
         const publisher = await this.deps.publisherVerifier.verify(finalPath, config.expectedPublisherName);
         if (!publisher.ok) {
@@ -327,7 +332,24 @@ export class Updater {
     }
   }
 
+  /** Revalidates bytes before revealing a folder. Never executes the file. */
+  async revealVerifiedDownload(reveal: (file: string) => void): Promise<UpdaterResult> {
+    const blocked = this.gate();
+    if (blocked) return blocked;
+    if (this.busy) return this.fail("busy", "operação em curso");
+    if (!this.deps.manualDownloadOnly || this.snapshot.phase !== "downloaded" || !this.validated || !this.artifactPath) return this.fail("installation", "nenhuma transferência manual validada");
+    this.busy = true;
+    try {
+      const bytes = await this.deps.cacheFs.readFile(this.artifactPath);
+      if (!bytes || bytes.length !== this.validated.file.sizeBytes || sha256Hex(bytes) !== this.validated.file.sha256.toLowerCase()) return this.fail("integrity", "o ficheiro foi alterado; abertura da pasta recusada");
+      reveal(this.artifactPath);
+      return this.ok();
+    } catch { return this.fail("internal", "não foi possível abrir a pasta"); }
+    finally { this.busy = false; }
+  }
+
   async install(request: { confirmed: boolean; expectedVersion: string }): Promise<UpdaterResult> {
+    if (this.deps.manualDownloadOnly) return this.fail("publisher", "instalação automática indisponível: instalador sem assinatura Authenticode validada");
     const blocked = this.gate();
     if (blocked) return blocked;
     if (this.busy) return this.busyResult();

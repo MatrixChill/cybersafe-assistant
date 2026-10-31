@@ -284,6 +284,17 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
             )}
           </div>
 
+          {snapshot.manualDownloadOnly && (
+            <div role="note" className="rounded border border-border p-3 text-sm">
+              Atualização manual: manifesto autenticado e SHA-256 verificado após a transferência.
+              O instalador não tem assinatura Authenticode validada. Não será executado automaticamente.
+              {snapshot.status === "downloaded" && actions.revealDownload && (
+                <button type="button" disabled={state.busy !== null} onClick={() => actions.revealDownload?.()}>
+                  Abrir pasta do instalador verificado
+                </button>
+              )}
+            </div>
+          )}
           {snapshot.status === "downloaded" && !snapshot.canInstall && (
             <p className="font-mono text-xs text-muted-foreground" data-testid="app-update-install-blocked">
               As verificações de segurança ainda não permitem instalar — o botão fica ativo quando terminarem.

@@ -174,6 +174,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     getSnapshot: () => invoke("app:update-get-snapshot"),
     check: () => invoke("app:update-check"),
     download: () => invoke("app:update-download"),
+    revealDownload: () => invoke("app:update-reveal"),
     cancel: () => invoke("app:update-cancel"),
     defer: () => invoke("app:update-defer"),
     install: (request: { confirmed: true; expectedVersion: string }) => invoke("app:update-install", request),

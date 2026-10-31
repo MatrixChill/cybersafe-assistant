@@ -100,7 +100,8 @@ for (const packaged of [false, true]) {
     //   proteção persistida no serviço, 19/10).
     // Qualquer mudança de superfície passa por esta auditoria.
     // Six additional guarded channels: three AI credentials and three protected termination.
-    assert.equal(f.handlers.size, 62, "audit covers every currently registered channel; review any surface change");
+    assert.equal(f.handlers.size, 63, "audit covers every currently registered channel; review any surface change");
+    assert.ok(f.handlers.has("app:update-reveal")); // folder reveal: same trusted document guard
     assert.ok(f.handlers.has("service:usb-scan"));
     assert.ok(f.handlers.has("service:usb-cancel"));
     // + auth-session read/write/clear: same sender/document guard, no new registrar.
@@ -228,7 +229,7 @@ test("preload surface is explicitly limited to the 56 reviewed capabilities", ()
     assert.equal(typeof method, "function", `${nome} tem de continuar a ser uma função`);
   }
   assert.deepEqual(Object.keys(api.appUpdate).sort(),
-    "cancel,check,defer,download,getSnapshot,install,onState,setAutomaticCheck".split(",").sort());
+    "cancel,check,defer,download,getSnapshot,install,onState,revealDownload,setAutomaticCheck".split(",").sort());
   for (const method of Object.values(api.appUpdate)) assert.equal(typeof method, "function");
   assert.deepEqual(Object.keys(api.authSession).sort(), ["clear", "read", "write"]);
   for (const method of Object.values(api.authSession)) assert.equal(typeof method, "function");

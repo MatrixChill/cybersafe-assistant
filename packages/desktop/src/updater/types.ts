@@ -76,6 +76,7 @@ export interface UpdateSnapshot {
   error?: { code: UpdateErrorCode; message: string };
   /** true só depois de integridade + autenticidade + editor + política. */
   canInstall: boolean;
+  manualDownloadOnly?: boolean;
   requiresElevation?: boolean;
   automaticCheckEnabled: boolean;
 }

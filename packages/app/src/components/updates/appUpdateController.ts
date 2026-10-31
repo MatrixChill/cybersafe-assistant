@@ -26,7 +26,7 @@
 import type { AppUpdateBridge, AppUpdateErrorCode, AppUpdateResult, AppUpdateSnapshot } from "@cybersafe/shared-types";
 import { errorCodeMessage } from "./appUpdateModel";
 
-export type AppUpdateActionName = "refresh" | "check" | "download" | "cancel" | "defer" | "install" | "automatic";
+export type AppUpdateActionName = "reveal" | "refresh" | "check" | "download" | "cancel" | "defer" | "install" | "automatic";
 
 export interface UpdatesViewState {
   bridgeAvailable: boolean;
@@ -40,6 +40,7 @@ export interface UpdatesActions {
   refresh(): void;
   check(): void;
   download(): void;
+  revealDownload?(): void;
   cancel(): void;
   defer(): void;
   install(expectedVersion: string): void;
@@ -54,6 +55,7 @@ export interface UpdatesController {
   refresh(): Promise<void>;
   check(): Promise<void>;
   download(): Promise<void>;
+  revealDownload(): Promise<void>;
   cancel(): Promise<void>;
   defer(): Promise<void>;
   install(expectedVersion: string): Promise<void>;
@@ -366,6 +368,7 @@ export function createUpdatesController(
     refresh,
     check: () => run("check", (b) => b.check()),
     download: () => run("download", (b) => b.download()),
+    revealDownload: () => run("reveal", (b) => { if (!b.revealDownload) throw new Error("A ponte não suporta abertura da pasta"); return b.revealDownload(); }),
     cancel,
     defer: () => run("defer", (b) => b.defer()),
     install: (expectedVersion: string) =>

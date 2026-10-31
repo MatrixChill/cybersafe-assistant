@@ -111,6 +111,7 @@ function dummyDeps(config) {
 
 function buildHarness({
   release,
+  manualDownloadOnly = false,
   installedVersion = "0.1.0",
   runtimeSupported = true,
   scanState = "idle",
@@ -137,6 +138,7 @@ function buildHarness({
   const updater = createUpdater({
     config,
     runtimeSupported,
+    manualDownloadOnly,
     installed: { version: installedVersion },
     source: release ? new LocalFixtureSource(() => ({ kind: "latest", manifest: release.raw })) : new LocalFixtureSource(() => ({ kind: "none" })),
     downloader: okDownloader(fs.files, { bytes: release ? release.bytes : new Uint8Array([1]), ...downloadBehavior }, downloadCalls),
@@ -438,4 +440,25 @@ describe("updater — preferência não auto-dispara; listeners", () => {
     assert.ok(afterFirst >= 1, "emitiu ao menos uma vez");
     assert.equal(seen, afterFirst, "listener removido não volta a receber");
   });
+});
+
+it('authenticates metadata even when the offered version equals the installed version', async () => {
+  const release = signedRelease({ version: '0.1.0', pins: makeKeys() });
+  const { updater } = buildHarness({ release });
+  const result = await updater.check();
+  assert.equal(result.ok, false);
+  assert.equal(result.error, 'untrusted-metadata');
+});
+
+it('manual policy verifies bytes, reveals only a folder and never executes', async () => {
+  const release = signedRelease();
+  const h = buildHarness({ release, manualDownloadOnly: true, publisherOk: false });
+  assert.equal((await h.updater.check()).ok, true);
+  assert.equal((await h.updater.download()).ok, true);
+  assert.equal(h.updater.snapshotCopy().canInstall, false);
+  const paths=[];
+  assert.equal((await h.updater.revealVerifiedDownload(p=>paths.push(p))).ok,true);
+  assert.equal(paths.length,1);
+  assert.equal((await h.updater.install({confirmed:true, expectedVersion:release.raw.version})).ok,false);
+  assert.equal(h.installCalls.length,0);
 });

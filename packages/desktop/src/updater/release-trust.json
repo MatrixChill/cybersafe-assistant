@@ -1,0 +1,8 @@
+{
+  "enabled": false,
+  "feedManifestUrl": "https://github.com/MatrixChill/cybersafe-assistant/releases/latest/download/update-manifest.json",
+  "publicKeyPem": "",
+  "pinnedKeyFingerprint": "",
+  "publisherLabel": "CyberSafe Assistant — academic unsigned",
+  "reason": "Publication public key not provisioned. Never replace with a fixture key."
+}
