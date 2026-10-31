@@ -71,6 +71,29 @@ function stagingDirs() {
 }
 
 describe("manifesto da aplicação empacotada", () => {
+  it("uses stock assisted NSIS without custom scripts/hooks and preserves installation contracts", () => {
+    const m = manifest();
+    const n = m.build.nsis;
+    assert.equal(n.include, undefined);
+    assert.equal(n.script, undefined);
+    assert.equal(Object.keys(n).some(key => /custom|hook/i.test(key)), false);
+    assert.equal(n.oneClick, false);
+    assert.equal(n.perMachine, false);
+    assert.equal(n.deleteAppDataOnUninstall, false);
+    assert.equal(n.createDesktopShortcut, true);
+    assert.equal(n.createStartMenuShortcut, true);
+    assert.equal(n.runAfterFinish, true);
+    assert.equal(n.language, undefined, 'do not force language as part of the stock correction');
+    assert.equal(m.build.appId, 'com.cybersafe.assistant');
+    assert.equal(m.version, readProductVersion({ root: REPO_ROOT }).version);
+    assert.equal(m.build.win.icon, path.join(DESKTOP_DIR, 'src', 'assets', 'icon.ico'));
+    assert.equal(n.installerSidebar, path.join(DESKTOP_DIR, 'build', 'installer', 'installerSidebar.bmp'));
+    assert.equal(n.uninstallerSidebar, path.join(DESKTOP_DIR, 'build', 'installer', 'uninstallerSidebar.bmp'));
+    const raw = desktopManifest.build.nsis;
+    assert.equal(raw.include, undefined, 'direct electron-builder use must also remain stock');
+    assert.equal(raw.script, undefined);
+  });
+
   it("leva productName: sem ele o userData cai em %APPDATA%\\@cybersafe\\desktop", () => {
     const m = manifest();
     assert.equal(m.productName, desktopManifest.build.productName, "o productName tem de vir do config do builder");

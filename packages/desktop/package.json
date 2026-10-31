@@ -56,10 +56,12 @@
     },
     "nsis": {
       "oneClick": false,
+      "perMachine": false,
       "allowToChangeInstallationDirectory": false,
       "createDesktopShortcut": true,
+      "createStartMenuShortcut": true,
+      "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "include": "installer/cybersafe-installer.nsh",
       "installerHeader": "installer/installerHeader.bmp",
       "installerSidebar": "installer/installerSidebar.bmp",
       "uninstallerSidebar": "installer/uninstallerSidebar.bmp"

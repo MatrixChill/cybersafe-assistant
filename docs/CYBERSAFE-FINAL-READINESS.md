@@ -1,6 +1,72 @@
 # CyberSafe — intensive close / continuidade técnica A–K
 
-## ESTADO ATUAL — revisão funcional posterior a87dada8
+## ESTADO ACTUAL — build894b426 medido, NSIS stock pendente de novo freeze
+
+**BLOCKED_WITH_EVIDENCE.** Codex aceitou894b426 em árvore isolada74ac108;
+core/service build0 e16/16 testes independentes (REPORTADO pelo Codex).
+Os144/144 da lane Freebuff são execução distinta, não16 reexecutados nem160
+casos únicos. Seed/fallback funcional aceite; trust/VM/publicação não aprovados.
+
+Freeze aprovado894b426bd88d661b95572bc42067470155790002, árvore clean,
+1751ficheiros, digest789e0278f7208597f6f06b0238e7ed644ec606a492f242683d78ce50b6b5a5a8.
+Preflightseed exit0. Build único autorizado exit0; freezePOST aprovado antes
+do delta seguinte. Artefacto apenas EVIDÊNCIA, NÃO candidato aceite:
+`packages/desktop/release/candidate-20261031-215142-91cac323/`
+`CyberSafe Assistant-0.1.10-internal.pap-r6.20261031-candidate-20261031-215142-91cac323-setup.exe`
+278622859B, SHA25640da200c20df04a4fe625024c5e7e2ef9e0ea761dfcc6fb10b9324452f5f83b7.
+
+Medição Freebuff no NOVO payload:423ficheiros fora asar/635800497B,
+2886entradas asar,0@litko/ascii_tree runtime. app.asarSHA
+724ca9eda2ba28c51c7375fe0a912d2929c92aadd9e148545e6c4c4b29b93657.
+Seed4recursos175916377B+manifesto, hashes fixos e licença ok. YARA4.6.0
+4recursos4919333B, VCRUNTIME app-local ok. SQLite.nodeABI130,
+SHA248266ce7ced05ac854e7662172eb56941b9a37c1e9a73433d28d6bfa7b7dcd7;
+koffiNAPI. Renderer versão0.1.10-internal.pap-r6.20261031,
+buildId20261031-215156, commit7=894b426, full=894b426bd88d661b95572bc42067470155790002,
+sourceState=clean. Mapa completo e inventário em PAYLOAD-MEASUREMENT.json e
+PAYLOAD-MANIFEST.json na pasta do artefacto. Identidades repetidas no JS são
+mesmos valores, não builds distintas. Binários não executados nesta medição;
+ABI é classificação estática, não prova de abertura SQLite no payload.
+
+Gráficos: symbol.png/tile.png presentes no asar; CoreScene tem fallback de
+falha WebGL/context lost e low-power. WebGL/GPU/runtime NÃO EXECUTADO,
+nenhuma inferência sobre VM; não forçada aceleração. Motores runtime do payload,
+login/Scanner/PDF/serviço instalado NÃO EXECUTADOS. Prova ClamAV real anterior
+na lane não é validação da candidata instalada. Build unsigned conforme logs;
+Authenticode do novo setup não medido independentemente, não inventar PASS.
+
+**Correcção documental:** o handoff antigo e referências a NSIS convencional
+não foram sustentados por verificação da configuração efectiva. A build894b426
+preservou nsis.include=installer/cybersafe-installer.nsh; esse script define
+customWelcomePage/customPageAfterChangeDir. Logo NÃO é assisted stock e fica
+HOLD independentemente do exit0. Não se encontrou builder-effective-config.yaml
+no output; conclusão sustentada pelo manifesto gerado por buildAppManifest,
+config fonte congelada e passagem directa ao electron-builder sem override.
+Não afirmar inspecção de ficheiro effective-config que não foi produzido.
+
+Delta mínimo autorizado pelo Codex: packages/desktop/package.json remove
+nsis.include e explicita perMachinefalse/createStartMenuShortcuttrue/runAfterFinishtrue;
+oneClickfalse/deleteAppDataOnUninstallfalse/createDesktopShortcuttrue/appIdactual
+preservados, ícone/bitmaps stock mantidos, sem forçar language. Scripts antigos
+preservados como histórico sem referência activa. Teste comportamental de
+buildAppManifest mede ausência include/script/custom hooks e todos os contratos,
+incluindo versão canónica, atalhos/opção executar/branding e config directo stock.
+nsis-stock-RED.log:10PASS1FAIL esperado; nsis-stock-POST.log:28PASS0FAIL0SKIP.
+Não houve segundo setup. Novo delta invalida freeze anterior e exige revisão,
+novo freeze e só então build corrigido. Não reutilizar approval894b426.
+
+Pendências TÉCNICAS: revisão delta stock, freezeexacto novo, build/payload e
+runtime isolado dirigidos, NSIS stock efectivo, metadadosWindows/Authenticode.
+HUMANAS: fingerprintEd25519/feed/certificado/VM/publicação separados.
+VM: clean snapshot/hash/manualinstall/benignos/motores/conta/PDF/encerramento/GPU,
+rollback snapshot. NÃO upgrade: appIdcom.cybersafe.assistant; dados podem ser
+partilhados apesar de identidades diferentes, usar snapshot limpo. Seed usa-se
+read-only em resources, NÃO deve ser copiada para perfil. Se >7dias, esperar
+degraded e actualizar por freshclam com autorização/rede, não fabricar frescura.
+Setup r6 anterior24beb5... permanece intacto. Nenhuma instalação/VM/trust/push.
+
+---
+## CHECKPOINT ANTERIOR — revisão funcional posterior a87dada8
 
 Esta secção substitui as conclusões técnicas do checkpoint histórico abaixo;
 resultados antigos são preservados, não reescritos. Owner Freebuff Builder,
