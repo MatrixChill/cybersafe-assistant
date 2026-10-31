@@ -1,7 +1,20 @@
 <!doctype html>
-<html lang="pt-PT">
+<!-- O documento nasce no tema POR OMISSÃO do produto (Núcleo escuro), não no
+     `:root` claro: sem isto, o primeiro paint — antes de o React aplicar as
+     preferências guardadas — é uma janela BRANCA (faixa de título incluída) e
+     só escurece quando o JS corre. `style` pinta a mesma cor que o
+     `backgroundColor` da BrowserWindow (#090b12), por isso não há flash.
+     O JS mantém a autoridade: `applyAppearance`/`applyV2Appearance` substituem
+     estes atributos pelas preferências reais do utilizador. -->
+<html lang="pt-PT" class="dark" data-theme="cybersafe-core" style="background-color: #090b12">
   <head>
     <meta charset="UTF-8" />
+    <!-- CSP de PRODUÇÃO. O renderer empacotado é carregado por loadFile(file://):
+         um header de resposta não chega a esse documento, por isso a política tem
+         de viajar no próprio HTML, ANTES de qualquer script. Esta string é a
+         fonte única: vite.config.ts deriva dela a política de DEV (só o que o HMR
+         exige) e um teste de entrega falha se divergir. -->
+    <meta http-equiv="Content-Security-Policy" content="default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; font-src 'self' data:; connect-src http://127.0.0.1:* http://localhost:*; object-src 'none'; base-uri 'none'; frame-src 'none'; form-action 'none'" />
     <!-- favicon = o escudo CS real (public/favicon.png), sem artwork novo -->
     <link rel="icon" type="image/png" href="/favicon.png" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />

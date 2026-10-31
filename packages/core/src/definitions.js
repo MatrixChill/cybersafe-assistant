@@ -6,7 +6,7 @@ export const DEFAULT_THRESHOLDS = {
 };
 export const DEFAULT_SETTINGS = {
     thresholds: DEFAULT_THRESHOLDS,
-    autoQuarantine: true,
+    autoKillTree: true,
     autoKillTree: true,
     restrictedAnalysis: true,
     scanTimeoutMs: 8_000,

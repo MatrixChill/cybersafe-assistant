@@ -144,7 +144,7 @@ export function sanitizeSignatureRecords(raw: unknown): SignatureRecord[] {
     const record = entry as Partial<SignatureRecord>;
     if (typeof record.sha256 !== "string") continue;
     const hash = record.sha256.trim().toLowerCase();
-    if (!hash || unique.has(hash)) continue;
+    if (!/^[0-9a-f]{64}$/.test(hash) || unique.has(hash)) continue;
     unique.set(hash, {
       sha256: hash,
       family:
@@ -257,6 +257,35 @@ export class SignatureDatabase {
       }
       this.records = new Map(records.map((record) => [record.sha256, record]));
       this.loadedFrom = filePath;
+
+      // Um array com registos validos NAO e o mesmo que cobertura offline. Uma
+      // base truncada (ou um feed que substituiu o ficheiro) pode ter entradas
+      // legitimas e nao ter nenhuma das assinaturas built-in obrigatorias — o
+      // EICAR incluido. Declarar `active` nesse caso dizia "a base esta boa"
+      // com a deteccao offline em falta. O criterio NAO e o tamanho da base:
+      // sao exactamente as assinaturas built-in cuja proveniencia esta provada.
+      const missingBuiltins = REQUIRED_BUILTIN_HASHES.filter(
+        (hash) => !records.some((record) => record.sha256.toLowerCase() === hash),
+      );
+      if (missingBuiltins.length > 0) {
+        // Repor a cobertura em MEMORIA (sao registos built-in, nao inventados)
+        // para nao perder deteccao; o ficheiro em disco NAO e tocado aqui —
+        // load() nao escreve, e o refresh/ensureFile decidem a correcao.
+        this.ensureOfflineCoverage();
+        this._health = {
+          status: "degraded",
+          detail:
+            `Base em ${filePath} com cobertura insuficiente: ${records.length} registo(s) válido(s), ` +
+            `${missingBuiltins.length} built-in em falta repostos em memória (${this.records.size} no total). ` +
+            `O ficheiro em disco não foi alterado.`,
+        };
+        console.warn(
+          `[Hashes] ${filePath} sem cobertura offline completa (${missingBuiltins.length} built-in em falta). ` +
+            `Cobertura reposta em memoria; base em disco preservada.`,
+        );
+        return;
+      }
+
       this._health = {
         status: "active",
         detail: `Loaded ${this.records.size} signature(s) from ${filePath}`,

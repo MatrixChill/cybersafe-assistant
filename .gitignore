@@ -1,13 +1,18 @@
+# Dependências
 node_modules/
-# Last reviewed: 2026-05-13
-dist/
-build/
-*.log
-packages/*/dist/
 packages/*/node_modules/
-packages/*/release/
 
-# Environment variables
+# Artefactos de build e empacotamento
+dist/
+packages/*/dist/
+packages/*/release/
+packages/native-engine/build/
+packages/desktop/dist-electron/
+*.tsbuildinfo
+
+# Bases de dados locais e segredos
+*.db
+*.sqlite
 .env
 .env.local
 .env.development.local
@@ -15,30 +20,28 @@ packages/*/release/
 .env.production.local
 **/.env
 **/.env.local
+*.pem
+*.key
+*.pfx
+*.p12
 
-# OS files
-.DS_Store
+# Binários de terceiros obtidos por script (ClamAV, GPL-2.0 + assinaturas)
+vendor/clamav/
+vendor/.archives/
+
+# Ficção de desenvolvimento e agentes (fora do repositório público)
+.maestri/
+.freebuff/
+Users/
+
+# Logs e lixo de sistema
+*.log
+*.tmp
 Thumbs.db
-
-# IDE files
+.DS_Store
 .vscode/
 .idea/
 
-# Database
-*.db
-*.sqlite
-.aider*
-
-# Artefactos de build python (nao sao fonte)
+# Python
 __pycache__/
 *.pyc
-
-# Maestri: infra-estrutura de agentes, nao produto CyberSafe.
-# Decisao (2026-10-05): passa a ter Git independente e privado, em
-# MatrixChill/maestri-infra. Zero dependencias: verificado que packages/ nao
-# importa nada de .maestri.
-#
-# NOTA: ignorar um caminho NAO o remove do indice. O que ja estava versionado
-# saiu do indice em `git rm -r --cached .maestri`, e continua legivel em todos
-# os commits anteriores deste historico. Nao houve reescrita de historico.
-.maestri/

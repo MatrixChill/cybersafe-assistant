@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import { X, ShieldAlert } from "lucide-react";
 import type {
   EngineHealth,
@@ -7,7 +7,8 @@ import type {
   EngineSubsystemStatus,
 } from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
-import { levelMeta, engineStatusText, wfpModuleDisplay, windowsFirewallDisplay, type ProtectionLevel } from "../lib/protectionHealth";
+import { levelMeta, engineStatusText, wfpModuleDisplay, type ProtectionLevel } from "../lib/protectionHealth";
+import { criarLeitorFirewall, copyEstadoLeituraFirewall, copiaPrimeiraPintura, type LeitorFirewall, type CopiaChipFirewall } from "../lib/firewallReadState";
 import { wfpHealth } from "@cybersafe/shared-types";
 
 interface ProtectionDetailsProps {
@@ -59,7 +60,7 @@ function contagemAssinaturas(detail?: string): number | null {
  * deve depender de uma garantia do emissor para nao mentir — os dados chegam
  * por um named-pipe, e um emissor novo nao conhece esta regra.
  *
- * Nestes casos a cobertura desce para `unknown`: "nao determinada" e honesto,
+ * Nestes casos a cobertura desce para `unknown`: "não verificada" é honesto,
  * "normal" seria uma affirmacao que o estado do motor nao sustenta.
  * Guard: test/yara-coverage-gate.test.ts.
  */
@@ -69,23 +70,13 @@ function coberturaUserCopy(
   status: EngineSubsystemStatus,
 ): string {
   const n = contagem === null ? "" : contagem === 1 ? " (1 regra de teste)" : ` (${contagem} regras)`;
-  // Plural PT-PT. Sem isto a linha de cobertura normal escrevia
-  // "1 regras carregadas" — que era a frase que o utilizador viu.
-  const carregadas =
-    contagem === null
-      ? "Cobertura normal."
-      : `Cobertura normal: ${contagem} ${contagem === 1 ? "regra carregada" : "regras carregadas"}.`;
-  // Um motor que nao esta `active` nao sustenta a affirmacao de cobertura
-  // plena, aconteca o que acontecer no campo `coverage`.
-  const efetiva: EngineSubsystemCoverage | undefined =
-    status !== "active" && coverage === "normal" ? "unknown" : coverage;
-  switch (efetiva) {
+  switch (coverage) {
     case "limited":
       return `Cobertura limitada: só regras de canário de teste${n}. Não detetam malware.`;
     case "normal":
-      return carregadas;
     case "unknown":
-      return "Cobertura não determinada: o serviço não mediu o que está carregado.";
+      if (status !== "active") return "Cobertura não verificada: o motor não está ativo.";
+      return "Cobertura não verificada: a origem e o alcance das definições carregadas não foram validados.";
     default:
       // Serviço antigo, sem o campo. Não inventar cobertura — e nunca assumir
       // que a ausência do campo significa que a cobertura é boa.
@@ -173,9 +164,33 @@ function wfpUserCopy(status: EngineSubsystemStatus): { texto: string; contexto: 
   return { texto: "O filtro de rede próprio do CyberSafe reporta um erro.", contexto: disclaimer };
 }
 
+/** SESSION14: o ciclo real da leitura (pedido/in-flight/erro/não-consultado/
+ *  resposta tardia) vive em `lib/firewallReadState.ts`, testável sem DOM.
+ *  O flicker NÃO VERIFICADO → ATIVO vinha do efeito partir de `null` em cada
+ *  abertura, sem estado de pedido: a reabertura repedia e a primeira pintura
+ *  era "Não verificado" com a resposta a caminho. Agora há UM leitor por
+ *  montagem: revalida por abertura com a leitura anterior visível, o in-flight
+ *  é coalescido, e sem bridge o leitor diz "sem bridge" — não é o `.then` de
+ *  `undefined`: o encadeamento opcional curto-circuita a expressão inteira,
+ *  `.then` e `.catch` nem correm, e o resultado era ausência silenciosa, não
+ *  um crash. */
+
 /** Um clique no estado geral abre os PROTECTION DETAILS. */
 export default function ProtectionDetails({ engine, level, open, onClose, score }: ProtectionDetailsProps) {
   const [technical, setTechnical] = useState(false);
+  const [leitura, setLeitura] = useState<CopiaChipFirewall | null>(null);
+  const leitorRef = useRef<LeitorFirewall | null>(null);
+
+  if (leitorRef.current === null) {
+    /** O corpo do componente corre também em render SSR (Node, sem `window`):
+        aceder a `window.electronAPI` sem guarda rebentava o render do Scanner.
+        Sem bridge o leitor entra no ramo `sem_bridge`, frase própria — não
+        falha de consulta, não crash. */
+    const bridge = typeof window !== "undefined" ? window.electronAPI : undefined;
+    const obterEstado =
+      bridge && typeof bridge.getWindowsHealth === "function" ? () => bridge.getWindowsHealth() : null;
+    leitorRef.current = criarLeitorFirewall({ obterEstado, aoEstado: (e) => setLeitura(copyEstadoLeituraFirewall(e)) });
+  }
 
   useEffect(() => {
     if (!open) return;
@@ -185,6 +200,25 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, [open, onClose]);
+
+  useEffect(() => {
+    const leitor = leitorRef.current;
+    if (!leitor) return;
+    /** StrictMode (main.tsx) faz setup→cleanup→setup na mesma instância: sem
+     *  `reativar()` o `desmontar()` do cleanup matava o leitor para sempre em
+     *  dev — o ref sobrevive, o leitor não renasce. */
+    leitor.reativar();
+    return () => leitor.desmontar();
+  }, []);
+
+  // Revalida por abertura: `garantirLeitura` coalesce o in-flight (um pedido
+  // em voo não soma outro) e mantém a última leitura VISÍVEL com ressalva
+  // durante a renovação. Fechar não deita fora a resposta em voo — ela é a
+  // leitura da vista, não da janela aberta naquele instante.
+  useEffect(() => {
+    if (!open) return;
+    leitorRef.current?.garantirLeitura();
+  }, [open]);
 
   if (!open) return null;
 
@@ -241,7 +275,11 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
         {scoreInfo && (
           <div className="mt-4 p-4 rounded-xl border border-border bg-secondary/30">
             <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Porque é que a nota é {score}/100
+              Porque é que a nota de proteção é {score}/100
+            </p>
+            <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
+              Esta é a nota de proteção do CyberSafe. Não é a saúde do computador: são medidas
+              diferentes, calculadas por motores diferentes, e não se somam.
             </p>
             <ul className="mt-2 space-y-1.5 text-sm text-foreground">
               <li>• Dos {scoreInfo.total} motores de análise, <b>{scoreInfo.active} estão ativos</b>.</li>
@@ -261,7 +299,7 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
                 <li>• Nenhuma ameaça recente tirou pontos — o teto vem dos motores em falta.</li>
               )}
             </ul>
-            <p className="mt-2 text-[11px] text-muted-foreground leading-relaxed">
+            <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
               A nota é o contrário do risco: partimos de 100 e retiramos o maior dos dois
               perigos — as ameaças recentes, ou a confiança que falta nos motores.
             </p>
@@ -283,7 +321,7 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
               <div key={key} className="p-3 rounded-lg bg-secondary/40 border border-border">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-sm text-foreground">{label}</span>
-                  <span className={cn("text-[10px] font-mono uppercase px-2 py-1 rounded border shrink-0", STATUS_META[status].cls)}>
+                  <span className={cn("text-xs font-mono uppercase px-2 py-1 rounded border shrink-0", STATUS_META[status].cls)}>
                     {STATUS_META[status].text}
                   </span>
                 </div>
@@ -301,67 +339,111 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
 
                     Guard: test/yara-coverage-gate.test.ts. */}
                 {key === "yara" && (
-                  <p className="text-[11px] text-foreground leading-relaxed">
+                  <p className="text-xs text-foreground leading-relaxed">
                     {coberturaUserCopy(engine?.yara?.coverage, regras, status)}
                   </p>
                 )}
                 {key === "hashDb" && (
-                  <p className="text-[11px] text-foreground leading-relaxed">
+                  <p className="text-xs text-foreground leading-relaxed">
                     {coberturaLinha ?? "Sem leitura do número de assinaturas."}
                   </p>
                 )}
                 {copy.contexto && (
-                  <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">{copy.contexto}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">{copy.contexto}</p>
                 )}
                 {technical && sub?.detail && (
-                  <p title={sub.detail} className="mt-1 text-[10px] text-muted-foreground font-mono break-all">— {sub.detail}</p>
+                  <p title={sub.detail} className="mt-1 text-xs text-muted-foreground font-mono break-all">— {sub.detail}</p>
                 )}
               </div>
             );
           })}
 
           {/* O Windows Firewall e o modulo WFP do CyberSafe sao coisas
-              diferentes. O servico so mede o segundo; sem leitura real do
-              primeiro o unico estado honesto e "Não verificado". */}
+              diferentes: o servico mede so o segundo, e o estado do
+              primeiro chega por `windows.healthSnapshot` através do leitor
+              de ciclo de vida (acima). Sem leitura confirmada o unico estado
+              honesto continua a ser "Nao verificado" — nunca "desligado";
+              com um pedido em voo diz-se "A consultar", não o vazio. */}
           {(() => {
             const wfpSub = wfpHealth(engine);
             const wfp = wfpModuleDisplay(wfpSub);
-            const win = windowsFirewallDisplay(null);
+            const win = leitura ?? copiaPrimeiraPintura(leitorRef.current?.temPonte() ?? false);
             const wfpCopy = wfpUserCopy(wfpSub?.status ?? "unavailable");
             return (
               <>
                 <div className="p-3 rounded-lg bg-secondary/40 border border-border">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-sm text-foreground">{WINDOWS_FIREWALL_LABEL}</span>
-                    <span className="text-[10px] font-mono uppercase px-2 py-1 rounded border text-muted-foreground border-border bg-secondary/40 shrink-0">
-                      {win.text}
+                    <span
+                      className={cn(
+                        "text-xs font-mono uppercase px-2 py-1 rounded border shrink-0",
+                        win.status === "active"
+                          ? "text-cyber-green border-cyber-green/40 bg-cyber-green/10"
+                          : win.status === "inactive"
+                            ? "text-cyber-red border-cyber-red/40 bg-cyber-red/10"
+                            : "text-muted-foreground border-border bg-secondary/40",
+                      )}
+                    >
+                      {win.texto}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-                    {win.status === "unknown"
-                      ? "O CyberSafe ainda não consultou o estado do Firewall do Windows nesta vista."
-                      : win.detail}
+                    {win.detalhe}
                   </p>
                 </div>
                 <div className="p-3 rounded-lg bg-secondary/40 border border-border">
                   <div className="flex items-center justify-between gap-2">
                     <span className="font-mono text-sm text-foreground">{WFP_MODULE_LABEL}</span>
-                    <span className={cn("text-[10px] font-mono uppercase px-2 py-1 rounded border shrink-0", STATUS_META[wfpSub?.status ?? "unavailable"].cls)}>
+                    <span className={cn("text-xs font-mono uppercase px-2 py-1 rounded border shrink-0", STATUS_META[wfpSub?.status ?? "unavailable"].cls)}>
                       {wfp.text}
                     </span>
                   </div>
                   <p className="mt-1 text-xs text-foreground leading-relaxed">{wfpCopy.texto}</p>
                   {wfpCopy.contexto && (
-                    <p className="mt-0.5 text-[11px] text-muted-foreground leading-relaxed">{wfpCopy.contexto}</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">{wfpCopy.contexto}</p>
                   )}
                   {technical && wfpSub?.detail && (
-                    <p title={wfpSub.detail} className="mt-1 text-[10px] text-muted-foreground font-mono break-all">— {wfpSub.detail}</p>
+                    <p title={wfpSub.detail} className="mt-1 text-xs text-muted-foreground font-mono break-all">— {wfpSub.detail}</p>
                   )}
                 </div>
               </>
             );
           })()}
         </div>
+
+        <section className="mt-4 p-3 rounded-lg border border-border text-sm">
+          <h4 className="font-semibold">Pastas monitorizadas</h4>
+          {engine?.monitoredPaths?.length ? <ul className="mt-2 space-y-1 text-xs text-muted-foreground break-all">
+            {engine.monitoredPaths.map(folder=><li key={folder}>{folder}</li>)}
+          </ul> : <p className="mt-1 text-xs text-muted-foreground">Nenhuma pasta confirmada pelo serviço. Verifique se a monitorização está ligada.</p>}
+          <p className="mt-2 text-xs text-muted-foreground">Os ficheiros são analisados após estabilizarem. Isto não garante bloqueio antes da execução. Ao sair completamente do CyberSafe, a monitorização termina.</p>
+          {engine?.realtimeLoss ? (
+            <>
+              <p className="mt-2 text-xs text-foreground">
+                Tentativas de análise rejeitadas pela fila: {engine.realtimeLoss.queueRejections}.  Sinais de possível lacuna do watcher: {engine.realtimeLoss.watcherSignals}.  Notificações do watcher sem nome: {engine.realtimeLoss.watcherNamelessCallbacks}.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                A fila conta tentativas rejeitadas; o watcher conta sinais de cobertura. Estas categorias não se somam.
+                {` Caminhos distintos afetados pela fila: ${engine.realtimeLoss.queuePathsCapped ? "pelo menos " : ""}${engine.realtimeLoss.queueDistinctPaths}.`}
+                {engine.realtimeLoss.watcherCallbacksIndeterminate
+                  ? " Notificações anónimas do watcher: lacuna de cobertura possível. A quantidade de ficheiros afetados é desconhecida."
+                  : " Sem notificações anónimas do watcher nesta leitura."}
+                {engine.realtimeLoss.raizesComPerda.length
+                  ? " Raízes com possível lacuna: " + engine.realtimeLoss.raizesComPerda.join(", ")
+                  : " Sem raízes com lacuna reportadas nesta leitura."}
+                {" Pode ser necessária uma análise manual das pastas afetadas."}
+              </p>
+            </>
+          ) : (
+            <p className="mt-2 text-xs text-muted-foreground">
+              Detalhe de cobertura indisponível nesta leitura.
+              {typeof engine?.realtimeDroppedEvents === "number" && Number.isFinite(engine.realtimeDroppedEvents)
+                ? ` Contador agregado legado: ${engine.realtimeDroppedEvents} eventos reportados. A quantidade de ficheiros afetados é desconhecida.`
+                : " Contagem de eventos indisponível."}
+              </p>
+            )
+          }
+        </section>
 
         <button
           onClick={() => setTechnical((v) => !v)}
@@ -372,7 +454,7 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
 
         {technical && reasons.length > 0 && (
           <div className="mt-4 p-3 rounded-lg bg-cyber-red/5 border border-cyber-red/20">
-            <p className="text-[10px] font-mono uppercase tracking-wider text-cyber-red mb-2">Motivos da degradação</p>
+            <p className="text-xs font-mono uppercase tracking-wider text-cyber-red mb-2">Motivos da degradação</p>
             <ul className="space-y-1">
               {reasons.map((reason, i) => (
                 <li key={i} className="text-xs font-mono text-muted-foreground">• {reason}</li>

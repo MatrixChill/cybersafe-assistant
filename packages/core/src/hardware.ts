@@ -1,10 +1,46 @@
+import { runHardwareQuery, withHardwareQuerySignal } from './hardware-query.js';
 import * as si from "systeminformation";
 import * as os from "os";
 import { exec } from "child_process";
 import { promisify } from "util";
 import type { GpuSnapshot, HardwareSnapshot, ProcessSnapshot, StressContributions, TemperatureStatus } from "@cybersafe/shared-types";
-import { readTemperature } from "./temperature.js";
+import type {
+  CpuCoreReading,
+  CpuFrequencyReading,
+  DiskActivityReading,
+  MemoryCommitReading,
+  NetworkAdapterReading,
+  PagefileReading,
+  PowerReading,
+  RamLayoutReading,
+  ReadingStatus,
+} from "@cybersafe/shared-types";
+import { readGraphics, readTemperature } from "./temperature.js";
+import { describeBatteryHealth, type BatteryHealth } from "./battery-health.js";
+import { readStorageHealth, type StorageHealth } from "./storage-health.js";
+import { readMemoryStatus, readPowerStatus } from "./win-kernel.js";
+import type { KernelMemoryStatus, KernelPowerStatus } from "./win-kernel.js";
+import { PdhDiskProbe } from "./win-pdh.js";
+import type { PdhReading, PdhVolumeSample } from "./win-pdh.js";
+import {
+  commitReading,
+  diskActivityReadings,
+  frequencyReading,
+  pagefileReading,
+  perCoreReading,
+  powerReading,
+  ramLayoutReading,
+} from "./hardware-normalize.js";
 import { isDedicatedGpu, gpuSelectionScore } from "./gpu-selection.js";
+import {
+  buildDiskSnapshot,
+  describeDiskRead,
+  initialDiskSnapshot,
+  worstWorkingVolume,
+  type DiskLastGood,
+  type DiskReadOutcome,
+} from "./disk.js";
+import type { DiskSnapshot } from "@cybersafe/shared-types";
 
 // Reexportado para consumidores históricos (ex.: testes) sem duplicar código.
 export { isDedicatedGpu, gpuSelectionScore } from "./gpu-selection.js";
@@ -21,6 +57,105 @@ const execAsync = promisify(exec);
  */
 const GPU_TEMPERATURE_STALE_TTL_MS = 25_000;
 
+/**
+ * O mesmo prazo para a temperatura da CPU. Antes, um único valor válido ficava
+ * publicado como "available" para sempre: a leitura seguinte só substituía o
+ * campo quando voltava não-nula, por isso um sensor que desaparecesse deixava
+ * o último valor a passar por atual. A CPU passa a ter o mesmo modelo da GPU
+ * (valor + instante da última leitura boa + estado), sem inventar 0 °C.
+ */
+const CPU_TEMPERATURE_STALE_TTL_MS = 25_000;
+
+/**
+ * TTL da leitura de uso de CPU. O tick rápido é de 1 s; tolerar 3 s cobre duas
+ * falhas transitórias sem transformar uma medição antiga em "agora". Passado o
+ * TTL, o valor deixa de ser publicado como atual (`usageStatus: "unavailable"`).
+ */
+const CPU_USAGE_STALE_TTL_MS = 3_000;
+
+/**
+ * TTL da leitura de uso de RAM (TP-HARDWARE-MEASURED-CONTRACT). Mesmo racional
+ * da CPU: o tick rápido é de 1 s e 3 s toleram duas falhas transitórias. Antes
+ * desta correção, `fastMetrics.ramPercent` era publicado desde o arranque como
+ * um número "medido" — um 0 sem amostra era indistinguível de RAM ociosa.
+ */
+const RAM_USAGE_STALE_TTL_MS = 3_000;
+
+/**
+ * RAM: os campos `usageStatus`/`usageUpdatedAt` e os volumes `number | null`
+ * ficam DECLARADOS em `HardwareSnapshot["ram"]` (shared-types, ownership
+ * coordenado deste bloco — sem cast local). A AUSÊNCIA de `usageStatus` em
+ * snapshots antigos significa estado DESCONHECIDO, nunca "available" por
+ * omissão: cada consumidor decide explicitamente (política no dossiê
+ * TP-HARDWARE-MEASURED-CONTRACT).
+ */
+/**
+ * Rede: o tick lento é 10 s. Um valor com mais de 20 s (2 ticks) já não
+ * representa o tráfego de agora — fica `unavailable` em vez de ser mostrado
+ * como atual. Dentro de 20 s, uma falha mantém-no como `stale` (rotulado).
+ */
+const NETWORK_STALE_TTL_MS = 20_000;
+
+/**
+ * Bateria: o refresh vive no tick lento (10 s). Um valor de portátil muda
+ * devagar, mas não pode ficar publicado como "agora" para sempre: um TTL de
+ * 60 s (6 ticks) mantém o último valor bom enquanto é plausivelmente atual e
+ * expira-o depois para `unavailable`. Uma falha do provider NUNCA vira
+ * "absent" — ausência de bateria só se comprova com uma leitura boa.
+ */
+const BATTERY_READ_STALE_TTL_MS = 60_000;
+
+/**
+ * Porque isto existe (medido a 26/10 nesta máquina): `si.battery()` custa 3
+ * PowerShell por chamada e era chamado em todos os ticks lentos → 18
+ * subprocessos/minuto a perguntar se havia bateria num computador de
+ * secretária. O kernel32 (`GetSystemPowerStatus`, 0 subprocessos, lido a cada
+ * tick rápido) já afirma `hasBattery === false` pela flag 0x80. Com a ausência
+ * confirmada por uma leitura REAL e o kernel a continuar a dizê-la, a
+ * reafirmação só acontece a cada 10 min. Um portátil nunca entra nesta
+ * janela: tem bateria, e o WMI mantém-se a 60 s.
+ */
+const BATTERY_ABSENT_RECHECK_MS = 600_000;
+
+/**
+ * Validade de uma leitura de saúde física do armazenamento. O tick lento corre
+ * a cada 10 s; 90 s tolera até 9 ciclos falhados antes de a leitura ser
+ * declarada expirada. O valor NÃO é apagado ao expirar — passa a `physicalStale`.
+ */
+const STORAGE_HEALTH_STALE_TTL_MS = 90_000;
+
+/**
+ * Cadência da LEITURA de saúde física, distinta da validade do valor. O tick
+ * lento corre a cada 10 s, mas cada leitura é um PowerShell (SmartData) — a
+ * 10 s seriam 6/minutos. A 60 s a leitura continua dentro do TTL de 90 s, por
+ * isso nunca aparece expirada enquanto o ciclo é saudável.
+ */
+const STORAGE_HEALTH_READ_MS = 60_000;
+
+/** Provider real da leitura de bateria; nunca publicado sem leitura real. */
+const BATTERY_SOURCE = "systeminformation";
+
+/**
+ * Prazo da PRIMEIRA leitura do armazenamento (ms).
+ *
+ * O tick médio do disco é assíncrono (5 s) para não atrasar os snapshots. Só a
+ * primeira leitura é esperada — de propósito: sem isto o primeiro snapshot
+ * publicado (e o único que alguns caminhos voltam a ver) dizia "Ainda sem
+ * leitura do armazenamento desde o arranque" mesmo com todos os volumes
+ * legíveis, e o consumidor ficava com esse estado. Com prazo de 4 s: uma leitura
+ * lenta é esperada até onde faz sentido e, se expirar, o caminho assíncrono
+ * normal termina o trabalho e publica o valor assim que ele chegar.
+ */
+const DISK_FIRST_READ_TIMEOUT_MS = 4_000;
+
+/**
+ * Janelas das leituras do kernel (memória/energia), feitas no tick rápido (1 s).
+ * `fresh` tolera um tick atrasado; `stale` mostra a última boa enquanto ela
+ * ainda é plausível; passado o TTL, `unavailable` com valores a `null`.
+ */
+const KERNEL_READ_FRESH_MS = 2_500;
+const KERNEL_READ_STALE_TTL_MS = 10_000;
+
 export class HardwareHealthEngine {
   private lastSnapshot: HardwareSnapshot | null = null;
 
@@ -31,19 +166,190 @@ export class HardwareHealthEngine {
     totalRamGb: 0,
   };
 
-  private mediumMetrics = {
-    diskPercent: 0,
-    diskUsedGb: 0,
-    diskTotalGb: 0,
-    fsType: "unknown",
-  };
+  /**
+   * Estado do armazenamento publicado (substitui os antigos
+   * `diskPercent/diskUsedGb/diskTotalGb/fsType` inicializados a zero).
+   * O estado inicial é "unavailable" (ainda sem leitura), nunca "0%": encher
+   * campos de medição com zero é afirmar que se mediu, e não se mediu.
+   */
+  private diskSnapshot: DiskSnapshot = initialDiskSnapshot();
+  private diskLastGood: DiskLastGood | null = null;
+  /**
+   * Atividade de leitura/escrita medida por volume (PDH). É um medidor do
+   * MOMENTO, não um histórico: quando não há medição nova publica-se tabela
+   * vazia com estado, nunca a taxa antiga a passar por atual.
+   */
+  private diskActivity: DiskActivityReading[] = [];
+  private diskActivityStatus: ReadingStatus = "unavailable";
+  private diskActivityDetail: string | null = null;
+  private diskProbe: PdhDiskProbe | null = null;
+  /** Houve já uma tentativa de leitura do armazenamento? (só a primeira é esperada) */
+  private diskReadAttempted = false;
 
   private slowMetrics = {
     rxSec: 0,
     txSec: 0,
-    interfaceName: "unknown",
+    // Vazio até haver leitura válida — nunca "unknown" inventado.
+    interfaceName: "",
     gpu: null as any,
-    cpuTemperature: null as number | null,
+  };
+
+  /**
+   * Utilização por processador LÓGICO. A fonte é o MESMO `si.currentLoad()` do
+   * uso total (0 subprocessos medidos a 26/10) — os números por núcleo já vêm
+   * na resposta e eram deitados fora. Array vazio = ainda sem leitura.
+   */
+  private cpuPerCore: { readings: CpuCoreReading[]; updatedAt: number | null } = {
+    readings: [],
+    updatedAt: null,
+  };
+
+  /**
+   * Leitura do kernel para memória de sistema (kernel32 `GlobalMemoryStatusEx`)
+   * e energia (kernel32 `GetSystemPowerStatus`). Guardam-se com o motivo da
+   * falha, porque `null` sem motivo seria indistinguível de "não tentado".
+   */
+  private kernelMemory: { memory: KernelMemoryStatus | null; reason?: string; updatedAt: number | null } = {
+    memory: null,
+    updatedAt: null,
+  };
+  private kernelPower: { power: KernelPowerStatus | null; reason?: string; updatedAt: number | null } = {
+    power: null,
+    updatedAt: null,
+  };
+
+  /**
+   * Identidade estática do CPU, uma vez por arranque: threads lógicas, núcleos
+   * físicos e frequência de referência (nominal). São propriedades da máquina,
+   * não medições — por isso não precisam de ser repetidas a cada tick.
+   */
+  private cpuIdentity = {
+    logicalCores: null as number | null,
+    physicalCores: null as number | null,
+    referenceMHz: null as number | null,
+  };
+
+  /**
+   * Frequência "atual" reportada pelo OS (`os.cpus()[i].speed`, 0 subprocessos
+   * medidos). Quando o Windows devolve o nominal, `measuredAsCurrent` é `false`
+   * e a UI diz "frequência de referência" em vez de prometer medição em tempo
+   * real.
+   */
+  private cpuCurrentMHz: number | null = null;
+
+  /** Módulos de RAM (Win32_PhysicalMemory via `si.memLayout`, 1 subprocesso): só arranque. */
+  private ramLayout: RamLayoutReading | null = null;
+
+  /**
+   * Fatos por adaptador (ip/mac/tipo/velocidade/estado) vindos de
+   * `si.networkInterfaces()` (1 subprocesso), apanhados uma vez no arranque e
+   * reassumidos a cada refresh. As TAXES vêm dos contadores acumulados de
+   * `si.networkStats()` — a mesma chamada que já alimenta o rx/tx principal,
+   * por isso nenhum adaptador custa uma consulta extra.
+   */
+  private adapterFacts = new Map<string, NetworkAdapterReading>();
+  /** Amostra anterior dos contadores acumulados, por interface, para a taxa. */
+  private adapterCounters = new Map<string, { rx: number; tx: number; at: number }>();
+  private adapters: NetworkAdapterReading[] = [];
+  private adaptersUpdatedAt: number | null = null;
+
+  /**
+   * Temperatura da CPU com frescura explícita. Mesmo modelo da GPU:
+   * - leitura válida → value/status=available/updatedAt=agora;
+   * - poll falhada dentro do TTL → mantém o último valor bom (status=stale);
+   * - passado o TTL → value=null, status=unavailable.
+   * O provider (`temperature.ts`) já rejeita 0 °C e valores fora de 0..150,
+   * por isso aqui não se transforma ausência de leitura em número nenhum.
+   */
+  private cpuTempState: {
+    value: number | null;
+    updatedAt: number | null;
+    status: TemperatureStatus;
+  } = { value: null, updatedAt: null, status: "unavailable" };
+
+  /**
+   * Estado da leitura de uso de CPU. `fastMetrics.cpuUsage` é o último valor
+   * BOM conhecido (0 é um valor real válido); este estado diz se ele é atual,
+   * antigo (stale) ou se nunca/expirou uma leitura (unavailable).
+   */
+  private cpuUsageState: {
+    updatedAt: number | null;
+    status: TemperatureStatus;
+  } = { updatedAt: null, status: "unavailable" };
+
+  /**
+   * Estado da leitura de uso de RAM (TP-HARDWARE-MEASURED-CONTRACT). Mesmo
+   * contrato da CPU: `fastMetrics.ramPercent` guarda o último valor BOM (0 é
+   * válido), isto diz se é atual, antigo (stale) ou ausente (unavailable).
+   * Antes disto, 0 sem amostra e "RAM ociosa medida" eram indistinguíveis.
+   */
+  private ramUsageState: {
+    updatedAt: number | null;
+    status: TemperatureStatus;
+    /** Última leitura BOA, retida mesmo depois do TTL (proveniência/CACHED). */
+    lastGoodPercent: number | null;
+  } = { updatedAt: null, status: "unavailable", lastGoodPercent: null };
+
+  /**
+   * Estado da leitura de tráfego de rede. `slowMetrics` guarda o último valor
+   * BOM (0 B/s real é válido); este estado diz se é atual, a primeira leitura
+   * ainda está pendente, falhou recentemente (stale) ou não há leitura.
+   */
+  private networkState: {
+    updatedAt: number | null;
+    status: "pending" | "available" | "stale" | "unavailable";
+  } = { updatedAt: null, status: "pending" };
+
+  /**
+   * Estado da leitura de bateria (TP-BATTERY-C1-C2). `staticMetrics` guarda o
+   * último valor BOM; `updatedAt` é o instante dessa leitura boa. Uma falha do
+   * provider NUNCA é classificada como "absent": mantém a classificação e os
+   * valores do último bom até ao TTL, depois passa a `unavailable`; sem
+   * qualquer leitura boa, uma falha é `error`.
+   */
+  private batteryState: {
+    updatedAt: number | null;
+    status: "present" | "absent" | "unavailable" | "error";
+  } = { updatedAt: null, status: "unavailable" };
+
+  /** Guarda anti-sobreposição do refresh da bateria (tick lento). */
+  private batteryRefreshInFlight = false;
+
+  /**
+   * Saúde FÍSICA dos discos (Get-PhysicalDisk + contadores de fiabilidade).
+   * `null` = ainda sem leitura. Vive separada do `diskSnapshot` de ocupação:
+   * espaço livre e saúde são perguntas diferentes.
+   *
+   * `at` é o instante em que a leitura TERMINOU — não a hora do snapshot. É
+   * isso que impede `physicalUpdatedAt` de parecer recente só porque alguém
+   * pediu um snapshot.
+   */
+  private storageHealth: { result: StorageHealth; at: string } | null = null;
+  /** Erro da tentativa mais recente (não apaga o último valor bom). */
+  private storageHealthError: { detail: string; at: string } | null = null;
+  private storageHealthInFlight = false;
+  /** Instante da última TENTATIVA de leitura SMART (ver `STORAGE_HEALTH_READ_MS`). */
+  private storageHealthReadAt: number | null = null;
+  /** Instante em que uma leitura boa afirmou «não há bateria» (ver `BATTERY_ABSENT_RECHECK_MS`). */
+  private batteryAbsentConfirmedAt: number | null = null;
+  private gpuRefreshInFlight = false;
+  private temperatureRefreshInFlight = false;
+
+  /**
+   * Saúde da bateria calculada a partir das capacidades da ÚLTIMA leitura boa.
+   * Vive separada de `batteryState` porque responde a outra pergunta: `status`
+   * diz se há leitura de carga agora; isto diz se a bateria está gasta. Uma
+   * leitura sem capacidades não apaga uma saúde já medida — substitui-a apenas
+   * quando o resultado é utilizável (ver `applyBatteryReading`).
+   */
+  private batteryHealthState: BatteryHealth = {
+    status: "unsupported",
+    detail: null,
+    designWh: null,
+    maxWh: null,
+    healthPercent: null,
+    wearPercent: null,
+    cycleCount: null,
   };
 
   /**
@@ -75,6 +381,30 @@ export class HardwareHealthEngine {
   private gpuSecondaryTemps: { hotspotC: number | null; memoryJunctionC: number | null } = {
     hotspotC: null,
     memoryJunctionC: null,
+  };
+
+  /** Quando a deteção de GPU (systeminformation) correu pela última vez. */
+  private gpuRefreshedAt: number | null = null;
+
+  /**
+   * Utilização do GPU com estado e origem próprios. `null` em `percent` significa
+   * "sem leitura" — nunca 0 %. É o mesmo modelo da temperatura: uma leitura
+   * falhada mantém a última boa dentro do TTL (stale) e expira-a depois.
+   */
+  private gpuUseState: {
+    percent: number | null;
+    memoryPercent: number | null;
+    updatedAt: number | null;
+    status: TemperatureStatus;
+    source: string;
+    sensor: string;
+  } = {
+    percent: null,
+    memoryPercent: null,
+    updatedAt: null,
+    status: "unavailable",
+    source: "unknown",
+    sensor: "unknown",
   };
 
   private staticMetrics = {
@@ -142,7 +472,7 @@ export class HardwareHealthEngine {
    */
   private async detectGpu(): Promise<any> {
     try {
-      const graphics = await si.graphics().catch(() => null);
+      const graphics = await readGraphics().catch(() => null);
       const controllers = graphics?.controllers ?? [];
       if (controllers.length === 0) {
         return { model: "Não disponível neste sistema", available: false };
@@ -214,6 +544,52 @@ export class HardwareHealthEngine {
     }
   }
 
+  /**
+   * Aplica a utilização do GPU (0..100) vinda do PMLog. 0 % é uma leitura REAL
+   * (GPU ociosa); uma leitura ausente mantém a última boa dentro do TTL e
+   * expira-a depois — nunca publica 0 % como se fosse "GPU parada medida".
+   */
+  private applyGpuUtilization(
+    percent: number | null | undefined,
+    memoryPercent: number | null | undefined,
+    source: string,
+    sensor: string,
+  ): void {
+    const now = Date.now();
+    const valid = typeof percent === "number" && Number.isFinite(percent) && percent >= 0 && percent <= 100;
+    if (valid) {
+      const mem =
+        typeof memoryPercent === "number" && Number.isFinite(memoryPercent) &&
+        memoryPercent >= 0 && memoryPercent <= 100
+          ? Math.round(memoryPercent)
+          : null;
+      this.gpuUseState = {
+        percent: Math.round(percent as number),
+        memoryPercent: mem,
+        updatedAt: now,
+        status: "available",
+        source,
+        sensor,
+      };
+      return;
+    }
+    if (
+      this.gpuUseState.updatedAt !== null &&
+      now - this.gpuUseState.updatedAt <= GPU_TEMPERATURE_STALE_TTL_MS
+    ) {
+      this.gpuUseState = { ...this.gpuUseState, status: "stale" };
+      return;
+    }
+    this.gpuUseState = {
+      ...this.gpuUseState,
+      percent: null,
+      memoryPercent: null,
+      status: "unavailable",
+      source,
+      sensor,
+    };
+  }
+
   /** Constrói o objeto GPU do snapshot, recalculando o estado da temperatura. */
   private buildGpuSnapshot(): HardwareSnapshot["gpu"] {
     const gpu = this.slowMetrics.gpu;
@@ -227,8 +603,41 @@ export class HardwareHealthEngine {
       if (status === "unavailable") value = null;
     }
 
+    // Utilização do GPU: a fonte ADL (PMLog) manda enquanto tem leitura; o
+    // `utilizationGpu` do systeminformation é o fallback. O estado descreve o
+    // NÚMERO publicado — sem estado, um null não se distingue de um 0 % medido.
+    const adlViva =
+      this.gpuUseState.percent !== null &&
+      this.gpuUseState.updatedAt !== null &&
+      now - this.gpuUseState.updatedAt <= GPU_TEMPERATURE_STALE_TTL_MS;
+    const uso: { percent: number | null; status: TemperatureStatus; source: string | null; updatedAt: number | null } =
+      adlViva
+        ? {
+            percent: this.gpuUseState.percent,
+            status: this.gpuUseState.status,
+            source: this.gpuUseState.sensor,
+            updatedAt: this.gpuUseState.updatedAt,
+          }
+        : typeof gpu.usagePercent === "number"
+          ? {
+              percent: gpu.usagePercent,
+              status: "available",
+              source: "systeminformation:graphicsController",
+              updatedAt: this.gpuRefreshedAt,
+            }
+          : { percent: null, status: "unavailable", source: null, updatedAt: null };
+
     return {
-      usagePercent: gpu.usagePercent ?? null,
+      // `available` explicitado: a UI tem de distinguir "ainda sem leitura"
+      // (`gpu === null`), "GPU presente" (`available: true`) e "placa não
+      // detetada" (`available: false`) — nunca confundir ausência de temperatura
+      // com ausência de placa gráfica.
+      available: true,
+      usagePercent: uso.percent,
+      usageStatus: uso.status,
+      usageUpdatedAt: uso.updatedAt ? new Date(uso.updatedAt).toISOString() : undefined,
+      usageSource: uso.source ?? undefined,
+      vramUsedPercent: adlViva ? this.gpuUseState.memoryPercent : null,
       vramTotalMb: gpu.vramTotalMb ?? null,
       vramUsedMb: gpu.vramUsedMb ?? null,
       model: gpu.model,
@@ -248,6 +657,818 @@ export class HardwareHealthEngine {
       temperatureSource: this.gpuTempState.source,
       temperatureSensor: this.gpuTempState.sensor,
     };
+  }
+
+  /**
+   * Seam da leitura de uso de CPU (sobreponível em testes sem hardware real).
+   * Qualquer falha do provider devolve `null` — nunca um objeto com 0.
+   *
+   * `cpus` (utilização por processador lógico) vem NA MESMA resposta e já foi
+   * medido a 26/10 como custo zero de subprocessos: era deitado fora.
+   */
+  private async readCpuLoad(): Promise<{ currentLoad?: number; cpus?: unknown } | null> {
+    return si.currentLoad().catch(() => null);
+  }
+
+  /**
+   * Aplica uma leitura de uso de CPU. Regras (TP-PAP-CPU-USAGE-TRUTH):
+   * - 0 REAL é válido (CPU ociosa não é erro);
+   * - valores não finitos/fora de 0..100 são leitura inválida, não 0;
+   * - leitura inválida NÃO escreve 0 em `fastMetrics.cpuUsage`: mantém o último
+   *   valor bom e marca `stale` dentro do TTL; expirado, marca `unavailable`.
+   */
+  private applyCpuUsage(raw: unknown): void {
+    const now = Date.now();
+    const valid =
+      typeof raw === "number" && Number.isFinite(raw) && raw >= 0 && raw <= 100;
+    if (valid) {
+      this.fastMetrics.cpuUsage = Math.round(raw as number);
+      this.cpuUsageState = { updatedAt: now, status: "available" };
+      return;
+    }
+    if (
+      this.cpuUsageState.updatedAt !== null &&
+      now - this.cpuUsageState.updatedAt <= CPU_USAGE_STALE_TTL_MS
+    ) {
+      this.cpuUsageState = { ...this.cpuUsageState, status: "stale" };
+      return;
+    }
+    // Nunca houve leitura boa, ou já expirou: o número que reste não é "agora".
+    this.cpuUsageState = { updatedAt: null, status: "unavailable" };
+  }
+
+  /**
+   * Estado do uso de CPU a publicar AGORA. A idade é recalculada no instante do
+   * snapshot (o tick pode estar atrasado ou o processo suspenso).
+   */
+  private buildCpuUsageState(): { status: TemperatureStatus; updatedAt: string | null } {
+    const { updatedAt, status } = this.cpuUsageState;
+    if (updatedAt === null) return { status: "unavailable", updatedAt: null };
+    const age = Date.now() - updatedAt;
+    return {
+      status: age > CPU_USAGE_STALE_TTL_MS ? "unavailable" : status,
+      updatedAt: new Date(updatedAt).toISOString(),
+    };
+  }
+
+  /**
+   * Utilização por processador lógico, da MESMA resposta de `currentLoad` do
+   * uso total (custo zero de subprocessos — ver `evidence/SONDA-FONTES`).
+   * Uma resposta sem array utilizável NÃO apaga logo a tabela: dentro do TTL do
+   * uso de CPU mantém a última, expirado deixa de haver tabela nenhuma —
+   * presentada como tal, não como zeros.
+   */
+  private applyPerCoreUsage(cpus: unknown): void {
+    const readings = perCoreReading(cpus);
+    if (readings !== null) {
+      this.cpuPerCore = { readings, updatedAt: Date.now() };
+      return;
+    }
+    if (
+      this.cpuPerCore.updatedAt === null ||
+      Date.now() - this.cpuPerCore.updatedAt > CPU_USAGE_STALE_TTL_MS
+    ) {
+      this.cpuPerCore = { readings: [], updatedAt: null };
+    }
+  }
+
+  /** Frequência instantânea reportada pelo OS (`os.cpus`), 0 subprocessos medidos. */
+  private applyCpuCurrentMHz(): void {
+    const cpus = os.cpus();
+    const speed = cpus.length > 0 ? cpus[0]?.speed : undefined;
+    this.cpuCurrentMHz =
+      typeof speed === "number" && Number.isFinite(speed) && speed > 0 ? Math.round(speed) : null;
+  }
+
+  /** Seam da leitura de memória do kernel (sobreponível em testes). */
+  protected readKernelMemory() {
+    return readMemoryStatus();
+  }
+
+  /** Seam da leitura de energia do kernel (sobreponível em testes). */
+  protected readKernelPower() {
+    return readPowerStatus();
+  }
+
+  /**
+   * As duas leituras do kernel (memória de sistema e energia) feitas no tick
+   * rápido. Custam uma chamada cada, sem PowerShell e sem WMI: por isso
+   * substituem números que antes ou vinham de subprocesso ou não existiam.
+   * Uma falha guarda o motivo e mantém a última boa — o estado publicado decide
+   * a frescura, nunca o valor.
+   */
+  private applyKernelReadings(): void {
+    const now = Date.now();
+    const memory = this.readKernelMemory();
+    if (memory.status === "ok") {
+      this.kernelMemory = { memory: memory.value, updatedAt: now };
+    } else {
+      this.kernelMemory = { ...this.kernelMemory, reason: memory.reason };
+    }
+    const power = this.readKernelPower();
+    if (power.status === "ok") {
+      this.kernelPower = { power: power.value, updatedAt: now };
+    } else {
+      this.kernelPower = { ...this.kernelPower, reason: power.reason };
+    }
+  }
+
+  /**
+   * Frescura de uma leitura do kernel. A cadência é o tick rápido (1 s), por
+   * isso `available` tolera um atraso e `stale` mostra a última boa enquanto
+   * ela ainda é razoavelmente atual; depois da janela de validade a resposta é
+   * `unavailable` com valores a `null` — nunca um número velho com ar de atual.
+   */
+  private kernelStatus(
+    updatedAt: number | null,
+  ): { status: ReadingStatus; fresh: boolean } {
+    if (updatedAt === null) return { status: "unavailable", fresh: false };
+    const age = Date.now() - updatedAt;
+    if (age > KERNEL_READ_STALE_TTL_MS) return { status: "unavailable", fresh: false };
+    return { status: age > KERNEL_READ_FRESH_MS ? "stale" : "available", fresh: true };
+  }
+
+  /** Memória comprometida + limite, com o estado derivado da frescura real. */
+  private buildCommitReading(): MemoryCommitReading {
+    const { status, fresh } = this.kernelStatus(this.kernelMemory.updatedAt);
+    const base = commitReading(fresh ? this.kernelMemory.memory : null, this.kernelMemory.reason);
+    return {
+      ...base,
+      status: fresh ? status : "unavailable",
+      updatedAt: this.kernelMemory.updatedAt
+        ? new Date(this.kernelMemory.updatedAt).toISOString()
+        : undefined,
+    };
+  }
+
+  /** Ficheiro de paginação; o total é DERIVADO do limite de compromisso. */
+  private buildPagefileReading(): PagefileReading {
+    const { status, fresh } = this.kernelStatus(this.kernelMemory.updatedAt);
+    const base = pagefileReading({ memory: fresh ? this.kernelMemory.memory : null });
+    return {
+      ...base,
+      status: fresh ? status : "unavailable",
+      updatedAt: this.kernelMemory.updatedAt
+        ? new Date(this.kernelMemory.updatedAt).toISOString()
+        : undefined,
+    };
+  }
+
+  /**
+   * Energia adaptada medida em kernel32. É a única fonte que pode afirmar
+   * "não há bateria" com prova (flag 0x80), o que permite ao PC Center dizer
+   * "Sem bateria — computador de secretária" em vez de uma saúde de 0 %.
+   */
+  private buildPowerReading(): PowerReading {
+    const { status, fresh } = this.kernelStatus(this.kernelPower.updatedAt);
+    const base = powerReading(fresh ? this.kernelPower.power : null, this.kernelPower.reason);
+    return {
+      ...base,
+      status: fresh ? status : base.status,
+      updatedAt: this.kernelPower.updatedAt
+        ? new Date(this.kernelPower.updatedAt).toISOString()
+        : undefined,
+    };
+  }
+
+  private buildFrequencyReading(): CpuFrequencyReading {
+    const reading = frequencyReading({
+      osSpeedMHz: this.cpuCurrentMHz,
+      referenceMHz: this.cpuIdentity.referenceMHz,
+    });
+    return {
+      ...reading,
+      updatedAt: this.cpuPerCore.updatedAt
+        ? new Date(this.cpuPerCore.updatedAt).toISOString()
+        : undefined,
+    };
+  }
+
+  /**
+   * RAM disponível e reservada.
+   *
+   * `availableGb` é o número do Gestor de Tarefas (kernel32
+   * `GlobalMemoryStatusEx`). `reservedGb` é o "Hardware Reserved" do Monitor de
+   * Recursos: RAM INSTALADA nos módulos menos a RAM UTILIZÁVEL pelo OS — as
+   * duas quantidades são medidas por fontes diferentes (Win32_PhysicalMemory e
+   * o kernel), por isso é DERIVADO e está marcado como tal.
+   *
+   * Foi um erro meu a primeira versão: derivar "reservado" de
+   * total−disponível−usado, sendo usado e disponível a mesma fonte, dava sempre
+   * 0, e 0 publicado significa "não está nada reservado" — uma afirmação falsa
+   * apresentada como medida. Sem dados de módulos, `reservedGb` é `null`
+   * ("não medido"), nunca 0.
+   */
+  private buildRamDerived(): {
+    availableGb: number | null;
+    reservedGb: number | null;
+    reservedIsDerived: boolean;
+  } {
+    const { fresh } = this.kernelStatus(this.kernelMemory.updatedAt);
+    const memory = fresh ? this.kernelMemory.memory : null;
+    if (!memory) return { availableGb: null, reservedGb: null, reservedIsDerived: false };
+    const instaladaBytes =
+      this.ramLayout?.status === "available"
+        ? this.ramLayout.modules.reduce((sum, m) => sum + (m.capacityBytes ?? 0), 0)
+        : 0;
+    const reservada =
+      instaladaBytes >= memory.totalPhysBytes
+        ? (instaladaBytes - memory.totalPhysBytes) / 1024 ** 3
+        : null;
+    return {
+      availableGb: Math.round((memory.availPhysBytes / 1024 ** 3) * 10) / 10,
+      reservedGb: reservada === null ? null : Math.round(reservada * 10) / 10,
+      reservedIsDerived: reservada !== null,
+    };
+  }
+
+  /**
+   * Seam da leitura de RAM (sobreponível em testes). `null` = sem leitura
+   * válida (falha do provider ou total inválido) — nunca um 0 inventado.
+   */
+  /**
+   * Capacidade de RAM da máquina (GB) ou `null` se nunca foi medida. Nunca `0`:
+   * sem leitura, a capacidade é DESCONHECIDA, não zero
+   * (TP-HARDWARE-MEASURED-CONTRACT, revisão "totalGb desconhecido").
+   */
+  private ramTotalGb: number | null = null;
+
+  private readRam(): { percent: number; usedGb: number; totalGb: number } | null {
+    const total = os.totalmem();
+    if (!(total > 0)) return null;
+    const used = total - os.freemem();
+    return {
+      percent: Math.round((used / total) * 100),
+      usedGb: used / 1024 ** 3,
+      totalGb: total / 1024 ** 3,
+    };
+  }
+
+  /**
+   * Aplica uma leitura de RAM ao estado publicado. 0 % é uma leitura REAL
+   * válida; uma falha mantém o último valor bom como `stale` dentro do TTL e
+   * `unavailable` depois disso — nunca escreve 0 para representar uma falha.
+   */
+  private applyRamUsage(read: { percent: number; usedGb: number; totalGb: number } | null): void {
+    const now = Date.now();
+    const valid =
+      read !== null &&
+      Number.isFinite(read.percent) &&
+      Number.isFinite(read.usedGb) &&
+      Number.isFinite(read.totalGb) &&
+      read.percent >= 0 &&
+      read.percent <= 100;
+    if (valid && read) {
+      this.fastMetrics.ramPercent = Math.round(read.percent);
+      this.fastMetrics.usedRamGb = read.usedGb;
+      this.fastMetrics.totalRamGb = read.totalGb;
+      this.ramTotalGb = read.totalGb;
+      this.ramUsageState = { updatedAt: now, status: "available", lastGoodPercent: Math.round(read.percent) };
+      return;
+    }
+    if (
+      this.ramUsageState.updatedAt !== null &&
+      now - this.ramUsageState.updatedAt <= RAM_USAGE_STALE_TTL_MS
+    ) {
+      this.ramUsageState = { ...this.ramUsageState, status: "stale" };
+      return;
+    }
+    // Nunca houve leitura boa, ou já expirou: o número que reste não é "agora".
+    // A última leitura BOA e o seu timestamp são PRESERVADOS (proveniência: a UI
+    // pode mostrá-la como "última leitura conhecida"/CACHED); quem decide a
+    // frescura é o `status`, nunca o valor nem o timestamp sozinhos. O valor
+    // retido NUNCA é carga atual e não entra no stress.
+    this.ramUsageState = { ...this.ramUsageState, status: "unavailable" };
+  }
+
+  /**
+   * Estado do uso de RAM a publicar AGORA. A idade é recalculada no instante do
+   * snapshot (o tick pode estar atrasado ou o processo suspenso).
+   */
+  private buildRamUsageState(): {
+    status: TemperatureStatus;
+    updatedAt: string | null;
+    lastGoodPercent: number | null;
+  } {
+    const { updatedAt, status, lastGoodPercent } = this.ramUsageState;
+    if (updatedAt === null) return { status: "unavailable", updatedAt: null, lastGoodPercent: null };
+    const age = Date.now() - updatedAt;
+    return {
+      status: age > RAM_USAGE_STALE_TTL_MS ? "unavailable" : status,
+      // Timestamp da última leitura BOM — proveniência, não promessa de frescura.
+      updatedAt: new Date(updatedAt).toISOString(),
+      lastGoodPercent: lastGoodPercent ?? null,
+    };
+  }
+
+  /**
+   * Seam da leitura de tráfego (sobreponível em testes sem CIM/rede real).
+   * Falha devolve `null` (não um array vazio: ambos são ausência de leitura).
+   */
+  private async readNetworkStats(): Promise<unknown[] | null> {
+    return runHardwareQuery('network', () => si.networkStats(), true).catch(() => null);
+  }
+
+  /** Ciclo de leitura de rede do tick lento (10 s). */
+  private networkRefreshFlight: Promise<void> | null = null;
+  private refreshNetwork(): Promise<void> {
+    if (this.networkRefreshFlight) return this.networkRefreshFlight;
+    const flight = this.collectNetwork();
+    this.networkRefreshFlight = flight;
+    void flight.finally(() => { if (this.networkRefreshFlight === flight) this.networkRefreshFlight = null; }).catch(() => {});
+    return flight;
+  }
+
+  private async collectNetwork(): Promise<void> {
+    let stats: unknown[] | null = null;
+    try {
+      stats = await this.readNetworkStats();
+    } catch {
+      stats = null;
+    }
+    this.applyNetworkReading(stats);
+  }
+
+  /**
+   * Seam da leitura de bateria (sobreponível em testes, sem WMI real).
+   * Falha devolve `null` — ausência de leitura, nunca "sem bateria".
+   */
+  private async readBattery(): Promise<unknown> {
+    return runHardwareQuery('battery', () => si.battery(), true).catch(() => null);
+  }
+
+  /**
+   * Aplica uma leitura BOA de bateria. `absent` só existe aqui: o provider
+   * respondeu e não há bateria. `percent` 0 com bateria presente é valor real.
+   */
+  private applyBatteryReading(raw: unknown, now: number): void {
+    const b = (raw ?? {}) as {
+      hasBattery?: boolean;
+      percent?: number;
+      isCharging?: boolean;
+      timeRemaining?: number | null;
+      designedCapacity?: unknown;
+      maxCapacity?: unknown;
+      capacityUnit?: unknown;
+      cycleCount?: unknown;
+    };
+    // Saúde calculada das capacidades desta leitura. Puro e sem I/O: uma
+    // entrada impossível produz estado + motivo, nunca um número inventado.
+    this.batteryHealthState = describeBatteryHealth({
+      hasBattery: b.hasBattery === true,
+      designedCapacity: b.designedCapacity,
+      maxCapacity: b.maxCapacity,
+      capacityUnit: b.capacityUnit,
+      cycleCount: b.cycleCount,
+    });
+    this.staticMetrics.hasBattery = b.hasBattery === true;
+    this.staticMetrics.batteryPercent =
+      typeof b.percent === "number" && Number.isFinite(b.percent) ? b.percent : 0;
+    this.staticMetrics.isCharging = b.isCharging === true;
+    this.staticMetrics.timeRemaining =
+      typeof b.timeRemaining === "number" && b.timeRemaining > 0 ? b.timeRemaining : null;
+    this.batteryState = {
+      updatedAt: now,
+      status: this.staticMetrics.hasBattery ? "present" : "absent",
+    };
+    // É AQUI e só aqui que a ausência fica provada: uma leitura boa respondeu
+    // e não há bateria. A partir daqui o WMI de bateria passa a ser reafirmado
+    // a 10 min, não a 10 s (ver `BATTERY_ABSENT_RECHECK_MS`). Se a leitura
+    // voltou a ver bateria, a janela fecha-se na hora.
+    this.batteryAbsentConfirmedAt = this.staticMetrics.hasBattery ? null : now;
+  }
+
+  /**
+   * Ciclo de refresh da bateria, no tick lento (10 s). Sem interval próprio e
+   * sem sobreposição: com um refresh em curso, o pedido seguinte sai cedo.
+   */
+  async refreshBattery(): Promise<void> {
+    if (this.batteryRefreshInFlight) return;
+    const agora = Date.now();
+    // O kernel diz `hasBattery === false` sem subprocesso, a cada tick rápido.
+    // Depois de UMA leitura boa ter afirmado a ausência, repetir o WMI (3
+    // PowerShell por chamada) seria pagar 18 subprocessos/minuto para ouvir a
+    // mesma resposta. Se o kernel voltar a ver bateria, a janela fecha-se e a
+    // leitura volta no tick seguinte.
+    if (this.kernelPower.power?.hasBattery === true) this.batteryAbsentConfirmedAt = null;
+    if (
+      this.batteryAbsentConfirmedAt !== null &&
+      agora - this.batteryAbsentConfirmedAt < BATTERY_ABSENT_RECHECK_MS &&
+      this.kernelPower.power?.hasBattery === false
+    ) {
+      return;
+    }
+    this.batteryRefreshInFlight = true;
+    try {
+      let reading: unknown = null;
+      try {
+        reading = await this.readBattery();
+      } catch {
+        reading = null;
+      }
+      if (reading && typeof reading === "object") {
+        this.applyBatteryReading(reading, Date.now());
+        return;
+      }
+      const now = Date.now();
+      if (
+        this.batteryState.updatedAt !== null &&
+        now - this.batteryState.updatedAt <= BATTERY_READ_STALE_TTL_MS
+      ) {
+        return; // último valor bom ainda fresco: mantém classificação e valores
+      }
+      this.batteryState = {
+        updatedAt: this.batteryState.updatedAt,
+        status: this.batteryState.updatedAt === null ? "error" : "unavailable",
+      };
+    } finally {
+      this.batteryRefreshInFlight = false;
+    }
+  }
+
+  /**
+   * Leitura da saúde física dos discos, sem sobreposição. NUNCA rejeita: uma
+   * falha total fica publicada com motivo (`unavailable`), para o PC Center
+   * poder explicar em vez de mostrar ausência silenciosa.
+   */
+  async refreshStorageHealth(): Promise<void> {
+    if (this.storageHealthInFlight) return;
+    const agora = Date.now();
+    // Ver `STORAGE_HEALTH_READ_MS`: o tick lento é de 10 s, a leitura SMART é
+    // um PowerShell. Marca-se a TENTATIVA antes do `await` para que uma leitura
+    // lenta não deixe o tick seguinte enfiar outra atrás dela.
+    if (this.storageHealthReadAt !== null && agora - this.storageHealthReadAt < STORAGE_HEALTH_READ_MS) {
+      return;
+    }
+    this.storageHealthReadAt = agora;
+    this.storageHealthInFlight = true;
+    try {
+      const result = await readStorageHealth();
+      const at = new Date().toISOString();
+      if (result.disks.length > 0) {
+        // Leitura real (mesmo com contadores `denied`): é o novo valor bom.
+        this.storageHealth = { result, at };
+        this.storageHealthError = null;
+      } else {
+        // Nada medido: NÃO se actualiza o timestamp do último valor bom.
+        this.storageHealthError = { detail: result.detail ?? "Sem leitura da saúde física.", at };
+      }
+    } catch (error: unknown) {
+      this.storageHealthError = {
+        detail:
+          error instanceof Error && error.message
+            ? `A leitura da saúde dos discos falhou: ${error.message}`
+            : "A leitura da saúde dos discos falhou sem mensagem do sistema.",
+        at: new Date().toISOString(),
+      };
+    } finally {
+      this.storageHealthInFlight = false;
+    }
+  }
+
+  /**
+   * Anexa a saúde física ao snapshot de disco, sem tocar nos campos de
+   * ocupação. Sem leitura ainda, nenhum campo é acrescentado (não se afirma
+   * saúde nem ausência dela).
+   */
+  private withStorageHealth(snapshot: DiskSnapshot, nowMs: number): DiskSnapshot {
+    const last = this.storageHealth;
+    const erro = this.storageHealthError;
+
+    if (!last) {
+      // Nunca houve leitura boa: publica-se a falha (sem timestamp de medição).
+      if (!erro) return snapshot;
+      return {
+        ...snapshot,
+        physical: [],
+        physicalStatus: "unavailable",
+        physicalDetail: erro.detail,
+        physicalErrorDetail: erro.detail,
+      };
+    }
+
+    const measuredAt = Date.parse(last.at);
+    const stale =
+      !Number.isFinite(measuredAt) || nowMs - measuredAt > STORAGE_HEALTH_STALE_TTL_MS;
+
+    return {
+      ...snapshot,
+      // O último valor válido NÃO é apagado por expirar: é marcado como expirado.
+      physical: last.result.disks,
+      physicalStatus: last.result.status,
+      physicalDetail: last.result.detail,
+      physicalUpdatedAt: last.at,
+      physicalStale: stale,
+      physicalErrorDetail: erro ? erro.detail : null,
+    };
+  }
+
+  /**
+   * Estado da bateria a publicar AGORA: a idade é recalculada no instante do
+   * snapshot; passado o TTL sem leitura nova, `unavailable` (o valor que reste
+   * não é "agora"). `updatedAt`/`source` só existem com leitura real.
+   */
+  private buildBatterySnapshot(): {
+    status: "present" | "absent" | "unavailable" | "error";
+    updatedAt?: string;
+    source?: string;
+  } {
+    const { updatedAt, status } = this.batteryState;
+    if (updatedAt === null) {
+      return { status };
+    }
+    const age = Date.now() - updatedAt;
+    if (age > BATTERY_READ_STALE_TTL_MS && status !== "error") {
+      return { status: "unavailable", updatedAt: new Date(updatedAt).toISOString() };
+    }
+    return {
+      status,
+      updatedAt: new Date(updatedAt).toISOString(),
+      source: BATTERY_SOURCE,
+      // A saúde acompanha a frescura da leitura de carga: sem leitura real não
+      // se publica saúde (e o `healthStatus` explica porquê).
+      ...this.buildBatteryHealthFields(status),
+    };
+  }
+
+  /**
+   * Campos de saúde a publicar — SÓ com leitura boa de uma bateria presente.
+   * `unavailable`/`error` não publicam saúde: a ausência do campo é "não
+   * medido", e o estado de carga já explica a falha. Sem bateria (ausência
+   * comprovada), o estado é `absent` e a UI diz "Não aplicável"; com
+   * capacidades em falta ou implausíveis, `unsupported`/`invalid` com motivo.
+   */
+  private buildBatteryHealthFields(
+    status: "present" | "absent" | "unavailable" | "error",
+  ): {
+    designCapacityWh?: number | null;
+    maxCapacityWh?: number | null;
+    healthPercent?: number | null;
+    wearPercent?: number | null;
+    cycleCount?: number | null;
+    healthStatus?: "available" | "invalid" | "unsupported" | "absent";
+    healthDetail?: string;
+  } {
+    if (status === "absent") {
+      // `null` explícito = "não aplicável"; `undefined` fica reservado para
+      // "não há leitura agora" (unavailable/error). A UI distingue os dois.
+      return {
+        designCapacityWh: null,
+        maxCapacityWh: null,
+        healthPercent: null,
+        wearPercent: null,
+        cycleCount: null,
+        healthStatus: "absent",
+        healthDetail: "Sem bateria: a saúde não é aplicável neste computador.",
+      };
+    }
+    if (status !== "present") {
+      // Sem leitura boa actual não há saúde a publicar.
+      return {};
+    }
+    const health = this.batteryHealthState;
+    return {
+      designCapacityWh: health.designWh,
+      maxCapacityWh: health.maxWh,
+      healthPercent: health.healthPercent,
+      wearPercent: health.wearPercent,
+      cycleCount: health.cycleCount,
+      healthStatus: health.status,
+      ...(health.detail ? { healthDetail: health.detail } : {}),
+    };
+  }
+
+  /**
+   * Aplica uma leitura de rede.
+   * - vazio/sem interface/contadores inválidos = falha (NUNCA 0 B/s inventado);
+   * - falha dentro do TTL mantém o último valor bom como `stale`;
+   * - expirado/sem leitura = `unavailable`; interface nunca vira "unknown".
+   */
+  private applyNetworkReading(stats: unknown[] | null): void {
+    const now = Date.now();
+    const list = Array.isArray(stats) ? stats : [];
+    // As taxas por adaptador saem DO MESMO array de contadores que alimenta o
+    // rx/tx principal: nenhuma consulta extra por interface.
+    this.rebuildAdapters(list, now);
+    const primary = list.find((n): n is { iface?: string; rx_sec?: number; tx_sec?: number } => {
+      if (!n || typeof n !== "object") return false;
+      const iface = (n as { iface?: unknown }).iface;
+      if (typeof iface !== "string" || iface.length === 0) return false;
+      const low = iface.toLowerCase();
+      return !low.includes("loopback") && !low.includes("lo");
+    }) ?? (list[0] as { iface?: string; rx_sec?: number; tx_sec?: number } | undefined);
+
+    const iface = primary?.iface;
+    const rx = primary?.rx_sec;
+    const tx = primary?.tx_sec;
+    const valid =
+      typeof iface === "string" &&
+      iface.length > 0 &&
+      typeof rx === "number" &&
+      Number.isFinite(rx) &&
+      rx >= 0 &&
+      typeof tx === "number" &&
+      Number.isFinite(tx) &&
+      tx >= 0;
+
+    if (valid) {
+      this.slowMetrics.rxSec = Math.round(rx as number);
+      this.slowMetrics.txSec = Math.round(tx as number);
+      this.slowMetrics.interfaceName = iface as string;
+      this.networkState = { updatedAt: now, status: "available" };
+      return;
+    }
+
+    if (this.networkState.updatedAt !== null && now - this.networkState.updatedAt <= NETWORK_STALE_TTL_MS) {
+      this.networkState = { ...this.networkState, status: "stale" };
+      return;
+    }
+    this.networkState = { updatedAt: null, status: "unavailable" };
+  }
+
+  /**
+   * Fatos por adaptador (designação, tipo, velocidade, IP, MAC, estado) —
+   * propriedade da máquina, não medição. Custa 1 subprocesso medido a 26/10,
+   * por isso é UMA recolha no arranque; as taxas vêm dos contadores acumulados
+   * de `networkStats` e não acrescentam nenhuma consulta.
+   */
+  private async readAdapterFacts(): Promise<void> {
+    const list = await runHardwareQuery("network-interfaces", () => si.networkInterfaces(), true)
+      .catch(() => null);
+    if (!Array.isArray(list)) return;
+    for (const entry of list as unknown as Record<string, unknown>[]) {
+      const iface = typeof entry.iface === "string" ? entry.iface : null;
+      if (!iface) continue;
+      const speed = typeof entry.speed === "number" && entry.speed > 0 ? entry.speed : null;
+      const up = entry.up === true;
+      const kind = HardwareHealthEngine.adapterKind(iface, typeof entry.type === "string" ? entry.type : undefined);
+      this.adapterFacts.set(iface, {
+        iface,
+        label: iface,
+        kind,
+        operstate: up ? "up" : entry.up === false ? "down" : null,
+        speedMbps: speed,
+        ip4: typeof entry.ip4 === "string" && entry.ip4 ? entry.ip4 : null,
+        mac: typeof entry.mac === "string" && entry.mac ? entry.mac : null,
+        rxBytesTotal: null,
+        txBytesTotal: null,
+        rxBytesPerSec: null,
+        txBytesPerSec: null,
+        // Estado por adaptador ainda não há leitura de contadores: `unavailable`
+        // até ao primeiro `networkStats`, que o substitui pela leitura real.
+        status: "unavailable",
+      });
+    }
+  }
+
+  /**
+   * Classificação do adaptador. Em Windows, `si.networkInterfaces()` não
+   * distingue sem-fio por campo próprio, por isso a heurística é de NOME e é
+   * marcada como inferência: um nome desconhecido é `unknown`, nunca "wired".
+   */
+  private static adapterKind(iface: string, declared?: string): NetworkAdapterReading["kind"] {
+    const low = `${iface} ${declared ?? ""}`.toLowerCase();
+    if (low.includes("loopback") || low.includes("lo:") || low.includes("distccd")) return "loopback";
+    if (/(wi-?fi|wireless|802\.11| WLAN|wifi)/.test(low)) return "wireless";
+    if (/(vEthernet|hyper-v|adapter for virtual|TAP|VMware|VirtualBox|Loopback)/.test(low)) return "virtual";
+    if (/(ethernet|GbE|PCIe|Gigabit|Family)/.test(low)) return "wired";
+    return "unknown";
+  }
+
+  /**
+   * Reconstrói a lista de adaptadores a partir dos contadores acumulados da
+   * mesma chamada que já dá o rx/tx principal. A taxa é NOSSA: duas amostras e
+   * o intervalo entre elas. Contador que desce (reinício/reset) não produz taxa
+   * negativa nem taxa inventada — produz `null` com a amostra nova guardada.
+   */
+  private rebuildAdapters(stats: unknown[], now: number): void {
+    // Dedupe por interface: o provider pode listar a mesma interface mais do que
+    // uma vez (endereços múltiplos) e uma tabela de adaptadores com duplicados
+    // é exatamente a contagem errada que este trabalho tinha de eliminar.
+    const porIface = new Map<string, NetworkAdapterReading>();
+    for (const entry of stats as Record<string, unknown>[]) {
+      const iface = typeof entry?.iface === "string" ? entry.iface : null;
+      if (!iface) continue;
+      const rxTotal =
+        typeof entry?.rx_bytes === "number" && Number.isFinite(entry.rx_bytes) && entry.rx_bytes >= 0
+          ? entry.rx_bytes
+          : null;
+      const txTotal =
+        typeof entry?.tx_bytes === "number" && Number.isFinite(entry.tx_bytes) && entry.tx_bytes >= 0
+          ? entry.tx_bytes
+          : null;
+      const totalsOk = rxTotal !== null && txTotal !== null;
+      const facts = this.adapterFacts.get(iface) ?? {
+        // Sem factos do provider de interfaces, o tipo é uma inferência de nome
+        // (documentada em `adapterKind`) e os campos que exigem WMI ficam null —
+        // não se inventa velocidade, IP nem estado.
+        iface,
+        label: iface,
+        kind: HardwareHealthEngine.adapterKind(iface),
+        operstate: null,
+        speedMbps: null,
+        ip4: null,
+        mac: null,
+      };
+      const previous = this.adapterCounters.get(iface);
+      let rxRate: number | null = null;
+      let txRate: number | null = null;
+      if (
+        rxTotal !== null && txTotal !== null &&
+        previous && now > previous.at && rxTotal >= previous.rx && txTotal >= previous.tx
+      ) {
+        const seconds = (now - previous.at) / 1000;
+        rxRate = Math.round((rxTotal - previous.rx) / seconds);
+        txRate = Math.round((txTotal - previous.tx) / seconds);
+      }
+      if (rxTotal !== null && txTotal !== null) {
+        this.adapterCounters.set(iface, { rx: rxTotal, tx: txTotal, at: now });
+      }
+      const ja = porIface.get(iface);
+      if (ja && (ja.rxBytesTotal !== null || rxTotal === null)) continue;
+      porIface.set(iface, {
+        ...(facts ?? {
+          iface,
+          label: iface,
+          kind: "unknown" as const,
+          operstate: null,
+          speedMbps: null,
+          ip4: null,
+          mac: null,
+        }),
+        iface,
+        rxBytesTotal: rxTotal,
+        txBytesTotal: txTotal,
+        rxBytesPerSec: rxRate,
+        txBytesPerSec: txRate,
+        status: totalsOk ? "available" : "unavailable",
+        updatedAt: new Date(now).toISOString(),
+      });
+    }
+    if (porIface.size > 0) {
+      this.adapters = [...porIface.values()];
+      this.adaptersUpdatedAt = now;
+    }
+  }
+
+  /** Lista de adaptadores a publicar, com a idade recalculada no snapshot. */
+  private buildAdapters(): NetworkAdapterReading[] {
+    if (this.adaptersUpdatedAt === null) return this.adapters;
+    const age = Date.now() - this.adaptersUpdatedAt;
+    if (age > NETWORK_STALE_TTL_MS) return [];
+    return this.adapters;
+  }
+
+  /** Estado da rede a publicar AGORA (a idade é recalculada no snapshot). */
+  private buildNetworkState(): {
+    status: "pending" | "available" | "stale" | "unavailable";
+    updatedAt: string | null;
+  } {
+    const { updatedAt, status } = this.networkState;
+    if (updatedAt === null) {
+      return { status: status === "pending" ? "pending" : "unavailable", updatedAt: null };
+    }
+    const age = Date.now() - updatedAt;
+    return {
+      status: age > NETWORK_STALE_TTL_MS ? "unavailable" : status,
+      updatedAt: new Date(updatedAt).toISOString(),
+    };
+  }
+
+  /**
+   * Aplica uma leitura de temperatura da CPU (boa ou falhada). Uma leitura
+   * inválida NÃO inventa 0 °C: dentro do TTL mantém o último valor bom como
+   * "stale"; fora do TTL limpa-o para `null`/`unavailable`.
+   */
+  private applyCpuTemperature(raw: number | null): void {
+    const now = Date.now();
+    if (typeof raw === "number" && Number.isFinite(raw) && raw > 0 && raw < 150) {
+      this.cpuTempState = { value: Math.round(raw), updatedAt: now, status: "available" };
+      return;
+    }
+    if (
+      this.cpuTempState.value !== null &&
+      this.cpuTempState.updatedAt !== null &&
+      now - this.cpuTempState.updatedAt <= CPU_TEMPERATURE_STALE_TTL_MS
+    ) {
+      this.cpuTempState = { ...this.cpuTempState, status: "stale" };
+      return;
+    }
+    this.cpuTempState = { value: null, updatedAt: null, status: "unavailable" };
+  }
+
+  /**
+   * Temperatura da CPU a publicar AGORA: o estado é recalculado no instante do
+   * snapshot, para que um valor que envelheceu sem novas polls também expire
+   * (o tick lento pode estar atrasado ou o processo pode ter estado suspenso).
+   */
+  private buildCpuTemperature(): { value: number | null; status: TemperatureStatus } {
+    const { value, updatedAt, status } = this.cpuTempState;
+    if (value === null || updatedAt === null) return { value: null, status: "unavailable" };
+    if (Date.now() - updatedAt > CPU_TEMPERATURE_STALE_TTL_MS) {
+      return { value: null, status: "unavailable" };
+    }
+    return { value, status };
   }
 
   /**
@@ -273,13 +1494,29 @@ export class HardwareHealthEngine {
     }
   }
 
+  constructor(private readonly queryTrace?: (line: string) => void) {}
+  private readonly queryAbort = new AbortController();
+  /** Cancel this engine's queued work; opaque already-running providers retain their lease. */
+  dispose(): void {
+    this.queryAbort.abort();
+    // A query PDH é um handle nativo: liberta-se explicitamente em vez de
+    // esperar pelo fim do processo, porque o serviço pode recriar engines.
+    this.diskProbe?.close();
+    this.diskProbe = null;
+  }
+  private initFlight: Promise<void> | null = null;
   async init() {
     if (this.initialized) return;
+    if (!this.initFlight) this.initFlight = withHardwareQuerySignal(this.queryAbort.signal, () => this.collectInit(), this.queryTrace).finally(() => { this.initFlight = null; });
+    return this.initFlight;
+  }
+
+  private async collectInit() {
     try {
       const [cpuInfo, osInfo, battery] = await Promise.all([
-        si.cpu().catch(() => null),
-        si.osInfo().catch(() => null),
-        si.battery().catch(() => null)
+        runHardwareQuery('cpu-info', () => si.cpu(), true).catch(() => null),
+        runHardwareQuery('os-info', () => si.osInfo(), true).catch(() => null),
+        runHardwareQuery('battery', () => si.battery(), true).catch(() => null)
       ]);
 
       this.staticMetrics.cpuModel = cpuInfo?.brand ?? "Unknown";
@@ -294,10 +1531,31 @@ export class HardwareHealthEngine {
 
       this.staticMetrics.hostname = osInfo?.hostname ?? "unknown";
 
-      this.staticMetrics.hasBattery = battery?.hasBattery ?? false;
-      this.staticMetrics.batteryPercent = battery?.percent ?? 0;
-      this.staticMetrics.isCharging = battery?.isCharging ?? false;
-      this.staticMetrics.timeRemaining = battery?.timeRemaining && battery.timeRemaining > 0 ? battery.timeRemaining : null;
+      // Identidade do CPU a partir do que JÁ foi pago: `cpuInfo` traz núcleos e
+      // frequência nominal. Os threads lógicos vêm de `os.cpus()` (0 subprocessos
+      // medidos) em vez de se confundirem com núcleos físicos.
+      const logical = os.cpus().length;
+      this.cpuIdentity = {
+        logicalCores: logical > 0 ? logical : null,
+        physicalCores: this.getPhysicalCores(cpuInfo) || null,
+        referenceMHz: typeof cpuInfo?.speed === "number" && cpuInfo.speed > 0 ? Math.round(cpuInfo.speed) : null,
+      };
+
+      // Leituras do kernel: grátis e instantâneas, por isso entram já no primeiro
+      // snapshot (memória comprometida, disponível, página, energia/bateria).
+      this.applyKernelReadings();
+      this.applyCpuCurrentMHz();
+
+      // Factos estáticos que custam PowerShell (módulos de RAM, adaptadores)
+      // vão em background: o primeiro snapshot não espera por eles.
+      void this.collectStaticFacts();
+
+      if (battery && typeof battery === "object") {
+        this.applyBatteryReading(battery, Date.now());
+      } else {
+        // O provider falhou no arranque: nunca "sem bateria"; fica sem leitura.
+        this.batteryState = { updatedAt: null, status: "error" };
+      }
 
       this.initialized = true;
     } catch (err) {
@@ -305,7 +1563,28 @@ export class HardwareHealthEngine {
     }
   }
 
-  async getSnapshot(processes: ProcessSnapshot[] = []): Promise<HardwareSnapshot> {
+  /**
+   * Recolha ÚNICA, em background, dos factos estáticos que custam PowerShell:
+   * módulos de RAM (Win32_PhysicalMemory) e adaptadores de rede. São
+   * propriedades da máquina, não medições — repeti-las a cada tick era exatamente
+   * o desperdício de consultas que este trabalho tinha por missão eliminar.
+   */
+  private async collectStaticFacts(): Promise<void> {
+    const [modules] = await Promise.all([
+      runHardwareQuery("ram-layout", () => si.memLayout(), true).catch(() => null),
+      this.readAdapterFacts(),
+    ]);
+    const layout = ramLayoutReading(modules);
+    this.ramLayout = {
+      ...layout,
+      updatedAt: layout.status === "available" ? new Date().toISOString() : undefined,
+    };
+  }
+
+  getSnapshot(processes: ProcessSnapshot[] = []): Promise<HardwareSnapshot> {
+    return withHardwareQuerySignal(this.queryAbort.signal, () => this.collectSnapshot(processes), this.queryTrace);
+  }
+  private async collectSnapshot(processes: ProcessSnapshot[]): Promise<HardwareSnapshot> {
     if (!this.initialized) {
       await this.init();
     }
@@ -317,66 +1596,39 @@ export class HardwareHealthEngine {
     if (now - this.lastFastTick >= 1000) {
       this.lastFastTick = now;
       try {
-        const cpuLoad = await si.currentLoad().catch(() => null);
-        this.fastMetrics.cpuUsage = Math.round(cpuLoad?.currentLoad ?? 0);
+        const cpuLoad = await this.readCpuLoad();
+        this.applyCpuUsage(cpuLoad?.currentLoad);
+        // Os por-núcleo vêm na mesma resposta — sem custo adicional.
+        this.applyPerCoreUsage(cpuLoad?.cpus);
+        this.applyCpuCurrentMHz();
 
-        const total = os.totalmem();
-        const free = os.freemem();
-        const used = total - free;
-        this.fastMetrics.totalRamGb = total / (1024 ** 3);
-        this.fastMetrics.usedRamGb = used / (1024 ** 3);
-        this.fastMetrics.ramPercent = total > 0 ? Math.round((used / total) * 100) : 0;
+        this.applyRamUsage(this.readRam());
+        // kernel32: uma chamada cada, sem subprocessos, com o contrato de
+        // frescura decidido no snapshot.
+        this.applyKernelReadings();
       } catch (err) {
+        // Uma exceção inesperada do tick não pode passar por 0% medido.
+        this.applyCpuUsage(null);
+        this.applyPerCoreUsage(null);
+        this.applyRamUsage(null);
         console.error("[Hardware] Fast tick error", err);
       }
     }
 
     // 2. TICK MÉDIO (Aprox. 5 segundos)
     // Dispara em background para não bloquear a entrega do snapshot (Fire-and-forget)
-    if (now - this.lastMediumTick >= 5000) {
+    if (!this.diskReadAttempted) {
+      // A PRIMEIRA leitura do armazenamento é esperada (com prazo), para que o
+      // primeiro snapshot publicado já traga o volume real em vez de "ainda sem
+      // leitura". As seguintes continuam assíncronas no tick médio.
+      await this.awaitFirstDiskRead(now);
+    } else if (now - this.lastMediumTick >= 5000) {
       this.lastMediumTick = now;
-      si.fsSize().then((fsSize) => {
-        try {
-          if (!fsSize || fsSize.length === 0) {
-            // No filesystems found
-            this.mediumMetrics.diskTotalGb = 0;
-            this.mediumMetrics.diskUsedGb = 0;
-            this.mediumMetrics.diskPercent = 0;
-            this.mediumMetrics.fsType = "unknown";
-            return;
-          }
-
-          // On Windows, look for C: drive first, otherwise use the first available
-          let primaryFs = fsSize.find(fs => fs.mount === "C:" || fs.mount === "C:\\");
-          if (!primaryFs) {
-            // Try to find any mounted filesystem (not system mounts)
-            primaryFs = fsSize.find(fs =>
-              fs.mount &&
-              !fs.mount.includes("Node") &&
-              !fs.mount.includes("Snapshot") &&
-              fs.size && fs.size > 0
-            );
-          }
-          if (!primaryFs && fsSize.length > 0) {
-            primaryFs = fsSize[0];
-          }
-
-          if (primaryFs && primaryFs.size && primaryFs.size > 0) {
-            this.mediumMetrics.diskTotalGb = primaryFs.size / (1024 ** 3);
-            this.mediumMetrics.diskUsedGb = (primaryFs.used ?? 0) / (1024 ** 3);
-            this.mediumMetrics.diskPercent = Math.max(0, Math.min(100, Math.round(primaryFs.use ?? 0)));
-            this.mediumMetrics.fsType = primaryFs.type ?? "unknown";
-          } else {
-            // Fallback: show UNKNOWN instead of wrong values
-            this.mediumMetrics.diskTotalGb = 0;
-            this.mediumMetrics.diskUsedGb = 0;
-            this.mediumMetrics.diskPercent = 0;
-            this.mediumMetrics.fsType = "unknown";
-          }
-        } catch (err) {
-          console.error("[Hardware] FS Size processing error", err);
-        }
-      }).catch(err => console.error("[Hardware] Medium tick error", err));
+      void this.readDisksOnce();
+      // Atividade de disco no MESMO tick de 5 s da ocupação: uma única fonte
+      // nativa (PDH) mede e custa ~0,2 ms, sem subprocesso. As taxas resultam
+      // do intervalo entre dois collects, por isso a cadência É a janela.
+      this.refreshDiskActivity();
     }
 
     // 3. TICK LENTO (Aprox. 10 segundos)
@@ -384,45 +1636,38 @@ export class HardwareHealthEngine {
     if (now - this.lastSlowTick >= 10000) {
       this.lastSlowTick = now;
 
-      // Network stats with better error handling
-      si.networkStats().then(netStats => {
-        try {
-          if (!netStats || netStats.length === 0) {
-            this.slowMetrics.rxSec = 0;
-            this.slowMetrics.txSec = 0;
-            this.slowMetrics.interfaceName = "unknown";
-            return;
-          }
+      // Rede: leitura própria com estado honesto (pending/available/stale/
+      // unavailable). Uma falha não publica 0 B/s nem inventa "unknown".
+      void this.refreshNetwork();
 
-          // Look for primary network interface (not loopback)
-          const primaryNet = netStats.find(n =>
-            n.iface &&
-            !n.iface.toLowerCase().includes("loopback") &&
-            !n.iface.toLowerCase().includes("lo")
-          ) || netStats[0];
+      // Bateria: refresh no mesmo ciclo (10 s), sem interval paralelo nem
+      // sobreposição. Uma falha mantém o último valor bom — nunca "sem bateria".
+      // init already obtained a real battery reading; do not repeat it on the
+      // immediate first slow tick, or renew its timestamp without a new sample.
+      if (this.batteryState.updatedAt === null || now - this.batteryState.updatedAt >= 10000) void this.refreshBattery();
 
-          if (primaryNet) {
-            this.slowMetrics.rxSec = primaryNet.rx_sec ?? 0;
-            this.slowMetrics.txSec = primaryNet.tx_sec ?? 0;
-            this.slowMetrics.interfaceName = primaryNet.iface ?? "unknown";
-          }
-        } catch (err) {
-          console.error("[Hardware] Net stats processing error", err);
-        }
-      }).catch(err => console.error("[Hardware] Slow tick net error", err));
+      // Saúde física dos discos: mesma cadência. Sem elevação os contadores
+      // vêm `denied` — o snapshot diz isso, não inventa 0 °C nem 0% de desgaste.
+      void this.refreshStorageHealth();
 
       // GPU detection with fallbacks
-      this.detectGpu().then(gpu => {
-        this.slowMetrics.gpu = gpu;
-      }).catch(err => console.error("[Hardware] GPU detection error", err));
+      if (!this.gpuRefreshInFlight) {
+        this.gpuRefreshInFlight = true;
+        this.detectGpu().then(gpu => {
+          this.slowMetrics.gpu = gpu;
+          this.gpuRefreshedAt = Date.now();
+        }).catch(err => console.error("[Hardware] GPU detection error", err))
+          .finally(() => { this.gpuRefreshInFlight = false; });
+      }
 
       // Temperaturas via providers user-mode (systeminformation → ACPI)
-      readTemperature().then(reading => {
-        // Usamos cpuPackageC como temperatura CPU principal, fallback para coreMax
-        const cpuTemp = reading.cpuPackageC ?? reading.cpuCoreMaxC;
-        if (cpuTemp !== null) {
-          this.slowMetrics.cpuTemperature = cpuTemp;
-        }
+      if (!this.temperatureRefreshInFlight) {
+        this.temperatureRefreshInFlight = true;
+        readTemperature().then(reading => {
+          // Usamos cpuPackageC como temperatura CPU principal, fallback para coreMax.
+        // Uma leitura falhada (null) passa pelo modelo de frescura da CPU: mantém
+        // o último valor bom dentro do TTL (stale) e expira-o depois.
+        this.applyCpuTemperature(reading.cpuPackageC ?? reading.cpuCoreMaxC);
         // Temperatura GPU: só o CORE pode alimentar o valor principal. Hotspot
         // e Memory Junction são guardados em campos separados com o seu sensor.
         if (reading.gpuCoreC !== null) {
@@ -430,7 +1675,19 @@ export class HardwareHealthEngine {
           this.applyGpuTemperature(reading.gpuCoreC, reading.source, sensorName);
         }
         this.applyGpuSecondaryTemps(reading.gpuHotspotC, reading.gpuMemoryJunctionC);
-      }).catch(() => { /* silent */ });
+        // Utilizacao do GPU: mesma aquisicao do PMLog que deu a temperatura, por
+        // isso nao custa uma consulta extra e continua rotulada com o sensor.
+        this.applyGpuUtilization(
+          reading.gpuPercent,
+          reading.gpuMemoryPercent,
+          reading.source,
+          reading.gpuPercentSensor ?? "GPU_ACTIVITY",
+        );
+      }).catch(() => {
+        // Erro na cadeia de temperatura conta como poll falhada (nunca valor fantasma).
+        this.applyCpuTemperature(null);
+      }).finally(() => { this.temperatureRefreshInFlight = false; });
+      }
     }
 
     const uptime = os.uptime();
@@ -439,12 +1696,21 @@ export class HardwareHealthEngine {
     const topProcessesByCpu = [...processes].sort((a, b) => b.cpu - a.cpu).slice(0, 5);
     const topProcessesByRam = [...processes].sort((a, b) => b.memoryMb - a.memoryMb).slice(0, 5);
 
-    // Stress Score
+    // Stress Score — usa a temperatura EFETIVA (já expirada se obsoleta).
+    const cpuTemperature = this.buildCpuTemperature();
+    const cpuUsageState = this.buildCpuUsageState();
+    const ramUsageState = this.buildRamUsageState();
+    const networkState = this.buildNetworkState();
     const { stressScore, alerts, contributions } = this.calculateStress(
-      this.fastMetrics.cpuUsage,
-      this.fastMetrics.ramPercent,
-      this.mediumMetrics.diskPercent,
-      this.slowMetrics.cpuTemperature,
+      // Só uma leitura ATUAL de CPU alimenta o stress. O número em
+      // fastMetrics.cpuUsage é mantido para apresentação ("última leitura"),
+      // mas um valor stale/indisponível não pode passar por carga de agora.
+      cpuUsageState.status === "available" ? this.fastMetrics.cpuUsage : null,
+      // RAM com o mesmo contrato: só uma medição ATUAL entra no stress; um 0
+      // que nunca foi medido (ou já expirado) não conta como RAM ociosa.
+      ramUsageState.status === "available" ? this.fastMetrics.ramPercent : null,
+      this.diskSnapshot,
+      cpuTemperature.value,
       topProcessesByCpu,
       topProcessesByRam
     );
@@ -452,36 +1718,79 @@ export class HardwareHealthEngine {
     const snapshot: HardwareSnapshot = {
       cpu: {
         usage: this.fastMetrics.cpuUsage,
+        // `usage` mantém-se número (compatibilidade source), mas o estado diz
+        // se é uma medição atual, uma última leitura antiga ou ausência de
+        // leitura. Sem leitura, a UI/assistente não devem apresentar 0%.
+        usageStatus: cpuUsageState.status,
+        usageUpdatedAt: cpuUsageState.updatedAt ?? undefined,
         model: this.staticMetrics.cpuModel,
         cores: this.staticMetrics.cpuCores,
         speed: this.staticMetrics.cpuSpeed,
-        temperature: this.slowMetrics.cpuTemperature,
+        temperature: cpuTemperature.value,
         // Auditado: sem sensor seguro (WMI/CIM em user-mode) o valor fica null e
         // o estado é "unavailable" — nunca inventamos uma temperatura fictícia
-        // e nunca carregamos um driver para a obter.
-        temperatureStatus: this.slowMetrics.cpuTemperature !== null ? "available" : "unavailable",
+        // e nunca carregamos um driver para a obter. Com um valor recente mas a
+        // última poll falhada, o estado é "stale" e expira ao fim do TTL.
+        temperatureStatus: cpuTemperature.status,
+        // Threads lógicos ≠ núcleos físicos: os dois campos existem porque a
+        // UI tinha por hábito mostrá-los como se fossem a mesma coisa.
+        logicalCores: this.cpuIdentity.logicalCores,
+        physicalCores: this.cpuIdentity.physicalCores,
+        // Tabela por processador lógico; ausente enquanto não houver leitura.
+        perCore: this.cpuPerCore.readings.length > 0 ? this.cpuPerCore.readings : undefined,
+        perCoreUpdatedAt: this.cpuPerCore.updatedAt
+          ? new Date(this.cpuPerCore.updatedAt).toISOString()
+          : undefined,
+        frequency: this.buildFrequencyReading(),
       },
       ram: {
-        usagePercent: this.fastMetrics.ramPercent,
-        usedGb: Math.round(this.fastMetrics.usedRamGb * 10) / 10,
-        totalGb: Math.round(this.fastMetrics.totalRamGb * 10) / 10,
+        // Medição ATUAL: só há NÚMEROS quando o estado é `available`. Sob
+        // `stale`/`unavailable` `usagePercent`/`usedGb` vão a null — nunca um 0
+        // nem a leitura antiga com ar de atual. `totalGb` é propriedade da
+        // máquina (capacidade instalada), não uma medição: mantém-se o ÚLTIMO
+        // valor conhecido quando existe, e `null` (desconhecido) enquanto nunca
+        // foi medida — nunca 0 GB. A última leitura BOA continua disponível em
+        // `usageLastGoodPercent` + `usageUpdatedAt` para exibição CACHED; NÃO é
+        // carga atual e o stress só aceita `available` (ver acima).
+        usagePercent: ramUsageState.status === "available" ? this.fastMetrics.ramPercent : null,
+        usedGb:
+          ramUsageState.status === "available"
+            ? Math.round(this.fastMetrics.usedRamGb * 10) / 10
+            : null,
+        totalGb: this.ramTotalGb === null ? null : Math.round(this.ramTotalGb * 10) / 10,
+        usageStatus: ramUsageState.status,
+        usageUpdatedAt: ramUsageState.updatedAt ?? undefined,
+        usageLastGoodPercent: ramUsageState.lastGoodPercent,
+        // Disponível/reservado/compromisso/página: tudo do mesmo kernel32
+        // `GlobalMemoryStatusEx`, sem subprocessos. O ficheiro de paginação tem
+        // o total DERIVADO e diz-lo (`totalIsDerived`).
+        ...this.buildRamDerived(),
+        commit: this.buildCommitReading(),
+        pagefile: this.buildPagefileReading(),
+        layout: this.ramLayout ?? ramLayoutReading(null),
       },
-      disk: {
-        usagePercent: this.mediumMetrics.diskPercent,
-        usedGb: Math.round(this.mediumMetrics.diskUsedGb * 10) / 10,
-        totalGb: Math.round(this.mediumMetrics.diskTotalGb * 10) / 10,
-        fsType: this.mediumMetrics.fsType,
-      },
+      // Estado + volumes tal como foram medidos (null em vez de 0 sem leitura),
+      // com a saúde física anexada quando já houve leitura de contadores.
+      disk: this.withDiskActivity(this.withStorageHealth(this.diskSnapshot, Date.now())),
       network: {
         rxSec: Math.round(this.slowMetrics.rxSec),
         txSec: Math.round(this.slowMetrics.txSec),
         interfaceName: this.slowMetrics.interfaceName,
+        readStatus: networkState.status,
+        updatedAt: networkState.updatedAt ?? undefined,
+        // Um registo por adaptador com estado e taxas próprias, construído a
+        // partir dos contadores acumulados — sem consultas por interface.
+        adapters: this.buildAdapters(),
       },
+      // Energia medida em kernel32: é esta leitura que permite distinguir
+      // "sem bateria (desktop)" de "sem leitura", sem inventar 0 %.
+      power: this.buildPowerReading(),
       battery: {
         hasBattery: this.staticMetrics.hasBattery,
         percent: this.staticMetrics.batteryPercent,
         isCharging: this.staticMetrics.isCharging,
         timeRemaining: this.staticMetrics.timeRemaining,
+        ...this.buildBatterySnapshot(),
       },
       gpu: this.buildGpuSnapshot(),
       system: {
@@ -506,10 +1815,128 @@ export class HardwareHealthEngine {
     return this.lastSnapshot;
   }
 
+  /**
+   * Aplica uma leitura de armazenamento (boa ou falhada). Dentro do TTL o estado
+   * passa a "stale" e mantém os números medidos; fora do TTL passa a
+   * "unavailable" e os números ficam `null` (nunca 0).
+   */
+  /**
+   * Uma leitura do armazenamento (TODOS os volumes, não só o C:). NUNCA rejeita:
+   * uma falha passa pelo mesmo caminho que uma leitura boa (`applyDiskRead`),
+   * para que o motivo fique publicado e o último valor bom não seja descartado.
+   */
+  private diskReadFlight: Promise<void> | null = null;
+  private readDisksOnce(): Promise<void> {
+    if (this.diskReadFlight) return this.diskReadFlight;
+    const flight = this.collectDisks();
+    this.diskReadFlight = flight;
+    void flight.finally(() => { if (this.diskReadFlight === flight) this.diskReadFlight = null; }).catch(() => {});
+    return flight;
+  }
+
+  private async collectDisks(): Promise<void> {
+    try {
+      const fsSize = await runHardwareQuery('volumes', () => si.fsSize(), true);
+      this.applyDiskRead(describeDiskRead(fsSize), Date.now());
+    } catch (error: unknown) {
+      this.applyDiskRead(
+        describeDiskRead(null, error instanceof Error ? error.message : String(error ?? "erro desconhecido")),
+        Date.now(),
+      );
+    }
+  }
+
+  /**
+   * Primeira leitura do armazenamento: esperada, mas com prazo. Se o prazo
+   * expirar respondemos na mesma — o estado fica `unavailable` COM motivo até a
+   * leitura assíncrona terminar, nunca um spinner eterno nem um zero inventado.
+   */
+  private async awaitFirstDiskRead(nowMs: number): Promise<void> {
+    this.diskReadAttempted = true;
+    this.lastMediumTick = nowMs;
+    let timer: NodeJS.Timeout | undefined;
+    try {
+      await Promise.race([
+        this.readDisksOnce(),
+        new Promise<void>((resolve) => {
+          timer = setTimeout(resolve, DISK_FIRST_READ_TIMEOUT_MS);
+        }),
+      ]);
+    } finally {
+      if (timer) clearTimeout(timer);
+    }
+  }
+
+  /**
+   * Seam da sondagem PDH (sobreponível em testes sem Windows nem DLL). Vive um
+   * único probe por engine: a query PDH tem de sobreviver entre ticks para que
+   * o segundo `collect` tenha um intervalo em que calcular a taxa.
+   */
+  protected pollDiskActivity(instances: string[]): PdhReading<PdhVolumeSample[]> {
+    this.diskProbe ??= new PdhDiskProbe();
+    return this.diskProbe.poll(instances);
+  }
+
+  /** Instâncias PDH a medir: os volumes já lidos pela ocupação, mais o agregado. */
+  private diskInstances(): string[] {
+    const letras = this.diskSnapshot.volumes
+      .map((volume) => volume.mount.toUpperCase())
+      .filter((mount) => /^[A-Z]:$/.test(mount));
+    return [...new Set([...letras, "_Total"])];
+  }
+
+  /**
+   * Aplica uma sondagem de atividade. Três estados distintos e nunca
+   * confundíveis: (1) PDH indisponível → estado com motivo; (2) disponível mas
+   * ainda sem intervalo medido → idem, com o motivo técnico; (3) medido →
+   * tabela por volume. Em (1) e (2) a tabela vai a vazia: publicar números
+   * velhos como se fossem deste intervalo é a mentira que o requisito §1 proíbe
+   * expressamente ("velocidades apenas quando comprováveis").
+   */
+  private refreshDiskActivity(): void {
+    const result = this.pollDiskActivity(this.diskInstances());
+    if (result.status === "unavailable") {
+      this.diskActivity = [];
+      this.diskActivityStatus = "unavailable";
+      this.diskActivityDetail = result.reason;
+      return;
+    }
+    const readings = diskActivityReadings(result.value);
+    const medidos = readings.filter((reading) => reading.status === "available");
+    this.diskActivity = medidos;
+    this.diskActivityStatus = medidos.length > 0 ? "available" : "unavailable";
+    this.diskActivityDetail =
+      medidos.length > 0 ? null : "contadores PDH sem intervalo medido ainda";
+  }
+
+  /** Anexa a atividade ao snapshot de disco, sem tocar na ocupação nem na saúde. */
+  private withDiskActivity(snapshot: DiskSnapshot): DiskSnapshot {
+    if (this.diskActivityStatus !== "available") {
+      return { ...snapshot, activity: [], activityStatus: "unavailable", activityDetail: this.diskActivityDetail };
+    }
+    return {
+      ...snapshot,
+      activity: this.diskActivity,
+      activityStatus: "available",
+      activityDetail: null,
+    };
+  }
+
+  private applyDiskRead(read: DiskReadOutcome, nowMs: number): void {
+    const { snapshot, lastGood } = buildDiskSnapshot({
+      read,
+      lastGood: this.diskLastGood,
+      nowMs,
+      nowIso: new Date(nowMs).toISOString(),
+    });
+    this.diskSnapshot = snapshot;
+    this.diskLastGood = lastGood;
+  }
+
   private calculateStress(
-    cpuUsage: number,
-    ramPercent: number,
-    diskPercent: number,
+    cpuUsage: number | null,
+    ramPercent: number | null,
+    disk: DiskSnapshot,
     temperature: number | null,
     topCpu: import("@cybersafe/shared-types").ProcessSnapshot[],
     topRam: import("@cybersafe/shared-types").ProcessSnapshot[],
@@ -528,28 +1955,34 @@ export class HardwareHealthEngine {
       gpu: 0,
     };
 
-    // CPU stress (max 35 points)
-    if (cpuUsage > 90) {
-      const pts = 35;
-      score += pts;
-      contributions.cpu = pts;
-      const topProcess = topCpu.length > 0 && topCpu[0].cpu > 30 ? topCpu[0] : undefined;
-      alerts.push({
-        severity: cpuUsage > 95 ? "critical" : "high",
-        category: "cpu",
-        title: "Utilização de CPU elevada",
-        description: topProcess ? `O processo ${topProcess.name} está consumindo ${topProcess.cpu}% da CPU.` : "A CPU está sob forte carga, o que pode causar lentidão no sistema.",
-        process: topProcess,
-        recommendation: "Feche aplicações pesadas que não estejam em uso. Se for um processo desconhecido, execute uma análise de segurança.",
-      });
-    } else if (cpuUsage > 75) {
-      const pts = 15;
-      score += pts;
-      contributions.cpu = pts;
+    // CPU stress (max 35 points) — só uma medição ATUAL conta. Um valor
+    // `stale`/`unavailable` (falha de leitura) não pode somar stress nem gerar
+    // alerta como se fosse a carga de agora.
+    if (cpuUsage !== null) {
+      if (cpuUsage > 90) {
+        const pts = 35;
+        score += pts;
+        contributions.cpu = pts;
+        const topProcess = topCpu.length > 0 && topCpu[0].cpu > 30 ? topCpu[0] : undefined;
+        alerts.push({
+          severity: cpuUsage > 95 ? "critical" : "high",
+          category: "cpu",
+          title: "Utilização de CPU elevada",
+          description: topProcess ? `O processo ${topProcess.name} está consumindo ${topProcess.cpu}% da CPU.` : "A CPU está sob forte carga, o que pode causar lentidão no sistema.",
+          process: topProcess,
+          recommendation: "Feche aplicações pesadas que não estejam em uso. Se for um processo desconhecido, execute uma análise de segurança.",
+        });
+      } else if (cpuUsage > 75) {
+        const pts = 15;
+        score += pts;
+        contributions.cpu = pts;
+      }
     }
 
-    // RAM stress (max 30 points)
-    if (ramPercent > 85) {
+    // RAM stress (max 30 points) — só uma medição ATUAL conta (idêntico à CPU):
+    // sem leitura válida, `null` não soma stress nem gera alerta como se fosse
+    // RAM ociosa, e um número stale não passa por carga de agora.
+    if (ramPercent !== null && ramPercent > 85) {
       const pts = 30;
       score += pts;
       contributions.ram = pts;
@@ -562,7 +1995,7 @@ export class HardwareHealthEngine {
         process: topProcess,
         recommendation: "Feche abas do navegador ou programas minimizados para libertar memória.",
       });
-    } else if (ramPercent > 70) {
+    } else if (ramPercent !== null && ramPercent > 70) {
       const pts = 10;
       score += pts;
       contributions.ram = pts;
@@ -588,23 +2021,31 @@ export class HardwareHealthEngine {
       }
     }
 
-    // Disk capacity alerts (NOT stress — separate finding)
-    if (diskPercent > 90) {
-      alerts.push({
-        severity: diskPercent > 95 ? "critical" : "high",
-        category: "disk",
-        title: "Espaço em disco muito baixo",
-        description: "Menos de 10% do disco principal está livre, o que pode impedir o sistema de funcionar corretamente.",
-        recommendation: "Apague ficheiros temporários, esvazie a reciclagem ou desinstale aplicações desnecessárias.",
-      });
-    } else if (diskPercent > 80) {
-      alerts.push({
-        severity: "low",
-        category: "disk",
-        title: "Espaço em disco baixo",
-        description: "O disco principal tem entre 10% e 20% de espaço livre.",
-        recommendation: "Liberte espaço antes que o disco fique quase cheio.",
-      });
+    // Capacidade de disco NÃO é stress (ver nota acima): o aviso sai do volume
+    // de trabalho mais cheio e diz QUAL é, com o espaço livre em números.
+    // Sem leitura (`volumes` vazio) não há aviso — não se inventa um problema
+    // a partir de um dado que não existe.
+    const worst = worstWorkingVolume(disk.volumes);
+    if (worst) {
+      const freeGb = Math.round(worst.freeGb);
+      const totalGb = Math.round(worst.totalGb);
+      if (worst.usagePercent > 90) {
+        alerts.push({
+          severity: worst.usagePercent > 95 ? "critical" : "high",
+          category: "disk",
+          title: `Espaço em disco muito baixo em ${worst.mount}`,
+          description: `Menos de 10% do volume ${worst.mount} está livre (${freeGb} GB livres de ${totalGb} GB), o que pode impedir o sistema de funcionar corretamente.`,
+          recommendation: `Liberte espaço no volume ${worst.mount}: apague ficheiros temporários, esvazie a reciclagem ou desinstale aplicações desnecessárias.`,
+        });
+      } else if (worst.usagePercent > 80) {
+        alerts.push({
+          severity: "low",
+          category: "disk",
+          title: `Espaço em disco baixo em ${worst.mount}`,
+          description: `O volume ${worst.mount} tem entre 10% e 20% de espaço livre (${freeGb} GB livres de ${totalGb} GB).`,
+          recommendation: `Liberte espaço no volume ${worst.mount} antes que fique quase cheio.`,
+        });
+      }
     }
 
     return {

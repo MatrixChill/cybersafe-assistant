@@ -12,15 +12,19 @@
     "dev:desktop": "npm run dev -w @cybersafe/desktop",
     "dev:service": "npm run dev -w @cybersafe/service",
     "dev": "concurrently --kill-others \"npm run dev:service\" \"npm run dev:api\" \"npm run dev:app\" \"npm run dev:desktop\"",
-    "build:all": "npm run build --workspaces",
+    "build:all": "node scripts/build-all-ordered.mjs",
     "build:native": "cmake -S packages/native-engine -B packages/native-engine/build && cmake --build packages/native-engine/build --config Release",
     "test:native": "node --test packages/native-engine/test/hash-vectors.test.js",
+    "test:build-order": "node --test scripts/build-all-ordered.test.mjs",
+    "test:dev-isolation": "node --test scripts/desktop-dev-profile-paths.test.mjs scripts/dev-cached-exception.test.mjs",
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",
     "memory:report": "node scripts/memory-report.mjs",
     "drivers:check": "node scripts/check-release-drivers.mjs",
     "scanner:probe": "node scripts/scanner-runtime-probe.mjs",
-    "scanner:benchmark": "node scripts/scanner-benchmark.mjs"
+    "scanner:benchmark": "node scripts/scanner-benchmark.mjs",
+    "scanner:batch-probe": "node scripts/scanner-clamav-batch-probe.mjs",
+    "protection:probe": "node scripts/protection-toggle-probe.mjs"
   },
   "license": "MIT",
   "engines": {
@@ -31,7 +35,17 @@
   ],
   "devDependencies": {
     "concurrently": "^9.2.1",
+    "iconv-lite": "0.7.2",
+    "node-gyp": "12.1.0",
     "wait-on": "^9.0.5"
+  },
+  "overrides": {
+    "systeminformation": "5.33.19",
+    "zod": "4.6.7",
+    "proxy-addr": "2.0.8",
+    "body-parser": "2.4.0",
+    "qs": "6.17.1",
+    "path-to-regexp": "8.4.2"
   },
   "dependencies": {
     "@tailwindcss/postcss": "^4.3.3"

@@ -29,53 +29,72 @@ import { isAppShuttingDown, onAppShutdown, runUnlessShuttingDown } from "@/lib/s
 // ── Types ──
 
 type ConnectionState = "loading" | "ready" | "empty" | "error" | "unavailable";
+
+/** Ritmo das LIGAÇÕES. A lista de processos segue o poll partilhado do `App`. */
+const CONNECTIONS_POLL_MS = 5_000;
 type ProtocolFilter = "all" | "tcp";
 
 // ── Component ──
 
 interface BusinessSecurityCenterProps {
   connections: ConnectionSnapshot[];
+  /**
+   * O inventário vem do poll partilhado do `App` — um dono por consulta. Este
+   * painel usa as linhas apenas para traduzir PID → nome nas ligações.
+   */
   processes: ProcessSnapshot[];
+  /**
+   * Instante da FOTO do Windows por trás de `processes`, já validado pela
+   * política de `processListState`. `null` = ninguém afirma a idade das linhas,
+   * e a marca de frescura tem de sair do ecrã — nunca ficar a antiga.
+   */
+  processesObservedAt?: number | null;
 }
 
 export default function BusinessSecurityCenter({
   connections: initialConnections,
-  processes: initialProcesses,
+  processes,
+  processesObservedAt,
 }: BusinessSecurityCenterProps) {
   const [connections, setConnections] = useState<ConnectionSnapshot[]>(initialConnections);
-  const [processes, setProcesses] = useState<ProcessSnapshot[]>(initialProcesses);
-  const [state, setState] = useState<ConnectionState>(
-    initialConnections.length > 0 ? "ready" : initialConnections.length === 0 && initialProcesses.length === 0 ? "loading" : "ready",
+  const [state, setState] = useState<ConnectionState>(() => {
+    // Motor ausente: estado derivado na inicialização (sem setState em efeito).
+    if (typeof window !== "undefined" && !window.electronAPI) return "unavailable";
+    // AG-13: Só entra em "ready" se houver ligações reais iniciais. A presença de processos sozinhos não prova ligações.
+    return initialConnections.length > 0 ? "ready" : "loading";
+  });
+  const [error, setError] = useState(() =>
+    typeof window !== "undefined" && !window.electronAPI ? "Motor de proteção indisponível." : "",
   );
-  const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [protocolFilter, setProtocolFilter] = useState<ProtocolFilter>("all");
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
   const [selectedConnection, setSelectedConnection] = useState<EnrichedConnection | null>(null);
   const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const mountedRef = useRef(true);
 
   // ── Fetch latest data ──
 
-  const fetchData = useCallback(async () => {
-    if (!window.electronAPI) {
-      setState("unavailable");
-      setError("Motor de proteção indisponível.");
-      return;
-    }
+  /**
+   * Uma leitura, um dono: este painel só pede LIGAÇÕES. A lista de processos é
+   * pedida pelo poll partilhado do `App` e chega por prop.
+   *
+   * Porque isto existia: o painel fazia o seu próprio `getProcesses` de 5 em 5 s
+   * em paralelo com o App — a mesma consulta com dois donos, dois ritmos e duas
+   * noções de frescura. E era esse caminho privado que, no caminho das props,
+   * carimbava «Atualizado» com `new Date()`, o relógio do cliente, sobre linhas
+   * cuja idade ninguém tinha afirmado.
+   */
+  const fetchConnections = useCallback(async () => {
+    // Motor ausente: o estado "unavailable" já é derivado na inicialização.
+    if (!window.electronAPI) return;
     // Encerramento em curso: sem leituras novas ao serviço.
     if (isAppShuttingDown()) return;
     try {
-      const [nextConnections, nextProcesses] = await Promise.all([
-        window.electronAPI.getConnections(),
-        window.electronAPI.getProcesses(),
-      ]);
+      const nextConnections = await window.electronAPI.getConnections();
       if (!mountedRef.current) return;
       // Resultado que chega depois do shutdown é descartado.
       if (isAppShuttingDown()) return;
       setConnections(nextConnections);
-      setProcesses(nextProcesses);
-      setLastUpdated(new Date());
       setError("");
       setState(nextConnections.length === 0 ? "empty" : "ready");
     } catch {
@@ -94,22 +113,37 @@ export default function BusinessSecurityCenter({
     return () => { mountedRef.current = false; };
   }, []);
 
-  useEffect(() => {
+  // ── Sync com props durante a render (padrão de ajuste a props) ──
+  // Evita setState dentro de efeitos: só reage quando as props mudam de facto.
+  const [prevConnections, setPrevConnections] = useState(initialConnections);
+  if (prevConnections !== initialConnections) {
+    setPrevConnections(initialConnections);
     setConnections(initialConnections);
-    setProcesses(initialProcesses);
-    if (initialConnections.length > 0 && state === "loading") {
-      setState("ready");
-      setLastUpdated(new Date());
-    }
-  }, [initialConnections, initialProcesses]);
+    // Aqui NÃO se afirma frescura nenhuma: receber linhas do App não é uma
+    // leitura acabada de fazer. A única marca mostrada vem de
+    // `processesObservedAt`, o instante da foto afirmado pelo serviço.
+    if (initialConnections.length > 0 && state === "loading") setState("ready");
+  }
+
+  /** A marca do painel: só o instante da foto do Windows, nunca `Date.now()`. */
+  const marcaDeLeitura =
+    typeof processesObservedAt === "number" && Number.isFinite(processesObservedAt)
+      ? new Date(processesObservedAt)
+      : null;
 
   // ── Polling ──
 
   useEffect(() => {
-    // Initial fetch if we have no data yet
-    if (connections.length === 0 && state === "loading") {
-      void fetchData();
-    }
+    // Leitura inicial pelo timer, fora da fase síncrona do efeito: o lint de
+    // hooks rejeita invocar diretamente uma função que faz setState no corpo.
+    const firstPoll =
+      connections.length === 0 && state === "loading"
+        ? setTimeout(() => {
+            runUnlessShuttingDown(() => {
+              void fetchConnections();
+            });
+          }, 0)
+        : null;
 
     const stopPolling = () => {
       if (pollRef.current) {
@@ -120,17 +154,18 @@ export default function BusinessSecurityCenter({
 
     pollRef.current = setInterval(() => {
       if (document.visibilityState !== "visible") return;
-      runUnlessShuttingDown(() => { void fetchData(); });
-    }, 5_000);
+      runUnlessShuttingDown(() => { void fetchConnections(); });
+    }, CONNECTIONS_POLL_MS);
 
     // O polling pára assim que o utilizador confirma a saída.
     const stopOnShutdown = onAppShutdown(stopPolling);
 
     return () => {
+      if (firstPoll !== null) clearTimeout(firstPoll);
       stopOnShutdown();
       stopPolling();
     };
-  }, [fetchData, connections.length, state]);
+  }, [fetchConnections, connections.length, state]);
 
   // ── Enriched data ──
 
@@ -264,9 +299,9 @@ export default function BusinessSecurityCenter({
           <h3 className="font-mono font-semibold text-foreground flex items-center gap-2 text-sm">
             <Globe className="w-4 h-4 text-primary" />
             Ligações de Rede
-            {lastUpdated && (
+            {marcaDeLeitura && (
               <span className="text-[10px] font-normal text-muted-foreground ml-2">
-                Atualizado {lastUpdated.toLocaleTimeString()}
+                Nomes de processo lidos às {marcaDeLeitura.toLocaleTimeString()}
               </span>
             )}
           </h3>
@@ -290,7 +325,7 @@ export default function BusinessSecurityCenter({
                     "px-3 py-1.5 text-xs font-mono rounded transition-all",
                     protocolFilter === f
                       ? "bg-primary text-primary-foreground"
-                      : "text-muted-foreground hover:bg-white/5",
+                      : "text-muted-foreground hover:bg-secondary/50",
                   )}
                 >
                   {f === "all" ? "Todos" : f.toUpperCase()}
@@ -304,7 +339,7 @@ export default function BusinessSecurityCenter({
               UDP indisponível
             </span>
             <button
-              onClick={() => void fetchData()}
+              onClick={() => void fetchConnections()}
               className="p-2 rounded-lg bg-secondary/50 text-muted-foreground hover:text-foreground hover:bg-secondary transition-all"
               title="Atualizar agora"
             >
@@ -320,7 +355,7 @@ export default function BusinessSecurityCenter({
               <AlertCircle className="w-12 h-12 opacity-20" />
               <p className="font-mono text-sm">Não foi possível obter as ligações de rede.</p>
               <button
-                onClick={() => void fetchData()}
+                onClick={() => void fetchConnections()}
                 className="px-4 py-2 bg-primary/10 text-primary rounded-lg text-xs font-mono hover:bg-primary/20 transition-all"
               >
                 Tentar novamente
@@ -397,7 +432,7 @@ export default function BusinessSecurityCenter({
                         </span>
                       </td>
                       <td className="py-3 px-4">
-                        <span className="font-mono text-xs text-foreground">
+                        <span className="font-mono text-xs text-foreground break-all max-w-[220px] inline-block" title={item.connection.remoteAddress || undefined}>
                           {item.connection.remoteAddress || "—"}
                         </span>
                         {item.connection.domain && (
@@ -457,7 +492,7 @@ export default function BusinessSecurityCenter({
       </div>
 
       {/* Privacy note */}
-      <div className="flex items-start gap-3 p-4 rounded-xl bg-secondary/30 border border-white/5">
+      <div className="flex items-start gap-3 p-4 rounded-xl bg-secondary/30 border border-border">
         <Shield className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
         <p className="text-[11px] text-muted-foreground font-mono leading-relaxed">
           O CyberSafe apresenta metadados de ligação. O conteúdo das comunicações não é capturado.
@@ -480,7 +515,7 @@ export default function BusinessSecurityCenter({
           ].map((item) => (
             <div
               key={item.label}
-              className="p-3 rounded-lg bg-secondary/20 border border-white/5 opacity-50"
+              className="p-3 rounded-lg bg-secondary/20 border border-border opacity-50"
             >
               <p className="text-xs font-mono text-muted-foreground font-semibold">{item.label}</p>
               <p className="text-[10px] font-mono text-muted-foreground/60 mt-1">{item.desc}</p>
@@ -524,7 +559,7 @@ export default function BusinessSecurityCenter({
             <div className="p-4 border-t border-border/50 bg-secondary/30 flex justify-end">
               <button
                 onClick={() => setSelectedConnection(null)}
-                className="px-4 py-2 font-mono text-sm rounded bg-white/5 hover:bg-white/10 transition-colors"
+                className="px-4 py-2 font-mono text-sm rounded bg-secondary/50 hover:bg-secondary transition-colors"
               >
                 Fechar
               </button>

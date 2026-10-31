@@ -75,7 +75,7 @@ describe("A3 — uma confirmacao = um request (guarda SINCRONA)", () => {
     let libertado;
     const trava = new Promise<void>((r) => { libertado = r; });
 
-    const deps = { pid: 7, gate: { inFlight: false }, kill: async (_pid: number) => { pedidos += 1; await trava; return result({ pid: 7, success: true, status: "killed" }); } };
+    const deps = { pid: 7, gate: { inFlight: false }, kill: async () => { pedidos += 1; await trava; return result({ pid: 7, success: true, status: "killed" }); } };
 
     // Duas confirmacoes no MESMO turno, antes de qualquer re-render: e
     // exatamente o que o `disabled` do botao nao apanha.
@@ -93,7 +93,7 @@ describe("A3 — uma confirmacao = um request (guarda SINCRONA)", () => {
   });
 
   test("a guarda e por fluxo: um PID diferente nao e bloqueado pelo outro", async () => {
-    let pedidos: number[] = [];
+      const pedidos: number[] = [];
     const kill = async (pid: number) => { pedidos.push(pid); return result({ pid, success: true, status: "killed" }); };
     await Promise.all([
       runKillRequest({ pid: 1, gate: { inFlight: false }, kill }),

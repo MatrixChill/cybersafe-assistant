@@ -1,5 +1,6 @@
 import * as fs from "node:fs";
-import { installSignalHandlers } from "./signal-handlers";
+import { installSignalHandlers } from "./signal-handlers.js";
+import { validarConfigWindowsReadOnly } from "./dev-windows-readonly.js";
 
 import "dotenv/config";
 import {
@@ -19,6 +20,26 @@ import {
 // Em regime normal nada é apagado antes de estar dentro da retenção; o
 // reclaim de truncar só dispara para ficheiros já macroscopicamente acima do
 // orçamento (o caso dos GB herdados desta máquina).
+// ── Validação do modo de leitura Windows — ANTES do primeiro efeito ──────────
+// As linhas seguintes abrem `BASE_DIR`, criam diretórios, giram `error.log` e
+// `boot-debug.log` e escrevem no primeiro log. Uma configuração inválida do modo
+// não pode deixar um único desses efeitos para trás, por isso a decisão de
+// «pedido ou não» é a primeira coisa que corre neste módulo.
+//
+// É estritamente condicional: sem `CYBERSAFE_DEV_WINDOWS_READONLY=1` nenhuma
+// função do modo é chamada, nenhuma estat é feita e o arranque normal é
+// byte-a-byte o de antes. Com a flag pedida e errada, lança aqui — antes de
+// `BASE_DIR`, antes do construtor do serviço e muito antes do pipe.
+//
+// Limite honesto e não evitável a partir deste ficheiro: as importações de
+// módulos ES são içadas e avaliadas antes do corpo, pelo que efeitos de topo dos
+// módulos importados (p. ex. `dotenv/config` a ler `.env`) acontecem seja onde
+// foi que esta linha for posta. O que aqui se garante é a ordem dentro de
+// `index.ts`, não uma anterioridade absoluta sobre todos os módulos.
+const configWindowsReadOnly = process.env.CYBERSAFE_DEV_WINDOWS_READONLY === "1"
+  ? validarConfigWindowsReadOnly(process.env)
+  : null;
+
 const BASE_DIR = serviceBaseDir();
 const DEBUG_LOG = bootDebugLogPath(BASE_DIR);
 const ERROR_LOG = errorLogPath(BASE_DIR);
@@ -67,6 +88,10 @@ bootDebug.write(`[${new Date().toISOString()}] BOOT INICIADO EM: ${process.cwd()
 
 import { ProtectionEngineService } from "./engine.js";
 import { DefinitionUpdater } from "./updater.js";
+import { installDevFixtureGate } from "./dev-fixture-gate.js";
+// `validarConfigWindowsReadOnly` é importado no topo deste ficheiro porque a
+// decisão do modo tem de anteceder `BASE_DIR`; daqui só se usa a montagem.
+import { montarGuardaWindowsReadOnly } from "./dev-windows-readonly.js";
 
 // ── Crash Resilience ─────────────────────────────────────────────────────────
 // Quando rodando como serviço Windows (SYSTEM), não há UI nem console.
@@ -140,18 +165,85 @@ process.on("unhandledRejection", (reason) => {
 });
 
 // ── Service Bootstrap ────────────────────────────────────────────────────────
+// `configWindowsReadOnly` foi decidido no topo deste módulo, antes do primeiro
+// efeito de logging; aqui limita-se a montar a guarda, porque precisa do objeto.
 
 const service = new ProtectionEngineService();
+
+// DEV direct runner: inherited parent channel, no PID lookup or OS termination.
+if (process.env.NODE_ENV !== "production" && process.env.CYBERSAFE_DEV_ISOLATION === "1" &&
+    process.env.CYBERSAFE_DEV_OWNED_CHILD === "1" && process.connected) {
+  let closing: Promise<unknown> | undefined;
+  const closeOwnedService = () => { closing ??= service.shutdown().catch((error) => safeWrite("err", ["[Service] Parent shutdown failed:", error])); };
+  process.on("message", (value: unknown) => {
+    if (value && typeof value === "object" && (value as { type?: unknown }).type === "cybersafe:dev:shutdown") closeOwnedService();
+  });
+  process.on("disconnect", closeOwnedService);
+}
 
 async function main() {
   logToFile("INFO", "Service starting...");
   safeWrite("out", ["[Service] Starting init..."]);
 
   try {
-    await service.init();
-    safeWrite("out", ["[Service] Init complete. Starting pipe server..."]);
+    // Gate de fixture do Scanner (TP-CONTINUOUS-RUNTIME Q1). Sem a env ligada isto é
+    // estritamente não-invasivo: `installDevFixtureGate` devolve `false` sem tocar em nada.
+    //
+    // A ordem é gate → init → pipe, e não o contrário. O resolutor do corpus YARA de teste
+    // (TP-A4) corre DENTRO de `init()` e exige o gate efetivamente montado; montado depois,
+    // essa prova nunca podia ser satisfeita. Antes do pipe server continua obrigatório:
+    // nenhum pedido pode chegar sem o gate em pé. Config inválida MATA o arranque — o
+    // requisito é «falha ⇒ zero sessão».
+    //
+    // A política de quarentena é lida do disco em `init()`, por isso é reportada à parte,
+    // depois, em vez de se montar o gate tarde demais para o corpus.
+    const gateMontado = installDevFixtureGate(service);
+    if (gateMontado) {
+      logToFile("WARN", "Gate de fixture de DEV montado: só scan.start custom dentro do FIXTURE_ROOT, readOnly forçado.");
+    }
+
+    // Guarda de leitura Windows: outro regime, também antes de `init()` e do pipe,
+    // para que nenhum pedido chegue ao motor sem a allowlist montada. Os dois são
+    // exclusivos por construção — `validarConfigWindowsReadOnly` recusa a flag de
+    // fixture — pelo que montar um não altera o outro. Os efeitos de arranque que
+    // este modo exige cortados (`USB_PROTECTION=0`, `STARTUP_RESUME=0`) são os
+    // ramos já existentes em `engine.ts init()`; este módulo valida-os e lança,
+    // nunca os escreve por detrás do launcher.
+    if (configWindowsReadOnly && montarGuardaWindowsReadOnly(service, process.env, (linha) => logToFile("WARN", linha))) {
+      safeWrite("out", ["[Service] Modo de leitura Windows montado: leituras permitidas, mutações recusadas antes do motor."]);
+    }
+
+    // ── Arranque progressivo (TP-PAP-F1-RUNTIME-20261026) ───────────────────
+    // As guardas acima já estão em pé (gate de fixture e/ou leitura Windows).
+    // O pipe abre AGORA, antes de `init()`: o desktop deixa de gastar o
+    // orçamento de arranque à espera de definitions/quarentena/probes para
+    // obter a primeira resposta. Durante a janela o motor serve apenas
+    // leituras seguras; as restantes esperam por init com prazo e as mutações
+    // são recusadas com erro estável. `service-ready` continua a sair só no
+    // fim de init — pipe ligado nunca é proteção pronta.
+    service.beginProgressiveStart();
+    safeWrite("out", ["[Service] Abrindo pipe server antes de completar init (arranque progressivo)..."]);
     await service.startPipeServer();
-    safeWrite("out", ["[Service] Pipe server started!"]);
+    safeWrite("out", ["[Service] Pipe server à escuta; init em curso. Mutações recusadas até pronto."]);
+
+    await service.init();
+
+    // Corrida shutdown-vs-init: se o encerramento já ganhou, NUNCA se anuncia
+    // serviço pronto ao Electron. `init()` também lança neste caso; esta guarda
+    // fecha a janela entre ele resolver e o `service-ready` sair.
+    if (service.startupState === "disposed") {
+      safeWrite("out", ["[Service] Encerramento durante init; não se anuncia service-ready."]);
+      return;
+    }
+
+    if (gateMontado) {
+      // Linha exclusiva do modo de DEV (só aqui com o gate montado): a política EFECTIVA,
+      // agora sim lida do disco. Não altera o regime normal nem o modo desligado.
+      const efetiva = (service as unknown as { quarantinePolicy?: string }).quarantinePolicy;
+      safeWrite("out", [`[Service] política de quarentena efetiva após init: ${String(efetiva)}`]);
+    }
+
+    safeWrite("out", ["[Service] Init complete. Motor pronto."]);
     logToFile("INFO", "Service fully initialized. Pipe server listening. Protection remains OFF until monitor.start is called.");
 
     // Sinaliza para o processo pai (Electron em dev) que está pronto

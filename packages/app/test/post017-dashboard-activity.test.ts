@@ -1,0 +1,11 @@
+import {test} from "node:test";
+import assert from "node:assert/strict";
+import {createElement} from "react";
+import {renderToStaticMarkup} from "react-dom/server";
+import LabDashboard from "../src/v2/dashboard/LabDashboard";
+import {AppearanceProvider} from "../src/contexts/AppearanceContext";
+const event={id:"fixture-exit",type:"process.exited",summary:"Processo terminado: conhost.exe",severity:"high",sequence:1,timestamp:"2026-10-30T10:00:00Z",data:{}};
+const dashboard={riskScore:0,totalEvents:1,highSeverityEvents:0,downloadRisk:"low",recentThreats:[],alerts:[],systemStatus:"unknown"};
+const render=(events:unknown[])=>renderToStaticMarkup(createElement(AppearanceProvider,null,createElement(LabDashboard,{dashboard,isLoading:false,events,eventsReadPhase:"pronto",serviceConnected:true,history:{phase:"pronto",entry:null}} as never)));
+test("dashboard exit headline is observation, original event remains unchanged",()=>{const original=JSON.stringify(event);const html=render([event]);assert.match(html,/Saída (?:do processo )?observada|Saída do processo observada/);assert.equal(JSON.stringify(event),original);assert.match(html,/causa|motivo|autor/i);});
+test("long activity includes complete original content in an accessible bounded region",()=>{const summary="Evento "+"dados-longos-sem-espaços-".repeat(100)+"FIM-DA-EVIDENCIA";const html=render([{...event,type:"engine.health",summary}]);assert.match(html,/FIM-DA-EVIDENCIA/);assert.match(html,/activity-message/);assert.match(html,/tabindex="0"/i);});

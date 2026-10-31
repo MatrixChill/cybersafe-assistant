@@ -24,3 +24,35 @@ export async function guardedServiceRequest<T>(
     throw error;
   }
 }
+
+/** Restringe IPC à janela principal, ao frame principal e ao documento esperado. */
+export function trustedIpcHandler<E extends {
+  sender: unknown;
+  senderFrame: { url: string } | null;
+}, A extends unknown[], R>(
+  expectedContents: () => { mainFrame: unknown; isDestroyed(): boolean } | null,
+  expectedUrl: () => string,
+  handler: (event: E, ...args: A) => R,
+): (event: E, ...args: A) => R {
+  return (event, ...args) => {
+    const contents = expectedContents();
+    let sameDocument = false;
+    try {
+      const actual = new URL(event.senderFrame?.url ?? "");
+      const expected = new URL(expectedUrl());
+      actual.hash = "";
+      expected.hash = "";
+      sameDocument = actual.href === expected.href;
+    } catch { /* Um URL inválido nunca autoriza. */ }
+    if (!contents || contents.isDestroyed() || event.sender !== contents ||
+        !event.senderFrame || event.senderFrame !== contents.mainFrame || !sameDocument) {
+      throw new Error("Emissor IPC não autorizado");
+    }
+    return handler(event, ...args);
+  };
+}
+
+/** Relatórios HTML são conteúdo sem acesso à ponte privilegiada. */
+export function reportWindowPreferences() {
+  return { contextIsolation: true, nodeIntegration: false, sandbox: true };
+}

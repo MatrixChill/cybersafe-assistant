@@ -258,7 +258,7 @@ function PasswordGame({
             )} />
           </div>
           <h2 className="text-2xl font-bold font-mono text-foreground mb-2">
-            {percentage >= 80 ? "Excelente!" : percentage >= 50 ? "Bom trabalho!" : "Continue praticando"}
+            {percentage >= 80 ? "Excelente!" : percentage >= 50 ? "Bom trabalho!" : "Continua a praticar"}
           </h2>
           <p className="text-lg font-mono text-primary mb-6">{percentage}% de acerto</p>
           <button onClick={onRestart} className="px-6 py-3 bg-primary text-primary-foreground font-mono rounded-lg hover:bg-primary/90">
@@ -396,7 +396,7 @@ function AttachmentGame({
             )} />
           </div>
           <h2 className="text-2xl font-bold font-mono text-foreground mb-2">
-            {percentage >= 80 ? "Excelente!" : percentage >= 50 ? "Bom trabalho!" : "Continue praticando"}
+            {percentage >= 80 ? "Excelente!" : percentage >= 50 ? "Bom trabalho!" : "Continua a praticar"}
           </h2>
           <p className="text-lg font-mono text-primary mb-6">{percentage}% de acerto</p>
           <button onClick={onRestart} className="px-6 py-3 bg-primary text-primary-foreground font-mono rounded-lg hover:bg-primary/90">
@@ -540,7 +540,7 @@ function DecisionGame({
             )} />
           </div>
           <h2 className="text-2xl font-bold font-mono text-foreground mb-2">
-            {percentage >= 80 ? "Excelente!" : percentage >= 50 ? "Bom trabalho!" : "Continue praticando"}
+            {percentage >= 80 ? "Excelente!" : percentage >= 50 ? "Bom trabalho!" : "Continua a praticar"}
           </h2>
           <p className="text-lg font-mono text-primary mb-6">{percentage}% de acerto</p>
           <button onClick={onRestart} className="px-6 py-3 bg-primary text-primary-foreground font-mono rounded-lg hover:bg-primary/90">
@@ -664,7 +664,7 @@ function AlertResponseGame({
             )} />
           </div>
           <h2 className="text-2xl font-bold font-mono text-foreground mb-2">
-            {percentage >= 80 ? "Excelente!" : percentage >= 50 ? "Bom trabalho!" : "Continue praticando"}
+            {percentage >= 80 ? "Excelente!" : percentage >= 50 ? "Bom trabalho!" : "Continua a praticar"}
           </h2>
           <p className="text-lg font-mono text-primary mb-6">{percentage}% de acerto</p>
           <button onClick={onRestart} className="px-6 py-3 bg-primary text-primary-foreground font-mono rounded-lg hover:bg-primary/90">

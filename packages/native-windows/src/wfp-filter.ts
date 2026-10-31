@@ -3,37 +3,105 @@ import { promisify } from "node:util";
 
 const execAsync = promisify(exec);
 
+/** Comando de mutação do firewall. Injectável: os testes nunca chegam ao PowerShell real. */
+export type WfpExecutor = (comando: string) => Promise<unknown>;
+/** Leitura de volta: só um verificador verdadeiro pode confirmar o estado ativo. */
+export type WfpVerificador = () => Promise<boolean>;
+
+/**
+ * Origem do estado, em vez de um booleano que não diz de onde veio.
+ *
+ * `solicitado_nao_verificado` existe porque o código de saída de um
+ * `New-NetFirewallRule` com `-ErrorAction SilentlyContinue` não é uma medição
+ * do Windows: é o resultado de um `await`.
+ */
+export type WfpEstado =
+  | { estado: "nao_iniciado" }
+  | { estado: "solicitado_nao_verificado" }
+  | { estado: "ativo_confirmado" }
+  | { estado: "parado" }
+  | { estado: "falhou"; motivo: string };
+
+export interface WfpFilterOpcoes {
+  executar?: WfpExecutor;
+  verificar?: WfpVerificador;
+}
+
+const REGRA = "CyberSafe Blocklist";
+const CAMINHO_PESSOAL = /[A-Za-z]:[\\/](?:Users|users)[\\/][^\\/\s"']+/g;
+
+/**
+ * Causa legível SEM caminho de utilizador: o motivo vai ao ecrã (a finding do
+ * pcstate publica `detail`). O placeholder não é ele próprio um caminho.
+ */
+function causaSanitizada(erro: unknown): string {
+  const nome = erro instanceof Error ? erro.name : "";
+  const mensagem = erro instanceof Error ? erro.message : String(erro);
+  const rotulo = nome && nome !== "Error" ? `${nome}: ` : "";
+  return `${rotulo}${mensagem}`
+    .replace(CAMINHO_PESSOAL, "<caminho>")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, 200);
+}
+
 export class WfpFilter {
   private blockedIps = new Set<string>();
-  private active = false;
   /**
-   * A regra foi realmente criada por este `start()`? `stop()` so remove o que
-   * nos pertence — ver o comentario no método.
+   * A regra foi realmente criada por este `start()`? `stop()` só remove o que
+   * nos pertence — ver o comentário no método.
    */
   private ruleCreated = false;
+  private estadoAtual: WfpEstado = { estado: "nao_iniciado" };
+  private readonly executar: WfpExecutor;
+  private readonly verificar?: WfpVerificador;
 
+  constructor(opcoes: WfpFilterOpcoes = {}) {
+    this.executar = opcoes.executar ?? (async (comando) => execAsync(comando));
+    this.verificar = opcoes.verificar;
+  }
+
+  /**
+   * `true` só depois de um read-back verdadeiro. Um comando que terminou bem
+   * não é observação do estado: ver `solicitado_nao_verificado`.
+   */
   isActive(): boolean {
-    return this.active;
+    return this.estadoAtual.estado === "ativo_confirmado";
+  }
+
+  estado(): WfpEstado {
+    return this.estadoAtual;
   }
 
   /**
    * Inicializa o "WFP Filter" (usando o Windows Firewall por debaixo dos panos)
    */
   async start() {
-    // Garante que a regra base do CyberSafe existe
     try {
-      await execAsync(
-        'powershell -Command "New-NetFirewallRule -DisplayName \'CyberSafe Blocklist\' -Direction Outbound -Action Block -RemoteAddress 127.0.0.2 -ErrorAction SilentlyContinue"'
+      await this.executar(
+        `powershell -Command "New-NetFirewallRule -DisplayName '${REGRA}' -Direction Outbound -Action Block -RemoteAddress 127.0.0.2 -ErrorAction SilentlyContinue"`,
       );
-      this.active = true;
-      // `-ErrorAction SilentlyContinue` nao distingue "criada agora" de "ja
-      // existia", e o comando pode ter falhado inteiro. Anotamos a INTENCAO
-      // para que o `stop()` saiba o que e seguro remover.
-      this.ruleCreated = true;
-    } catch (e) {
-      this.active = false;
-      // Ignora, regra pode já existir ou requerer Admin
+    } catch (erro) {
+      // `-ErrorAction SilentlyContinue` pode ainda assim rebentar no processo:
+      // quando rebenta, a exceção é a única coisa que diz PORQUE não está ativo.
+      this.ruleCreated = false;
+      this.estadoAtual = { estado: "falhou", motivo: causaSanitizada(erro) };
+      return;
     }
+    // Anotamos a INTENÇÃO para que o `stop()` saiba o que é seguro remover.
+    this.ruleCreated = true;
+    if (!this.verificar) {
+      this.estadoAtual = { estado: "solicitado_nao_verificado" };
+      return;
+    }
+    let confirmado = false;
+    try {
+      confirmado = (await this.verificar()) === true;
+    } catch {
+      // Verificação falhada não é a falha do `start()`: nada foi confirmado.
+      confirmado = false;
+    }
+    this.estadoAtual = confirmado ? { estado: "ativo_confirmado" } : { estado: "solicitado_nao_verificado" };
   }
 
   /**
@@ -56,15 +124,18 @@ export class WfpFilter {
    * segurança para um PowerShell genuinamente pendurado.
    */
   async stop() {
-    this.active = false;
     if (!this.ruleCreated) return;
 
     this.ruleCreated = false;
     try {
-      await execAsync(
-        'powershell -Command "Remove-NetFirewallRule -DisplayName \'CyberSafe Blocklist\' -ErrorAction SilentlyContinue"'
+      await this.executar(
+        `powershell -Command "Remove-NetFirewallRule -DisplayName '${REGRA}' -ErrorAction SilentlyContinue"`,
       );
-    } catch (e) {}
+    } catch (erro) {
+      this.estadoAtual = { estado: "falhou", motivo: causaSanitizada(erro) };
+      return;
+    }
+    this.estadoAtual = { estado: "parado" };
   }
 
   /**
@@ -84,16 +155,16 @@ export class WfpFilter {
 
   private async syncRules() {
     if (this.blockedIps.size === 0) {
-      await execAsync(
-        'powershell -Command "Set-NetFirewallRule -DisplayName \'CyberSafe Blocklist\' -RemoteAddress 127.0.0.2 -ErrorAction SilentlyContinue"'
+      await this.executar(
+        `powershell -Command "Set-NetFirewallRule -DisplayName '${REGRA}' -RemoteAddress 127.0.0.2 -ErrorAction SilentlyContinue"`,
       );
       return;
     }
 
     const ips = Array.from(this.blockedIps).join(",");
     try {
-      await execAsync(
-        `powershell -Command "Set-NetFirewallRule -DisplayName 'CyberSafe Blocklist' -RemoteAddress ${ips} -ErrorAction SilentlyContinue"`
+      await this.executar(
+        `powershell -Command "Set-NetFirewallRule -DisplayName '${REGRA}' -RemoteAddress ${ips} -ErrorAction SilentlyContinue"`,
       );
     } catch (e) {
       console.warn("[WfpFilter] Falha ao sincronizar regras de firewall:", e);

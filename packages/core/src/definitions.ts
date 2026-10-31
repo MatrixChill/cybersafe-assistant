@@ -4,6 +4,7 @@ import type {
   TrustDecision,
 } from "@cybersafe/shared-types";
 import { wfpHealth } from "@cybersafe/shared-types";
+import { resolvePipeName } from "./dev-isolation.js";
 
 export interface RiskThresholds {
   safeMax: number;
@@ -13,13 +14,25 @@ export interface RiskThresholds {
 
 export interface ProtectionSettings {
   thresholds: RiskThresholds;
-  autoQuarantine: boolean;
+/**
+ * @deprecated Sem consumers desde P0. Não ativar — a quarentena é sempre
+ * acionada por decisão explícita da UI/engine. Mantido por compatibilidade
+ * de tipo; removido de DEFAULT_SETTINGS para garantir que nunca activa.
+ */
+autoQuarantine?: boolean;
   autoKillTree: boolean;
   restrictedAnalysis: boolean;
   scanTimeoutMs: number;
 }
 
-export const PIPE_NAME = "\\\\.\\pipe\\cybersafe-protection-dev-v2";
+/**
+ * Nome do named pipe de proteção. SEM o otim-in de desenvolvimento ligado, é
+ * exatamente o literal histórico (`\\.\pipe\cybersafe-protection-dev-v2`).
+ * Com `CYBERSAFE_DEV_ISOLATION=1` e config válida, aponta para um pipe local
+ * isolado partilhado por desktop e serviço. Config parcial/inválida falha
+ * FECHADO na resolução (antes de qualquer connect), nunca cai no pipe real.
+ */
+export const PIPE_NAME = resolvePipeName();
 
 export const DEFAULT_THRESHOLDS: RiskThresholds = {
   safeMax: 40,
@@ -29,7 +42,6 @@ export const DEFAULT_THRESHOLDS: RiskThresholds = {
 
 export const DEFAULT_SETTINGS: ProtectionSettings = {
   thresholds: DEFAULT_THRESHOLDS,
-  autoQuarantine: true,
   autoKillTree: true,
   restrictedAnalysis: true,
   scanTimeoutMs: 8_000,
@@ -40,6 +52,29 @@ export function scoreToStatus(score: number, degraded = false): ProtectionStatus
   if (score > DEFAULT_THRESHOLDS.alertMax) return "critical";
   if (score > DEFAULT_THRESHOLDS.safeMax) return "attention";
   return "safe";
+}
+
+/**
+ * Estado da proteção para o utilizador, a partir do facto on/off e do score.
+ *
+ * `scoreToStatus` sozinho responde a "como estão as ameaças?", não a "a
+ * proteção está a correr?". Com zero ameaças dava "safe" mesmo com a proteção
+ * desligada — Protected por ausência de notícias. Esta função fecha isso:
+ * só `protectionEnabled === true` pode chegar a "safe".
+ *
+ * `protectionEnabled` tem de ser o facto lido do motor. `undefined`/`null`
+ * significa "não lido" e NUNCA dá "safe": desconhecido não é protegido.
+ *
+ * Desligada é `critical`, não `degraded`: `degraded` é parte dos motores a
+ * falhar, e a máquina ainda é parcialmente vigiada. Desligada é não vigiada.
+ */
+export function deriveProtectionStatus(
+  protectionEnabled: boolean | null | undefined,
+  riskScore: number,
+  degraded = false,
+): ProtectionStatus {
+  if (protectionEnabled !== true) return "critical";
+  return scoreToStatus(riskScore, degraded);
 }
 
 /**
@@ -67,6 +102,12 @@ export function effectiveRiskScore(maxRisk: number, engine?: EngineHealth): numb
 
 export function engineIsDegraded(engine?: EngineHealth): boolean {
   if (!engine) return false;
+  // Rejeições de admissão e sinais indeterminados não provam quantos ficheiros
+  // ficaram sem análise. Impedem, porém, confirmar cobertura completa.
+  const loss = engine.realtimeLoss;
+  if ((loss?.queueRejections ?? engine.realtimeDroppedEvents ?? 0) > 0
+    || loss?.watcherCallbacksIndeterminate === true
+    || (loss?.watcherSignals ?? 0) > 0) return true;
   const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)];
   return subEngines.some((e) => e && e.status !== "active");
 }

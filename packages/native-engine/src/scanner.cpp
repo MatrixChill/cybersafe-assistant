@@ -32,7 +32,9 @@ ScanReport scan_file(const std::string& path) {
   r.path = path;
 
   if (!std::filesystem::exists(path)) {
-    r.level = "safe";
+    // Ficheiro inexistente e falha de analise, nunca "safe": um erro
+    // nao pode aparecer como resultado limpo.
+    r.level = "error";
     r.reasons.push_back("file_not_found");
     return r;
   }

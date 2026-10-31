@@ -158,11 +158,25 @@ describe("P0 isolamento de runtime â€” ProtectionEngineService", () => {
       engine.processes = [
         {
           pid: 41112,
+          ppid: 0,
           name: "calc.exe",
           path: "C:\\Windows\\System32\\calc.exe",
-          // eslint-disable-next-line
+          commandLine: "calc.exe",
+          cpu: 0,
+          memoryMb: 0,
+          // A identidade vem da fonte (CIM). Sem ela, a revalidação pré-kill
+          // (F1b) recusa agir — este fixture tem de ser um snapshot válido.
+          startedAt: new Date().toISOString(),
+          trusted: "unknown",
         },
       ];
+      // Cache injetada = foto do instante do fixture. R2: a revalidação
+      // pré-kill consulta sempre a fonte; este teste de isolamento fixa-a com
+      // o MESMO dono, para o caminho chegar ao taskkill simulado e escrever o
+      // log no tmpdir.
+      engine.processesPhotoAt = Date.now();
+      const alvo = engine.processes[0];
+      engine.queryCimProcesses = async (filter) => (filter.startsWith("ProcessId=") ? [alvo] : []);
       engine.runTaskkill = async (pid) => ({
         ok: false,
         status: "access-denied",

@@ -1,16 +1,36 @@
+import { prepareIndividualTermination, confirmIndividualTermination } from "../lib/individualProcessTermination";
+import SelectedProcessExplanations from "@/components/pccenter/SelectedProcessExplanations";
 import { Fragment, useCallback, useEffect, useReducer, useRef, useState } from "react";
-import { Activity, Shield, Trash2, Cpu, HardDrive, AlertTriangle, AlertCircle, HelpCircle, Search, RefreshCw, X } from "lucide-react";
-import type { ProcessSnapshot, ProcessAnalysisResult, ProcessKillResult } from "@cybersafe/shared-types";
+import ProcessIntelligencePanel from "../components/ProcessIntelligencePanel";
+import type { ProcessDiagnostic } from "../lib/processIntelligence";
+import { Activity, Shield, CircleStop, Cpu, HardDrive, AlertTriangle, AlertCircle, HelpCircle, Search, RefreshCw, X } from "lucide-react";
+import type { ProcessSnapshot, ProcessAnalysisResult, ProcessKillResult, ProcessEnumerationTruth } from "@cybersafe/shared-types";
 // WS-4: a orientação do processo é pura e vive em shared-types, porque o app
 // só pode importar de lá.
 import { buildProcessGuidance, isProtectedProcess } from "@cybersafe/shared-types";
+// HORA 2: os factos do painel de detalhe (pai/filhos por ppid da lista atual,
+// join de conexoes por processPid, falta de dado escrita por extenso).
+import {
+  buildProcessDetailFacts,
+  connectionsForPid,
+  formatConnectionLine,
+  sameInstance,
+  type DetailConnections,
+  type ProcessInstance,
+} from "../lib/processDetail";
 // Import relativo de propósito: o alias `@/lib` só existe no Vite, e sem isto a
 // página não é carregável por `tsx --test` — foi por isso que nenhum teste deste
 // ficheiro conseguiu jamais renderizar o modal (o defeito de identificação vive
 // aqui desde a primeira versão).
 import { cn } from "../lib/utils";
 import {
-  isTerminalKillOutcome,
+  avisoDeEnumeracao,
+  estadoDaListaDeProcessos,
+  listaDesactualizada,
+  rotuloDaLinhaAntiga,
+  rotuloDoEstadoDaLista,
+} from "../lib/processListState";
+import {
   KILL_UNAVAILABLE_ERROR,
   pidsConfirmedGone,
   PROCESSES_POLL_MS,
@@ -90,14 +110,35 @@ export async function runKillSequence(deps: KillSequenceDeps): Promise<KillOutco
   });
 }
 
+/** Legacy tree termination remains denied; only the pinned individual protocol is used. */
+export const QUERY_MODE_BADGE = "Terminação individual limitada — aplicações comuns elegíveis; sujeita a confirmação";
+
 interface TaskManagerPageProps {
   processes: ProcessSnapshot[];
+  diagnostic?: ProcessDiagnostic;
+  onExplainProcess?: (pid?: number, startedAt?: string | null) => void;
   /**
    * Refetch autoritativo da LISTA (dono do estado é o App). É o caminho
    * só-processos: um `getProcesses`, nunca o snapshot completo de 7 tópicos —
    * que mede 720–1085 ms contra os 0–1 ms dos outros seis.
    */
   onRefreshProcesses?: () => Promise<void> | void;
+  /**
+   * Estado da ligação ao serviço. `null` = ainda desconhecido.
+   * Sem isto a página não consegue distinguir "não há processos" de
+   * "não houve resposta" — e dizia a primeira quando só tinha a segunda.
+   */
+  serviceConnected?: boolean | null;
+  /** Instante da última leitura VÁLIDA do snapshot; `null` = nunca houve. */
+  processesObservedAt?: number | null;
+  /**
+   * O que o serviço afirma sobre a enumeração (P1-PROCESS-TRUTH). Sem isto a
+   * página tem de adivinhar pela contagem de linhas — e uma enumeração que
+   * rebentou chega com zero linhas, exatamente como «não há processos».
+   */
+  processTruth?: ProcessEnumerationTruth | null;
+  /** Um pedido da lista está em voo agora. */
+  aEnumerar?: boolean;
 }
 
 /**
@@ -117,6 +158,7 @@ export interface KillTarget {
   name: string;
   user?: string;
   memoryMb: number;
+  startedAt?: string;
 }
 
 export type KillSource = "filtered" | "unfiltered";
@@ -228,7 +270,16 @@ export function traceKill(event: string, fields: KillTraceFields): void {
   console.log("[TM-KILL]", { event, ...fields });
 }
 
-export default function TaskManagerPage({ processes, onRefreshProcesses }: TaskManagerPageProps) {
+export default function TaskManagerPage({
+  processes,
+  onRefreshProcesses,
+  diagnostic,
+  onExplainProcess,
+  serviceConnected = null,
+  processesObservedAt = null,
+  processTruth = null,
+  aEnumerar = false,
+}: TaskManagerPageProps) {
   const [searchTerm, setSearchTerm] = useState("");
   const [sortBy, setSortBy] = useState<"cpu" | "mem" | "name">("cpu");
   const [analyzingPid, setAnalyzingPid] = useState<number | null>(null);
@@ -257,6 +308,16 @@ export default function TaskManagerPage({ processes, onRefreshProcesses }: TaskM
   /** Alvo congelado no clique + ação corrente. Nada disto vem da lista. */
   const [kill, setKill] = useReducer(killReducer, initialKillState);
   const { target: killTarget, actionId: killActionId, source: killSource } = kill;
+  const terminationTicket = useRef<string | null>(null);
+  const preparingTermination = useRef(false);
+  const terminationMounted = useRef(true);
+  const [isPreparingTermination, setIsPreparingTermination] = useState(false);
+  useEffect(() => { terminationMounted.current=true; return () => {
+    terminationMounted.current=false;
+    const ticket=terminationTicket.current;
+    terminationTicket.current=null;
+    if(ticket) void window.electronAPI?.cancelProcessTermination(ticket).catch(()=>{});
+  }; }, []);
 
   /**
    * Linhas que o serviço JÁ confirmou mortas (`killed`) ou que já não estavam
@@ -268,38 +329,93 @@ export default function TaskManagerPage({ processes, onRefreshProcesses }: TaskM
    */
   const [removedPids, setRemovedPids] = useState<number[]>([]);
   // WS-4: painel de detalhe por processo (expander na propria linha).
-  const [detailPid, setDetailPid] = useState<number | null>(null);
+  // F1: a identidade e a INSTANCIA (pid + startedAt), nunca o PID sozinho —
+  // o Windows empresta números e um PID reutilizado é outro processo.
+  const [detail, setDetail] = useState<ProcessInstance | null>(null);
   /** Índice da linha removida: onde o foco tem de ir quando ela desaparece. */
   const pendingFocusIndex = useRef<number | null>(null);
   const rowsRef = useRef<HTMLDivElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
 
   /**
+   * HORA 2: ligacoes do processo em detalhe. Le-se do serviço UMA vez por
+   * selecao (topico `connections` ja existe no IPC; o join por processPid e
+   * cliente-side). F1/F2: o resultado guarda a INSTANCIA a que pertence e a
+   * HORA da leitura — um resultado velho de uma selecao anterior, ou de uma
+   * vida anterior do mesmo PID, nunca se cola ao painel do processo novo.
+   */
+  const [detailConnections, setDetailConnections] = useState<{ instance: ProcessInstance; data: DetailConnections } | null>(null);
+
+  // O painel abre-se para uma instancia; se ela sai da lista (terminada) OU o
+  // mesmo PID aparece com outro startedAt (PID reutilizado = processo novo), o
+  // detalhe FECHA-se — nunca se re-aponta em silencio nem herda factos alheios.
+  useEffect(() => {
+    if (detail && !processes.some((p) => sameInstance(p, detail))) {
+      setDetail(null);
+    }
+  }, [detail, processes]);
+
+  useEffect(() => {
+    if (!detail) {
+      setDetailConnections(null);
+      return;
+    }
+    const api = window.electronAPI;
+    if (!api) {
+      setDetailConnections({ instance: detail, data: { status: "unavailable" } });
+      return;
+    }
+    let cancelled = false;
+    setDetailConnections({ instance: detail, data: { status: "loading" } });
+    api.getConnections()
+      .then((conns) => {
+        if (cancelled) return;
+        setDetailConnections({
+          instance: detail,
+          data: {
+            status: "ready",
+            connections: connectionsForPid(conns, detail.pid),
+            // F2: a lista e um snapshot. Diz-se a hora em que foi lida.
+            readAt: new Date().toLocaleTimeString("pt-PT"),
+          },
+        });
+      })
+      .catch(() => {
+        if (!cancelled) setDetailConnections({ instance: detail, data: { status: "unavailable" } });
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [detail]);
+
+  /**
    * Selecionar uma linha congela o alvo inteiro. Se o PID sair da lista a seguir
    * (foi exatamente o que o stub do Notepad fazia), o modal fica igual e o
    * terminal continua a apontar para o PID que o utilizador escolheu.
    */
-  const selectKillTarget = useCallback(
-    (row: ProcessSnapshot) => {
-      const target = freezeKillTarget(row);
-      const source = killSourceFor(searchTerm);
-      setKill({ type: "select", target, source });
-      traceKill("select", {
-        actionId: killActionId + 1,
-        source,
-        rowPid: row.pid,
-        rowName: row.name,
-        rowMemoryMb: row.memoryMb,
-        rowMemoryMbType: typeof row.memoryMb,
-        selectedPid: target.pid,
-        selectedName: target.name,
-        modalPid: target.pid,
-      });
-    },
-    [searchTerm, killActionId],
-  );
+  const selectKillTarget = useCallback(async (row: ProcessSnapshot) => {
+    if(preparingTermination.current || terminationTicket.current || killRequestGate.current.inFlight) return;
+    const api=window.electronAPI;
+    if(!api?.prepareProcessTermination || !row.startedAt) {
+      setKillNotice({message:"Terminação indisponível: falta ligação ou instante de criação confirmado.",ok:false});return;
+    }
+    preparingTermination.current=true;setIsPreparingTermination(true);setKillNotice(null);
+    try {
+      const prepared=await prepareIndividualTermination(api,{pid:row.pid,startedAt:row.startedAt});
+      if(!terminationMounted.current) {if(prepared?.ok)void api.cancelProcessTermination(prepared.ticket).catch(()=>{});return;}
+      if(!prepared?.ok) {setKillNotice({message:prepared?.error??"Não foi possível validar o processo.",ok:false});return;}
+      terminationTicket.current=prepared.ticket;
+      setKill({type:"select",target:{...freezeKillTarget(row),...prepared.target},source:killSourceFor(searchTerm)});
+    } catch {
+      setKillNotice({message:"Falha de ligação ao serviço; nenhuma confirmação foi enviada.",ok:false});
+    } finally {preparingTermination.current=false;setIsPreparingTermination(false);}
+  }, [searchTerm]);
 
-  const clearKillTarget = useCallback(() => setKill({ type: "clear" }), []);
+  const clearKillTarget = useCallback(() => {
+    const ticket=terminationTicket.current;terminationTicket.current=null;
+    if(ticket) void window.electronAPI?.cancelProcessTermination(ticket).catch(()=>{});
+    setKill({type:"clear"});
+  }, []);
 
   // HOTFIX (DEV only): uma linha por render com o modal montado. Se o sintoma
   // voltar, uma única reprodução diz se o render do card chegou a acontecer e
@@ -322,6 +438,32 @@ export default function TaskManagerPage({ processes, onRefreshProcesses }: TaskM
     ),
     sortBy,
   );
+  /**
+   * O que a lista PODE dizer. Só uma resposta válida com zero processos
+   * autoriza "Nenhum processo encontrado"; serviço desligado, primeira leitura
+   * pendente, filtro sem resultados e leitura antiga têm textos próprios.
+   */
+  const estadoDaLista = estadoDaListaDeProcessos({
+    total: processes.length,
+    visiveis: filteredProcesses.length,
+    pesquisa: searchTerm,
+    servicoLigado: serviceConnected,
+    observadoEm: processesObservedAt,
+    verdade: processTruth,
+    aEnumerar,
+  });
+  const rotuloDaLista = rotuloDoEstadoDaLista(estadoDaLista);
+  const listaAntiga = listaDesactualizada({
+    total: processes.length,
+    servicoLigado: serviceConnected,
+    observadoEm: processesObservedAt,
+  });
+  /**
+   * A falha de enumeração é um aviso SOBRE a tabela, não o conteúdo da área
+   * vazia: com linhas antigas em ecrã, `estadoDaLista` é `ok` e a falha
+   * desapareceria sem o segundo eixo.
+   */
+  const avisoEnum = avisoDeEnumeracao(processTruth, processes.length);
 
   /**
    * A verdade chegou: os PIDs que o snapshot autoritativo já não traz podem ser
@@ -387,7 +529,7 @@ const handleAnalyze = async (pid: number) => {
     // O PID é o que foi congelado no clique. Não volta a ser derivado da lista —
     // era aí que o modal desaparecia quando o stub do Notepad saía do snapshot.
     const target = killTarget;
-    if (!target) return;
+    if (!target || !terminationTicket.current) return;
     const actionId = killActionId;
     const listContainsPid = () => processes.some((p) => p.pid === target.pid);
 
@@ -426,20 +568,17 @@ const handleAnalyze = async (pid: number) => {
       const outcome = await runKillSequence({
         pid: target.pid,
         gate: killRequestGate.current,
-        kill: api.killProcessTree,
+        kill: async () => {
+          const ticket=terminationTicket.current;
+          terminationTicket.current=null; // No retry after IPC uncertainty.
+          if(!ticket) return {success:false,status:"failed",pid:target.pid,error:"Confirmação ausente."};
+          return confirmIndividualTermination(api,ticket,target.pid);
+        },
         refresh: refreshProcesses,
         onOutcome: (o) => {
-          if (o.message) setKillNotice({ message: o.message, ok: o.success });
-          // A linha sai no instante em que o serviço confirma: esperar pelo
-          // refetch (720–1085 ms medidos) é fazer o utilizador esperar por algo
-          // que já sabemos. O snapshot autoritativo continua a correr atrás.
-          if (isTerminalKillOutcome(o)) {
-            pendingFocusIndex.current = Math.max(
-              0,
-              filteredProcesses.findIndex((p) => p.pid === target.pid),
-            );
-            setRemovedPids((prev) => (prev.includes(target.pid) ? prev : [...prev, target.pid]));
-          }
+          if (o.message) setKillNotice({ message: o.status === "killed" ? "Processo terminado pelo CyberSafe; saída confirmada." : o.message, ok: o.success });
+          // Refetch the authoritative list. Never hide by PID alone: a new
+          // process may already have reused it after the confirmed object exited.
         },
         onFinish: () => {
           setIsKilling(false);
@@ -470,7 +609,7 @@ const handleAnalyze = async (pid: number) => {
 
   return (
     <div className="p-8 h-full flex flex-col space-y-6 animate-in fade-in duration-500 relative">
-      <div className="flex items-center justify-between shrink-0">
+      <div className="flex flex-wrap items-center justify-between gap-4 shrink-0">
         <div>
           <h1 className="text-2xl font-bold font-mono tracking-tight">
             Gestor de <span className="text-primary">Tarefas</span>
@@ -478,6 +617,15 @@ const handleAnalyze = async (pid: number) => {
           <p className="text-muted-foreground text-sm mt-1">
             Gestão avançada de processos e análise
           </p>
+          {/* Eligibility is confirmed by the service, not inferred from a row. */}
+          <p
+            data-query-mode-badge
+            className="mt-2 inline-flex items-center gap-2 rounded bg-secondary/60 px-2 py-1 text-xs font-mono text-muted-foreground"
+          >
+            <CircleStop className="w-3.5 h-3.5" />
+            {QUERY_MODE_BADGE}
+          </p>
+          {isPreparingTermination && <p role="status" aria-live="polite" className="mt-2 text-xs text-muted-foreground">A validar a identidade e as permissões do processo… nenhuma terminação foi solicitada.</p>}
           {/* Honestidade: isto é uma actualização automática com temporizador,
               não "tempo real" — o serviço é que descobre as mudanças, de 10 em
               10 s. Dizer "tempo real" seria uma promessa que o código não cumpre. */}
@@ -500,19 +648,40 @@ const handleAnalyze = async (pid: number) => {
           <div className="bg-secondary/50 rounded-lg p-1 flex">
             <button
               onClick={() => setSortBy("cpu")}
-              className={cn("px-3 py-1.5 text-xs font-mono rounded", sortBy === "cpu" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-white/5")}
+              className={cn("px-3 py-1.5 text-xs font-mono rounded", sortBy === "cpu" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/50")}
             >
               CPU
             </button>
             <button
               onClick={() => setSortBy("mem")}
-              className={cn("px-3 py-1.5 text-xs font-mono rounded", sortBy === "mem" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-white/5")}
+              className={cn("px-3 py-1.5 text-xs font-mono rounded", sortBy === "mem" ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-secondary/50")}
             >
               RAM
             </button>
           </div>
         </div>
       </div>
+
+      {avisoEnum && (
+        <div role="alert" className="shrink-0 flex items-start gap-3 rounded-xl border border-cyber-red/40 bg-cyber-red/10 px-4 py-3">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-cyber-red" />
+          <p className="text-sm font-mono text-foreground">
+            <span className="font-semibold">{avisoEnum.titulo}. </span>
+            {avisoEnum.detalhe}
+          </p>
+        </div>
+      )}
+
+      {listaAntiga && (
+        <div className="shrink-0 flex items-start gap-3 rounded-xl border border-cyber-yellow/40 bg-cyber-yellow/10 px-4 py-3">
+          <AlertTriangle className="w-5 h-5 shrink-0 mt-0.5 text-cyber-yellow" />
+          <p className="text-sm font-mono text-foreground">
+            {rotuloDaLinhaAntiga({ servicoLigado: serviceConnected })}
+          </p>
+        </div>
+      )}
+
+      <ProcessIntelligencePanel diagnostic={diagnostic} onExplain={onExplainProcess} />
 
       {killNotice && (
         <div className={cn(
@@ -559,9 +728,16 @@ const handleAnalyze = async (pid: number) => {
 
         <div className="flex-1 overflow-y-auto scrollbar-hide" ref={rowsRef}>
           {filteredProcesses.length === 0 ? (
-            <div className="h-full flex flex-col items-center justify-center text-muted-foreground space-y-4">
-              <Activity className="w-12 h-12 opacity-20" />
-              <p className="font-mono text-sm">Nenhum processo encontrado</p>
+            <div className="h-full flex flex-col items-center justify-center text-muted-foreground space-y-3 px-8 text-center">
+              {rotuloDaLista?.carregando ? (
+                <RefreshCw className="w-10 h-10 opacity-40 animate-spin" aria-hidden="true" />
+              ) : estadoDaLista.kind === "sem-resposta" ? (
+                <AlertTriangle className="w-10 h-10 opacity-40 text-cyber-yellow" aria-hidden="true" />
+              ) : (
+                <Activity className="w-12 h-12 opacity-20" aria-hidden="true" />
+              )}
+              <p className="font-mono text-sm">{rotuloDaLista?.titulo ?? "Nenhum processo encontrado"}</p>
+              {rotuloDaLista && <p className="font-mono text-xs opacity-70 max-w-md">{rotuloDaLista.detalhe}</p>}
             </div>
           ) : (
             <div className="flex flex-col p-2 space-y-1">
@@ -572,14 +748,14 @@ const handleAnalyze = async (pid: number) => {
                 // WS-4: a cor e o pulso vem da PRIORIDADE calculada, nunca do
                 // numero de CPU. CPU alta sozinha e trabalho normal.
                 const guidance = buildProcessGuidance(process);
-                const isDetailOpen = detailPid === process.pid;
+                const isDetailOpen = sameInstance(process, detail);
 
                 return (
                   <Fragment key={process.pid}>
-                  <div className="grid grid-cols-12 gap-4 items-center p-3 rounded-lg hover:bg-white/5 border border-transparent hover:border-white/5 transition-all group">
+                  <div className="grid grid-cols-12 gap-4 items-center p-3 rounded-lg hover:bg-secondary/50 border border-transparent hover:border-border transition-all group">
                     <div className="col-span-4 flex items-center gap-3 min-w-0">
                       <button
-                        onClick={() => setDetailPid(isDetailOpen ? null : process.pid)}
+                        onClick={() => setDetail(isDetailOpen ? null : { pid: process.pid, startedAt: process.startedAt })}
                         aria-expanded={isDetailOpen}
                         data-row-detail={process.pid}
                         title="Ver detalhe do processo"
@@ -593,6 +769,12 @@ const handleAnalyze = async (pid: number) => {
                       <div className="truncate flex flex-col min-w-0">
                         <span className="font-mono text-sm text-foreground truncate">{process.name}</span>
                         {process.user && <span className="text-[10px] text-muted-foreground truncate">{process.user}</span>}
+                        {onExplainProcess && <button type="button"
+                          onClick={() => onExplainProcess(process.pid, process.startedAt)}
+                          aria-label={`Explicar ${process.name} na MATRIX`}
+                          className="self-start text-xs text-primary hover:underline focus-visible:outline focus-visible:outline-2 focus-visible:outline-ring">
+                          Explicar na MATRIX
+                        </button>}
                       </div>
                     </div>
                     <div className="col-span-2 text-center text-xs font-mono text-muted-foreground">{process.pid}</div>
@@ -608,7 +790,7 @@ const handleAnalyze = async (pid: number) => {
                     <div className="col-span-2 text-center text-xs font-mono text-muted-foreground">
                       {formatMemoryMb(process.memoryMb)} MB
                     </div>
-                    <div className="col-span-2 flex justify-end gap-2 opacity-0 group-hover:opacity-100 transition-opacity">
+                    <div className="col-span-2 flex justify-end gap-2 opacity-0 group-hover:opacity-100 focus-within:opacity-100 transition-opacity">
                       <button
                         onClick={() => handleAnalyze(process.pid)}
                         disabled={analyzingPid === process.pid}
@@ -619,63 +801,29 @@ const handleAnalyze = async (pid: number) => {
                       </button>
                       <button
                         onClick={() => selectKillTarget(process)}
-                        disabled={isProtected}
+                        disabled={isProtected || isPreparingTermination || isKilling || !process.startedAt}
                         data-row-action={process.pid}
                         className={cn("p-2 rounded transition-colors disabled:opacity-30 disabled:cursor-not-allowed",
-                          "bg-cyber-red/10 text-cyber-red hover:bg-cyber-red/20")}
-                        title={isProtected ? "Processo protegido: o Windows precisa dele" : "Terminar Processo"}
+                          "bg-secondary/60 text-muted-foreground hover:bg-secondary")}
+                        aria-label={isProtected
+                          ? "Processo protegido: o Windows precisa dele"
+                          : "Verificar elegibilidade e terminar este processo"}
+                        title={isProtected ? "Processo protegido: o Windows precisa dele" : "Verificar elegibilidade e terminar este processo"}
                       >
-                        <Trash2 className="w-4 h-4" />
+                        <CircleStop className="w-4 h-4" />
                       </button>
                     </div>
                   </div>
                   {isDetailOpen && (
-                    <div
-                      data-row-detail-panel={process.pid}
-                      className="mt-2 mb-3 ml-5 p-4 rounded-lg border border-white/5 bg-black/20 flex flex-col gap-3 text-xs"
-                    >
-                      <div className="flex flex-col gap-1">
-                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">O que é</span>
-                        <span className="text-foreground">{guidance.what}</span>
-                        <span className="text-muted-foreground">{guidance.role}</span>
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Dado</span>
-                        {guidance.evidence.map((linha) => (
-                          <span key={linha} className="font-mono text-muted-foreground">{linha}</span>
-                        ))}
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Significado</span>
-                        <span className="text-muted-foreground">{guidance.meaning}</span>
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Prioridade</span>
-                        <span className={cn(
-                          "font-mono font-bold uppercase",
-                          guidance.priority === "urgent" ? "text-cyber-red"
-                            : guidance.priority === "worth-noting" ? "text-cyber-yellow"
-                            : "text-cyber-green",
-                        )}>
-                          {guidance.priority === "urgent" ? "Atenção — sinal a rever"
-                            : guidance.priority === "worth-noting" ? "Vale a pena ver"
-                            : "Nada a assinalar"}
-                        </span>
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Pode fechar</span>
-                        <span className="text-muted-foreground">{guidance.safeToCloseReason}</span>
-                      </div>
-
-                      <div className="flex flex-col gap-1">
-                        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Orientação</span>
-                        <span className="text-foreground">{guidance.guidance}</span>
-                      </div>
-                    </div>
+                    <ProcessDetailPanel
+                      process={process}
+                      allProcesses={processes}
+                      connections={
+                        detailConnections && sameInstance(detailConnections.instance, detail) && sameInstance(detail, process)
+                          ? detailConnections.data
+                          : { status: "loading" }
+                      }
+                    />
                   )}
                   </Fragment>
                 );
@@ -722,7 +870,7 @@ const handleAnalyze = async (pid: number) => {
               {analysisResult.fileScan && (
                 <div className="space-y-2">
                   <h4 className="text-sm font-mono text-muted-foreground uppercase tracking-wider">Heurística Local</h4>
-                  <div className="p-4 rounded-lg bg-secondary/30 border border-white/5 space-y-3">
+                  <div className="p-4 rounded-lg bg-secondary/30 border border-border space-y-3">
                      <div className="flex justify-between items-center text-sm font-mono">
                         <span className="text-muted-foreground">Severidade</span>
                         <span className={analysisResult.fileScan.overallSeverity === "low" ? "text-cyber-green" : "text-cyber-red"}>{analysisResult.fileScan.overallSeverity.toUpperCase()}</span>
@@ -734,7 +882,7 @@ const handleAnalyze = async (pid: number) => {
                      {analysisResult.fileScan.rulesTriggered.length > 0 && (
                         <div className="text-xs font-mono mt-2 flex flex-wrap gap-2">
                           {analysisResult.fileScan.rulesTriggered.map((r: string) => (
-                             <span key={r} className="px-2 py-1 bg-white/5 rounded border border-white/10">{r}</span>
+                             <span key={r} className="px-2 py-1 bg-secondary/50 rounded border border-border">{r}</span>
                           ))}
                         </div>
                      )}
@@ -744,7 +892,7 @@ const handleAnalyze = async (pid: number) => {
 
               {analysisResult.virusTotal && (
                 <div className="space-y-2">
-                  <h4 className="text-sm font-mono text-muted-foreground uppercase tracking-wider border-t border-white/10 pt-4 flex justify-between items-center">
+                  <h4 className="text-sm font-mono text-muted-foreground uppercase tracking-wider border-t border-border pt-4 flex justify-between items-center">
                     <span>Inteligência VirusTotal</span>
                     <span className="text-xs normal-case">{new Date(analysisResult.virusTotal.scanDate).toLocaleString()}</span>
                   </h4>
@@ -782,17 +930,17 @@ const handleAnalyze = async (pid: number) => {
             <div className="p-4 border-t border-border/50 bg-secondary/30 flex justify-end gap-3">
               <button 
                 onClick={() => setAnalysisResult(null)}
-                className="px-4 py-2 font-mono text-sm rounded bg-white/5 hover:bg-white/10 transition-colors"
+                className="px-4 py-2 font-mono text-sm rounded bg-secondary/50 hover:bg-secondary transition-colors"
               >
                 Fechar
               </button>
               {analysisResult.recommendation !== "safe" && !analysisResult.isCritical && (
-                 <button 
-                   onClick={() => { selectKillTarget(analysisResult.process); setAnalysisResult(null); }}
-                   className="px-4 py-2 font-mono text-sm rounded bg-cyber-red text-white hover:bg-cyber-red/90 transition-colors"
+                 <span
+                   className="px-4 py-2 font-mono text-xs rounded bg-secondary/40 text-muted-foreground"
+                   data-query-mode={analysisResult.process.pid}
                  >
-                   Terminar Ameaça
-                 </button>
+                   {QUERY_MODE_BADGE}
+                 </span>
               )}
             </div>
           </div>
@@ -818,6 +966,107 @@ const handleAnalyze = async (pid: number) => {
           onConfirm={handleKill}
         />
       )}
+    </div>
+  );
+}
+
+interface ProcessDetailPanelProps {
+  process: ProcessSnapshot;
+  /** Lista atual do cliente — fonte dos filhos e do pai derivados por `ppid`. */
+  allProcesses: ProcessSnapshot[];
+  connections: DetailConnections;
+}
+
+/**
+ * HORA 2 — painel de detalhe: DADO → SIGNIFICADO → PRIORIDADE → AÇÃO, sem IA
+ * inventada. Exportado para renderizar em teste sem jsdom (mesmo padrão do
+ * `KillConfirmModal`). Não lê `signer`/`hash`/`trusted`: em produção esses
+ * campos nunca vêm ou são sempre "neutral", e mostrá-los seria dar valor a
+ * dado que não existe.
+ */
+export function ProcessDetailPanel({ process, allProcesses, connections }: ProcessDetailPanelProps) {
+  const guidance = buildProcessGuidance(process);
+  const facts = buildProcessDetailFacts(process, allProcesses);
+  return (
+    <div
+      data-row-detail-panel={process.pid}
+      className="mt-2 mb-3 ml-5 p-4 rounded-lg border border-border bg-black/20 flex flex-col gap-3 text-xs"
+    >
+      <div className="flex flex-col gap-1">
+        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Dados do processo</span>
+        <span className="font-mono text-muted-foreground">Nome: <span className="text-foreground">{process.name}</span></span>
+        <span className="font-mono text-muted-foreground">PID: <span className="text-foreground">{process.pid}</span></span>
+        <span className="font-mono text-muted-foreground">Caminho: <span className="text-foreground">{facts.pathText}</span></span>
+        <span className="font-mono text-muted-foreground">CPU: <span className="text-foreground">{formatCpu(process.cpu)}%</span> · Memória: <span className="text-foreground">{formatMemoryMb(process.memoryMb)} MB</span></span>
+        <span className="font-mono text-muted-foreground">Processo pai: <span className="text-foreground">{facts.parentText}</span></span>
+        <span className="font-mono text-muted-foreground">Filhos: <span className="text-foreground">{facts.childrenText}</span></span>
+        <span className="font-mono text-muted-foreground">Estado: <span className={facts.protectionText.startsWith("Protegido") ? "text-cyber-yellow" : "text-foreground"}>{facts.protectionText}</span></span>
+        {connections.status === "loading" && (
+          <span className="font-mono text-muted-foreground">Ligações: <span className="text-foreground">a ler…</span></span>
+        )}
+        {connections.status === "unavailable" && (
+          <span className="font-mono text-muted-foreground">Ligações: <span className="text-foreground">indisponíveis (sem leitura do serviço)</span></span>
+        )}
+        {connections.status === "ready" && connections.connections.length === 0 && (
+          <span className="font-mono text-muted-foreground">
+            Ligações: <span className="text-foreground">sem ligações TCP associadas{connections.readAt ? ` (leitura das ${connections.readAt})` : ""}</span>
+          </span>
+        )}
+        {connections.status === "ready" && connections.connections.length > 0 && (
+          <>
+            <span className="font-mono text-muted-foreground">
+              Ligações: <span className="text-foreground">{connections.connections.length} associada{connections.connections.length === 1 ? "" : "s"}{connections.readAt ? ` (leitura das ${connections.readAt})` : ""}</span>
+            </span>
+            {connections.connections.slice(0, 8).map((c, i) => (
+              <span key={`${c.remoteAddress}-${c.remotePort ?? "na"}-${c.direction}-${i}`} className="font-mono text-muted-foreground pl-2">{formatConnectionLine(c)}</span>
+            ))}
+          </>
+        )}
+      </div>
+
+      <SelectedProcessExplanations processo={process} protegido={isProtectedProcess(process)} />
+
+      <div className="flex flex-col gap-1">
+        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">O que é</span>
+        <span className="text-foreground">{guidance.what}</span>
+        <span className="text-muted-foreground">{guidance.role}</span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Dado</span>
+        {guidance.evidence.map((linha) => (
+          <span key={linha} className="font-mono text-muted-foreground">{linha}</span>
+        ))}
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Significado</span>
+        <span className="text-muted-foreground">{guidance.meaning}</span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Prioridade</span>
+        <span className={cn(
+          "font-mono font-bold uppercase",
+          guidance.priority === "urgent" ? "text-cyber-red"
+            : guidance.priority === "worth-noting" ? "text-cyber-yellow"
+            : "text-cyber-green",
+        )}>
+          {guidance.priority === "urgent" ? "Atenção — sinal a rever"
+            : guidance.priority === "worth-noting" ? "Vale a pena ver"
+            : "Nada a assinalar"}
+        </span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Pode fechar</span>
+        <span className="text-muted-foreground">{guidance.safeToCloseReason}</span>
+      </div>
+
+      <div className="flex flex-col gap-1">
+        <span className="font-mono uppercase tracking-wider text-[10px] text-muted-foreground">Orientação</span>
+        <span className="text-foreground">{guidance.guidance}</span>
+      </div>
     </div>
   );
 }
@@ -849,7 +1098,15 @@ export function KillConfirmModal({ target, isKilling, onCancel, onConfirm }: Kil
     // sem IPC (e a sidebar, irmã deste contentor, ficava normal). Os outros
     // três modais do projeto usam `fixed inset-0`; este era o único exceção.
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-background/80 backdrop-blur-sm animate-in fade-in">
-      <div className="w-full max-w-sm cyber-border border-cyber-red/50 bg-card rounded-2xl shadow-lg p-6 text-center space-y-6">
+      <div onKeyDown={event => {
+        if(event.key==="Escape" && !isKilling){event.preventDefault();onCancel();}
+        if(event.key==="Tab") {
+          const buttons=Array.from(event.currentTarget.querySelectorAll<HTMLButtonElement>("button:not(:disabled)"));
+          const first=buttons[0],last=buttons.at(-1);
+          if(event.shiftKey && document.activeElement===first){event.preventDefault();last?.focus();}
+          else if(!event.shiftKey && document.activeElement===last){event.preventDefault();first?.focus();}
+        }
+      }} role="alertdialog" aria-modal="true" aria-label="Confirmar terminação individual" className="w-full max-w-sm cyber-border border-cyber-red/50 bg-card rounded-2xl shadow-lg p-6 text-center space-y-6">
         <div className="w-16 h-16 rounded-full bg-cyber-red/10 border border-cyber-red/30 mx-auto flex items-center justify-center">
           <AlertTriangle className="w-8 h-8 text-cyber-red animate-pulse" />
         </div>
@@ -866,12 +1123,13 @@ export function KillConfirmModal({ target, isKilling, onCancel, onConfirm }: Kil
             </span>
             <span className="block text-[11px] font-mono text-muted-foreground">
               PID {target.pid}
+              {target.startedAt ? ` · criado em ${target.startedAt}` : ""}
               {target.user ? ` · ${target.user}` : ""}
               {` · ${memoryText} MB`}
             </span>
           </div>
           <p className="text-sm font-mono text-muted-foreground mt-2">
-            Só este processo será terminado, juntamente com os seus processos filhos. Qualquer alteração não guardada será perdida.
+            Só este processo será terminado. Os processos filhos não serão terminados. Pode perder dados não guardados; guarde o trabalho antes de confirmar.
           </p>
         </div>
         {isKilling && (
@@ -882,8 +1140,9 @@ export function KillConfirmModal({ target, isKilling, onCancel, onConfirm }: Kil
         <div className="flex gap-3 justify-center">
           <button
             disabled={isKilling}
+            autoFocus
             onClick={onCancel}
-            className="flex-1 px-4 py-2 font-mono text-sm rounded bg-white/5 hover:bg-white/10 transition-colors"
+            className="flex-1 px-4 py-2 font-mono text-sm rounded bg-secondary/50 hover:bg-secondary transition-colors"
           >
             Cancelar
           </button>
@@ -899,3 +1158,4 @@ export function KillConfirmModal({ target, isKilling, onCancel, onConfirm }: Kil
     </div>
   );
 }
+

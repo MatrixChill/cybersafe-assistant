@@ -1,10 +1,18 @@
 import * as fs from "node:fs";
 import * as fsPromises from "node:fs/promises";
 import * as path from "node:path";
+import { createHash, randomUUID } from "node:crypto";
 import * as https from "node:https";
-import * as http from "node:http";
 import { spawn } from "node:child_process";
-import { compile } from "@litko/yara-x";
+import {
+  CLAMAV_BINARY_ENV,
+  CYBERSAFE_EICAR_POSITIVE_CONTROL_RULE,
+  countReportableYaraRules,
+  validateYaraSource,
+  type YaraClassicDiagnostic,
+  type YaraCorpusManifest,
+  type YaraRuleClass,
+} from "@cybersafe/core";
 import {
   ensureFreshclamConfig,
   buildFreshclamArgs,
@@ -14,26 +22,144 @@ import {
 } from "./clamav-config.js";
 import { ClamDatabaseGate } from "./clam-database-gate.js";
 import type { UpdateDenialReason } from "./clam-database-gate.js";
+import { downloadYaraRulesText } from "./yara-rules-download.js";
+import { WINDOWS_READONLY_ENV } from "./dev-windows-readonly.js";
+import { FIXTURE_SCAN_FLAG } from "./dev-fixture-gate.js";
+
+/**
+ * A recuperação do corpus YARA pode fazer rede e escrever definições?
+ *
+ * Nos modos em que a lane corre sobre um Windows real em LEITURA
+ * (`CYBERSAFE_DEV_WINDOWS_READONLY=1`) ou sobre uma fixture controlada
+ * (`CYBERSAFE_REALDEV_FIXTURE_SCAN=1`), não. O contrato é dos módulos que já
+ * definem estes modos; aqui só se reutiliza a flag, sem inventar um segundo
+ * significado para ela.
+ */
+export function recuperacaoYaraPermitida(env: NodeJS.ProcessEnv = process.env): boolean {
+  return actualizacaoDefinicoesPermitida(env);
+}
+
+/**
+ * Uma actualização de definições pode fazer rede e escrever em `definitionsDir`?
+ *
+ * A mesma superfície fechada pelos modos de leitura/ fixture. O agendador passou
+ * a arrancar com o SERVIÇO (não só com a proteção), portanto a guarda deixa de
+ * ser opcional: sem ela, um run de leitura começaria a descarregar assinaturas.
+ */
+export function actualizacaoDefinicoesPermitida(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[WINDOWS_READONLY_ENV] !== "1" && env[FIXTURE_SCAN_FLAG] !== "1";
+}
+
+/**
+ * O agendador pode nascer neste processo? A decisão vive aqui para o motor e
+ * para os testes verem a MESMA matriz. Em `NODE_ENV=test` não nasce: os testes
+ * instanciam o motor sem querer I/O de rede. Readonly/fixture fecham a mesma
+ * superfície de escrita.
+ */
+export function agendadorDefinicoesDeveArrancar(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env.NODE_ENV !== "test" && actualizacaoDefinicoesPermitida(env);
+}
 
 // ── Configuration ────────────────────────────────────────────────────────────
 const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 horas
+/** Limite do corpo do feed de hashes. O feed real é pequeno; isto fecha DoS de memória. */
+export const MAX_HASH_FEED_BYTES = 8 * 1024 * 1024;
 
-// Fontes de regras YARA — lista de fallback
-const YARA_SOURCES = [
-  "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Eicar.yar",
-  "https://raw.githubusercontent.com/Yara-Rules/rules/master/packers/packer_compiler_signatures.yar",
-  "https://raw.githubusercontent.com/Yara-Rules/rules/master/crypto/crypto_signatures.yar",
-  "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Ransomware_Generic.yar"
+type UpdateComponent = "yara" | "clamav" | "hashes";
+
+/**
+ * `.update-meta.json`. O timestamp global mantém-se (compatibilidade), mas a
+ * decisão de pular passa a ser POR COMPONENTE.
+ *
+ * MEDIDO (TP-RETOMA-01, 2026-10-29): o timestamp global era escrito quando
+ * QUALQUER componente actualizava. Um YARA que respondia (mesmo com erros de
+ * fonte) renovava a data e impedia o ClamAV de tentar outra vez durante 6 h —
+ * a base envelhecia sem que o agendador voltasse a chamar o freshclam. Cada
+ * componente tem agora a sua própria prova de sucesso.
+ */
+interface UpdateMeta {
+  timestamp?: number;
+  iso?: string;
+  components?: Partial<Record<UpdateComponent, number>>;
+}
+
+// Fontes de regras YARA — lista de fallback.
+//
+// `ruleClass` é proveniência declarada, não eficácia: `test` só deteta o
+// ficheiro de teste do EICAR. Só com fontes `production` aceites é que um
+// corpus deixa de ser "cobertura limitada".
+//
+// `reference` é material de IDENTIFICAÇÃO, não de deteção: as regras PECheck
+// (IsPE64, HasOverlay, HasDigitalSignature, …) descrevem a estrutura de um PE
+// e as de `crypto_signatures.yar` descrevem constantes/APIs criptográficas.
+// São validadas e registadas no manifesto, mas NÃO entram no corpus de ameaça
+// nem na contagem de production — um binário benigno não pode colecionar
+// matches "high" só por ser um PE64 ou usar AES.
+//
+// A 4ª fonte era `MALW_Ransomware_Generic.yar`, que responde 404 desde há
+// meses: o update reportava uma falha permanente e o corpus nunca teve
+// ransomware. Trocada por uma fonte real do mesmo repositório, com 17 regras
+// e compilação verificada contra o motor de regras.
+const YARA_SOURCES: Array<{ url: string; ruleClass: YaraRuleClass }> = [
+  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Eicar.yar", ruleClass: "test" },
+  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/packers/packer_compiler_signatures.yar", ruleClass: "reference" },
+  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/crypto/crypto_signatures.yar", ruleClass: "reference" },
+  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/RANSOM_MS17-010_Wannacrypt.yar", ruleClass: "production" },
 ];
+
+/** Nome da fonte sem URL nem caminho: o que pode aparecer num estado ou manifesto. */
+function sourceName(url: string): string {
+  try {
+    return path.posix.basename(new URL(url).pathname);
+  } catch {
+    return "unknown-source";
+  }
+}
+
+/**
+ * Motivo curto e sem detalhe sensível para o manifesto. Uma mensagem de erro
+ * de fetch pode trazer a URL inteira; o manifesto é lido por consumidores de
+ * estado e não deve transportar infraestrutura.
+ */
+function rejectionReason(error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  const http = /HTTP (\d{3})/.exec(message);
+  if (http) return `HTTP ${http[1]}`;
+  if (/não compilam|compile|compilador|E\d{3}/i.test(message)) return "compile-error";
+  if (/Conteúdo baixado|válido/i.test(message)) return "invalid-content";
+  return "fetch-error";
+}
 
 // MalwareBazaar API endpoint
 const HASH_FEED_URL = "https://mb-api.abuse.ch/api/v1/";
+
+/**
+ * Categorias do PRODUTO a partir dos códigos estáveis do adapter clássico.
+ * O compilador C não publica códigos `E0xx`; o adapter normaliza-os
+ * (`unknown-module`, `duplicate-rule`, …) e a categoría que o manifesto do
+ * corpus regista continua a ser esta: `incompatible-module`, `duplicate-rule`
+ * ou `compile-error`.
+ */
+function classifyYaraCompilerError(error: YaraClassicDiagnostic): string {
+  return error.code === "unknown-module"
+    ? "incompatible-module"
+    : error.code === "duplicate-rule"
+      ? "duplicate-rule"
+      : "compile-error";
+}
+
+function describeYaraCompilerError(source: string, error: YaraClassicDiagnostic): string {
+  const category = classifyYaraCompilerError(error);
+  const location = error.line === undefined ? "" : `:${error.line}`;
+  return `${source}${location}: ${category} (${error.code})`;
+}
 
 export interface UpdateResult {
   yaraUpdated: boolean;
   clamUpdated: boolean;
   hashesUpdated: boolean;
   errors: string[];
+  warnings: string[];
   timestamp: string;
 }
 
@@ -62,12 +188,53 @@ function descreverAdiamento(reason: UpdateDenialReason | undefined, orcamentoMs:
   }
 }
 
+/**
+ * O `freshclam` a LANÇAR.
+ *
+ * DIST-CLAMAV13OUT: quando o motor é o bundle empacotado, o `freshclam` vive
+ * AO LADO do `clamscan` (medido: os dois no mesmo directório). Sem isto, o
+ * `spawn("freshclam", …)` dependia do PATH e, numa máquina sem ClamAV no PATH,
+ * o update de assinaturas falhava mesmo com o motor empacotado a funcionar.
+ *
+ * Sem pin — ou com um pin cujo irmão não existe — devolve o nome simples e o
+ * PATH volta a decidir: o comportamento de antes, inalterado. NÃO se procura o
+ * `freshclam` do sistema por conta própria: um pin explícito é uma decisão do
+ * operador/deploy, e inventar caminhos aqui seria adivinhar.
+ *
+ * PURO (env/plataforma/existência injectáveis): é o que permite medi-lo com um
+ * PATH limpo e uma fixture isolada, sem correr o freshclam nenhuma vez.
+ */
+export function resolveFreshclamBinary(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    platform?: NodeJS.Platform;
+    exists?: (path: string) => boolean;
+  } = {},
+): string {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const exists = options.exists ?? ((candidate: string) => fs.existsSync(candidate));
+  const pinned = env[CLAMAV_BINARY_ENV]?.trim();
+  if (!pinned) return "freshclam";
+  // A plataforma INJECTADA manda nas regras de caminho, não a do host: com
+  // `path.join` (do host) um `/opt/clamav/clamscan` "linux" validado em Windows
+  // dava `/opt/clamav\\freshclam`, e um irmão existente era dado como ausente.
+  const pathImpl = platform === "win32" ? path.win32 : path.posix;
+  const sibling = pathImpl.join(
+    pathImpl.dirname(pinned),
+    platform === "win32" ? "freshclam.exe" : "freshclam",
+  );
+  return exists(sibling) ? sibling : "freshclam";
+}
+
 export class DefinitionUpdater {
   private readonly definitionsDir: string;
   private readonly yaraPath: string;
   private readonly hashesPath: string;
   private readonly metaPath: string;
   private timer: NodeJS.Timeout | null = null;
+  /** Cancela downloads em voo no encerramento; recriado se o scheduler voltar. */
+  private abortController = new AbortController();
   /**
    * P1-1 (1) — QUANDO A BASE DE ASSINATURAS ESTÁ A SER TROCADA.
    *
@@ -120,6 +287,9 @@ export class DefinitionUpdater {
    * pediu.
    */
   private afterSwap?: (result: UpdateResult) => Promise<void> | void;
+  private afterYaraUpdated?: () => Promise<void> | void;
+  private afterYaraRollbackFailed?: (error: unknown) => Promise<void> | void;
+  private afterDefinitionsUpdated?: (result: UpdateResult) => Promise<void> | void;
 
   /**
    * O gate da base de assinaturas. Uma instância por serviço, partilhada com o
@@ -129,11 +299,23 @@ export class DefinitionUpdater {
   readonly gate: ClamDatabaseGate;
   /** Como o `freshclam` é criado. Ver a nota no construtor. */
   private readonly spawnFreshclam: typeof spawn;
+  private readonly renameYaraRules: typeof fsPromises.rename;
+  /**
+   * Seam de teste da escrita da base de hashes. É SEPARADO do seam do YARA de
+   * propósito: um duplo que simula o rename do corpus não pode governar a
+   * escrita de outra base. Em produção é `fsPromises.rename`.
+   */
+  private readonly renameHashes: typeof fsPromises.rename;
+  /** Seam de teste; em produção é `https.request`. */
+  private readonly hashFeedRequest: typeof https.request;
 
   constructor(
     definitionsDir: string,
     options: {
       afterSwap?: (result: UpdateResult) => Promise<void> | void;
+      afterYaraUpdated?: () => Promise<void> | void;
+      afterYaraRollbackFailed?: (error: unknown) => Promise<void> | void;
+      afterDefinitionsUpdated?: (result: UpdateResult) => Promise<void> | void;
       gate?: ClamDatabaseGate;
       /**
        * Seam de teste: como o `freshclam` é criado. A produção nunca injecta
@@ -147,6 +329,9 @@ export class DefinitionUpdater {
        * dublê em vez do código.
        */
       spawnFreshclam?: typeof spawn;
+      renameYaraRules?: typeof fsPromises.rename;
+      renameHashes?: typeof fsPromises.rename;
+      hashFeedRequest?: typeof https.request;
     } = {},
   ) {
     this.definitionsDir = definitionsDir;
@@ -155,12 +340,18 @@ export class DefinitionUpdater {
     this.metaPath = path.join(definitionsDir, ".update-meta.json");
     this.gate = options.gate ?? new ClamDatabaseGate();
     this.spawnFreshclam = options.spawnFreshclam ?? spawn;
+    this.renameYaraRules = options.renameYaraRules ?? fsPromises.rename;
+    this.renameHashes = options.renameHashes ?? fsPromises.rename;
+    this.hashFeedRequest = options.hashFeedRequest ?? https.request;
     DefinitionUpdater.liveGates.add(this.gate);
     // P1-1 (2) — o gancho é do CICLO, não do update manual: quem o regista é o
     // motor, e tanto o scheduler como o `updateDefinitions` o atravessam. Por
     // isso é uma opção do construtor e não um método — não há caminho que o
     // instale num caso e o esqueça no outro.
     this.afterSwap = options.afterSwap;
+    this.afterYaraUpdated = options.afterYaraUpdated;
+    this.afterYaraRollbackFailed = options.afterYaraRollbackFailed;
+    this.afterDefinitionsUpdated = options.afterDefinitionsUpdated;
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -169,59 +360,101 @@ export class DefinitionUpdater {
    * Verifica se já passou o intervalo e, se sim, atualiza.
    * Retorna o resultado da operação.
    */
+  private activeOperations = 0;
+  get operationInProgress(): boolean { return this.activeOperations > 0; }
   async checkAndUpdate(force = false): Promise<UpdateResult> {
+    ++this.activeOperations;
+    try { return await this.runCheckAndUpdate(force); }
+    finally { --this.activeOperations; }
+  }
+  private async runCheckAndUpdate(force = false): Promise<UpdateResult> {
     const result: UpdateResult = {
       yaraUpdated: false,
       clamUpdated: false,
       hashesUpdated: false,
       errors: [],
+      warnings: [],
       timestamp: new Date().toISOString(),
     };
 
-    if (!force) {
-      const lastUpdate = this.getLastUpdateTimestamp();
-      if (Date.now() - lastUpdate < UPDATE_INTERVAL_MS) {
-        console.log("[Updater] Definições ainda frescas, pulando atualização.");
-        return result;
+    if (this.abortController.signal.aborted) {
+      console.log("[Updater] Encerrado: actualização não começa.");
+      return result;
+    }
+
+    // Cada componente decide por si. `force` continua a significar tudo.
+    const stale = {
+      yara: force || this.componentStale("yara"),
+      clamav: force || this.componentStale("clamav"),
+      hashes: force || this.componentStale("hashes"),
+    };
+    if (!stale.yara && !stale.clamav && !stale.hashes) {
+      console.log("[Updater] Definições ainda frescas, pulando atualização.");
+      return result;
+    }
+
+    const updated: Partial<Record<UpdateComponent, boolean>> = {};
+    console.log(
+      "[Updater] Iniciando atualização de definições...",
+      JSON.stringify({ yara: stale.yara, clamav: stale.clamav, hashes: stale.hashes }),
+    );
+
+    // 1. YARA Rules
+    if (stale.yara) {
+      try {
+        const yaraResult = await this.updateYaraRules();
+        result.yaraUpdated = true;
+        updated.yara = true;
+        result.errors.push(...yaraResult.errors.map((error) => `YARA source: ${error}`));
+        result.warnings.push(...yaraResult.warnings.map((warning) => `YARA warning: ${warning}`));
+        console.log("[Updater] Regras YARA atualizadas.");
+      } catch (err: any) {
+        result.errors.push(`YARA: ${err.message}`);
+        const sourceErrors = err?.sourceErrors;
+        if (Array.isArray(sourceErrors)) {
+          result.errors.push(...sourceErrors.map((detail: string) => `YARA source: ${detail}`));
+        }
+        console.error("[Updater] Falha ao atualizar YARA:", err.message);
       }
     }
 
-    console.log("[Updater] Iniciando atualização de definições...");
+    // Um download abortado no encerramento não pode continuar para ClamAV,
+    // hashes ou escrita de metadados.
+    if (this.abortController.signal.aborted) return result;
 
-    // 1. YARA Rules
-    try {
-      await this.updateYaraRules();
-      result.yaraUpdated = true;
-      console.log("[Updater] Regras YARA atualizadas.");
-    } catch (err: any) {
-      result.errors.push(`YARA: ${err.message}`);
-      console.error("[Updater] Falha ao atualizar YARA:", err.message);
-    }
-
-    // 2. ClamAV via freshclam
-    try {
-      await this.updateClamAV();
-      result.clamUpdated = true;
-      console.log("[Updater] ClamAV atualizado via freshclam.");
-    } catch (err: any) {
-      // ClamAV não é obrigatório — freshclam pode não estar instalado
-      result.errors.push(`ClamAV: ${err.message}`);
-      console.warn("[Updater] freshclam indisponível ou falhou:", err.message);
+    // 2. ClamAV via freshclam. O sucesso é o freshclam a sair com 0; falha não
+    // renova a prova deste componente (o próximo ciclo volta a tentar).
+    if (stale.clamav) {
+      try {
+        await this.updateClamAV();
+        result.clamUpdated = true;
+        updated.clamav = true;
+        console.log("[Updater] ClamAV atualizado via freshclam.");
+      } catch (err: any) {
+        // ClamAV não é obrigatório — freshclam pode não estar instalado
+        result.errors.push(`ClamAV: ${err.message}`);
+        console.warn("[Updater] freshclam indisponível ou falhou:", err.message);
+      }
     }
 
     // 3. Hash feed
-    try {
-      await this.updateHashFeed();
-      result.hashesUpdated = true;
-      console.log("[Updater] Feed de hashes atualizado.");
-    } catch (err: any) {
-      result.errors.push(`Hashes: ${err.message}`);
-      console.warn("[Updater] Falha ao atualizar hashes:", err.message);
+    if (stale.hashes) {
+      try {
+        await this.updateHashFeed();
+        result.hashesUpdated = true;
+        updated.hashes = true;
+        console.log("[Updater] Feed de hashes atualizado.");
+      } catch (err: any) {
+        result.errors.push(`Hashes: ${err.message}`);
+        console.warn("[Updater] Falha ao atualizar hashes:", err.message);
+      }
     }
 
-    // Salva timestamp somente se pelo menos algo atualizou
-    if (result.yaraUpdated || result.clamUpdated || result.hashesUpdated) {
-      this.saveUpdateTimestamp();
+    if (this.abortController.signal.aborted) return result;
+
+    // Salva a prova POR COMPONENTE; o timestamp global só avança se algo mudou.
+    if (updated.yara || updated.clamav || updated.hashes) {
+      this.saveUpdateTimestamp(updated);
     }
 
     // P1-1 (2) — O GANCHO SÓ CORRE QUANDO A BASE MUDOU DE VERDADE.
@@ -246,6 +479,18 @@ export class DefinitionUpdater {
       }
     }
 
+    if (
+      this.afterDefinitionsUpdated &&
+      (result.yaraUpdated || result.clamUpdated || result.hashesUpdated)
+    ) {
+      try {
+        await this.afterDefinitionsUpdated(result);
+      } catch (err: any) {
+        result.errors.push(`definitions-reload: ${err.message}`);
+        console.warn("[Updater] Recarregamento das definições falhou:", err.message);
+      }
+    }
+
     console.log("[Updater] Ciclo finalizado.", JSON.stringify(result));
     return result;
   }
@@ -255,6 +500,7 @@ export class DefinitionUpdater {
    */
   startScheduler(): void {
     if (this.timer) return;
+    if (this.abortController.signal.aborted) this.abortController = new AbortController();
     console.log(`[Updater] Scheduler iniciado (intervalo: ${UPDATE_INTERVAL_MS / 3600000}h).`);
 
     // Check imediato (non-blocking)
@@ -270,43 +516,303 @@ export class DefinitionUpdater {
   }
 
   /**
-   * Para o scheduler.
+   * Para o scheduler e cancela download em voo.
+   *
+   * O `dispose()` do serviço chama isto e depois o `DefinitionUpdater.dispose()`
+   * estático mata os `freshclam` vivos. Sem abortar, um download YARA de 30 s
+   * podia terminar e escrever definições DEPOIS de o serviço dizer que fechou.
    */
   stopScheduler(): void {
     if (this.timer) {
       clearInterval(this.timer);
       this.timer = null;
     }
+    this.abortController.abort();
   }
 
   // ── Private: YARA ──────────────────────────────────────────────────────────
 
-  private async updateYaraRules(): Promise<void> {
+  private async updateYaraRules(): Promise<{ errors: string[]; warnings: string[] }> {
     await fsPromises.mkdir(path.dirname(this.yaraPath), { recursive: true });
 
-    // Tenta cada fonte em ordem
+    const validSources: string[] = [];
+    const accepted: Array<{ name: string; ruleClass: YaraRuleClass; content: string }> = [];
+    const rejected: Array<{ name: string; reason: string }> = [];
+    const sourceErrors: string[] = [];
+    const sourceWarnings: string[] = [];
     let lastError: Error | null = null;
-    for (const url of YARA_SOURCES) {
+    for (const descriptor of YARA_SOURCES) {
+      const url = descriptor.url;
+      const name = sourceName(url);
       try {
         const content = await this.downloadText(url);
-        // Validação: regras YARA devem conter "rule " e compilar com YARA-X.
-        // Só escrevemos no disco se o conteúdo for YARA válido.
+        const source = new URL(url).pathname;
+        // Validação: regras YARA devem conter "rule " e compilar com o YARA
+        // clássico oficial (yarac). Só escrevemos no disco o que compila.
         if (!content.includes("rule ") || content.includes("<!DOCTYPE html>")) {
           throw new Error("Conteúdo baixado não parece ser YARA válido.");
         }
-        try {
-          compile(content);
-        } catch (compileErr: any) {
-          throw new Error(`Regras baixadas não compilam com YARA-X: ${compileErr?.message ?? "unknown"}`);
+        const compilerDiagnostics = validateYaraSource(content);
+        const compilerErrors = compilerDiagnostics.filter((diagnostic) => diagnostic.severity === "error");
+        if (compilerErrors.length > 0) {
+          sourceErrors.push(...compilerErrors.map((error) => describeYaraCompilerError(source, error)));
+          rejected.push({ name, reason: "compile-error" });
+          const codes = compilerErrors.map((error) => error.code).join(",");
+          lastError = new Error(`YARA source rejected (${source}; ${codes}).`);
+          const categories = compilerErrors
+            .map((error) => `${classifyYaraCompilerError(error)} (${error.code})`)
+            .join(", ");
+          console.warn(`[Updater] Fonte YARA rejeitada (${source}): ${categories}`);
+          continue;
         }
-        await fsPromises.writeFile(this.yaraPath, content, "utf-8");
-        return; // Sucesso
+        for (const warning of compilerDiagnostics.filter((diagnostic) => diagnostic.severity === "warning")) {
+          const location = warning.line === undefined ? "" : `:${warning.line}`;
+          sourceWarnings.push(`${new URL(url).pathname}${location}: ${warning.code}`);
+        }
+
+        // Referência: já compilou sozinha acima. Não se junta ao corpus de
+        // ameaça (nem ao teste de compatibilidade entre fontes): um conflito
+        // com uma regra de deteção não existe se o ficheiro nunca é carregado.
+        if (descriptor.ruleClass === "reference") {
+          accepted.push({ name, ruleClass: descriptor.ruleClass, content });
+          continue;
+        }
+
+        const candidate = [...validSources, content].join("\n");
+        const candidateErrors = validateYaraSource(candidate).filter(
+          (diagnostic) => diagnostic.severity === "error",
+        );
+        if (candidateErrors.length > 0) {
+          sourceErrors.push(
+            ...candidateErrors.map((error) => `${source}: incompatible-with-accepted-rules (${error.code})`),
+          );
+          rejected.push({ name, reason: "incompatible-with-accepted-rules" });
+          lastError = new Error(`YARA source conflicts with accepted rules (${source}).`);
+          console.warn(`[Updater] Fonte YARA incompatível com regras aceites (${source}).`);
+          continue;
+        }
+        validSources.push(content);
+        accepted.push({ name, ruleClass: descriptor.ruleClass, content });
       } catch (err: any) {
         lastError = err;
-        console.warn(`[Updater] Fonte YARA falhou (${url}):`, err.message);
+        const source = new URL(url).pathname;
+        rejected.push({ name, reason: rejectionReason(err) });
+        sourceErrors.push(`${source}: ${err.message}`);
+        console.warn(`[Updater] Fonte YARA falhou (${source}):`, err.message);
       }
     }
-    throw lastError ?? new Error("Todas as fontes YARA falharam.");
+    if (validSources.length === 0) {
+      const failure =
+        lastError instanceof Error ? lastError : new Error("Todas as fontes YARA falharam.");
+      // O detalhe por fonte não pode desaparecer no `throw`: sem isto o
+      // `definitions.update` só mostrava o último erro e escondia as outras
+      // fontes que falharam (HTTP, compilação ou conflito).
+      (failure as Error & { sourceErrors?: string[] }).sourceErrors = sourceErrors;
+      throw failure;
+    }
+
+    // Controlo positivo: sem ele, um corpus com dezenas de regras que nunca
+    // dispararam é indistinguível de um pipeline partido. A regra é NOSSA,
+    // sem marker de fallback, e entra sempre como fonte de teste.
+    const positiveControl = {
+      name: "cybersafe-eicar-control.yar",
+      ruleClass: "test" as YaraRuleClass,
+      content: CYBERSAFE_EICAR_POSITIVE_CONTROL_RULE,
+    };
+    validSources.push(positiveControl.content);
+    accepted.push(positiveControl);
+    let corpusContent = validSources.join("\n");
+    try {
+      const controlErrors = validateYaraSource(corpusContent).filter(
+        (diagnostic) => diagnostic.severity === "error",
+      );
+      if (controlErrors.length > 0) {
+        throw new Error(controlErrors[0].message);
+      }
+    } catch (controlError: any) {
+      // Um corpus real que já declare `CyberSafe_Canary_EICAR` colidiria. Nesse
+      // caso o controlo positivo já existe (é o da fonte) e não se duplica.
+      console.warn(
+        "[Updater] Controlo positivo não pôde ser acrescentado:",
+        controlError?.message ?? controlError,
+      );
+      validSources.pop();
+      accepted.pop();
+      corpusContent = validSources.join("\n");
+    }
+    await this.publishYaraRules(corpusContent, this.afterYaraUpdated);
+    // Proveniência publicada DEPOIS do corpus, e ligada a ele por hash. Se
+    // falhar, o corpus continua válido e o motor classifica-o pelo conteúdo:
+    // perder o manifesto degrada o detalhe, nunca a proteção.
+    await this.publishYaraManifest(corpusContent, accepted, rejected);
+    return { errors: sourceErrors, warnings: sourceWarnings };
+  }
+
+  /**
+   * Recuperação do corpus YARA no arranque.
+   *
+   * Existe por uma razão medida: `checkAndUpdate` salta tudo quando a última
+   * actualização tem menos de 6 horas, INCLUINDO um corpus que ficou só com a
+   * assinatura de teste. O utilizador via "Degradado" e o serviço só tentava
+   * outra vez horas depois. Isto corre apenas o YARA — não toca em freshclam,
+   * hashes, proteção ou configuração — e nunca lança: falhar aqui é voltar ao
+   * estado em que já estava.
+   */
+  async refreshYaraCorpus(): Promise<boolean> {
+    // Guarda de MODO. Esta recuperação faz rede e escreve no directório de
+    // definições; nos modos read-only e fixture isso é exactamente o que não
+    // pode acontecer. A recusa é total e acontece ANTES de qualquer I/O —
+    // devolver `false` sem tocar em nada é a única resposta honesta.
+    if (!recuperacaoYaraPermitida()) {
+      console.log("[Updater] Recuperação YARA recusada: modo read-only/fixture.");
+      return false;
+    }
+    try {
+      const result = await this.updateYaraRules();
+      console.log("[Updater] Recuperação do corpus YARA concluída.", JSON.stringify({
+        errors: result.errors.length,
+        warnings: result.warnings.length,
+      }));
+      return true;
+    } catch (err: any) {
+      console.warn("[Updater] Recuperação do corpus YARA falhou:", err?.message ?? err);
+      return false;
+    }
+  }
+
+  private async publishYaraManifest(
+    corpusContent: string,
+    accepted: Array<{ name: string; ruleClass: YaraRuleClass; content: string }>,
+    rejected: Array<{ name: string; reason: string }>,
+  ): Promise<void> {
+    const manifestPath = path.join(this.definitionsDir, ".yara-corpus.json");
+    const manifest: YaraCorpusManifest = {
+      version: 1,
+      generatedAt: new Date().toISOString(),
+      corpusSha256: createHash("sha256").update(corpusContent, "utf-8").digest("hex"),
+      sources: accepted.map((source) => ({
+        name: source.name,
+        ruleClass: source.ruleClass,
+        // Mesmo parser do `ruleCount` do motor: inclui declarações indentadas
+        // e `global`, exclui `private`. Uma regex `^rule` dava 17 onde o
+        // motor conta 18.
+        rules: countReportableYaraRules(source.content),
+        sha256: createHash("sha256").update(source.content, "utf-8").digest("hex"),
+      })),
+      rejected,
+    };
+
+    const staging = path.join(
+      path.dirname(manifestPath),
+      `.${path.basename(manifestPath)}.${process.pid}.${randomUUID()}.tmp`,
+    );
+    try {
+      await fsPromises.writeFile(staging, JSON.stringify(manifest, null, 2), "utf-8");
+      await this.renameYaraRules(staging, manifestPath);
+    } catch (err: any) {
+      console.warn("[Updater] Manifesto do corpus YARA não publicado:", err?.message ?? err);
+      try {
+        await fsPromises.unlink(staging);
+      } catch {}
+    }
+  }
+
+  private async publishYaraRules(content: string, afterPublish?: () => Promise<void> | void): Promise<void> {
+    let previousContent: string | null = null;
+    try {
+      previousContent = await fsPromises.readFile(this.yaraPath, "utf-8");
+    } catch (error) {
+      if (!(error instanceof Error && "code" in error && error.code === "ENOENT")) {
+        throw error;
+      }
+    }
+
+    await this.writeYaraRulesAtomically(content);
+    if (!afterPublish) return;
+
+    try {
+      await afterPublish();
+    } catch (reloadError) {
+      try {
+        if (previousContent === null) {
+          await fsPromises.unlink(this.yaraPath);
+        } else {
+          await this.writeYaraRulesAtomically(previousContent);
+        }
+      } catch (restoreError) {
+        if (
+          previousContent !== null ||
+          !(restoreError instanceof Error && "code" in restoreError && restoreError.code === "ENOENT")
+        ) {
+          let recoveryHandlerError: unknown;
+          try {
+            await this.afterYaraRollbackFailed?.(restoreError);
+          } catch (error) {
+            recoveryHandlerError = error;
+          }
+          throw new AggregateError(
+            [reloadError, restoreError, ...(recoveryHandlerError ? [recoveryHandlerError] : [])],
+            "YARA reload failed and the previous corpus could not be restored.",
+          );
+        }
+      }
+
+      try {
+        await afterPublish();
+      } catch (restoreReloadError) {
+        let recoveryHandlerError: unknown;
+        try {
+          await this.afterYaraRollbackFailed?.(restoreReloadError);
+        } catch (error) {
+          recoveryHandlerError = error;
+        }
+        throw new AggregateError(
+          [reloadError, restoreReloadError, ...(recoveryHandlerError ? [recoveryHandlerError] : [])],
+          "YARA reload failed and the previous corpus could not be reloaded.",
+        );
+      }
+      throw reloadError;
+    }
+  }
+
+  private async writeYaraRulesAtomically(content: string): Promise<void> {
+    const stagingPath = path.join(
+      path.dirname(this.yaraPath),
+      `.${path.basename(this.yaraPath)}.${process.pid}.${randomUUID()}.tmp`,
+    );
+    let stagingCreated = false;
+
+    try {
+      const stagingFile = await fsPromises.open(stagingPath, "wx");
+      stagingCreated = true;
+      try {
+        await stagingFile.writeFile(content, "utf-8");
+        await stagingFile.sync();
+      } finally {
+        await stagingFile.close();
+      }
+      await this.renameYaraRules(stagingPath, this.yaraPath);
+    } catch (error) {
+      if (stagingCreated) {
+        try {
+          await fsPromises.unlink(stagingPath);
+        } catch (cleanupError) {
+          if (
+            !(cleanupError instanceof Error && "code" in cleanupError && cleanupError.code === "ENOENT")
+          ) {
+            throw new AggregateError(
+              [error, cleanupError],
+              "YARA rule publication failed and its staging file could not be removed.",
+            );
+          }
+        }
+      }
+      throw error;
+    }
+  }
+
+  private downloadText(url: string): Promise<string> {
+    return downloadYaraRulesText(url, undefined, this.abortController.signal);
   }
 
   // ── Private: ClamAV ────────────────────────────────────────────────────────
@@ -427,6 +933,10 @@ export class DefinitionUpdater {
    * passagem de vez — que é exactamente o bug que a posse por token veio
    * fechar.
    */
+  private freshclamBinary(): string {
+    return resolveFreshclamBinary();
+  }
+
   private runFreshclam(
     args: string[],
     clamDbDir: string,
@@ -437,7 +947,7 @@ export class DefinitionUpdater {
     posse: NonNullable<Awaited<ReturnType<ClamDatabaseGate["beginUpdate"]>>>,
   ): void {
     try {
-      const child = this.spawnFreshclam("freshclam", args, {
+      const child = this.spawnFreshclam(this.freshclamBinary(), args, {
         stdio: "pipe",
         windowsHide: true,
         timeout: 120_000, // 2 min timeout
@@ -559,13 +1069,28 @@ export class DefinitionUpdater {
     }
 
     const merged = this.mergeHashFeeds(existing, remoteFeeds);
-    await fsPromises.writeFile(this.hashesPath, JSON.stringify(merged, null, 2), "utf-8");
+    // Staging + rename no MESMO directório: uma falha a meio não deixa a base
+    // de hashes truncada; o ficheiro anterior continua válido.
+    const staging = path.join(
+      path.dirname(this.hashesPath),
+      `.${path.basename(this.hashesPath)}.${process.pid}.${randomUUID()}.tmp`,
+    );
+    try {
+      await fsPromises.writeFile(staging, JSON.stringify(merged, null, 2), "utf-8");
+      // Seam próprio, não o do YARA: um duplo do corpus não pode governar a
+      // escrita da base de hashes. Em produção continua a ser `fsPromises.rename`.
+      await this.renameHashes(staging, this.hashesPath);
+    } catch (error) {
+      await fsPromises.rm(staging, { force: true }).catch(() => undefined);
+      throw error;
+    }
   }
 
   private downloadMalwareBazaar(): Promise<string> {
     return new Promise((resolve, reject) => {
       const data = "query=get_recent&selector=time";
-      const req = https.request(HASH_FEED_URL, {
+      const req = this.hashFeedRequest(HASH_FEED_URL, {
+        signal: this.abortController.signal,
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
@@ -577,9 +1102,48 @@ export class DefinitionUpdater {
           reject(new Error(`MalwareBazaar HTTP ${res.statusCode}`));
           return;
         }
+        const declared = Number(res.headers["content-length"]);
+        if (Number.isFinite(declared) && declared > MAX_HASH_FEED_BYTES) {
+          reject(new Error(`Feed de hashes excede o limite de ${MAX_HASH_FEED_BYTES} bytes (content-length)`));
+          res.destroy();
+          return;
+        }
         let body = "";
-        res.on("data", chunk => body += chunk);
-        res.on("end", () => resolve(body));
+        let bytes = 0;
+        let settled = false;
+        const fail = (error: Error) => {
+          if (settled) return;
+          settled = true;
+          reject(error);
+        };
+        res.on("data", (chunk: Buffer | string) => {
+          if (settled) return;
+          bytes += Buffer.isBuffer(chunk) ? chunk.length : Buffer.byteLength(String(chunk));
+          if (bytes > MAX_HASH_FEED_BYTES) {
+            fail(new Error(`Feed de hashes excede o limite de ${MAX_HASH_FEED_BYTES} bytes`));
+            res.destroy();
+            return;
+          }
+          body += chunk;
+        });
+        res.on("end", () => {
+          if (settled) return;
+          settled = true;
+          resolve(body);
+        });
+        // Uma ligação cortada antes do `end` não pode deixar a promessa
+        // pendurada: sem estes caminhos, o updater ficava à espera para sempre
+        // (ou até ao timeout do pedido, que não cobre todos os cortes).
+        res.on("aborted", () => {
+          fail(new Error("Ligação interrompida durante o download do feed de hashes."));
+          res.destroy();
+        });
+        res.on("close", () => {
+          if (!settled) {
+            fail(new Error("Ligação fechada antes do fim do feed de hashes."));
+          }
+        });
+        res.on("error", (error: Error) => fail(error));
       });
       req.on("error", reject);
       req.on("timeout", () => { req.destroy(); reject(new Error("Timeout MalwareBazaar")); });
@@ -597,54 +1161,53 @@ export class DefinitionUpdater {
 
   // ── Private: Metadata ──────────────────────────────────────────────────────
 
-  private getLastUpdateTimestamp(): number {
+  private readUpdateMeta(): UpdateMeta {
     try {
       const raw = fs.readFileSync(this.metaPath, "utf-8");
-      return JSON.parse(raw).timestamp ?? 0;
+      const parsed = JSON.parse(raw) as UpdateMeta;
+      return parsed && typeof parsed === "object" ? parsed : {};
     } catch {
-      return 0;
+      return {};
     }
   }
 
-  private saveUpdateTimestamp(): void {
+  /**
+   * Um componente está velho?
+   *
+   * O fallback para o timestamp GLOBAL só vale para metadados LEGADOS, sem
+   * `components` nenhum, e só para YARA/hashes. Assim que um metadado tem
+   * componentes, a ausência de prova de um deles é velhice — nunca herdada do
+   * sucesso de outro. Sem esta regra, um YARA fresco renovava o global e o
+   * ClamAV falhado ficava mais 6 h sem nova tentativa, para sempre.
+   *
+   * Na migração, o ClamAV é tentado já: o global histórico não é prova de que o
+   * freshclam correu. YARA/hashes podem herdar o global uma vez.
+   */
+  private componentStale(component: UpdateComponent): boolean {
+    const meta = this.readUpdateMeta();
+    const hasComponents = meta.components !== undefined && Object.keys(meta.components).length > 0;
+    if (!hasComponents) {
+      if (component === "clamav") return true;
+      const legacy = Number(meta.timestamp ?? 0);
+      return !(Number.isFinite(legacy) && legacy > 0 && Date.now() - legacy < UPDATE_INTERVAL_MS);
+    }
+    const own = Number(meta.components?.[component] ?? 0);
+    return !(Number.isFinite(own) && own > 0 && Date.now() - own < UPDATE_INTERVAL_MS);
+  }
+
+  private saveUpdateTimestamp(updated: Partial<Record<UpdateComponent, boolean>>): void {
+    const meta = this.readUpdateMeta();
+    const now = Date.now();
+    const components: Partial<Record<UpdateComponent, number>> = { ...(meta.components ?? {}) };
+    if (updated.yara) components.yara = now;
+    if (updated.clamav) components.clamav = now;
+    if (updated.hashes) components.hashes = now;
     fs.mkdirSync(path.dirname(this.metaPath), { recursive: true });
     fs.writeFileSync(
       this.metaPath,
-      JSON.stringify({ timestamp: Date.now(), iso: new Date().toISOString() }),
+      JSON.stringify({ timestamp: now, iso: new Date(now).toISOString(), components }, null, 2),
       "utf-8",
     );
   }
 
-  // ── Private: HTTP util ─────────────────────────────────────────────────────
-
-  private downloadText(url: string): Promise<string> {
-    return new Promise((resolve, reject) => {
-      const client = url.startsWith("https") ? https : http;
-      const request = client.get(url, { timeout: 30_000 }, (res) => {
-        // Follow redirects (301/302)
-        if (res.statusCode && res.statusCode >= 300 && res.statusCode < 400 && res.headers.location) {
-          this.downloadText(res.headers.location).then(resolve, reject);
-          return;
-        }
-
-        if (res.statusCode !== 200) {
-          reject(new Error(`HTTP ${res.statusCode} ao baixar ${url}`));
-          return;
-        }
-
-        let data = "";
-        res.on("data", (chunk) => {
-          data += chunk.toString();
-        });
-        res.on("end", () => resolve(data));
-        res.on("error", reject);
-      });
-
-      request.on("error", reject);
-      request.on("timeout", () => {
-        request.destroy();
-        reject(new Error(`Timeout ao baixar ${url}`));
-      });
-    });
-  }
 }

@@ -115,6 +115,53 @@ describe("ServiceClient — ligação única ao pipe", () => {
     client.disconnect();
   });
 
+  it("queda emite false uma vez; hardware falha rápido e recuperação só relê", async () => {
+    const client = new ServiceClient(pipe.pipeName);
+    const states = [];
+    const methods = [];
+    let replacement;
+    // Conta tentativas reais, incluindo ENOENT; remover o backoff faz falhar.
+    const originalCreate = net.createConnection;
+    let attempts = 0;
+    net.createConnection = (...args) => { attempts++; return originalCreate(...args); };
+    try {
+      assert.equal(typeof client.onConnectionState, "function");
+      client.onConnectionState((connected) => states.push(connected));
+      await client.request("protection.getState", undefined);
+      assert.deepEqual(states, [true]);
+      await pipe.close();
+      await waitFor(() => states.includes(false));
+      const before = attempts;
+      const started = Date.now();
+      const polls = await Promise.allSettled(Array.from({ length: 40 }, () => client.request("hardware.snapshot", undefined)));
+      assert.ok(polls.every((p) => p.status === "rejected"));
+      assert.ok(Date.now() - started < 250, "runtime não espera 30 retries");
+      await new Promise((r) => setTimeout(r, 1100));
+      assert.ok(attempts - before <= 3, `40 polls geraram ${attempts - before} tentativas em 1100ms`);
+      assert.deepEqual(states, [true, false]);
+      replacement = net.createServer((socket) => {
+        let buffer = "";
+        socket.on("data", (chunk) => {
+          const decoded = decodeMessages(buffer + chunk.toString()); buffer = decoded.rest;
+          for (const request of decoded.messages) {
+            methods.push(request.method);
+            socket.write(encodeMessage({ type: "response", id: request.id, ok: true, result: { protectionEnabled: false } }));
+          }
+        });
+      });
+      await new Promise((resolve) => replacement.listen(pipe.pipeName, resolve));
+      await waitFor(() => client.isConnected, 4000);
+      assert.deepEqual(states, [true, false, true]);
+      const actual = await client.request("protection.getState", undefined);
+      assert.equal(actual.protectionEnabled, false);
+      assert.deepEqual(methods, ["protection.getState"], "reconexão nunca envia monitor.start");
+    } finally {
+      client.disconnect();
+      net.createConnection = originalCreate;
+      if (replacement) await new Promise((resolve) => replacement.close(resolve));
+    }
+  });
+
   it("o caminho real de arranque (poll da tray + boot) não duplica a ligação", async () => {
     const client = new ServiceClient(pipe.pipeName);
 
@@ -126,6 +173,46 @@ describe("ServiceClient — ligação única ao pipe", () => {
 
     assert.equal(pipe.connections, 1, "o arranque não pode abrir dois sockets");
     client.disconnect();
+  });
+
+  it("disconnect cancela o retry inicial e não deixa tentativas órfãs", async () => {
+    const client = new ServiceClient(newPipeName("missing"));
+    const originalCreate = net.createConnection;
+    let attempts = 0;
+    net.createConnection = (...args) => { attempts++; return originalCreate(...args); };
+    try {
+      const connecting = client.connect();
+      const rejected = assert.rejects(connecting);
+      client.disconnect();
+      await rejected;
+      await new Promise((r) => setTimeout(r, 1100));
+      assert.equal(attempts, 1, "cancelar startup deve impedir o próximo retry");
+      assert.equal(client.isConnected, false);
+    } finally {
+      client.disconnect();
+      net.createConnection = originalCreate;
+    }
+  });
+
+  it("shutdown durante recuperação pára o loop e não volta a ligar", async () => {
+    const client = new ServiceClient(pipe.pipeName);
+    const states = [];
+    client.onConnectionState((state) => states.push(state));
+    await client.connect();
+    await pipe.close();
+    await waitFor(() => states.length === 2);
+    await client.requestShutdown();
+    const originalCreate = net.createConnection;
+    let attempts = 0;
+    net.createConnection = (...args) => { attempts++; return originalCreate(...args); };
+    try {
+      await new Promise((r) => setTimeout(r, 1100));
+      assert.equal(attempts, 0, "shutdown cancela a reconexão de fundo");
+      assert.deepEqual(states, [true, false], "false não se repete no disconnect");
+    } finally {
+      client.disconnect();
+      net.createConnection = originalCreate;
+    }
   });
 
   it("disconnect() fecha o socket e o pedido seguinte religa uma só vez", async () => {

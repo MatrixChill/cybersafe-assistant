@@ -28,11 +28,9 @@ import { YaraEngine } from "../dist/yara.js";
  * `coverage` torna essa resposta explicita e transportavel pelo named-pipe.
  *
  * ── A assimetria de `normal` e deliberada ───────────────────────────────────
- * "limited" e affirmacao segura: sabemos que e pouco. "normal" e affirmacao
- * forte: so se emite com evidencia medida (um corpus que NAO e o canario
- * compilou com sucesso). A ausencia do marker num ficheiro que nao leu NAO
- * basta — por isso o calculo e feito depois de `load()`, no ramo em que o
- * corpus esta de facto em memoria, nunca por presuncao do caminho de codigo.
+ * "normal" exige proveniencia e eficacia validadas; compilar regras sinteticas
+ * so prova que o motor as consegue executar. Sem essa evidencia, o corpus e
+ * `unknown`, mesmo quando o scanner esta operacional.
  */
 
 const tmpRoots = [];
@@ -102,10 +100,14 @@ describe("CONTRATO DE COBERTURA — status mede o motor, coverage mede o corpus"
   });
 
   // ── CASO C: motor activo com corpus valido ──────────────────────────────
-  test("C1: corpus válido não-canário => status 'active' E coverage = 'normal'", async () => {
+  test("C1: corpus sintético válido não-canário => status 'active' E coverage = 'unknown'", async () => {
     const e = await loadEngineWith(REAL_CORPUS, "default.yar");
-    assert.equal(e.health.status, "active", "um corpus real tem de dar motor activo");
-    assert.equal(e.health.coverage, "normal", "corpus real compilado é a ÚNICA evidência que autoriza 'normal'");
+    assert.equal(e.health.status, "active", "a compilação comprova que o motor está operacional");
+    assert.equal(
+      e.health.coverage,
+      "unknown",
+      "regras sintéticas compiladas não comprovam proveniência nem eficácia contra ameaças",
+    );
   });
 
   test("C2: status e coverage são semanticamente independentes", async () => {
@@ -133,9 +135,9 @@ describe("CONTRATO DE COBERTURA — status mede o motor, coverage mede o corpus"
     assert.notEqual(e.health.coverage, "limited", "'limited' afirma que medimos pouco; se não medimos, é 'unknown'");
   });
 
-  test("B2: corpus vazio => não é 'normal' nem 'limited' (nada foi medido)", async () => {
+  test("B2: corpus vazio => fallback de canário com coverage 'limited'", async () => {
     const e = await loadEngineWith("", "default.yar");
-    assert.notEqual(e.health.coverage, "normal", "um ficheiro vazio não autoriza 'normal'");
+    assert.equal(e.health.coverage, "limited", "o ficheiro vazio é substituído pelo canário conhecido");
   });
 
   test("B3: corpus que não compila => coverage = 'unknown' (não 'normal')", async () => {
@@ -189,8 +191,8 @@ describe("CONTRATO — o tipo partilhado declara coverage", () => {
  *     IS_FALLBACK_CANARY     NAO
  *
  * Ou seja: coverage "normal" com uma regra que só deteta o ficheiro de teste
- * do EICAR. O mesmo par (`active` + `normal`) do canário nosso, exactamente
- * porque o marker — e só o marker — é que decide.
+ * do EICAR. A regressão mostrou que nem a compilação nem a ausência do marker
+ * autorizam cobertura normal; o conteúdo reconhecido como teste é `limited`.
  *
  * ── Porque aconteceu ──────────────────────────────────────────────────────
  * `updater.ts` faz `return` no PRIMEIRO fonte que valida (o `return` logo a
@@ -268,7 +270,7 @@ describe("CASO E — corpus só-teste SEM marker não é cobertura normal", () =
     assert.doesNotMatch(detail, /detectam|detectando|detectou-se/i, "PT-BR nao pode entrar no estado mostravel");
   });
 
-  test("E4: assimetria — uma regra REAL ao lado da de teste é suficiente para 'normal'", async () => {
+  test("E4: nome de regra de malware ao lado da de teste não comprova cobertura", async () => {
     const comReal = `${fs.readFileSync(FIXTURE_REAL, "utf-8")}
 rule MALW_Emotet
 {
@@ -279,7 +281,11 @@ rule MALW_Emotet
 }
 `;
     const e = await loadEngineWith(comReal, "default.yar");
-    assert.equal(e.health.coverage, "normal", "um corpus com uma regra que não é de teste cobre malware");
+    assert.equal(
+      e.health.coverage,
+      "unknown",
+      "um nome e uma regra sintética não comprovam proveniência nem eficácia",
+    );
     assert.equal(e.health.status, "active");
   });
 
@@ -298,7 +304,7 @@ rule CyberSafe_Real_Detection_One
     assert.equal(e.health.coverage, "limited", "o marker do canário continua a sobrepor o conteúdo");
   });
 
-  test("E6: coverage 'normal' nunca pode sair com 0 ou 1 regra", async () => {
+  test("E6: corpus sem evidência não recebe coverage 'normal', mesmo com 0 ou 1 regra", async () => {
     for (const [nome, conteudo] of [
       ["vazio", ""],
       ["o ficheiro real", fs.readFileSync(FIXTURE_REAL, "utf-8")],
@@ -320,39 +326,7 @@ describe("CONTRATO E — a UI não escreve português de Brazil nem plural errad
     "utf-8",
   );
 
-  test("E7: '1 regra' tem de ser singular na linha de cobertura normal", () => {
-    // A frase que o utilizador viu foi `Cobertura normal: 1 regras carregadas.`
-    // Scope estreito: a funcao de copy de cobertura. `${regras} regras carregadas`
-    // noutro sitio pode ser legitimo — la o singular ja e tratado num ramo a parte.
-    const inicio = appSrc.indexOf("function coberturaUserCopy");
-    assert.notEqual(inicio, -1, "a funcao de copy de cobertura tem de existir");
-    const corpo = appSrc.slice(inicio, appSrc.indexOf("\n}", inicio));
-    assert.ok(corpo.length > 0, "a funcao de copy tem de ter corpo");
-
-    // O ramo "normal" nao pode interpolar a contagem crua.
-    const ramoNormal = corpo.slice(corpo.indexOf('case "normal"'), corpo.indexOf('case "unknown"'));
-    assert.ok(ramoNormal.length > 0, "tem de existir um ramo 'normal'");
-    assert.doesNotMatch(
-      corpo,
-      /\$\{contagem\} regras carregadas/,
-      "a contagem interpolada precisa de ser pluralizada: 1 regra carregada, N regras carregadas",
-    );
-    // O tratamento do singular pode viver numa variavel calculada antes do switch
-    // (e vive: e o que o codigo faz) ou no proprio ramo. O que nao pode e o
-    // ramo devolver a contagem interpolada sem tratamento nenhum.
-    assert.match(
-      corpo,
-      /Cobertura normal: \$\{contagem\} \$\{contagem === 1 \? "regra carregada" : "regras carregadas"\}/,
-      'a frase tem de ser "Cobertura normal: 1 regra carregada." / "N regras carregadas." — nunca "1 regras"',
-    );
-    assert.match(
-      ramoNormal,
-      /return carregadas/,
-      "o ramo 'normal' tem de devolver a copy pluralizada, e nao a contagem crua",
-    );
-  });
-
-  test("E8: nenhuma string de cobertura em PT-BR", () => {
+  test("E7: nenhuma string de cobertura em PT-BR", () => {
     // Corta SO a funcao de copy de cobertura. Um check PT-BR sobre o ficheiro
     // inteiro apanharia codigo nao relacionado (e dariam falsos positivos em
     // nomes de variaveis e comentarios); o que nos interessa e o texto que o

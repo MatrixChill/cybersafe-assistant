@@ -528,6 +528,423 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
     posse.release();
   });
 
+  it("publicação falhada das regras YARA preserva o corpus anterior", async () => {
+    const { DefinitionUpdater } = await import("../dist/updater.js");
+    const fsPromises = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-atomic-"));
+    const rulesPath = path.join(definitionsDir, "yara", "default.yar");
+    const previousRules = "rule previous_corpus { condition: true }";
+    const candidateRules = "rule updated_corpus { condition: true }";
+
+    try {
+      await fsPromises.mkdir(path.dirname(rulesPath), { recursive: true });
+      await fsPromises.writeFile(rulesPath, previousRules, "utf8");
+      const updater = new DefinitionUpdater(definitionsDir, {
+        renameYaraRules: async () => {
+          throw new Error("simulated atomic publication failure");
+        },
+      });
+      updater.downloadText = async () => candidateRules;
+      updater.updateClamAV = async () => {
+        throw new Error("ClamAV disabled in isolated test");
+      };
+      updater.updateHashFeed = async () => {
+        throw new Error("hash feed disabled in isolated test");
+      };
+
+      const result = await updater.checkAndUpdate(true);
+
+      assert.equal(result.yaraUpdated, false);
+      assert.match(result.errors[0], /simulated atomic publication failure/);
+      assert.equal(await fsPromises.readFile(rulesPath, "utf8"), previousRules);
+      assert.deepEqual(await fsPromises.readdir(path.dirname(rulesPath)), ["default.yar"]);
+    } finally {
+      await fsPromises.rm(definitionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("rollback do corpus quando o reload YARA falha restaura disco e motor", async () => {
+    const { DefinitionUpdater } = await import("../dist/updater.js");
+    const { YaraEngine } = await import("@cybersafe/core");
+    const fsPromises = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-reload-rollback-"));
+    const rulesPath = path.join(definitionsDir, "yara", "default.yar");
+    const previousRules = 'rule previous_corpus { strings: $a = "previous-marker" condition: $a }';
+    const candidateRules = 'rule updated_corpus { strings: $b = "updated-marker" condition: $b }';
+    let reloads = 0;
+
+    try {
+      await fsPromises.mkdir(path.dirname(rulesPath), { recursive: true });
+      await fsPromises.writeFile(rulesPath, previousRules, "utf8");
+      const yara = new YaraEngine(rulesPath);
+      await yara.load(rulesPath);
+      const updater = new DefinitionUpdater(definitionsDir, {
+        afterYaraUpdated: async () => {
+          reloads += 1;
+          await yara.load(rulesPath);
+          if (reloads === 1) {
+            throw new Error("simulated YARA reload failure");
+          }
+        },
+      });
+      updater.downloadText = async () => candidateRules;
+      updater.updateClamAV = async () => {
+        throw new Error("ClamAV disabled in isolated test");
+      };
+      updater.updateHashFeed = async () => {
+        throw new Error("hash feed disabled in isolated test");
+      };
+
+      const result = await updater.checkAndUpdate(true);
+
+      assert.equal(result.yaraUpdated, false);
+      assert.equal(reloads, 2, "após restaurar o corpus anterior, o motor tem de o recarregar");
+      assert.match(result.errors.join("\n"), /simulated YARA reload failure/);
+      assert.equal(await fsPromises.readFile(rulesPath, "utf8"), previousRules);
+      assert.deepEqual(
+        yara.match(Buffer.from("previous-marker")).map((match) => match.ruleId),
+        ["previous_corpus"],
+      );
+      assert.deepEqual(yara.match(Buffer.from("updated-marker")), []);
+    } finally {
+      await fsPromises.rm(definitionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("desativa YARA se o rollback restaurado também não puder ser recarregado", async () => {
+    const { DefinitionUpdater } = await import("../dist/updater.js");
+    const { YaraEngine } = await import("@cybersafe/core");
+    const fsPromises = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-rollback-fail-closed-"));
+    const rulesPath = path.join(definitionsDir, "yara", "default.yar");
+    const previousRules = 'rule previous_corpus { strings: $a = "previous-marker" condition: $a }';
+    const candidateRules = 'rule updated_corpus { strings: $b = "updated-marker" condition: $b }';
+    let reloads = 0;
+
+    try {
+      await fsPromises.mkdir(path.dirname(rulesPath), { recursive: true });
+      await fsPromises.writeFile(rulesPath, previousRules, "utf8");
+      const yara = new YaraEngine(rulesPath);
+      await yara.load(rulesPath);
+      const updater = new DefinitionUpdater(definitionsDir, {
+        afterYaraUpdated: async () => {
+          reloads += 1;
+          await yara.load(rulesPath);
+          throw new Error(`simulated reload failure ${reloads}`);
+        },
+        afterYaraRollbackFailed: () => yara.markUnavailable("YARA rollback reload failed."),
+      });
+      updater.downloadText = async () => candidateRules;
+      updater.updateClamAV = async () => {
+        throw new Error("ClamAV disabled in isolated test");
+      };
+      updater.updateHashFeed = async () => {
+        throw new Error("hash feed disabled in isolated test");
+      };
+
+      const result = await updater.checkAndUpdate(true);
+
+      assert.equal(result.yaraUpdated, false);
+      assert.match(result.errors.join("\n"), /previous corpus could not be reloaded/);
+      assert.equal(reloads, 2);
+      assert.equal(yara.isAvailable, false);
+      assert.equal(yara.health.status, "error");
+      assert.throws(() => yara.match(Buffer.from("previous-marker")), /unavailable/i);
+    } finally {
+      await fsPromises.rm(definitionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("a publicação YARA substitui o corpus completo sem deixar ficheiros temporários", async () => {
+    const { DefinitionUpdater } = await import("../dist/updater.js");
+    const fsPromises = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-atomic-success-"));
+    const rulesPath = path.join(definitionsDir, "yara", "default.yar");
+    const candidateRules = "rule updated_corpus { condition: true }";
+
+    try {
+      await fsPromises.mkdir(path.dirname(rulesPath), { recursive: true });
+      await fsPromises.writeFile(rulesPath, "rule previous_corpus { condition: true }", "utf8");
+      const updater = new DefinitionUpdater(definitionsDir);
+      updater.downloadText = async () => candidateRules;
+      updater.updateClamAV = async () => {
+        throw new Error("ClamAV disabled in isolated test");
+      };
+      updater.updateHashFeed = async () => {
+        throw new Error("hash feed disabled in isolated test");
+      };
+
+      const result = await updater.checkAndUpdate(true);
+
+      assert.equal(result.yaraUpdated, true);
+      // O corpus publicado começa pela fonte aceite e leva o controlo positivo
+      // no fim (regra NOSSA, de teste); o `downloadText` deste teste devolve a
+      // mesma regra às 4 fontes, por isso as repetições são rejeitadas.
+      const published = await fsPromises.readFile(rulesPath, "utf8");
+      assert.ok(published.startsWith(candidateRules), "a fonte aceite tem de estar no corpus");
+      assert.match(published, /CyberSafe_Canary_EICAR/, "o controlo positivo acompanha o corpus");
+      assert.deepEqual(await fsPromises.readdir(path.dirname(rulesPath)), ["default.yar"]);
+    } finally {
+      await fsPromises.rm(definitionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("agrega todas as fontes YARA válidas em vez de parar na primeira", async () => {
+    const { DefinitionUpdater } = await import("../dist/updater.js");
+    const fsPromises = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-sources-"));
+    const rulesBySource = new Map([
+      ["MALW_Eicar.yar", 'rule source_eicar { condition: true }'],
+      ["packer_compiler_signatures.yar", 'rule source_packer { condition: true }'],
+      ["crypto_signatures.yar", 'rule source_crypto { condition: true }'],
+      ["RANSOM_MS17-010_Wannacrypt.yar", 'rule source_ransomware { condition: true }'],
+    ]);
+
+    try {
+      const updater = new DefinitionUpdater(definitionsDir);
+      updater.downloadText = async (url) => {
+        const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
+        assert.ok(source, `fonte YARA inesperada: ${url}`);
+        return rulesBySource.get(source);
+      };
+      updater.updateClamAV = async () => {
+        throw new Error("ClamAV disabled in isolated test");
+      };
+      updater.updateHashFeed = async () => {
+        throw new Error("hash feed disabled in isolated test");
+      };
+
+      const result = await updater.checkAndUpdate(true);
+      const published = await fsPromises.readFile(
+        path.join(definitionsDir, "yara", "default.yar"),
+        "utf8",
+      );
+
+      assert.equal(result.yaraUpdated, true);
+      for (const rule of ["source_eicar", "source_ransomware"]) {
+        assert.match(published, new RegExp(`rule ${rule}\\b`), `${rule} não foi incluída no corpus`);
+      }
+      for (const rule of ["source_packer", "source_crypto"]) {
+        assert.doesNotMatch(published, new RegExp(`rule ${rule}\\b`), `${rule} é referência e não entra no corpus`);
+      }
+    } finally {
+      await fsPromises.rm(definitionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("publica regras compiláveis com warnings e reporta os warnings separadamente", async () => {
+    const { DefinitionUpdater } = await import("../dist/updater.js");
+    const fsPromises = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-warning-"));
+    const rulesBySource = new Map([
+      ["MALW_Eicar.yar", "rule warning_probe { condition: true }"],
+      ["packer_compiler_signatures.yar", "rule source_packer { condition: filesize > 10 }"],
+      ["crypto_signatures.yar", "rule source_crypto { condition: filesize > 20 }"],
+      ["RANSOM_MS17-010_Wannacrypt.yar", "rule source_ransomware { condition: filesize > 30 }"],
+    ]);
+
+    try {
+      const updater = new DefinitionUpdater(definitionsDir);
+      updater.downloadText = async (url) => {
+        const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
+        assert.ok(source, `fonte YARA inesperada: ${url}`);
+        return rulesBySource.get(source);
+      };
+      updater.updateClamAV = async () => {
+        throw new Error("ClamAV disabled in isolated test");
+      };
+      updater.updateHashFeed = async () => {
+        throw new Error("hash feed disabled in isolated test");
+      };
+
+      const result = await updater.checkAndUpdate(true);
+
+      assert.equal(result.yaraUpdated, true);
+      assert.ok(
+        result.warnings.some((warning) => /MALW_Eicar\.yar.*invariant_expr/.test(warning)),
+        "o warning tem de identificar a fonte e o código do compilador",
+      );
+      assert.ok(
+        !result.errors.some((error) => error.includes("YARA source")),
+        "um warning não deve ser apresentado como erro nem rejeitar a fonte",
+      );
+    } finally {
+      await fsPromises.rm(definitionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("classifica módulos YARA não suportados e continua com fontes compatíveis", async () => {
+    const { DefinitionUpdater } = await import("../dist/updater.js");
+    const fsPromises = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-module-"));
+    const rulesBySource = new Map([
+      ["MALW_Eicar.yar", 'import "module_that_does_not_exist" rule unsupported_module { condition: true }'],
+      ["packer_compiler_signatures.yar", "rule source_packer { condition: filesize > 10 }"],
+      ["crypto_signatures.yar", "rule source_crypto { condition: filesize > 20 }"],
+      ["RANSOM_MS17-010_Wannacrypt.yar", "rule source_ransomware { condition: filesize > 30 }"],
+    ]);
+
+    try {
+      const updater = new DefinitionUpdater(definitionsDir);
+      updater.downloadText = async (url) => {
+        const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
+        assert.ok(source, `fonte YARA inesperada: ${url}`);
+        return rulesBySource.get(source);
+      };
+      updater.updateClamAV = async () => {
+        throw new Error("ClamAV disabled in isolated test");
+      };
+      updater.updateHashFeed = async () => {
+        throw new Error("hash feed disabled in isolated test");
+      };
+
+      const result = await updater.checkAndUpdate(true);
+      const published = await fsPromises.readFile(
+        path.join(definitionsDir, "yara", "default.yar"),
+        "utf8",
+      );
+
+      assert.equal(result.yaraUpdated, true);
+      assert.ok(
+        result.errors.some((error) => /MALW_Eicar\.yar.*incompatible-module.*E010/.test(error)),
+        "módulo desconhecido deve ser classificado com a origem e o código estável",
+      );
+      assert.doesNotMatch(published, /unsupported_module/);
+      assert.doesNotMatch(published, /rule source_packer\b/);
+      assert.doesNotMatch(published, /rule source_crypto\b/);
+      assert.match(published, /rule source_ransomware\b/);
+    } finally {
+      await fsPromises.rm(definitionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("reference não participa no merge e não colide com uma regra de production", async () => {
+    const { DefinitionUpdater } = await import("../dist/updater.js");
+    const fsPromises = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-duplicate-"));
+    const rulesBySource = new Map([
+      ["MALW_Eicar.yar", "rule source_duplicate { condition: true }"],
+      ["packer_compiler_signatures.yar", "rule source_duplicate { condition: false }"],
+      ["crypto_signatures.yar", "rule source_after_duplicate { condition: true }"],
+      ["RANSOM_MS17-010_Wannacrypt.yar", "rule source_last { condition: true }"],
+    ]);
+
+    try {
+      const updater = new DefinitionUpdater(definitionsDir);
+      updater.downloadText = async (url) => {
+        const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
+        assert.ok(source, `fonte YARA inesperada: ${url}`);
+        return rulesBySource.get(source);
+      };
+      updater.updateClamAV = async () => {
+        throw new Error("ClamAV disabled in isolated test");
+      };
+      updater.updateHashFeed = async () => {
+        throw new Error("hash feed disabled in isolated test");
+      };
+
+      const result = await updater.checkAndUpdate(true);
+      const published = await fsPromises.readFile(
+        path.join(definitionsDir, "yara", "default.yar"),
+        "utf8",
+      );
+
+      assert.equal(result.yaraUpdated, true);
+      assert.equal(
+        result.errors.some((error) => error.includes("packer_compiler_signatures.yar")),
+        false,
+        "um duplicado de uma fonte reference não é conflito: essa fonte não entra no corpus",
+      );
+      assert.equal((published.match(/rule source_duplicate\b/g) ?? []).length, 1);
+      assert.doesNotMatch(published, /rule source_after_duplicate\b/);
+      assert.match(published, /rule source_last\b/);
+    } finally {
+      await fsPromises.rm(definitionsDir, { recursive: true, force: true });
+    }
+  });
+
+  it("conflito production vs test: production recusada e o corpus aceite antes do conflito preservado", async () => {
+    const { DefinitionUpdater } = await import("../dist/updater.js");
+    const fsPromises = await import("node:fs/promises");
+    const os = await import("node:os");
+    const path = await import("node:path");
+    const definitionsDir = await fsPromises.mkdtemp(path.join(os.tmpdir(), "cs-yara-conflict-"));
+    const rulesPath = path.join(definitionsDir, "yara", "default.yar");
+    await fsPromises.mkdir(path.dirname(rulesPath), { recursive: true });
+    await fsPromises.writeFile(rulesPath, "rule previous_corpus { condition: true }", "utf8");
+    const rulesBySource = new Map([
+      ["MALW_Eicar.yar", "rule source_shared { condition: true }\nrule test_kept { condition: true }"],
+      ["packer_compiler_signatures.yar", "rule reference_packer { condition: true }"],
+      ["crypto_signatures.yar", "rule reference_crypto { condition: true }"],
+      ["RANSOM_MS17-010_Wannacrypt.yar", "rule source_shared { condition: false }"],
+    ]);
+
+    try {
+      const updater = new DefinitionUpdater(definitionsDir);
+      updater.downloadText = async (url) => {
+        const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
+        assert.ok(source, `fonte YARA inesperada: ${url}`);
+        return rulesBySource.get(source);
+      };
+      updater.updateClamAV = async () => {
+        throw new Error("ClamAV disabled in isolated test");
+      };
+      updater.updateHashFeed = async () => {
+        throw new Error("hash feed disabled in isolated test");
+      };
+
+      const result = await updater.checkAndUpdate(true);
+      const published = await fsPromises.readFile(rulesPath, "utf8");
+      const manifest = JSON.parse(
+        await fsPromises.readFile(path.join(definitionsDir, ".yara-corpus.json"), "utf8"),
+      );
+
+      assert.equal(result.yaraUpdated, true);
+      assert.ok(
+        result.errors.some((error) =>
+          error.includes("RANSOM_MS17-010_Wannacrypt.yar") &&
+          error.includes("incompatible-with-accepted-rules"),
+        ),
+        "a production conflituosa tem de ser recusada com a categoria estável",
+      );
+      assert.equal(
+        (published.match(/rule source_shared\b/g) ?? []).length,
+        1,
+        "a regra aceite antes do conflito fica uma única vez no corpus",
+      );
+      assert.match(published, /rule test_kept\b/, "o resto da fonte válida não pode ser perdido");
+      assert.doesNotMatch(published, /rule reference_packer\b/);
+      assert.doesNotMatch(published, /rule previous_corpus\b/, "o candidato válido substituiu o corpus anterior");
+      assert.deepEqual(
+        manifest.rejected,
+        [{ name: "RANSOM_MS17-010_Wannacrypt.yar", reason: "incompatible-with-accepted-rules" }],
+        "o conflito fica registado no manifesto, sem a fonte entrar no corpus",
+      );
+      assert.ok(
+        !manifest.sources.some((source) => source.name === "RANSOM_MS17-010_Wannacrypt.yar"),
+        "a produção conflituosa não pode aparecer como fonte aceite",
+      );
+    } finally {
+      await fsPromises.rm(definitionsDir, { recursive: true, force: true });
+    }
+  });
+
   // ── 21/22/23. OS ACHADOS DO CODEX (2026-10-03) ─────────────────────────────
   /**
    * O Codex reviu a implementacao e encontrou tres buracos REAIS, todos meus.

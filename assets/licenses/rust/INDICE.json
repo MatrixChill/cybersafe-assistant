@@ -1,0 +1,1599 @@
+{
+  "schema": 1,
+  "geradoEm": "2026-10-24T17:47:12.927Z",
+  "alvoCompilacao": "x86_64-pc-windows-msvc",
+  "metodo": "classificacao.json (kind/target/optional do sparse index) + crate-type do Cargo.toml oficial de cada .crate com checksum igual ao lock",
+  "contagens": {
+    "componentesNoIndice": 328,
+    "incorporavelProvavel": 253,
+    "hostProcMacroOuTransitivo": 43,
+    "excluidasPorAresta": 32,
+    "comTextoNoCrate": 270,
+    "comTextoUpstreamTagExacta": 16,
+    "comTextoUpstreamRefNaoExacta": 8,
+    "semTexto": 1,
+    "semTextoDentroDoIncorporavel": 1,
+    "semTextoForaDoIncorporavel": 0,
+    "componentesSemArquivoRecolhido": 32,
+    "identificadoresSemTextoSpdx": [
+      "GPL-3.0"
+    ],
+    "textosPublicadosDistintos": 202,
+    "spdx": 15,
+    "spdxPendencia": [
+      "GPL-3.0"
+    ],
+    "cobertosPorDeclaracaoVersionadaMaisTermosOficiais": 1,
+    "comTextoOficialVersionadoAnterior": 251
+  },
+  "coberturaPorClasse": {
+    "incorporável-provável": {
+      "comTexto": 252,
+      "semTexto": 1
+    },
+    "build-only (host/proc-macro)": {
+      "comTexto": 43,
+      "semTexto": 0
+    }
+  },
+  "limitacoes": [
+    "alcançabilidade + kind + target + crate-type NÃO é análise do binário linkado: é o limite superior defensável a partir de metadados oficiais, sem reconstruir",
+    "cfg com feature=… não é avaliável sem resolução de features completa; esses componentes ficam incluídos no conjunto coberto (conservador) e marcados no índice",
+    "linhas de copyright são copiadas literalmente do texto obtido; ausência de linha não é negada, é registada como tal",
+    "textos marcados com ref não específica da versão (ex. main) não são prova versionada dessa versão: ficam contados à parte"
+  ],
+  "spdx": [
+    {
+      "id": "0BSD",
+      "vezes": 1,
+      "estado": "ok",
+      "ficheiro": "SPDX-0BSD--e3f18c71.txt",
+      "sha256": "e3f18c71e10d673590eb9856c1d79dd3b4b0d65404efb5e8584dbede7edd608b",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/0BSD.txt"
+    },
+    {
+      "id": "Apache-2.0",
+      "vezes": 246,
+      "estado": "ok",
+      "ficheiro": "SPDX-Apache-2.0--074e6e32.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/Apache-2.0.txt"
+    },
+    {
+      "id": "BSD-2-Clause",
+      "vezes": 2,
+      "estado": "ok",
+      "ficheiro": "SPDX-BSD-2-Clause--f32fb3b4.txt",
+      "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/BSD-2-Clause.txt"
+    },
+    {
+      "id": "BSD-3-Clause",
+      "vezes": 4,
+      "estado": "ok",
+      "ficheiro": "SPDX-BSD-3-Clause--5a93d583.txt",
+      "sha256": "5a93d5831e1297ab10fe643e1a631e83be392896da14ee2951285a79012df69d",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/BSD-3-Clause.txt"
+    },
+    {
+      "id": "BSL-1.0",
+      "vezes": 1,
+      "estado": "ok",
+      "ficheiro": "SPDX-BSL-1.0--84c6ef3e.txt",
+      "sha256": "84c6ef3ea9e3254a54d0acf5d3e0c61ae011b8fef7dd6940591cf060e6380a8f",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/BSL-1.0.txt"
+    },
+    {
+      "id": "bzip2-1.0.6",
+      "vezes": 1,
+      "estado": "ok",
+      "ficheiro": "SPDX-bzip2-1.0.6--0a56dbab.txt",
+      "sha256": "0a56dbabe7d2ff65dea26e8b795fe42c6204a192b974d8e9304fe356ccda9fd1",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/bzip2-1.0.6.txt"
+    },
+    {
+      "id": "CC0-1.0",
+      "vezes": 1,
+      "estado": "ok",
+      "ficheiro": "constant_time_eq-0.3.1-LICENSE-CC0--a2010f34.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/CC0-1.0.txt"
+    },
+    {
+      "id": "GPL-3.0",
+      "vezes": 1,
+      "estado": "PENDENCIA",
+      "motivo": "sem texto SPDX"
+    },
+    {
+      "id": "ISC",
+      "vezes": 1,
+      "estado": "ok",
+      "ficheiro": "SPDX-ISC--521c6f0e.txt",
+      "sha256": "521c6f0ed8e64736684f89843d16a4df6b4b7449acbcfc6ca6630a3037ca8c53",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/ISC.txt"
+    },
+    {
+      "id": "LGPL-2.1-or-later",
+      "vezes": 1,
+      "estado": "ok",
+      "ficheiro": "SPDX-LGPL-2.1-or-later--5749785c.txt",
+      "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/LGPL-2.1-or-later.txt"
+    },
+    {
+      "id": "LLVM-exception",
+      "vezes": 34,
+      "estado": "ok",
+      "ficheiro": "SPDX-LLVM-exception--e34c5833.txt",
+      "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/LLVM-exception.txt"
+    },
+    {
+      "id": "MIT",
+      "vezes": 257,
+      "estado": "ok",
+      "ficheiro": "SPDX-MIT--b05785f9.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt"
+    },
+    {
+      "id": "MIT-0",
+      "vezes": 1,
+      "estado": "ok",
+      "ficheiro": "SPDX-MIT-0--59746d62.txt",
+      "sha256": "59746d6285ffa44bfc7ecada352aa5d6a20dc8eab418a60ce091cc739012c135",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT-0.txt"
+    },
+    {
+      "id": "Unicode-3.0",
+      "vezes": 1,
+      "estado": "ok",
+      "ficheiro": "unicode-ident-1.0.19-LICENSE-UNICODE--f7db8105.txt",
+      "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/Unicode-3.0.txt"
+    },
+    {
+      "id": "Unlicense",
+      "vezes": 4,
+      "estado": "ok",
+      "ficheiro": "SPDX-Unlicense--0bdebfed.txt",
+      "sha256": "0bdebfeda07d45dada625ae1317c6f833186e798b171d0db640bcf32e92a8240",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/Unlicense.txt"
+    },
+    {
+      "id": "Zlib",
+      "vezes": 4,
+      "estado": "ok",
+      "ficheiro": "SPDX-Zlib--bfb1112d.txt",
+      "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d",
+      "url": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/Zlib.txt"
+    }
+  ],
+  "textos": [
+    {
+      "ficheiro": "addr2line-0.25.1-LICENSE-APACHE--a60eea81.txt",
+      "sha256": "a60eea817514531668d7e00765731449fe14d059d3249e0bc93b36de45f759f2",
+      "bytes": 10847,
+      "id": "addr2line-0.25.1-LICENSE-APACHE",
+      "origem": ".crate addr2line-0.25.1.crate (sha256 1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "addr2line-0.25.1-LICENSE-MIT--e99d88d2.txt",
+      "sha256": "e99d88d232bf57d70f0fb87f6b496d44b6653f99f8a63d250a54c61ea4bcde40",
+      "bytes": 1069,
+      "id": "addr2line-0.25.1-LICENSE-MIT",
+      "origem": ".crate addr2line-0.25.1.crate (sha256 1b5d307320b3181d6d7954e663bd7c774a838b8220fe0593c86d9fb09f498b4b, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "adler2-2.0.1-LICENSE-0BSD--861399f8.txt",
+      "sha256": "861399f8c21c042b110517e76dc6b63a2b334276c8cf17412fc3c8908ca8dc17",
+      "bytes": 665,
+      "id": "adler2-2.0.1-LICENSE-0BSD",
+      "origem": ".crate adler2-2.0.1.crate (sha256 320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "adler2-2.0.1-LICENSE-APACHE--8ada45cd.txt",
+      "sha256": "8ada45cd9f843acf64e4722ae262c622a2b3b3007c7310ef36ac1061a30f6adb",
+      "bytes": 10860,
+      "id": "adler2-2.0.1-LICENSE-APACHE",
+      "origem": ".crate adler2-2.0.1.crate (sha256 320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "adler2-2.0.1-LICENSE-MIT--23f18e03.txt",
+      "sha256": "23f18e03dc49df91622fe2a76176497404e46ced8a715d9d2b67a7446571cca3",
+      "bytes": 1023,
+      "id": "adler2-2.0.1-LICENSE-MIT",
+      "origem": ".crate adler2-2.0.1.crate (sha256 320119579fcad9c21884f5c4861d16174d0e06250625266f50fe6898340abefa, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "aes-0.8.4-LICENSE-APACHE--a9040321.txt",
+      "sha256": "a9040321c3712d8fd0b09cf52b17445de04a23a10165049ae187cd39e5c86be5",
+      "bytes": 10849,
+      "id": "aes-0.8.4-LICENSE-APACHE",
+      "origem": ".crate aes-0.8.4.crate (sha256 b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "aes-0.8.4-LICENSE-MIT--f7e8ab63.txt",
+      "sha256": "f7e8ab639afef15573680c97f796166835cbeb3865175882fea41c60d106b733",
+      "bytes": 1057,
+      "id": "aes-0.8.4-LICENSE-MIT",
+      "origem": ".crate aes-0.8.4.crate (sha256 b169f7a6d4742236a0a00c541b845991d0ac43e546831af1249753ab4c3aa3a0, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "aho-corasick-1.1.4-COPYING--01c266bc.txt",
+      "sha256": "01c266bced4a434da0051174d6bee16a4c82cf634e2679b6155d40d75012390f",
+      "bytes": 126,
+      "id": "aho-corasick-1.1.4-COPYING",
+      "origem": ".crate aho-corasick-1.1.4.crate (sha256 ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "aho-corasick-1.1.4-LICENSE-MIT--0f96a838.txt",
+      "sha256": "0f96a83840e146e43c0ec96a22ec1f392e0680e6c1226e6f3ba87e0740af850f",
+      "bytes": 1081,
+      "id": "aho-corasick-1.1.4-LICENSE-MIT",
+      "origem": ".crate aho-corasick-1.1.4.crate (sha256 ddd31a130427c27518df266943a5308ed92d4b226cc639f5a8f1002816174301, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "allocator-api2-0.2.21-LICENSE-APACHE--20fe7b00.txt",
+      "sha256": "20fe7b00e904ed690e3b9fd6073784d3fc428141dbd10b81c01fd143d0797f58",
+      "bytes": 9899,
+      "id": "allocator-api2-0.2.21-LICENSE-APACHE",
+      "origem": ".crate allocator-api2-0.2.21.crate (sha256 683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "allocator-api2-0.2.21-LICENSE-MIT--36516aef.txt",
+      "sha256": "36516aefdc84c5d5a1e7485425913a22dbda69eb1930c5e84d6ae4972b5194b9",
+      "bytes": 1046,
+      "id": "allocator-api2-0.2.21-LICENSE-MIT",
+      "origem": ".crate allocator-api2-0.2.21.crate (sha256 683d7910e743518b0e34f1186f92494becacb047c7b6bf616c96772180fef923, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "annotate-snippets-0.12.10-LICENSE-APACHE--c6596eb7.txt",
+      "sha256": "c6596eb7be8581c18be736c846fb9173b69eccf6ef94c5135893ec56bd92ba08",
+      "bytes": 11358,
+      "id": "annotate-snippets-0.12.10-LICENSE-APACHE",
+      "origem": ".crate annotate-snippets-0.12.10.crate (sha256 15580ece6ea97cbf832d60ba19c021113469480852c6a2a6beb0db28f097bf1f, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "annotate-snippets-0.12.10-LICENSE-MIT--6efb0476.txt",
+      "sha256": "6efb0476a1cc085077ed49357026d8c173bf33017278ef440f222fb9cbcb66e6",
+      "bytes": 1062,
+      "id": "annotate-snippets-0.12.10-LICENSE-MIT",
+      "origem": ".crate annotate-snippets-0.12.10.crate (sha256 15580ece6ea97cbf832d60ba19c021113469480852c6a2a6beb0db28f097bf1f, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "anyhow-1.0.100-LICENSE-APACHE--62c7a1e3.txt",
+      "sha256": "62c7a1e35f56406896d7aa7ca52d0cc0d272ac022b5d2796e7d6905db8a3636a",
+      "bytes": 9723,
+      "id": "anyhow-1.0.100-LICENSE-APACHE",
+      "origem": ".crate anyhow-1.0.100.crate (sha256 a23eb6b1614318a8071c9b2521f36b424b2c83db5eb3a0fead4a6c0809af6e61, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "arbitrary-1.4.2-LICENSE-MIT--15656cc1.txt",
+      "sha256": "15656cc11a8331f28c0986b8ab97220d3e76f98e60ed388b5ffad37dfac4710c",
+      "bytes": 1074,
+      "id": "arbitrary-1.4.2-LICENSE-MIT",
+      "origem": ".crate arbitrary-1.4.2.crate (sha256 c3d036a3c4ab069c7b410a2ce876bd74808d2d0888a82667669f8e783a898bf1, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "array-bytes-9.3.0-LICENSE-APACHE2--4ac1fdbc.txt",
+      "sha256": "4ac1fdbca847caf4861bfc1a4ee15ecff886845f5a51c621970cb1941027d7aa",
+      "bytes": 11302,
+      "id": "array-bytes-9.3.0-LICENSE-APACHE2",
+      "origem": ".crate array-bytes-9.3.0.crate (sha256 27d55334c98d756b32dcceb60248647ab34f027690f87f9a362fd292676ee927, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "array-bytes-9.3.0-LICENSE-GPL3--589ed823.txt",
+      "sha256": "589ed823e9a84c56feb95ac58e7cf384626b9cbf4fda2a907bc36e103de1bad2",
+      "bytes": 35141,
+      "id": "array-bytes-9.3.0-LICENSE-GPL3",
+      "origem": ".crate array-bytes-9.3.0.crate (sha256 27d55334c98d756b32dcceb60248647ab34f027690f87f9a362fd292676ee927, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "asn1-rs-0.7.1-LICENSE-MIT--a5c61b93.txt",
+      "sha256": "a5c61b93b6ee1d104af9920cf020ff3c7efe818e31fe562c72261847a728f513",
+      "bytes": 1060,
+      "id": "asn1-rs-0.7.1-LICENSE-MIT",
+      "origem": ".crate asn1-rs-0.7.1.crate (sha256 56624a96882bb8c26d61312ae18cb45868e5a9992ea73c58e45c3101e56a1e60, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "backtrace-0.3.76-LICENSE-MIT--378f5840.txt",
+      "sha256": "378f5840b258e2779c39418f3f2d7b2ba96f1c7917dd6be0713f88305dbda397",
+      "bytes": 1057,
+      "id": "backtrace-0.3.76-LICENSE-MIT",
+      "origem": ".crate backtrace-0.3.76.crate (sha256 bb531853791a215d7c62a30daf0dde835f381ab5de4589cfe7c649d2cbe92bd6, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "base16ct-0.2.0-LICENSE-MIT--0aa8963e.txt",
+      "sha256": "0aa8963e105e8b6e02f634484145d4e5b0f42d0a6dd05c16f8148f033383adef",
+      "bytes": 1143,
+      "id": "base16ct-0.2.0-LICENSE-MIT",
+      "origem": ".crate base16ct-0.2.0.crate (sha256 4c7f02d4ea65f2c1853089ffd8d2787bdbc63de2f0d29dedbcf8ccdfa0ccd4cf, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "base64-0.22.1-LICENSE-MIT--0dd882e5.txt",
+      "sha256": "0dd882e53de11566d50f8e8e2d5a651bcf3fabee4987d70f306233cf39094ba7",
+      "bytes": 1076,
+      "id": "base64-0.22.1-LICENSE-MIT",
+      "origem": ".crate base64-0.22.1.crate (sha256 72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "base64ct-1.8.0-LICENSE-MIT--2d1c57bf.txt",
+      "sha256": "2d1c57bff28344b9e698f51063bc8509799cc4c99a4e0cf2aa3f7e7c3e1f9a9d",
+      "bytes": 1148,
+      "id": "base64ct-1.8.0-LICENSE-MIT",
+      "origem": ".crate base64ct-1.8.0.crate (sha256 55248b47b0caf0546f7988906588779981c43bb1bc9d0c44087278f80cdb44ba, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "beef-0.5.2-LICENSE-APACHE--fe99bc31.txt",
+      "sha256": "fe99bc314b2672132fe8b986fdcdf5a4ffb29edfdf6bf79ec88ccc6cbe092b13",
+      "bytes": 10856,
+      "id": "beef-0.5.2-LICENSE-APACHE",
+      "origem": ".crate beef-0.5.2.crate (sha256 3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "beef-0.5.2-LICENSE-MIT--809a5649.txt",
+      "sha256": "809a5649163758f9182c72fa09fd50a426b5966dd1b4720915ba024c6b910356",
+      "bytes": 1100,
+      "id": "beef-0.5.2-LICENSE-MIT",
+      "origem": ".crate beef-0.5.2.crate (sha256 3a8241f3ebb85c056b509d4327ad0358fbbba6ffb340bf388f26350aeda225b1, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "bincode-2.0.1-LICENSE.md--90d7e062.txt",
+      "sha256": "90d7e062634054e6866d3c81e6a2b3058a840e6af733e98e80bdfe1a7dec6912",
+      "bytes": 1076,
+      "id": "bincode-2.0.1-LICENSE.md",
+      "origem": ".crate bincode-2.0.1.crate (sha256 36eaf5d7b090263e8150820482d5d93cd964a81e4019913c972f4edcc6edb740, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "bitflags-2.10.0-LICENSE-MIT--6485b8ed.txt",
+      "sha256": "6485b8ed310d3f0340bf1ad1f47645069ce4069dcc6bb46c7d5c6faf41de1fdb",
+      "bytes": 1071,
+      "id": "bitflags-2.10.0-LICENSE-MIT",
+      "origem": ".crate bitflags-2.10.0.crate (sha256 812e12b5285cc515a9c72a5c1d3b6d46a19dac5acfef5265968c166106e31dd3, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "bitvec-1.0.1-LICENSE.txt--411781fd.txt",
+      "sha256": "411781fd38700f2357a14126d0ab048164ab881f1dcb335c1bb932e232c9a2f5",
+      "bytes": 1082,
+      "id": "bitvec-1.0.1-LICENSE.txt",
+      "origem": ".crate bitvec-1.0.1.crate (sha256 1bc2832c24239b0141d5674bb9174f9d68a8b5b3f2753311927c172ca46f7e9c, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "block-buffer-0.10.4-LICENSE-MIT--d5c22aa3.txt",
+      "sha256": "d5c22aa3118d240e877ad41c5d9fa232f9c77d757d4aac0c2f943afc0a95e0ef",
+      "bytes": 1082,
+      "id": "block-buffer-0.10.4-LICENSE-MIT",
+      "origem": ".crate block-buffer-0.10.4.crate (sha256 3078c7629b62d3f0439517fa394996acacc5cbc91c5a20d8c658e77abd503a71, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "bstr-1.12.1-COPYING--68653aaa.txt",
+      "sha256": "68653aaa727a2bfa31b7a751e31701ce33c49d695c12dd291a07d1c54da4c14b",
+      "bytes": 262,
+      "id": "bstr-1.12.1-COPYING",
+      "origem": ".crate bstr-1.12.1.crate (sha256 63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "bstr-1.12.1-LICENSE-MIT--6b7374c3.txt",
+      "sha256": "6b7374c39a57e57fc2c38eb529c4c88340152b10f51dd5ae2d819dfa67f61715",
+      "bytes": 1086,
+      "id": "bstr-1.12.1-LICENSE-MIT",
+      "origem": ".crate bstr-1.12.1.crate (sha256 63044e1ae8e69f3b5a92c736ca6269b8d12fa7efe39bf34ddb06d102cf0e2cab, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "bumpalo-3.19.0-LICENSE-MIT--65f94e99.txt",
+      "sha256": "65f94e99ddaf4f5d1782a6dae23f35d4293a9a01444a13135a6887017d353cee",
+      "bytes": 1059,
+      "id": "bumpalo-3.19.0-LICENSE-MIT",
+      "origem": ".crate bumpalo-3.19.0.crate (sha256 46c5e41b57b8bba42a04676d81cb89e9ee8e859a1a66f80a5a72e1cb76b34d43, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "bzip2-0.6.0-LICENSE-MIT--c8c6324c.txt",
+      "sha256": "c8c6324cf2f0f076e3ed5dea4a21f00bd4dd6fce44f72b110bc52e7fe06f6e1e",
+      "bytes": 1079,
+      "id": "bzip2-0.6.0-LICENSE-MIT",
+      "origem": ".crate bzip2-0.6.0.crate (sha256 bea8dcd42434048e4f7a304411d9273a411f647446c1234a65ce0554923f4cff, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "cipher-0.4.4-LICENSE-MIT--5c7bd92d.txt",
+      "sha256": "5c7bd92d1f096f12203dc1b601e3cb17484fa1b023e30b6b8edcc80e416237ec",
+      "bytes": 1070,
+      "id": "cipher-0.4.4-LICENSE-MIT",
+      "origem": ".crate cipher-0.4.4.crate (sha256 773f3b9af64447d2ce9850330c473515014aa235e6a783b02db81ff39e4a3dad, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "cobs-0.3.0-LICENSE-MIT--e0cfa100.txt",
+      "sha256": "e0cfa1006a64520633de6bfbf563f5b1bea04ef0c5b73f049681931fa297dda3",
+      "bytes": 1066,
+      "id": "cobs-0.3.0-LICENSE-MIT",
+      "origem": ".crate cobs-0.3.0.crate (sha256 0fa961b519f0b462e3a3b4a34b64d119eeaca1d59af726fe450bbba07a9fc0a1, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "const-oid-0.9.6-LICENSE-MIT--bada9e7e.txt",
+      "sha256": "bada9e7ed8dc00d63502053c455d7c8d7575dfb7e8277a2a832531844d900682",
+      "bytes": 1082,
+      "id": "const-oid-0.9.6-LICENSE-MIT",
+      "origem": ".crate const-oid-0.9.6.crate (sha256 c2459377285ad874054d797f3ccebf984978aa39129f6eafde5cdc8315b612f8, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "constant_time_eq-0.3.1-LICENSE-CC0--a2010f34.txt",
+      "sha256": "a2010f343487d3f7618affe54f789f5487602331c0a8d03f49e9a7c547cf0499",
+      "bytes": 7048,
+      "id": "constant_time_eq-0.3.1-LICENSE-CC0",
+      "origem": ".crate constant_time_eq-0.3.1.crate (sha256 7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "constant_time_eq-0.3.1-LICENSE-MIT0--9a3aeb3f.txt",
+      "sha256": "9a3aeb3f63659c4c6302d315e1d98784d1e8559858a47ff9562e091bb922d28d",
+      "bytes": 858,
+      "id": "constant_time_eq-0.3.1-LICENSE-MIT0",
+      "origem": ".crate constant_time_eq-0.3.1.crate (sha256 7c74b8349d32d297c9134b8c88677813a227df8f779daa29bfc29c183fe3dca6, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "convert_case-0.10.0-LICENSE--aed7b175.txt",
+      "sha256": "aed7b1758e35afa0cd0fde059d61950747ca11cd0e5e169cb21c11608daed772",
+      "bytes": 1062,
+      "id": "convert_case-0.10.0-LICENSE",
+      "origem": ".crate convert_case-0.10.0.crate (sha256 633458d4ef8c78b72454de2d54fd6ab2e60f9e02be22f3c6104cdc8a4e0fceb9, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "cpufeatures-0.2.17-LICENSE-MIT--ae9baa7b.txt",
+      "sha256": "ae9baa7beea910273c2f384c2a6b721fb7bd02bda3436074a1072e4ee689f985",
+      "bytes": 1082,
+      "id": "cpufeatures-0.2.17-LICENSE-MIT",
+      "origem": ".crate cpufeatures-0.2.17.crate (sha256 59ed5838eebb26a2bb2e58f6d5b5316989ae9d08bab10e0e6d103e656d1b0280, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "crc-3.3.0-LICENSE-APACHE--470355a7.txt",
+      "sha256": "470355a7eed93fcc4281ec2e0f82ca3b94e7af1e4d83629f91de8cfac34d750e",
+      "bytes": 10846,
+      "id": "crc-3.3.0-LICENSE-APACHE",
+      "origem": ".crate crc-3.3.0.crate (sha256 9710d3b3739c2e349eb44fe848ad0b7c8cb1e42bd87ee49371df2f7acaf3e675, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "crc-3.3.0-LICENSE-MIT--34886793.txt",
+      "sha256": "3488679340a49ecc34d342c4009d2dabf76f4a21f12aec2ca99b15805d656544",
+      "bytes": 1074,
+      "id": "crc-3.3.0-LICENSE-MIT",
+      "origem": ".crate crc-3.3.0.crate (sha256 9710d3b3739c2e349eb44fe848ad0b7c8cb1e42bd87ee49371df2f7acaf3e675, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "crc-catalog-b500ea693c552f8d946e290722a7b3ee8b9a7ee2-Apache-2.0.txt--d3cdb764.txt",
+      "sha256": "d3cdb764b98283ee7c3a3cea8d374e2a2957322374378d1f3263f4d512741fc3",
+      "bytes": 11346,
+      "id": "crc-catalog-b500ea693c552f8d946e290722a7b3ee8b9a7ee2-Apache-2.0.txt",
+      "origem": "https://raw.githubusercontent.com/akhilles/crc-catalog/b500ea693c552f8d946e290722a7b3ee8b9a7ee2/LICENSES/Apache-2.0.txt"
+    },
+    {
+      "ficheiro": "crc-catalog-b500ea693c552f8d946e290722a7b3ee8b9a7ee2-MIT.txt--5ef8fcfb.txt",
+      "sha256": "5ef8fcfb6cccec8fcae043c834099a60c8b7406408db576e026d2b7e67dc5cf5",
+      "bytes": 1073,
+      "id": "crc-catalog-b500ea693c552f8d946e290722a7b3ee8b9a7ee2-MIT.txt",
+      "origem": "https://raw.githubusercontent.com/akhilles/crc-catalog/b500ea693c552f8d946e290722a7b3ee8b9a7ee2/LICENSES/MIT.txt"
+    },
+    {
+      "ficheiro": "crc32fast-1.5.0-LICENSE-MIT--61d383b0.txt",
+      "sha256": "61d383b05b87d78f94d2937e2580cce47226d17823c0430fbcad09596537efcf",
+      "bytes": 1097,
+      "id": "crc32fast-1.5.0-LICENSE-MIT",
+      "origem": ".crate crc32fast-1.5.0.crate (sha256 9481c1c90cbf2ac953f07c8d4a58aa3945c425b7185c9154d67a65e4230da511, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "crypto-bigint-0.5.5-LICENSE-MIT--90c503b6.txt",
+      "sha256": "90c503b61dee04e1449c323ec34c229dfb68d7adcb96c7e140ee55f70fce2d8e",
+      "bytes": 1077,
+      "id": "crypto-bigint-0.5.5-LICENSE-MIT",
+      "origem": ".crate crypto-bigint-0.5.5.crate (sha256 0dc92fb57ca44df6db8059111ab3af99a63d5d0f8375d9972e319a379c6bab76, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "crypto-common-0.1.6-LICENSE-MIT--35216724.txt",
+      "sha256": "3521672491a3479422d5fe1aca6645dd2984090f85da6e5205abfb18fb7a6897",
+      "bytes": 1065,
+      "id": "crypto-common-0.1.6-LICENSE-MIT",
+      "origem": ".crate crypto-common-0.1.6.crate (sha256 1bfb12502f3fc46cca1bb51ac28df9d618d813cdc3d2f25b9fe775a34af26bb3, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ctor-0.6.3-LICENSE-APACHE--a8ad31b1.txt",
+      "sha256": "a8ad31b1c3f40dca5a84119351b8fa8ddc868edd77fad8a8ebf6d8f2d16fa4ae",
+      "bytes": 11324,
+      "id": "ctor-0.6.3-LICENSE-APACHE",
+      "origem": ".crate ctor-0.6.3.crate (sha256 424e0138278faeb2b401f174ad17e715c829512d74f3d1e81eb43365c2e0590e, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ctor-0.6.3-LICENSE-MIT--bccaa8b6.txt",
+      "sha256": "bccaa8b6c09f94e81f06696e179dbe058464bbdfbc823b6d49cada1d71e84ac3",
+      "bytes": 1022,
+      "id": "ctor-0.6.3-LICENSE-MIT",
+      "origem": ".crate ctor-0.6.3.crate (sha256 424e0138278faeb2b401f174ad17e715c829512d74f3d1e81eb43365c2e0590e, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "darling-0.20.11-LICENSE--8ea93490.txt",
+      "sha256": "8ea93490d74a5a1b1af3ff71d786271b3f1e5f0bea79ac16e02ec533cef040d6",
+      "bytes": 1067,
+      "id": "darling-0.20.11-LICENSE",
+      "origem": ".crate darling-0.20.11.crate (sha256 fc7f46116c46ff9ab3eb1597a45688b6715c6e628b5c133e288e709a29bcb4ee, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "data-encoding-2.9.0-LICENSE--b68ad1a3.txt",
+      "sha256": "b68ad1a3367b825447089e1f8d6829b97f47a89eb78d2f4ebaef4672f5606186",
+      "bytes": 1121,
+      "id": "data-encoding-2.9.0-LICENSE",
+      "origem": ".crate data-encoding-2.9.0.crate (sha256 2a2330da5de22e8a3cb63252ce2abb30116bf5265e89c0e01bc17015ce30a476, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "deflate64-0.1.10-LICENSE--86b5aede.txt",
+      "sha256": "86b5aedec040ac6eab419af61a8f0aea48ab0037c4b764e5cff5df15bee40df2",
+      "bytes": 1145,
+      "id": "deflate64-0.1.10-LICENSE",
+      "origem": ".crate deflate64-0.1.10.crate (sha256 26bf8fc351c5ed29b5c2f0cbbac1b209b74f60ecd62e675a998df72c49af5204, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "der-0.7.10-LICENSE-MIT--ad64fcb9.txt",
+      "sha256": "ad64fcb9589f162720f3cc5010ad76ca6ad3764e11861f9192c489df176bb71d",
+      "bytes": 1082,
+      "id": "der-0.7.10-LICENSE-MIT",
+      "origem": ".crate der-0.7.10.crate (sha256 e7c1832837b905bbfb5101e07cc24c8deddf52f93225eee6ead5f4d63d53ddcb, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "deranged-0.5.4-LICENSE-Apache--edd65bdd.txt",
+      "sha256": "edd65bdd88957a205c47d53fa499eed8865a70320f0f03f6391668cb304ea376",
+      "bytes": 11349,
+      "id": "deranged-0.5.4-LICENSE-Apache",
+      "origem": ".crate deranged-0.5.4.crate (sha256 a41953f86f8a05768a6cda24def994fd2f424b04ec5c719cf89989779f199071, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "deranged-0.5.4-LICENSE-MIT--231c837c.txt",
+      "sha256": "231c837c45eb53f108fb48929e488965bc4fcc14e9ea21d35f50e6b99d98685b",
+      "bytes": 1062,
+      "id": "deranged-0.5.4-LICENSE-MIT",
+      "origem": ".crate deranged-0.5.4.crate (sha256 a41953f86f8a05768a6cda24def994fd2f424b04ec5c719cf89989779f199071, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "digest-0.10.7-LICENSE-MIT--9e0dfd2d.txt",
+      "sha256": "9e0dfd2dd4173a530e238cb6adb37aa78c34c6bc7444e0e10c1ab5d8881f63ba",
+      "bytes": 1057,
+      "id": "digest-0.10.7-LICENSE-MIT",
+      "origem": ".crate digest-0.10.7.crate (sha256 9ed9a281f7bc9b7576e61468ba615a66a5c8cfdff42420a70aa82701a3b1e292, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "dsa-0.6.3-LICENSE-APACHE--78779d42.txt",
+      "sha256": "78779d420019e6b4630376af8e86b6b335ee8a2f89ede6e0411e0469a326aaa4",
+      "bytes": 10846,
+      "id": "dsa-0.6.3-LICENSE-APACHE",
+      "origem": ".crate dsa-0.6.3.crate (sha256 48bc224a9084ad760195584ce5abb3c2c34a225fa312a128ad245a6b412b7689, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "dsa-0.6.3-LICENSE-MIT--b3470648.txt",
+      "sha256": "b3470648aff02beb36d7a53240fc9260ed80ed93bd43bace6b67d7ef7336ee33",
+      "bytes": 1070,
+      "id": "dsa-0.6.3-LICENSE-MIT",
+      "origem": ".crate dsa-0.6.3.crate (sha256 48bc224a9084ad760195584ce5abb3c2c34a225fa312a128ad245a6b412b7689, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ecdsa-0.16.9-LICENSE-MIT--bdebaf91.txt",
+      "sha256": "bdebaf9156a298f8fdab56dd26cb5144673de522d80f4c0d88e0039145f147f9",
+      "bytes": 1070,
+      "id": "ecdsa-0.16.9-LICENSE-MIT",
+      "origem": ".crate ecdsa-0.16.9.crate (sha256 ee27f32b5c5292967d2d4a9d7f1e0b0aed2c15daded5a60300e4abb9d8020bca, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "either-1.15.0-LICENSE-MIT--7576269e.txt",
+      "sha256": "7576269ea71f767b99297934c0b2367532690f8c4badc695edf8e04ab6a1e545",
+      "bytes": 1043,
+      "id": "either-1.15.0-LICENSE-MIT",
+      "origem": ".crate either-1.15.0.crate (sha256 48c757948c5ede0e46177b7add2e67155f70e33c07fea8284df6576da70b3719, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "elliptic-curve-0.13.8-LICENSE-MIT--d27687b5.txt",
+      "sha256": "d27687b51f2874822c1530976b7e837eac4f308d94bf3dd42047011b7d437b47",
+      "bytes": 1070,
+      "id": "elliptic-curve-0.13.8-LICENSE-MIT",
+      "origem": ".crate elliptic-curve-0.13.8.crate (sha256 b5e6043086bf7973472e0c7dff2142ea0b680d30e18d9cc40f267efbf222bd47, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "embedded-io-0.4.0-LICENSE-MIT--423e1c49.txt",
+      "sha256": "423e1c4900b3fbb41cda3e34530b2597d50c2e61473e18c085756c507e46fe1c",
+      "bytes": 1067,
+      "id": "embedded-io-0.4.0-LICENSE-MIT",
+      "origem": ".crate embedded-io-0.4.0.crate (sha256 ef1a6892d9eef45c8fa6b9e0086428a2cca8491aca8f787c534a3d6d0bcb3ced, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "embedded-io-0.6.1-LICENSE-MIT--47674f8b.txt",
+      "sha256": "47674f8b7d98c232c6f81346c4cfe48933d913a9e257d7a522ad9f42e3dd61e1",
+      "bytes": 1067,
+      "id": "embedded-io-0.6.1-LICENSE-MIT",
+      "origem": ".crate embedded-io-0.6.1.crate (sha256 edd0f118536f44f5ccd48bcb8b111bdc3de888b58c74639dfb034a357d0f206d, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "equivalent-1.0.2-LICENSE-MIT--7365cc88.txt",
+      "sha256": "7365cc8878a1d7ce155a58c4ca09c3d7a6be413efa5334a80ea842912b669349",
+      "bytes": 1049,
+      "id": "equivalent-1.0.2-LICENSE-MIT",
+      "origem": ".crate equivalent-1.0.2.crate (sha256 877a4ace8713b0bcf2a4e7eec82529c029f1d0619886d18145fea96c3ffe5c0f, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "errno-0.3.14-LICENSE-MIT--8764a597.txt",
+      "sha256": "8764a597675778ddfd4e25f81b08a05dbcf089ac05662df7613fe67f150e3aa2",
+      "bytes": 1054,
+      "id": "errno-0.3.14-LICENSE-MIT",
+      "origem": ".crate errno-0.3.14.crate (sha256 39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "fallible-iterator-0.2.0-LICENSE-MIT--0816e154.txt",
+      "sha256": "0816e154b159ba255c563f7c8c7df5bbb8cc5fc96f5ab8cf9f4743b4f41fe7eb",
+      "bytes": 1078,
+      "id": "fallible-iterator-0.2.0-LICENSE-MIT",
+      "origem": ".crate fallible-iterator-0.2.0.crate (sha256 4443176a9f2c162692bd3d352d745ef9413eec5782a80d8fd6f8a1ac692a07f7, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ff-0.13.1-LICENSE-APACHE--3708458d.txt",
+      "sha256": "3708458dee7f359ac6c9c5558023ed481be87e5372c43ebd7f2ca7ad23c12026",
+      "bytes": 10848,
+      "id": "ff-0.13.1-LICENSE-APACHE",
+      "origem": ".crate ff-0.13.1.crate (sha256 c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ff-0.13.1-LICENSE-MIT--8d0c1d1d.txt",
+      "sha256": "8d0c1d1d4b2bebf5b9211f0e883d5a482b7808f3ed31320da14ddee95811f4ef",
+      "bytes": 1076,
+      "id": "ff-0.13.1-LICENSE-MIT",
+      "origem": ".crate ff-0.13.1.crate (sha256 c0b50bfb653653f9ca9095b427bed08ab8d75a137839d9ad64eb11810d5b6393, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "flate2-1.1.2-LICENSE-MIT--75d3bf11.txt",
+      "sha256": "75d3bf11a47fed60aee0a6cc56a97b896b470ee8fb52d6cd553bd8348337f422",
+      "bytes": 1062,
+      "id": "flate2-1.1.2-LICENSE-MIT",
+      "origem": ".crate flate2-1.1.2.crate (sha256 4a3d7db9596fecd151c5f638c0ee5d5bd487b6e0ea232e5dc96d5250f6f94b1d, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "fnv-1.0.7-LICENSE-MIT--65fdb6c7.txt",
+      "sha256": "65fdb6c76cd61612070c066eec9ecdb30ee74fb27859d0d9af58b9f499fd0c3e",
+      "bytes": 1056,
+      "id": "fnv-1.0.7-LICENSE-MIT",
+      "origem": ".crate fnv-1.0.7.crate (sha256 3f9eec918d3f24069decb9af1554cad7c880e2da24a9afd88aca000531ab82c1, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "foldhash-0.1.5-LICENSE--b1181a40.txt",
+      "sha256": "b1181a40b2a7b25cf66fd01481713bc1005df082c53ef73e851e55071b102744",
+      "bytes": 856,
+      "id": "foldhash-0.1.5-LICENSE",
+      "origem": ".crate foldhash-0.1.5.crate (sha256 d9c4f5dac5e15c24eb999c26181a6ca40b39fe946cbe4c263c7209467bc83af2, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "funty-2.0.0-LICENSE.txt--f790cc57.txt",
+      "sha256": "f790cc576999f5998c766d3d26d7d64dc368e805a98461484f65e8d961ec6d9f",
+      "bytes": 1082,
+      "id": "funty-2.0.0-LICENSE.txt",
+      "origem": ".crate funty-2.0.0.crate (sha256 e6d5a32815ae3f33302d95fdcb2ce17862f8c65363dcfd29360480ba1001fc9c, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "futures-0.3.31-LICENSE-APACHE--275c491d.txt",
+      "sha256": "275c491d6d1160553c32fd6127061d7f9606c3ea25abfad6ca3f6ed088785427",
+      "bytes": 10874,
+      "id": "futures-0.3.31-LICENSE-APACHE",
+      "origem": ".crate futures-0.3.31.crate (sha256 65bc07b1a8bc7c85c5f2e110c476c7389b4554ba72af57d8445ea63a576b0876, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "futures-0.3.31-LICENSE-MIT--6652c868.txt",
+      "sha256": "6652c868f35dfe5e8ef636810a4e576b9d663f3a17fb0f5613ad73583e1b88fd",
+      "bytes": 1094,
+      "id": "futures-0.3.31-LICENSE-MIT",
+      "origem": ".crate futures-0.3.31.crate (sha256 65bc07b1a8bc7c85c5f2e110c476c7389b4554ba72af57d8445ea63a576b0876, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "generic-array-0.14.7-LICENSE--c09aae9d.txt",
+      "sha256": "c09aae9d3c77b531f56351a9947bc7446511d6b025b3255312d3e3442a9a7583",
+      "bytes": 1107,
+      "id": "generic-array-0.14.7-LICENSE",
+      "origem": ".crate generic-array-0.14.7.crate (sha256 85649ca51fd72272d7821adaf274ad91c288277713d9c18820d8499a7ff69e9a, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "getrandom-0.2.16-LICENSE-APACHE--aaff3765.txt",
+      "sha256": "aaff376532ea30a0cd5330b9502ad4a4c8bf769c539c87ffe78819d188a18ebf",
+      "bytes": 10849,
+      "id": "getrandom-0.2.16-LICENSE-APACHE",
+      "origem": ".crate getrandom-0.2.16.crate (sha256 335ff9f135e4384c8150d6f27c6daed433577f86b4750418338c01a1a2528592, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "getrandom-0.2.16-LICENSE-MIT--42fa1695.txt",
+      "sha256": "42fa16951ce7f24b5a467a40e5b449a1d41e662f97ca779864f053f39e097737",
+      "bytes": 1130,
+      "id": "getrandom-0.2.16-LICENSE-MIT",
+      "origem": ".crate getrandom-0.2.16.crate (sha256 335ff9f135e4384c8150d6f27c6daed433577f86b4750418338c01a1a2528592, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "getrandom-0.3.3-LICENSE-MIT--29e9fe50.txt",
+      "sha256": "29e9fe5074bd27e0e5d5d110394fbbcd841baee2651a3c4b4560a632702cede4",
+      "bytes": 1130,
+      "id": "getrandom-0.3.3-LICENSE-MIT",
+      "origem": ".crate getrandom-0.3.3.crate (sha256 26145e563e54f2cadc477553f1ec5ee650b00862f0a58bcd12cbdc5f0ea2d2f4, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "gimli-0.26.2-LICENSE-MIT--7b63ecd5.txt",
+      "sha256": "7b63ecd5f1902af1b63729947373683c32745c16a10e8e6292e2e2dcd7e90ae0",
+      "bytes": 1071,
+      "id": "gimli-0.26.2-LICENSE-MIT",
+      "origem": ".crate gimli-0.26.2.crate (sha256 22030e2c5a68ec659fde1e949a745124b48e6fa8b045b7ed5bd1fe4ccc5c4e5d, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "group-0.13.0-COPYRIGHT--7429802d.txt",
+      "sha256": "7429802d3e67e3308471b91fbea341e484c4e0a23d0fb230a8636c38184cec79",
+      "bytes": 615,
+      "id": "group-0.13.0-COPYRIGHT",
+      "origem": ".crate group-0.13.0.crate (sha256 f0f9ef7462f7c099f518d754361858f86d8a07af53ba9af0fe635bbccb151a63, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "hashbrown-0.12.3-LICENSE-MIT--ff8f68cb.txt",
+      "sha256": "ff8f68cb076caf8cefe7a6430d4ac086ce6af2ca8ce2c4e5a2004d4552ef52a2",
+      "bytes": 1060,
+      "id": "hashbrown-0.12.3-LICENSE-MIT",
+      "origem": ".crate hashbrown-0.12.3.crate (sha256 8a9ee70c43aaf417c914396645a0fa852624801b24ebb7ae78fe8272889ac888, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "hkdf-0.12.4-LICENSE-APACHE--59013a5c.txt",
+      "sha256": "59013a5c8d3a19c26a457579105915a5d51bb0c09d579f8cdedf12e4203c3018",
+      "bytes": 10848,
+      "id": "hkdf-0.12.4-LICENSE-APACHE",
+      "origem": ".crate hkdf-0.12.4.crate (sha256 7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "hkdf-0.12.4-LICENSE-MIT--d288f9c9.txt",
+      "sha256": "d288f9c9b4590446ec18c22ead8f8b5a12a3d4025b68f62dc9015063eb9cca69",
+      "bytes": 1108,
+      "id": "hkdf-0.12.4-LICENSE-MIT",
+      "origem": ".crate hkdf-0.12.4.crate (sha256 7b5f8eb2ad728638ea2c7d47a21db23b7b58a72ed6a38256b8a1849f15fbbdf7, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ident_case-1.0.1-LICENSE--508a77d2.txt",
+      "sha256": "508a77d2e7b51d98adeed32648ad124b7b30241a8e70b2e72c99f92d8e5874d1",
+      "bytes": 1036,
+      "id": "ident_case-1.0.1-LICENSE",
+      "origem": ".crate ident_case-1.0.1.crate (sha256 b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "indexmap-1.9.3-LICENSE-MIT--ecc269ef.txt",
+      "sha256": "ecc269ef87fd38a1d98e30bfac9ba964a9dbd9315c3770fed98d4d7cb5882055",
+      "bytes": 1049,
+      "id": "indexmap-1.9.3-LICENSE-MIT",
+      "origem": ".crate indexmap-1.9.3.crate (sha256 bd070e393353796e801d209ad339e89596eb4c8d430d18ede6a1cced8fafbd99, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "inout-0.1.4-LICENSE-MIT--304b898a.txt",
+      "sha256": "304b898acad7f02e03d6d8832d682a3b43ee729ab5d3a069af5a36979083b6b4",
+      "bytes": 1110,
+      "id": "inout-0.1.4-LICENSE-MIT",
+      "origem": ".crate inout-0.1.4.crate (sha256 879f10e63c20629ecabbb64a8010319738c66a5cd0c29b02d63d272b03751d01, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "intaglio-1.12.0-LICENSE--15da64f6.txt",
+      "sha256": "15da64f623f875845ecd7357f8644a01e7c51d5735460ae8f90b77325c790697",
+      "bytes": 1097,
+      "id": "intaglio-1.12.0-LICENSE",
+      "origem": ".crate intaglio-1.12.0.crate (sha256 c4f599237266026b45d957d9a47b949942185c0f0ebc7a9798e41b2dad728619, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "io-uring-0.7.10-LICENSE-APACHE--e10a580a.txt",
+      "sha256": "e10a580a2e20912c0e10934054eda92f46c38d6aea09c1ba42e9125db3e307a2",
+      "bytes": 10832,
+      "id": "io-uring-0.7.10-LICENSE-APACHE",
+      "origem": ".crate io-uring-0.7.10.crate (sha256 046fa2d4d00aea763528b4950358d0ead425372445dc8ff86312b3c69ff7727b, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "io-uring-0.7.10-LICENSE-MIT--e948351e.txt",
+      "sha256": "e948351ead749b98472107edb98e25d1aefda221afc50a7d04ea06a0fe4e1706",
+      "bytes": 1073,
+      "id": "io-uring-0.7.10-LICENSE-MIT",
+      "origem": ".crate io-uring-0.7.10.crate (sha256 046fa2d4d00aea763528b4950358d0ead425372445dc8ff86312b3c69ff7727b, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ipnet-2.11.0-LICENSE-APACHE--87d9feb9.txt",
+      "sha256": "87d9feb9238c6bd8e0024fc4733b06cff036f89f36d93b7df1c8a0549bbb7a5b",
+      "bytes": 11352,
+      "id": "ipnet-2.11.0-LICENSE-APACHE",
+      "origem": ".crate ipnet-2.11.0.crate (sha256 469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ipnet-2.11.0-LICENSE-MIT--47dc9ff2.txt",
+      "sha256": "47dc9ff29128ddfb4d6a0435383c9f89120bc374dbcc1dd00b933a0b28aa7865",
+      "bytes": 1062,
+      "id": "ipnet-2.11.0-LICENSE-MIT",
+      "origem": ".crate ipnet-2.11.0.crate (sha256 469fb0b9cefa57e3ef31275ee7cacb78f2fdca44e4765491884a2b119d4eb130, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "lazy_static-1.5.0-LICENSE-MIT--0621878e.txt",
+      "sha256": "0621878e61f0d0fda054bcbe02df75192c28bde1ecc8289cbd86aeba2dd72720",
+      "bytes": 1071,
+      "id": "lazy_static-1.5.0-LICENSE-MIT",
+      "origem": ".crate lazy_static-1.5.0.crate (sha256 bbd2bcb4c963f2ddae06a2efc7e9f3591312473c50c6685e1f298068316e66fe, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "libbz2-rs-sys-0.2.2-LICENSE--54e1fd7b.txt",
+      "sha256": "54e1fd7bd53273e601c9599eb162a004dacddee031ae297ee7109a7beb93b1c2",
+      "bytes": 2123,
+      "id": "libbz2-rs-sys-0.2.2-LICENSE",
+      "origem": ".crate libbz2-rs-sys-0.2.2.crate (sha256 2c4a545a15244c7d945065b5d392b2d2d7f21526fba56ce51467b06ed445e8f7, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "libc-0.2.176-LICENSE-MIT--a8d47ff5.txt",
+      "sha256": "a8d47ff51ca256f56a8932dba07660672dbfe3004257ca8de708aac1415937a1",
+      "bytes": 1076,
+      "id": "libc-0.2.176-LICENSE-MIT",
+      "origem": ".crate libc-0.2.176.crate (sha256 58f929b4d672ea937a23a1ab494143d968337a5f47e56d0815df1e0890ddf174, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "libloading-0.9.0-LICENSE--b29f8b01.txt",
+      "sha256": "b29f8b01452350c20dd1af16ef83b598fea3053578ccc1c7a0ef40e57be2620f",
+      "bytes": 736,
+      "id": "libloading-0.9.0-LICENSE",
+      "origem": ".crate libloading-0.9.0.crate (sha256 754ca22de805bb5744484a5b151a9e1a8e837d5dc232c2d7d8c2e3492edc8b60, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "libm-0.2.15-LICENSE.txt--3823dda7.txt",
+      "sha256": "3823dda7cf046602f4b4e77ec8e227863dc4736037cc85bb33d9f19febe16bb7",
+      "bytes": 14088,
+      "id": "libm-0.2.15-LICENSE.txt",
+      "origem": ".crate libm-0.2.15.crate (sha256 f9fbbcab51052fe104eb5e5d351cf728d30a5be1fe14d9be8a3b097481fb97de, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "libz-rs-sys-0.5.2-LICENSE--e72111c5.txt",
+      "sha256": "e72111c52b7d96ebe25348dee19f0744f444d3c95ae6b1ecb6ccaecc5bce05ba",
+      "bytes": 856,
+      "id": "libz-rs-sys-0.5.2-LICENSE",
+      "origem": ".crate libz-rs-sys-0.5.2.crate (sha256 840db8cf39d9ec4dd794376f38acc40d0fc65eec2a8f484f7fd375b84602becd, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "linux-raw-sys-0.11.0-COPYRIGHT--3290ae0f.txt",
+      "sha256": "3290ae0fbc9ddb77d2239121d710f0bb9d31b3b4744e6d97fe01e652b4c1870b",
+      "bytes": 881,
+      "id": "linux-raw-sys-0.11.0-COPYRIGHT",
+      "origem": ".crate linux-raw-sys-0.11.0.crate (sha256 df1d3c3b53da64cf5760482273a98e575c651a67eec7f77df96b5b642de8f039, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "logos-0.15.1-LICENSE-APACHE--f30735c1.txt",
+      "sha256": "f30735c11407534952947e1c7b7457ddf28847000bb038402495ad66f3d020a4",
+      "bytes": 10860,
+      "id": "logos-0.15.1-LICENSE-APACHE",
+      "origem": ".crate logos-0.15.1.crate (sha256 ff472f899b4ec2d99161c51f60ff7075eeb3097069a36050d8037a6325eb8154, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "logos-0.15.1-LICENSE-MIT--112fcdb9.txt",
+      "sha256": "112fcdb9f4935988cc2313e4cc38faaeccfff53eb1296499e618932d472908e0",
+      "bytes": 1104,
+      "id": "logos-0.15.1-LICENSE-MIT",
+      "origem": ".crate logos-0.15.1.crate (sha256 ff472f899b4ec2d99161c51f60ff7075eeb3097069a36050d8037a6325eb8154, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "lzma-rust2-0.13.0-LICENSE--5ad8c213.txt",
+      "sha256": "5ad8c213095c573921d7388edf93f6a9f54490b8ebf3b165ae8ef1947cf70846",
+      "bytes": 11556,
+      "id": "lzma-rust2-0.13.0-LICENSE",
+      "origem": ".crate lzma-rust2-0.13.0.crate (sha256 c60a23ffb90d527e23192f1246b14746e2f7f071cb84476dd879071696c18a4a, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "mach2-0.4.3-LICENSE-BSD--044983df.txt",
+      "sha256": "044983df14c97f2f9570766aaf977b3cdfc4a06cf1f36b776331c5ff89b4fb89",
+      "bytes": 1320,
+      "id": "mach2-0.4.3-LICENSE-BSD",
+      "origem": ".crate mach2-0.4.3.crate (sha256 d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "mach2-0.4.3-LICENSE-MIT--3f9f0f7e.txt",
+      "sha256": "3f9f0f7e5a5911a8042e32c83ff5d061ce1ffd02e8a207ec2135a44ad73b4191",
+      "bytes": 1077,
+      "id": "mach2-0.4.3-LICENSE-MIT",
+      "origem": ".crate mach2-0.4.3.crate (sha256 d640282b302c0bb0a2a8e0233ead9035e3bed871f0b7e81fe4a1ec829765db44, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "md-5-0.10.6-LICENSE-MIT--b4eb00df.txt",
+      "sha256": "b4eb00df6e2a4d22518fcaa6a2b4646f249b3a3c9814509b22bd2091f1392ff1",
+      "bytes": 1138,
+      "id": "md-5-0.10.6-LICENSE-MIT",
+      "origem": ".crate md-5-0.10.6.crate (sha256 d89e7ee0cfbedfc4da3340218492196241d89eefb6dab27de5df917a6d2e78cf, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "md2-0.10.2-LICENSE-MIT--8a2ad67f.txt",
+      "sha256": "8a2ad67f0228ff5f34c89e1b25f303fe37f21da71b2759aa1494683f4e5f0c57",
+      "bytes": 1053,
+      "id": "md2-0.10.2-LICENSE-MIT",
+      "origem": ".crate md2-0.10.2.crate (sha256 1f4f0f3ed25ff4f8d8d102288d92f900efc202661c884cf67dfe4f0d07c43d1f, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "memfd-0.6.5-LICENSE-APACHE--c71d239d.txt",
+      "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4",
+      "bytes": 11357,
+      "id": "memfd-0.6.5-LICENSE-APACHE",
+      "origem": ".crate memfd-0.6.5.crate (sha256 ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "memfd-0.6.5-LICENSE-MIT--e5d8f26c.txt",
+      "sha256": "e5d8f26c5b92d382e7ab2826500e5099a40a7751e92a55bc51c6770933411f9e",
+      "bytes": 1060,
+      "id": "memfd-0.6.5-LICENSE-MIT",
+      "origem": ".crate memfd-0.6.5.crate (sha256 ad38eb12aea514a0466ea40a80fd8cc83637065948eb4a426e4aa46261175227, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "memmap2-0.9.9-LICENSE-APACHE--04ea4849.txt",
+      "sha256": "04ea4849dba9dcae07113850c6f1b1a69052c625210639914eee352023f750ad",
+      "bytes": 10835,
+      "id": "memmap2-0.9.9-LICENSE-APACHE",
+      "origem": ".crate memmap2-0.9.9.crate (sha256 744133e4a0e0a658e1374cf3bf8e415c4052a15a111acd372764c55b4177d490, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "memmap2-0.9.9-LICENSE-MIT--0d25d03b.txt",
+      "sha256": "0d25d03b5ab49576178ad0cae7a2648d12c17ad0452fe49c07e55e4b59aa5257",
+      "bytes": 1091,
+      "id": "memmap2-0.9.9-LICENSE-MIT",
+      "origem": ".crate memmap2-0.9.9.crate (sha256 744133e4a0e0a658e1374cf3bf8e415c4052a15a111acd372764c55b4177d490, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "minimal-lexical-0.2.1-LICENSE-APACHE--8173d5c2.txt",
+      "sha256": "8173d5c29b4f956d532781d2b86e4e30f83e6b7878dce18c919451d6ba707c90",
+      "bytes": 10850,
+      "id": "minimal-lexical-0.2.1-LICENSE-APACHE",
+      "origem": ".crate minimal-lexical-0.2.1.crate (sha256 68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "minimal-lexical-0.2.1-LICENSE.md--dbe1fff0.txt",
+      "sha256": "dbe1fff0fb1314b6af94f161511406275cf01c5a32441fbf24528a57a051d599",
+      "bytes": 2003,
+      "id": "minimal-lexical-0.2.1-LICENSE.md",
+      "origem": ".crate minimal-lexical-0.2.1.crate (sha256 68354c5c6bd36d73ff3feceb05efa59b6acb7626617f4962be322a825e61f79a, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "miniz_oxide-0.8.9-LICENSE--4108245a.txt",
+      "sha256": "4108245a1f2df9d4e94df8abed5b4ba0759bb2f9b40a6b939f1be141077ae50b",
+      "bytes": 1213,
+      "id": "miniz_oxide-0.8.9-LICENSE",
+      "origem": ".crate miniz_oxide-0.8.9.crate (sha256 1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "miniz_oxide-0.8.9-LICENSE-APACHE.md--0d542e0c.txt",
+      "sha256": "0d542e0c8804e39aa7f37eb00da5a762149dc682d7829451287e11b938e94594",
+      "bytes": 10174,
+      "id": "miniz_oxide-0.8.9-LICENSE-APACHE.md",
+      "origem": ".crate miniz_oxide-0.8.9.crate (sha256 1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "miniz_oxide-0.8.9-LICENSE-MIT.md--799e9ca9.txt",
+      "sha256": "799e9ca9d179295ef372f25d3769cdda7d25bb2668add6a6a1e22d1e4c678b8d",
+      "bytes": 1212,
+      "id": "miniz_oxide-0.8.9-LICENSE-MIT.md",
+      "origem": ".crate miniz_oxide-0.8.9.crate (sha256 1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "miniz_oxide-0.8.9-LICENSE-ZLIB.md--0a54e647.txt",
+      "sha256": "0a54e647fe54104658b5e563c04c6f9edf251710e47bce692e0bd990a4ddaa39",
+      "bytes": 984,
+      "id": "miniz_oxide-0.8.9-LICENSE-ZLIB.md",
+      "origem": ".crate miniz_oxide-0.8.9.crate (sha256 1fa76a2c86f704bdb222d66965fb3d63269ce38518b83cb0575fca855ebb6316, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "mio-1.0.4-LICENSE--07919255.txt",
+      "sha256": "07919255c7e04793d8ea760d6c2ce32d19f9ff02bdbdde3ce90b1e1880929a9b",
+      "bytes": 1082,
+      "id": "mio-1.0.4-LICENSE",
+      "origem": ".crate mio-1.0.4.crate (sha256 78bed444cc8a2160f01cbcf811ef18cac863ad68ae8ca62092e8db51d51c761c, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "napi-rs-napi-v3.8.1-LICENSE--3f1ce665.txt",
+      "sha256": "3f1ce66533302df3a32edbfdfc0b78f0dd34659e4c1f5817162e5ea3c2297215",
+      "bytes": 2138,
+      "id": "napi-rs-napi-v3.8.1-LICENSE",
+      "origem": "https://raw.githubusercontent.com/napi-rs/napi-rs/napi-v3.8.1/LICENSE"
+    },
+    {
+      "ficheiro": "nohash-hasher-0.2.0-LICENSE-APACHE--cfc7749b.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358,
+      "id": "nohash-hasher-0.2.0-LICENSE-APACHE",
+      "origem": ".crate nohash-hasher-0.2.0.crate (sha256 2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "nohash-hasher-0.2.0-LICENSE-MIT--ec353d4f.txt",
+      "sha256": "ec353d4fecf7963b4c054384557e5dbc3c7a717997eb4a3815b315721a6aa75a",
+      "bytes": 1069,
+      "id": "nohash-hasher-0.2.0-LICENSE-MIT",
+      "origem": ".crate nohash-hasher-0.2.0.crate (sha256 2bf50223579dc7cdcfb3bfcacf7069ff68243f8c363f62ffa99cf000a6b9c451, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "nom-7.1.3-LICENSE--4dbda043.txt",
+      "sha256": "4dbda04344456f09a7a588140455413a9ac59b6b26a1ef7cdf9c800c012d87f0",
+      "bytes": 1065,
+      "id": "nom-7.1.3-LICENSE",
+      "origem": ".crate nom-7.1.3.crate (sha256 d273983c5a657a70a3e8f2a01329822f3b8c8172b73826411a55751e404a0a4a, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "num-conv-0.2.0-LICENSE-Apache--c0fd5f9d.txt",
+      "sha256": "c0fd5f9df8d17e13587f8fe403d2326b835e60d532817d0b42ae4aea44209251",
+      "bytes": 11342,
+      "id": "num-conv-0.2.0-LICENSE-Apache",
+      "origem": ".crate num-conv-0.2.0.crate (sha256 cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "num-conv-0.2.0-LICENSE-MIT--af85fff5.txt",
+      "sha256": "af85fff507d80e6c7ff242acfc4b0a7f5de9a72286bb3c883c782772ca4b4402",
+      "bytes": 1055,
+      "id": "num-conv-0.2.0-LICENSE-MIT",
+      "origem": ".crate num-conv-0.2.0.crate (sha256 cf97ec579c3c42f953ef76dbf8d55ac91fb219dde70e49aa4a6b7d74e9919050, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "object-0.37.3-LICENSE-MIT--0b74dfa0.txt",
+      "sha256": "0b74dfa0bcee5c420c6b7f67b4b2658f9ab8388c97b8e733975f2cecbdd668a6",
+      "bytes": 1064,
+      "id": "object-0.37.3-LICENSE-MIT",
+      "origem": ".crate object-0.37.3.crate (sha256 ff76201f031d8863c38aa7f905eca4f53abbfa15f609db4277d44cd8938f33fe, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "p256-0.13.2-LICENSE-MIT--233b95cc.txt",
+      "sha256": "233b95ccbf90dc67e32f3e8995c489f6312d9191ebd141a931c3b684f1e3be6d",
+      "bytes": 1070,
+      "id": "p256-0.13.2-LICENSE-MIT",
+      "origem": ".crate p256-0.13.2.crate (sha256 c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "p384-0.13.1-LICENSE-MIT--02168781.txt",
+      "sha256": "02168781a5b59970e3da1784d2eb69f432598a3757f283dbffdafd9d483a9113",
+      "bytes": 1070,
+      "id": "p384-0.13.1-LICENSE-MIT",
+      "origem": ".crate p384-0.13.1.crate (sha256 fe42f1670a52a47d448f14b6a5c61dd78fce51856e68edaa38f7ae3a46b8d6b6, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "pbkdf2-0.12.2-LICENSE-MIT--8ea5cea8.txt",
+      "sha256": "8ea5cea8ddecc46a64a004406414d25529fca7eb71cfd8c0cfe49c343bff79c5",
+      "bytes": 1115,
+      "id": "pbkdf2-0.12.2-LICENSE-MIT",
+      "origem": ".crate pbkdf2-0.12.2.crate (sha256 f8ed6a7761f76e3b9f92dfb0a60a6a6477c61024b775147ff0973a02653abaf2, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "pin-utils-0.1.0-LICENSE-APACHE--a4db7887.txt",
+      "sha256": "a4db788775cb25f2da419a7ccd3f1f89c3d2cfa8748fb25257596b88183b4c77",
+      "bytes": 10841,
+      "id": "pin-utils-0.1.0-LICENSE-APACHE",
+      "origem": ".crate pin-utils-0.1.0.crate (sha256 8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "pin-utils-0.1.0-LICENSE-MIT--28802412.txt",
+      "sha256": "28802412d2bfbafe432b305634413b41a984d30fba0df41d30aa2c8a2077c5b1",
+      "bytes": 1065,
+      "id": "pin-utils-0.1.0-LICENSE-MIT",
+      "origem": ".crate pin-utils-0.1.0.crate (sha256 8b870d8c151b6f2fb93e84a13146138f05d02ed11c7e7c54f8826aaaf7c9f184, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "pkcs1-0.7.5-LICENSE-MIT--c995204c.txt",
+      "sha256": "c995204cc6bad2ed67dd41f7d89bb9f1a9d48e0edd745732b30640d7912089a4",
+      "bytes": 1082,
+      "id": "pkcs1-0.7.5-LICENSE-MIT",
+      "origem": ".crate pkcs1-0.7.5.crate (sha256 c8ffb9f10fa047879315e6625af03c164b16962a5368d724ed16323b68ace47f, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "postcard-1.1.3-LICENSE-MIT--177540ca.txt",
+      "sha256": "177540cad091a40e8071db310bc3b6115c4e329a92a234609b60c154b008a888",
+      "bytes": 1063,
+      "id": "postcard-1.1.3-LICENSE-MIT",
+      "origem": ".crate postcard-1.1.3.crate (sha256 6764c3b5dd454e283a30e6dfe78e9b31096d9e32036b5d1eaac7a6119ccb9a24, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "powerfmt-0.2.0-LICENSE-Apache--155420c6.txt",
+      "sha256": "155420c6403d4e0fca34105e3c03fdd6939b64c393c7ec6f95f5b72c5474eab0",
+      "bytes": 11349,
+      "id": "powerfmt-0.2.0-LICENSE-Apache",
+      "origem": ".crate powerfmt-0.2.0.crate (sha256 439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "powerfmt-0.2.0-LICENSE-MIT--070dbc7d.txt",
+      "sha256": "070dbc7dda03a29296f2d58bdb9b7331af90f2abc9f31df22875d1eabaf29852",
+      "bytes": 1062,
+      "id": "powerfmt-0.2.0-LICENSE-MIT",
+      "origem": ".crate powerfmt-0.2.0.crate (sha256 439ee305def115ba05938db6eb1644ff94165c5ab5e9420d1c1bcedbba909391, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ppv-lite86-0.2.21-LICENSE-APACHE--0218327e.txt",
+      "sha256": "0218327e7a480793ffdd4eb792379a9709e5c135c7ba267f709d6f6d4d70af0a",
+      "bytes": 10854,
+      "id": "ppv-lite86-0.2.21-LICENSE-APACHE",
+      "origem": ".crate ppv-lite86-0.2.21.crate (sha256 85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ppv-lite86-0.2.21-LICENSE-MIT--4cada0bd.txt",
+      "sha256": "4cada0bd02ea3692eee6f16400d86c6508bbd3bafb2b65fed0419f36d4f83e8f",
+      "bytes": 1076,
+      "id": "ppv-lite86-0.2.21-LICENSE-MIT",
+      "origem": ".crate ppv-lite86-0.2.21.crate (sha256 85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "protobuf-3.7.2-LICENSE.txt--7f2fa80a.txt",
+      "sha256": "7f2fa80a60e84f8dc0747abb0e42342f83bded04a20461a636b47c0331b92ddf",
+      "bytes": 1058,
+      "id": "protobuf-3.7.2-LICENSE.txt",
+      "origem": ".crate protobuf-3.7.2.crate (sha256 d65a1d4ddae7d8b5de68153b48f6aa3bba8cb002b243dbdbc55a5afbc98f99f4, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "psl-2.1.175-LICENSE--f09adf50.txt",
+      "sha256": "f09adf500d35265ee63ef552f8e61487e09ee549da66eaf0ec7924e3ad7cf14b",
+      "bytes": 1074,
+      "id": "psl-2.1.175-LICENSE",
+      "origem": ".crate psl-2.1.175.crate (sha256 a1fb740c4ef76c2187ae4a56a74d58595bb8258e973704f5d60545f3e1d3e69a, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "psl-types-2.0.11-LICENSE--7b25e066.txt",
+      "sha256": "7b25e06666d3797292dbb4b1c3f5ba509ebe02fce102e1dca7ca81dd3cbfbeb7",
+      "bytes": 1074,
+      "id": "psl-types-2.0.11-LICENSE",
+      "origem": ".crate psl-types-2.0.11.crate (sha256 33cb294fe86a74cbcf50d4445b37da762029549ebeea341421c7c70370f86cac, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "r-efi-5.3.0-AUTHORS--ff92bed4.txt",
+      "sha256": "ff92bed461f50338dd703a9ba9aee496a425957873df1d91192776e4bdf5dda7",
+      "bytes": 3693,
+      "id": "r-efi-5.3.0-AUTHORS",
+      "origem": ".crate r-efi-5.3.0.crate (sha256 69cdb34c158ceb288df11e18b4bd39de994f6657d83847bdffdbd7f346754b0f, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "radium-0.7.0-LICENSE.txt--13f4cc9f.txt",
+      "sha256": "13f4cc9fbc8d4a447b28aa84019c10ad4abf4b5f6919db061bf6690ccc23bc02",
+      "bytes": 1079,
+      "id": "radium-0.7.0-LICENSE.txt",
+      "origem": ".crate radium-0.7.0.crate (sha256 dc33ff2d4973d518d823d61aa239014831e521c75da58e3df4840d3f47749d09, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "rand_core-0.6.4-LICENSE-APACHE--6df43f6f.txt",
+      "sha256": "6df43f6f4b5d4587f3d8d71e45532c688fd168afa5fe89d571cb32fa09c4ef51",
+      "bytes": 10282,
+      "id": "rand_core-0.6.4-LICENSE-APACHE",
+      "origem": ".crate rand_core-0.6.4.crate (sha256 ec0be4795e2f6a28069bec0b5ff3e2ac9bafc99e6a9a7dc3547996c5c816922c, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "rand-0.8.5-COPYRIGHT--90eb64f0.txt",
+      "sha256": "90eb64f0279b0d9432accfa6023ff803bc4965212383697eee27a0f426d5f8d5",
+      "bytes": 569,
+      "id": "rand-0.8.5-COPYRIGHT",
+      "origem": ".crate rand-0.8.5.crate (sha256 34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "rand-0.8.5-LICENSE-APACHE--35242e7a.txt",
+      "sha256": "35242e7a83f69875e6edeff02291e688c97caafe2f8902e4e19b49d3e78b4cab",
+      "bytes": 9724,
+      "id": "rand-0.8.5-LICENSE-APACHE",
+      "origem": ".crate rand-0.8.5.crate (sha256 34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "rand-0.8.5-LICENSE-MIT--209fbbe0.txt",
+      "sha256": "209fbbe0ad52d9235e37badf9cadfe4dbdc87203179c0899e738b39ade42177b",
+      "bytes": 1117,
+      "id": "rand-0.8.5-LICENSE-MIT",
+      "origem": ".crate rand-0.8.5.crate (sha256 34af8d1a0e25924bc5b7c43c079c942339d8f0a8b57c39049bef581b46327404, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "roxmltree-0.21.1-LICENSE-MIT--fffe218c.txt",
+      "sha256": "fffe218c1e349e1d482a05677f2ce850502f88298174d77f6ac7c04821db7899",
+      "bytes": 1083,
+      "id": "roxmltree-0.21.1-LICENSE-MIT",
+      "origem": ".crate roxmltree-0.21.1.crate (sha256 f1964b10c76125c36f8afe190065a4bf9a87bf324842c05701330bba9f1cacbb, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "rsa-0.9.10-LICENSE-APACHE--769f80b5.txt",
+      "sha256": "769f80b5bcb42ed0af4e4d2fd74e1ac9bf843cb80c5a29219d1ef3544428a6bb",
+      "bytes": 10846,
+      "id": "rsa-0.9.10-LICENSE-APACHE",
+      "origem": ".crate rsa-0.9.10.crate (sha256 b8573f03f5883dcaebdfcf4725caa1ecb9c15b2ef50c43a07b816e06799bb12d, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "rsa-0.9.10-LICENSE-MIT--30fefc3a.txt",
+      "sha256": "30fefc3a7d6a0041541858293bcbea2dde4caa4c0a5802f996a7f7e8c0085652",
+      "bytes": 1022,
+      "id": "rsa-0.9.10-LICENSE-MIT",
+      "origem": ".crate rsa-0.9.10.crate (sha256 b8573f03f5883dcaebdfcf4725caa1ecb9c15b2ef50c43a07b816e06799bb12d, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "rustc-hash-2.1.1-LICENSE-APACHE--95bd3988.txt",
+      "sha256": "95bd3988beee069fa2848f648dab43cc6e0b2add2ad6bcb17360caf749802bcc",
+      "bytes": 9722,
+      "id": "rustc-hash-2.1.1-LICENSE-APACHE",
+      "origem": ".crate rustc-hash-2.1.1.crate (sha256 357703d41365b4b27c590e3ed91eabb1b663f07c4c084095e60cbed4362dff0d, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "rustix-1.1.2-COPYRIGHT--377c2e7c.txt",
+      "sha256": "377c2e7c53250cc5905c0b0532d35973392af16ffb9596a41d99d202cf3617c9",
+      "bytes": 853,
+      "id": "rustix-1.1.2-COPYRIGHT",
+      "origem": ".crate rustix-1.1.2.crate (sha256 cd15f8a2c5551a84d56efdc1cd049089e409ac19a3072d5037a17fd70719ff3e, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "ryu-1.0.20-LICENSE-BOOST--c9bff757.txt",
+      "sha256": "c9bff75738922193e67fa726fa225535870d2aa1059f91452c411736284ad566",
+      "bytes": 1338,
+      "id": "ryu-1.0.20-LICENSE-BOOST",
+      "origem": ".crate ryu-1.0.20.crate (sha256 28d3b2b1366ec20994f1fd18c3c594f05c5dd4bc44d8bb0c1c632c8d6829481f, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "sec1-0.7.3-LICENSE-MIT--4a883ecc.txt",
+      "sha256": "4a883ecc3bb1010faed542bf63d53e530fea5e5e12cf676aed588784298ba929",
+      "bytes": 1082,
+      "id": "sec1-0.7.3-LICENSE-MIT",
+      "origem": ".crate sec1-0.7.3.crate (sha256 d3e97a565f76233a6003f9f5c54be1d9c5bdfa3eccfb189469f11ec4901c47dc, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "simd-adler32-0.3.7-LICENSE.md--42a35170.txt",
+      "sha256": "42a35170233e83e18856792e748de4c1ce4a63b2afce9a370c89ef3fe23f9f2d",
+      "bytes": 1078,
+      "id": "simd-adler32-0.3.7-LICENSE.md",
+      "origem": ".crate simd-adler32-0.3.7.crate (sha256 d66dc143e6b11c1eddc06d5c423cfc97062865baf299914ab64caa38182078fe, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "slab-0.4.11-LICENSE--8ce08301.txt",
+      "sha256": "8ce0830173fdac609dfb4ea603fdc002c2f4af0dc9b1a005653f5da9cf534b18",
+      "bytes": 1055,
+      "id": "slab-0.4.11-LICENSE",
+      "origem": ".crate slab-0.4.11.crate (sha256 7a2ae44ef20feb57a68b23d846850f861394c2e02dc425a50098ae8c90267589, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "smallvec-1.15.1-LICENSE-MIT--0b281726.txt",
+      "sha256": "0b28172679e0009b655da42797c03fd163a3379d5cfa67ba1f1655e974a2a1a9",
+      "bytes": 1072,
+      "id": "smallvec-1.15.1-LICENSE-MIT",
+      "origem": ".crate smallvec-1.15.1.crate (sha256 67b1b7a3b5fe4f1376887184045fcf45c69e92af734b7aaddc05fb777b6fbd03, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "SPDX-0BSD--e3f18c71.txt",
+      "sha256": "e3f18c71e10d673590eb9856c1d79dd3b4b0d65404efb5e8584dbede7edd608b",
+      "bytes": 643,
+      "id": "SPDX-0BSD",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/0BSD.txt"
+    },
+    {
+      "ficheiro": "SPDX-Apache-2.0--074e6e32.txt",
+      "sha256": "074e6e32c86a4c0ef8b3ed25b721ca23aca83df277cd88106ef7177c354615ff",
+      "bytes": 10280,
+      "id": "SPDX-Apache-2.0",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/Apache-2.0.txt"
+    },
+    {
+      "ficheiro": "SPDX-BSD-2-Clause--f32fb3b4.txt",
+      "sha256": "f32fb3b417a194167cfad068223fc975ba96c5960513a10f66a3c28720aec1df",
+      "bytes": 1267,
+      "id": "SPDX-BSD-2-Clause",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/BSD-2-Clause.txt"
+    },
+    {
+      "ficheiro": "SPDX-BSD-3-Clause--5a93d583.txt",
+      "sha256": "5a93d5831e1297ab10fe643e1a631e83be392896da14ee2951285a79012df69d",
+      "bytes": 1460,
+      "id": "SPDX-BSD-3-Clause",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/BSD-3-Clause.txt"
+    },
+    {
+      "ficheiro": "SPDX-BSL-1.0--84c6ef3e.txt",
+      "sha256": "84c6ef3ea9e3254a54d0acf5d3e0c61ae011b8fef7dd6940591cf060e6380a8f",
+      "bytes": 1338,
+      "id": "SPDX-BSL-1.0",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/BSL-1.0.txt"
+    },
+    {
+      "ficheiro": "SPDX-bzip2-1.0.6--0a56dbab.txt",
+      "sha256": "0a56dbabe7d2ff65dea26e8b795fe42c6204a192b974d8e9304fe356ccda9fd1",
+      "bytes": 1739,
+      "id": "SPDX-bzip2-1.0.6",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/bzip2-1.0.6.txt"
+    },
+    {
+      "ficheiro": "SPDX-ISC--521c6f0e.txt",
+      "sha256": "521c6f0ed8e64736684f89843d16a4df6b4b7449acbcfc6ca6630a3037ca8c53",
+      "bytes": 737,
+      "id": "SPDX-ISC",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/ISC.txt"
+    },
+    {
+      "ficheiro": "SPDX-LGPL-2.1-or-later--5749785c.txt",
+      "sha256": "5749785c8bdefafcb5d798270ed0a967036fe2ca63dcedade1627565dfef81d2",
+      "bytes": 26001,
+      "id": "SPDX-LGPL-2.1-or-later",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/LGPL-2.1-or-later.txt"
+    },
+    {
+      "ficheiro": "SPDX-LLVM-exception--e34c5833.txt",
+      "sha256": "e34c58338bd89d43e709e226610d8f32b3e3c47f4ad9a99a8dc1d4ac7842488e",
+      "bytes": 919,
+      "id": "SPDX-LLVM-exception",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/LLVM-exception.txt"
+    },
+    {
+      "ficheiro": "SPDX-MIT--b05785f9.txt",
+      "sha256": "b05785f9f18e6716bab63424b11454513b9943a222595b70411009202fc592b5",
+      "bytes": 1078,
+      "id": "SPDX-MIT",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT.txt"
+    },
+    {
+      "ficheiro": "SPDX-MIT-0--59746d62.txt",
+      "sha256": "59746d6285ffa44bfc7ecada352aa5d6a20dc8eab418a60ce091cc739012c135",
+      "bytes": 915,
+      "id": "SPDX-MIT-0",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/MIT-0.txt"
+    },
+    {
+      "ficheiro": "SPDX-Unlicense--0bdebfed.txt",
+      "sha256": "0bdebfeda07d45dada625ae1317c6f833186e798b171d0db640bcf32e92a8240",
+      "bytes": 1211,
+      "id": "SPDX-Unlicense",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/Unlicense.txt"
+    },
+    {
+      "ficheiro": "SPDX-Zlib--bfb1112d.txt",
+      "sha256": "bfb1112d49db5b1daecdfef24bd7e2f3ea0bafb33aa67aa0ab51e2bf8407c03d",
+      "bytes": 838,
+      "id": "SPDX-Zlib",
+      "origem": "https://raw.githubusercontent.com/spdx/license-list-data/main/text/Zlib.txt"
+    },
+    {
+      "ficheiro": "spin-0.9.8-LICENSE--6ac8711f.txt",
+      "sha256": "6ac8711fb340c62ce0a4ecd463342d3fa0e8e70de697c863a2e1c0c53006003c",
+      "bytes": 1084,
+      "id": "spin-0.9.8-LICENSE",
+      "origem": ".crate spin-0.9.8.crate (sha256 6980e8d7511241f8acf4aebddbb1ff938df5eebe98691418c4468d0b72a96a67, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "stable_deref_trait-1.2.0-LICENSE-MIT--5e05b024.txt",
+      "sha256": "5e05b024f653a5ce199e77cbbbd42fb5553562ec714b819421ed0c3e552a75d7",
+      "bytes": 1056,
+      "id": "stable_deref_trait-1.2.0-LICENSE-MIT",
+      "origem": ".crate stable_deref_trait-1.2.0.crate (sha256 a8f112729512f8e442d81f95a8a7ddf2b7c6b8a1a6f509a95864142b30cab2d3, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "strsim-0.11.1-LICENSE--1e697ce8.txt",
+      "sha256": "1e697ce8d21401fbf1bddd9b5c3fd4c4c79ae1e3bdf51f81761c85e11d5a89cd",
+      "bytes": 1166,
+      "id": "strsim-0.11.1-LICENSE",
+      "origem": ".crate strsim-0.11.1.crate (sha256 7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "strum_macros-0.27.2-LICENSE--8bce3b45.txt",
+      "sha256": "8bce3b45e49ecd1461f223b46de133d8f62cd39f745cfdaf81bee554b908bd42",
+      "bytes": 1072,
+      "id": "strum_macros-0.27.2-LICENSE",
+      "origem": ".crate strum_macros-0.27.2.crate (sha256 7695ce3845ea4b33927c055a39dc438a45b059f7c1b3d91d38d10355fb8cbca7, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "subtle-2.6.1-LICENSE--d1fc1bc0.txt",
+      "sha256": "d1fc1bc0d155df60b2e7705b6b2ae02a05c96f948e1cec6e2fb86360b09f346b",
+      "bytes": 1582,
+      "id": "subtle-2.6.1-LICENSE",
+      "origem": ".crate subtle-2.6.1.crate (sha256 13c2bddecc57b384dee18652358fb23172facb8a2c51ccc10d74c157bdea3292, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "synstructure-0.13.2-LICENSE--219920e8.txt",
+      "sha256": "219920e865eee70b7dcfc948a86b099e7f4fe2de01bcca2ca9a20c0a033f2b59",
+      "bytes": 1052,
+      "id": "synstructure-0.13.2-LICENSE",
+      "origem": ".crate synstructure-0.13.2.crate (sha256 728a70f3dbaf5bab7f0c4b1ac8d7ae5ea60a4b5549c8a5914361c99147a709d2, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "tap-1.0.1-LICENSE.txt--8b4e95f5.txt",
+      "sha256": "8b4e95f5cf0dc40269c99f7b787203ffe04ded245ca2427422c196efa2b2f42a",
+      "bytes": 1090,
+      "id": "tap-1.0.1-LICENSE.txt",
+      "origem": ".crate tap-1.0.1.crate (sha256 55937e1799185b12863d447f42597ed69d9928686b8d88a1df17376a097d8369, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "text-size-1.1.1-LICENSE-APACHE--7cfd738c.txt",
+      "sha256": "7cfd738c53d61c79f07e348f622bf7707c9084237054d37fbe07788a75f5881c",
+      "bytes": 11048,
+      "id": "text-size-1.1.1-LICENSE-APACHE",
+      "origem": ".crate text-size-1.1.1.crate (sha256 f18aa187839b2bdb1ad2fa35ead8c4c2976b64e4363c386d45ac0f7ee85c9233, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "time-0.3.47-LICENSE-MIT--2537228d.txt",
+      "sha256": "2537228d9a1b44a5dc595241349cae7090b326c8de165aaf89bfddef4a00d0fc",
+      "bytes": 1057,
+      "id": "time-0.3.47-LICENSE-MIT",
+      "origem": ".crate time-0.3.47.crate (sha256 743bd48c283afc0388f9b8827b976905fb217ad9e647fae3a379a9283c4def2c, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "tokio-1.47.1-LICENSE--253cd04c.txt",
+      "sha256": "253cd04c6714889df2d32f3f64d669179a1c95c76ac43c40882c52eb06bc3552",
+      "bytes": 1070,
+      "id": "tokio-1.47.1-LICENSE",
+      "origem": ".crate tokio-1.47.1.crate (sha256 89e49afdadebb872d3145a5638b59eb0691ea23e46ca484037cfab3b76b95038, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "typenum-1.19.0-LICENSE--db11fec9.txt",
+      "sha256": "db11fec9946737df39ca3898d9cd8c10ec6f6c3a884a6802b0ad0b81b4e8f23a",
+      "bytes": 17,
+      "id": "typenum-1.19.0-LICENSE",
+      "origem": ".crate typenum-1.19.0.crate (sha256 562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "typenum-1.19.0-LICENSE-APACHE--516b24e0.txt",
+      "sha256": "516b24e051bf5630880ebbd55c40a25ce9552ebaf8970a53e8976eb70e522406",
+      "bytes": 10835,
+      "id": "typenum-1.19.0-LICENSE-APACHE",
+      "origem": ".crate typenum-1.19.0.crate (sha256 562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "typenum-1.19.0-LICENSE-MIT--a825bd85.txt",
+      "sha256": "a825bd853ab71619a4923d7b4311221427848070ff44d990da39b0b274c1683f",
+      "bytes": 1083,
+      "id": "typenum-1.19.0-LICENSE-MIT",
+      "origem": ".crate typenum-1.19.0.crate (sha256 562d481066bde0658276a35467c4af00bdc6ee726305698a55b86e61d7ad82bb, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "unicode-ident-1.0.19-LICENSE-UNICODE--f7db8105.txt",
+      "sha256": "f7db81051789b729fea528a63ec4c938fdcb93d9d61d97dc8cc2e9df6d47f2a1",
+      "bytes": 1995,
+      "id": "unicode-ident-1.0.19-LICENSE-UNICODE",
+      "origem": ".crate unicode-ident-1.0.19.crate (sha256 f63a545481291138910575129486daeaf8ac54aee4387fe7906919f7830c7d9d, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "unicode-width-0.2.2-COPYRIGHT--23860c2a.txt",
+      "sha256": "23860c2a7b5d96b21569afedf033469bab9fe14a1b24a35068b8641c578ce24d",
+      "bytes": 321,
+      "id": "unicode-width-0.2.2-COPYRIGHT",
+      "origem": ".crate unicode-width-0.2.2.crate (sha256 b4ac048d71ede7ee76d585517add45da530660ef4390e49b098733c6e897f254, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "unty-0.0.4-LICENSE-APACHE--fa84f04c.txt",
+      "sha256": "fa84f04c495f2533ba036606acc8644b50077752f17bc2e943235459dda1c12c",
+      "bytes": 11541,
+      "id": "unty-0.0.4-LICENSE-APACHE",
+      "origem": ".crate unty-0.0.4.crate (sha256 6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "unty-0.0.4-LICENSE-MIT--ac1e6e43.txt",
+      "sha256": "ac1e6e437cd571f6b450abd33dc055cf26dfb0fe2a72952c3ef6ae3844549c12",
+      "bytes": 1085,
+      "id": "unty-0.0.4-LICENSE-MIT",
+      "origem": ".crate unty-0.0.4.crate (sha256 6d49784317cd0d1ee7ec5c716dd598ec5b4483ea832a2dced265471cc0f690ae, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "uuid-1.18.1-LICENSE-MIT--436bc5a1.txt",
+      "sha256": "436bc5a105d8e57dcd8778730f3754f7bf39c14d2f530e4cde4bd2d17a83ec3d",
+      "bytes": 1157,
+      "id": "uuid-1.18.1-LICENSE-MIT",
+      "origem": ".crate uuid-1.18.1.crate (sha256 2f87b8aa10b915a06587d0dec516c282ff295b475d94abf425d62b57710070a2, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "virtue-0.0.18-LICENSE.md--ddcbb691.txt",
+      "sha256": "ddcbb6914b62d5bebc3cb58ebe8d2738ffa9a48555469bbcbe65159979b878cf",
+      "bytes": 1103,
+      "id": "virtue-0.0.18-LICENSE.md",
+      "origem": ".crate virtue-0.0.18.crate (sha256 051eb1abcf10076295e815102942cc58f9d5e3b4560e46e53c21e8ff6f3af7b1, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "walrus-0.24.4-LICENSE-MIT--77674336.txt",
+      "sha256": "77674336af8ded214dc3ae07da631c7dd35cc8205f39298474ba98a889e57272",
+      "bytes": 1059,
+      "id": "walrus-0.24.4-LICENSE-MIT",
+      "origem": ".crate walrus-0.24.4.crate (sha256 ff282e73d21b86a9d397f42570d158eb9e5c521d0ead4d13cd049fd7cb45c467, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "wasmtime-4c22e15bade0a8590d8272f5be85426cb134601b-LICENSE--268872b9.txt",
+      "sha256": "268872b9816f90fd8e85db5a28d33f8150ebb8dd016653fb39ef1f94f2686bc5",
+      "bytes": 12243,
+      "id": "wasmtime-4c22e15bade0a8590d8272f5be85426cb134601b-LICENSE",
+      "origem": "https://raw.githubusercontent.com/bytecodealliance/wasmtime/4c22e15bade0a8590d8272f5be85426cb134601b/LICENSE"
+    },
+    {
+      "ficheiro": "winapi-util-0.1.11-LICENSE-MIT--cb3c929a.txt",
+      "sha256": "cb3c929a05e6cbc9de9ab06a4c57eeb60ca8c724bef6c138c87d3a577e27aa14",
+      "bytes": 1081,
+      "id": "winapi-util-0.1.11-LICENSE-MIT",
+      "origem": ".crate winapi-util-0.1.11.crate (sha256 c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "windows-link-0.2.0-license-apache-2.0--c16f8dcf.txt",
+      "sha256": "c16f8dcf1a368b83be78d826ea23de4079fe1b4469a0ab9ee20563f37ff3d44b",
+      "bytes": 11351,
+      "id": "windows-link-0.2.0-license-apache-2.0",
+      "origem": ".crate windows-link-0.2.0.crate (sha256 45e46c0661abb7180e7b9c281db115305d49ca1709ab8242adf09666d2173c65, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "windows-link-0.2.0-license-mit--c2cfccb8.txt",
+      "sha256": "c2cfccb812fe482101a8f04597dfc5a9991a6b2748266c47ac91b6a5aae15383",
+      "bytes": 1141,
+      "id": "windows-link-0.2.0-license-mit",
+      "origem": ".crate windows-link-0.2.0.crate (sha256 45e46c0661abb7180e7b9c281db115305d49ca1709ab8242adf09666d2173c65, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "yara-x-v1.10.0-LICENSE--fdf05444.txt",
+      "sha256": "fdf05444c9178e662fa28810d94a1fa6ec32d7be798241c98094213317265880",
+      "bytes": 1509,
+      "id": "yara-x-v1.10.0-LICENSE",
+      "origem": "https://raw.githubusercontent.com/VirusTotal/yara-x/v1.10.0/LICENSE"
+    },
+    {
+      "ficheiro": "zerocopy-0.8.27-LICENSE-APACHE--9d185ac6.txt",
+      "sha256": "9d185ac6703c4b0453974c0d85e9eee43e6941009296bb1f5eb0b54e2329e9f3",
+      "bytes": 11350,
+      "id": "zerocopy-0.8.27-LICENSE-APACHE",
+      "origem": ".crate zerocopy-0.8.27.crate (sha256 0894878a5fa3edfd6da3f88c4805f4c8558e2b996227a3d864f47fe11e38282c, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zerocopy-0.8.27-LICENSE-BSD--83c17633.txt",
+      "sha256": "83c1763356e822adde0a2cae748d938a73fdc263849ccff6b27776dff213bd32",
+      "bytes": 1275,
+      "id": "zerocopy-0.8.27-LICENSE-BSD",
+      "origem": ".crate zerocopy-0.8.27.crate (sha256 0894878a5fa3edfd6da3f88c4805f4c8558e2b996227a3d864f47fe11e38282c, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zerocopy-0.8.27-LICENSE-MIT--1a2f5c12.txt",
+      "sha256": "1a2f5c12ddc934d58956aa5dbdd3255fe55fd957633ab7d0d39e4f0daa73f7df",
+      "bytes": 1060,
+      "id": "zerocopy-0.8.27-LICENSE-MIT",
+      "origem": ".crate zerocopy-0.8.27.crate (sha256 0894878a5fa3edfd6da3f88c4805f4c8558e2b996227a3d864f47fe11e38282c, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zeroize_derive-1.4.2-LICENSE-MIT--90a8b662.txt",
+      "sha256": "90a8b6622d5e3faa3055007a9ab99c4e99a51e6ebdccbada7530cb16dc2bd4fb",
+      "bytes": 1095,
+      "id": "zeroize_derive-1.4.2-LICENSE-MIT",
+      "origem": ".crate zeroize_derive-1.4.2.crate (sha256 ce36e65b0d2999d2aafac989fb249189a141aee1f53c612c1f37d72631959f69, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zeroize-1.8.2-LICENSE-MIT--0b04ee3c.txt",
+      "sha256": "0b04ee3ce0021a922f43f37a17fee09a5a1ee6d1f4e149d5bf75b72395a49c72",
+      "bytes": 1095,
+      "id": "zeroize-1.8.2-LICENSE-MIT",
+      "origem": ".crate zeroize-1.8.2.crate (sha256 b97154e67e32c85465826e8bcc1c59429aaaf107c1e4a9e53c8d8ccd5eff88d0, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zip-6.0.0-LICENSE--04dc5213.txt",
+      "sha256": "04dc52136d82400b11df5f474949863a70a5d05d2278dec45b99c479494450a6",
+      "bytes": 1217,
+      "id": "zip-6.0.0-LICENSE",
+      "origem": ".crate zip-6.0.0.crate (sha256 eb2a05c7c36fde6c09b08576c9f7fb4cda705990f73b58fe011abf7dfb24168b, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zopfli-0.8.2-COPYING--018b1cb8.txt",
+      "sha256": "018b1cb87efdf7a04c2fcc13d57ed63f62149113fb207b27ea13430d64f13513",
+      "bytes": 11341,
+      "id": "zopfli-0.8.2-COPYING",
+      "origem": ".crate zopfli-0.8.2.crate (sha256 edfc5ee405f504cd4984ecc6f14d02d55cfda60fa4b689434ef4102aae150cd7, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zstd-0.13.3-LICENSE--129e8ede.txt",
+      "sha256": "129e8edef29e9abcd2ebabe252f4ef1b1289cdca356bf0040284a2fbccfb96c8",
+      "bytes": 1080,
+      "id": "zstd-0.13.3-LICENSE",
+      "origem": ".crate zstd-0.13.3.crate (sha256 e91ee311a569c327171651566e07972200e76fcfe2242a4fa446149a3881c08a, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zstd-safe-7.2.4-LICENSE--a77b7cfe.txt",
+      "sha256": "a77b7cfeaf911ed410ffbe76f0cb2b24ad8a4d94e7ead5727e914425c416cc63",
+      "bytes": 18,
+      "id": "zstd-safe-7.2.4-LICENSE",
+      "origem": ".crate zstd-safe-7.2.4.crate (sha256 8f49c4d5f0abb602a93fb8736af2a4f4dd9512e36f7f570d66e65ff867ed3b9d, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zstd-sys-2.0.16_zstd.1.5.7-COPYING--f9c375a1.txt",
+      "sha256": "f9c375a1be4a41f7b70301dd83c91cb89e41567478859b77eef375a52d782505",
+      "bytes": 18091,
+      "id": "zstd-sys-2.0.16+zstd.1.5.7-COPYING",
+      "origem": ".crate zstd-sys-2.0.16+zstd.1.5.7.crate (sha256 91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zstd-sys-2.0.16_zstd.1.5.7-LICENSE--70552664.txt",
+      "sha256": "7055266497633c9025b777c78eb7235af13922117480ed5c674677adc381c9d8",
+      "bytes": 1549,
+      "id": "zstd-sys-2.0.16+zstd.1.5.7-LICENSE",
+      "origem": ".crate zstd-sys-2.0.16+zstd.1.5.7.crate (sha256 91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748, igual ao Cargo.lock)"
+    },
+    {
+      "ficheiro": "zstd-sys-2.0.16_zstd.1.5.7-LICENSE.BSD-3-Clause--48341f68.txt",
+      "sha256": "48341f685c87304089aa099b23c386f8bacc519ef555aa7a13e239908907b3fd",
+      "bytes": 1595,
+      "id": "zstd-sys-2.0.16+zstd.1.5.7-LICENSE.BSD-3-Clause",
+      "origem": ".crate zstd-sys-2.0.16+zstd.1.5.7.crate (sha256 91e19ebc2adc8f83e43039e79776e3fda8ca919132d68a1fed6a5faca2683748, igual ao Cargo.lock)"
+    }
+  ],
+  "resolucoesDocumentais": [
+    {
+      "component": "ppmd-rust",
+      "version": "1.2.1",
+      "license": "CC0-1.0",
+      "state": "documentary-coverage-confirmed",
+      "evidence": "resolutions/ppmd-rust-1.2.1/SOURCE-PROOF.json",
+      "basis": "251 pre-existing version-specific texts + 1 version-specific author dedication/declaration and official canonical CC0 terms; do not call all 252 upstream version-specific LICENSE files."
+    }
+  ]
+}

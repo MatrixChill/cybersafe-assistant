@@ -1,0 +1,228 @@
+/* Camada de apresentação V2 do Scanner — transcrita de
+ * `pap-design-lab-codex-20261027/v2/src/styles.css` (blocos `.phase-list`),
+ * reancorada em `.cs-v2 .v2-scanner` e com os tokens do produto (`--v2-*`).
+ *
+ * Ligada à cascata pelo integrador em `src/main.tsx` (`./v2/scanner/scanner-v2.css`,
+ * delta `PATCH-SPRINT2012-CSS-DELTA.diff`, aplicado na DEV a 28/10). A folha
+ * continua sem importação por componente de propósito: `node:test` + `tsx` não
+ * carregam `.css`, e uma importação aqui desligava os testes que renderizam —
+ * foi o defeito que a revisão de 28/10 apanhou no Painel.
+ *
+ * Nota de legibilidade, não escondida: o laboratório escreve 9px/8px nestas
+ * duas regras. Transcrevi o valor do lab porque a fonte visual manda; a dúvida
+ * de legibilidade está reportada no handoff (R-C da revisão V2-FIRST) em vez de
+ * ser resolvida à revelia aqui. */
+
+/* Cartões de análise — `.scan-options`/`.scan-option` de
+ * `styles.css:1064-1108` do lab, adaptados ao produto: o lab usa-os como
+ * SELETOR de modo (3 colunas, `.radio-dot`, `.selected`, `aria-pressed`); no
+ * produto os quatro cartões são AÇÕES que arrancam análise, por isso a estrutura
+ * visual vem (painel com token de raio/borda/texto) e a semântica de rádio NÃO
+ * é copiada — seria afirmar uma seleção que não existe. Quatro ações em duas
+ * colunas iguais, que é o análogo honesto da grelha do lab. */
+
+.cs-v2 .v2-scanner .scan-options {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 12px;
+  margin-bottom: 20px;
+}
+
+.cs-v2 .v2-scanner .scan-option {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  position: relative;
+  background: var(--v2-panel);
+  border: 1px solid var(--v2-border);
+  border-radius: var(--v2-card-radius);
+  text-align: left;
+  color: var(--v2-muted);
+}
+
+.cs-v2 .v2-scanner .scan-option strong {
+  color: var(--v2-text);
+}
+
+@media (min-width: 1600px) {
+  .cs-v2 .v2-scanner .scan-options {
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+  }
+}
+
+/* Fases da análise — composição `.phase-list` do lab
+ * (`styles.css:1257-1281`), transcrita com os tokens do produto. */
+
+.cs-v2 .v2-scanner .phase-list {
+  display: flex;
+  /* `wrap` não é do lab — é do `.caption { flex-basis: 100% }` abaixo. Sem ele,
+   * um item com base 100% num flex sem quebra não vai para a linha dele: é
+   * encolhido até ao mínimo de conteúdo e a linha de proveniência some com a
+   * largura estreita. O lab nunca meteu um filho de base 100% aqui; o produto
+   * pôs, por isso a quebra é exigência nossa, medida na folha (não no browser). */
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 10px;
+  margin-top: 17px;
+  font-size: 9px;
+  color: var(--v2-subtle);
+}
+
+.cs-v2 .v2-scanner .phase-list > span {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.cs-v2 .v2-scanner .phase-list > span > span {
+  display: grid;
+  place-items: center;
+  width: 18px;
+  height: 18px;
+  border: 1px solid var(--v2-border);
+  border-radius: 50%;
+  font-size: 8px;
+}
+
+/* `.current` e nao `.reached`: o lab marca como alcancadas as fases que o
+ * temporizador de demo ja 'deixou para tras'. Aqui so se realca a fase que o
+ * motor comunica agora; as anteriores nao sao afirmadas sem historico. */
+.cs-v2 .v2-scanner .phase-list .current {
+  color: var(--v2-accent);
+}
+
+.cs-v2 .v2-scanner .phase-list .mono {
+  font-family: var(--v2-font-data);
+  letter-spacing: 0.4px;
+}
+
+.cs-v2 .v2-scanner .phase-list .caption {
+  flex-basis: 100%;
+  color: var(--v2-muted);
+}
+
+/* Estado atual dos motores — estrutura `.result-grid` do lab
+ * (`styles.css:1297-1309`: duas colunas, cada `<span>` é rótulo/valor empilhados).
+ * Não há cor por estado: `ACTIVE`/`DEGRADED`/… chegam escritos (`data-state` fica
+ * disponível para o shell), porque tinta não é prova e o veredicto de proteção é
+ * do Painel, não desta página. */
+
+.cs-v2 .v2-scanner .cs-v2-engine-state {
+  margin-top: 24px;
+}
+
+.cs-v2 .v2-scanner .cs-v2-engine-state h3 {
+  font-size: 13px;
+  letter-spacing: 0.3px;
+  text-transform: uppercase;
+  color: var(--v2-text);
+}
+
+.cs-v2 .v2-scanner .cs-v2-engine-state .caption {
+  margin-top: 6px;
+  font-size: 11px;
+  color: var(--v2-muted);
+}
+
+.cs-v2 .v2-scanner .result-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 14px;
+  margin: 18px 0;
+  font-size: 10px;
+}
+
+.cs-v2 .v2-scanner .result-grid > span {
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 7px;
+}
+
+.cs-v2 .v2-scanner .engine-state strong {
+  color: var(--v2-text);
+}
+
+.cs-v2 .v2-scanner .engine-state em {
+  font-family: var(--v2-font-data);
+  font-style: normal;
+  color: var(--v2-text);
+}
+
+.cs-v2 .v2-scanner .engine-state small {
+  color: var(--v2-subtle);
+}
+
+/* Estreito: o lab deita a grelha de resultados para uma coluna
+ * (`styles.css:2760` `@media (max-width: 760px)` → `.result-grid { grid-template-columns: 1fr }`,
+ * e é no mesmo bloco que `.phase-list` ganha `flex-wrap: wrap` — a quebra que o
+ * caption do evento 3 precisava já era lei do lab, só que abaixo de 760px). */
+@media (max-width: 760px) {
+  .cs-v2 .v2-scanner .result-grid {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Cartão de resultado — `.result-box` de `styles.css:1282-1296`.
+ * Transcrito: geometria e tipo de letra. NÃO transcritos, com a razão:
+ *  - `border: 1px solid var(--warn-edge)` e `background: var(--warn-bg)`: no lab
+ *    esta caixa é só o «resultado parcial · demonstração»; no produto é o cartão
+ *    que mostra concluído, parcial e falhado, e a tinta vem do tom já calculado
+ *    (`data-ton` + os gradientes do próprio cartão). Pintar de aviso um resultado
+ *    limpo seria o lab a mentir pelo produto.
+ *  - `margin-top: 24px` e `margin-top: 14px` no `h3`: o espaçamento do cartão e
+ *    o lugar do título são do fluxo da página (o cabeçalho é um flex com o chip
+ *    ao lado; descer o título desalinhava o par). Fica o que é tipo de letra,
+ *    que é o que o lab mede. */
+.cs-v2 .v2-scanner .result-box {
+  border-radius: var(--v2-control-radius);
+}
+
+.cs-v2 .v2-scanner .result-box h3 {
+  font-size: 14px;
+}
+
+.cs-v2 .v2-scanner .result-box > p {
+  font-size: 11px;
+}
+
+/* Moldura de largada — anatomia `.demo-drop-zone` de `ultimate.css:401-420`,
+ * transcrita como apresentação do produto com tokens `--v2-*`.
+ *
+ * Anatomia medida, e é a parte importante: o NÓ QUE RECEBE OS EVENTOS continua
+ * a ser o invólucro de idle (`onDragOver`/`onDragLeave`/`onDrop` nas linhas
+ * 1483-1485), que abraça a moldura, a confirmação de pasta e os cartões. Esta
+ * classe vive no filho de apresentação. Ou seja: a moldura é o desenho do
+ * alvo, não o limite do alvo — largar em qualquer ponto do cartão continua a
+ * contar. Restringir a área de drop por conveniência visual estava proibido no
+ * packet e é proibido por aqui; há um teste a contar uma só ligação de handlers.
+ *
+ * Do protótipo não vem nada: nem a recusa de `Files`, nem «Nenhum ficheiro
+ * real é aberto ou lido», nem amostras/tray/checks/radar. A decisão do
+ * integrador (28/10, TP-V2-SCANNER-S2-DROP-ADAPTER) é precisamente esta — a
+ * geometria é reutilizável, o comportamento de demonstração não. */
+.cs-v2 .v2-scanner .v2-scanner-drop {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 10px;
+  text-align: center;
+  border: 1px dashed var(--v2-border-strong);
+  border-radius: var(--v2-card-radius);
+  padding: 24px;
+  background: var(--v2-inset);
+  margin-bottom: 20px;
+}
+
+.cs-v2 .v2-scanner .v2-scanner-drop p,
+.cs-v2 .v2-scanner .v2-scanner-drop small {
+  font-size: 11px;
+}
+
+/* Estado de arrastar do lab (`ultimate.css:418-421`): a borda e o fundo trocam
+ * para o acento. O produto já tinha `border-primary bg-primary/5` no invólucro
+ * — fica nos dois, porque o invólucro é o alvo e a moldura é o aviso. */
+.cs-v2 .v2-scanner .v2-scanner-drop.v2-scanner-drop--arrastando {
+  border-color: var(--v2-accent);
+  background: var(--v2-accent-soft);
+}

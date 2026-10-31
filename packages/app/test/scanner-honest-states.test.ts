@@ -61,7 +61,7 @@ describe("TASK C.1 — os 6 estados do batch, honestos", () => {
   });
 
   test("inconclusive (sem filesAnalyzed): contagem em '—' e NUNCA verde", () => {
-    const state = { status: "completed" as const, threatsFound: 0 };
+    const state = { status: "completed" as const, threatsFound: 0, filesInconclusive: 1 };
     assert.equal(resultFilesWithoutDetections(state), null);
     assert.equal(noDetectionsTone(state), "neutral", "sem base conhecida o cartão não pode parecer 'limpo'");
   });
@@ -69,16 +69,41 @@ describe("TASK C.1 — os 6 estados do batch, honestos", () => {
 
 describe("TASK C.2 — verde exclusivo de 'safe'", () => {
   test("completed + zero ameaças + base conhecida → green", () => {
-    assert.equal(noDetectionsTone({ status: "completed", threatsFound: 0, filesAnalyzed: 10 }), "green");
+    assert.equal(noDetectionsTone({
+      status: "completed",
+      threatsFound: 0,
+      filesAnalyzed: 10,
+      filesFailed: 0,
+      filesInconclusive: 0,
+    }), "green");
   });
 
   test("completed COM ameaças → nunca green, mesmo com contagem real", () => {
-    assert.equal(noDetectionsTone({ status: "completed", threatsFound: 2, filesAnalyzed: 10 }), "neutral");
+    assert.equal(noDetectionsTone({
+      status: "completed",
+      threatsFound: 2,
+      filesAnalyzed: 10,
+      filesFailed: 0,
+      filesInconclusive: 0,
+    }), "neutral");
   });
 
   test("cancelled e failed → nunca green", () => {
-    assert.equal(noDetectionsTone({ status: "cancelled", threatsFound: 0, filesAnalyzed: 10 }), "neutral");
-    assert.equal(noDetectionsTone({ status: "failed", threatsFound: 0, filesAnalyzed: 10 }), "neutral");
+    assert.equal(noDetectionsTone({
+      status: "cancelled", threatsFound: 0, filesAnalyzed: 10, filesFailed: 0, filesInconclusive: 0,
+    }), "neutral");
+    assert.equal(noDetectionsTone({
+      status: "failed", threatsFound: 0, filesAnalyzed: 10, filesFailed: 0, filesInconclusive: 0,
+    }), "neutral");
+  });
+
+  test("ficheiros inconclusivos ou falhados nunca ficam verdes", () => {
+    assert.equal(noDetectionsTone({
+      status: "completed", threatsFound: 0, filesAnalyzed: 10, filesFailed: 0, filesInconclusive: 1,
+    }), "neutral");
+    assert.equal(noDetectionsTone({
+      status: "completed", threatsFound: 0, filesAnalyzed: 10, filesFailed: 1, filesInconclusive: 0,
+    }), "neutral");
   });
 });
 
@@ -149,23 +174,45 @@ describe("TASK C.6 — elapsed/velocidade com filesAnalyzed=0 durante ~7 s", () 
 
 describe("TASK C.7 — PT-PT singular/plural em todas as frases", () => {
   test("log terminal: 1 ficheiro no singular, N no plural", () => {
-    const um = terminalScanLogMessage({ status: "completed", filesScanned: 1, threatsFound: 0 });
+    const um = terminalScanLogMessage({ status: "completed", filesScanned: 1, filesAnalyzed: 1, threatsFound: 0 });
     assert.match(um, /1 ficheiro analisado\b/);
     assert.doesNotMatch(um, /1 ficheiros/);
-    const muitos = terminalScanLogMessage({ status: "completed", filesScanned: 20, threatsFound: 0 });
+    const muitos = terminalScanLogMessage({ status: "completed", filesScanned: 20, filesAnalyzed: 20, threatsFound: 0 });
     assert.match(muitos, /20 ficheiros analisados/);
   });
 
+  test("log terminal: sem cobertura de motores diz 'considerados', nunca 'analisados'", () => {
+    // `filesAnalyzed` ausente = o motor não reportou quantos chegaram aos
+    // motores. Dizer "1 ficheiro analisado" a partir de `filesScanned` era
+    // apresentar os ignorados pelas exclusões como verificados.
+    const semCobertura = terminalScanLogMessage({ status: "completed", filesScanned: 1, threatsFound: 0 });
+    assert.match(semCobertura, /1 ficheiro considerado\b/);
+    assert.doesNotMatch(semCobertura, /analisad/);
+    const muitos = terminalScanLogMessage({ status: "completed", filesScanned: 800, threatsFound: 0 });
+    assert.match(muitos, /800 ficheiros considerados/);
+    assert.doesNotMatch(muitos, /800 ficheiros analisados/);
+  });
+
+  test("log terminal: analisados de considerados quando o motor só cobriu parte", () => {
+    const parcial = terminalScanLogMessage({
+      status: "completed",
+      filesScanned: 800,
+      filesAnalyzed: 663,
+      threatsFound: 0,
+    });
+    assert.match(parcial, /663 de 800 ficheiros analisados, sem ameaças encontradas/);
+  });
+
   test("log terminal: ameaças com singular/plural correctos", () => {
-    assert.match(terminalScanLogMessage({ status: "completed", filesScanned: 5, threatsFound: 1 }), /1 ameaça encontrada\b/);
-    assert.doesNotMatch(terminalScanLogMessage({ status: "completed", filesScanned: 5, threatsFound: 1 }), /1 ameaças/);
-    assert.match(terminalScanLogMessage({ status: "completed", filesScanned: 5, threatsFound: 3 }), /3 ameaças encontradas/);
-    assert.match(terminalScanLogMessage({ status: "completed", filesScanned: 5, threatsFound: 0 }), /sem ameaças encontradas/);
+    assert.match(terminalScanLogMessage({ status: "completed", filesScanned: 5, filesAnalyzed: 5, threatsFound: 1 }), /1 ameaça encontrada\b/);
+    assert.doesNotMatch(terminalScanLogMessage({ status: "completed", filesScanned: 5, filesAnalyzed: 5, threatsFound: 1 }), /1 ameaças/);
+    assert.match(terminalScanLogMessage({ status: "completed", filesScanned: 5, filesAnalyzed: 5, threatsFound: 3 }), /3 ameaças encontradas/);
+    assert.match(terminalScanLogMessage({ status: "completed", filesScanned: 5, filesAnalyzed: 5, threatsFound: 0 }), /sem ameaças encontradas/);
   });
 
   test("log terminal: cancelado e falhado", () => {
-    assert.match(terminalScanLogMessage({ status: "cancelled", filesScanned: 1, threatsFound: 0 }), /Análise cancelada: 1 ficheiro analisado\b/);
-    assert.doesNotMatch(terminalScanLogMessage({ status: "cancelled", filesScanned: 1, threatsFound: 0 }), /1 ficheiros/);
+    assert.match(terminalScanLogMessage({ status: "cancelled", filesScanned: 1, filesAnalyzed: 1, threatsFound: 0 }), /Análise cancelada: 1 ficheiro analisado\b/);
+    assert.doesNotMatch(terminalScanLogMessage({ status: "cancelled", filesScanned: 1, filesAnalyzed: 1, threatsFound: 0 }), /1 ficheiros/);
     assert.match(terminalScanLogMessage({ status: "failed", filesScanned: 0, threatsFound: 0, error: "x" }), /Análise falhada: x/);
   });
 

@@ -19,12 +19,14 @@ export type ProtectionLevel = "protected" | "attention" | "degraded" | "critical
 export function deriveProtectionLevel(
   status: ProtectionStatus,
   engine?: EngineHealth,
+  realtime?: RealtimeProtectionInfo,
 ): ProtectionLevel {
   if (engine && !engine.serviceRunning) return "critical";
   const hasEngineError = engine
     && [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)]
       .some((e) => e && e.status === "error");
   if (hasEngineError) return "critical";
+  if (realtime && (realtime.disponivel === false || realtime.enabled !== true || realtime.pausedUntil)) return "degraded";
   const unhealthy = engine?.anyEngineDegraded === true;
 
   if (status === "safe") return unhealthy ? "degraded" : "protected";
@@ -58,6 +60,58 @@ export function engineStatusText(status: EngineSubsystemStatus): string {
   // AFIRMACAO sobre o motor, e nao se sabe. Diz-se que nao se sabe.
   if (status === "unavailable") return "Indisponível";
   return "Estado desconhecido";
+}
+
+/**
+ * G1 — texto PT-PT de cada `ProtectionStatus` do serviço.
+ *
+ * O Monitor usava `engineStatusText(protection.status as EngineSubsystemStatus)`:
+ * dois vocabulários diferentes com cast por cima. `safe`, `attention` e
+ * `critical` não existem no vocabulário dos motores, caía no ramo de fallback e
+ * o ecrã escrevia "Estado desconhecido" exatamente quando havia má notícias.
+ * Este mapa cobre TODOS os valores reais da união — nada inventado: as palavras
+ * são as que o produto já usa (meta dos níveis do Dashboard), e "Degradado" é o
+ * que o serviço reporta. Valor fora da união continua a dizer "desconhecido".
+ */
+export function protectionStatusText(status: ProtectionStatus): string {
+  switch (status) {
+    case "safe": return "Protegido";
+    case "attention": return "Atenção";
+    case "critical": return "Crítico";
+    case "degraded": return "Degradado";
+    default: return "Estado desconhecido";
+  }
+}
+
+/**
+ * G2 — a linha DISTINTA do tempo real, a partir dos campos factuais do
+ * `ProtectionState`. As regras de leitura estão no próprio tipo:
+ * `undefined` = não foi lido; `false` = foi mesmo desligada. Por isso:
+ *   · `enabled === false` → "Desativada"  (só com leitura real)
+ *   · `enabled === true`  → "Ativa"
+ *   · `pausedUntil` presente → "Pausada até …" (prioridade: é o facto mais
+ *     específico que o serviço emite)
+ *   · nada lido → null — a linha OMITE-SE; nunca se escreve "Desativada"
+ *     por ausência de dado.
+ */
+export interface RealtimeProtectionInfo {
+  disponivel?: boolean;
+  enabled?: boolean;
+  pausedUntil?: string | null;
+}
+
+export function realtimeProtectionCopy(info: RealtimeProtectionInfo | undefined | null): { text: string; tone: "ok" | "warn" | "off" } | null {
+  if (!info) return null;
+  if (info.disponivel === false) return { text: "Indisponível", tone: "warn" };
+  const pausedUntil = typeof info.pausedUntil === "string" && info.pausedUntil.trim() !== "" ? info.pausedUntil.trim() : null;
+  if (pausedUntil) {
+    const when = new Date(pausedUntil);
+    const quando = Number.isNaN(when.getTime()) ? pausedUntil : when.toLocaleString("pt-PT");
+    return { text: `Pausada até ${quando}`, tone: "warn" };
+  }
+  if (info.enabled === true) return { text: "Ativa", tone: "ok" };
+  if (info.enabled === false) return { text: "Desativada", tone: "off" };
+  return null;
 }
 
 /**
@@ -158,8 +212,8 @@ export const PROTECTION_LEVEL_META: Record<ProtectionLevel, ProtectionLevelMeta>
     label: "Sistema Protegido",
     shortLabel: "Protegido",
     answer: "Sim.",
-    answerDetail: "Tudo a funcionar e sob vigilância.",
-    summary: "Todos os componentes de proteção estão ativos e o teu sistema está bem.",
+    answerDetail: "Monitorização ligada e motores disponíveis.",
+    summary: "Os componentes reportam disponibilidade. Isto não garante a deteção de todas as ameaças nem bloqueio antes da execução.",
     techSummary: "Todos os motores reportam ACTIVE.",
     dotClass: "bg-cyber-green",
     chipClass: "border bg-cyber-green/10 border-cyber-green/30",
@@ -170,8 +224,8 @@ export const PROTECTION_LEVEL_META: Record<ProtectionLevel, ProtectionLevelMeta>
     label: "Atenção Necessária",
     shortLabel: "Atenção",
     answer: "Sim, com um aviso.",
-    answerDetail: "Está protegido, mas há coisas que devias ver.",
-    summary: "Proteção parcialmente disponível. Alguns componentes estão limitados, mas o sistema continua monitorizado.",
+    answerDetail: "Há avisos a rever no estado de proteção.",
+    summary: "Consultar o estado da monitorização e dos motores antes de concluir que a proteção está operacional.",
     techSummary: "Pelo menos um motor não está totalmente ativo.",
     dotClass: "bg-cyber-yellow",
     chipClass: "border bg-cyber-yellow/10 border-cyber-yellow/30",
@@ -182,8 +236,8 @@ export const PROTECTION_LEVEL_META: Record<ProtectionLevel, ProtectionLevelMeta>
     label: "Proteção precisa de atenção",
     shortLabel: "Atenção",
     answer: "A meio.",
-    answerDetail: "Está a vigiar, mas com menos olhos do que devia.",
-    summary: "Alguns componentes de proteção não estão disponíveis neste computador. O sistema continua a monitorizar o que puder, mas a confiança nas deteções está reduzida.",
+    answerDetail: "A disponibilidade da proteção está limitada ou por confirmar.",
+    summary: "Verificar se a monitorização está ligada e quais os motores disponíveis. Componentes limitados reduzem a capacidade de análise.",
     techSummary: "Motores IMPORTANTES indisponíveis — a confiança nas deteções está reduzida.",
     dotClass: "bg-cyber-red",
     chipClass: "border bg-cyber-red/10 border-cyber-red/30",

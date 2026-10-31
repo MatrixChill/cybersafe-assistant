@@ -59,6 +59,8 @@ const SIGNATURE_ALLOWLIST = {
   "packages/core/test/clamav-cap-review.test.js":
     "Só stdout sintético; 'eicar.txt' é um nome de caminho dentro de uma string.",
   "packages/core/test/yara-coverage-contract.test.js": "Contrato de cobertura; sem payload em disco.",
+  "packages/service/test/yara-corpus-provenance.test.js":
+    "Buffer entregue a engine.match() em memória (control0 positivo do corpus publicado); nada da assinatura é escrito.",
 };
 
 /** Este próprio ficheiro contém os marcadores para os poder procurar. */

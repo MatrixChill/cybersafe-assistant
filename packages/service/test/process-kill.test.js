@@ -17,6 +17,33 @@ import { mkdtempSync } from "node:fs";
  */
 const TEST_BASE_DIR = mkdtempSync(path.join(os.tmpdir(), "cybersafe-p0-process-kill-"));
 
+/**
+ * Compatibilidade dos cenários legados: injetam `engine.processes` à mão e
+ * testam o kill, não a frescura da foto (essa fronteira está em
+ * tp-f1-r1-identity.test.js). Uma cache injetada sem `processesPhotoAt` é
+ * tratada como foto do instante da injeção.
+ *
+ * R2 (FINDING-FRESH-PID-REUSE): a foto já não dispensa a revalidação — a
+ * fonte é consultada antes de TODA a ação. Cada cenário que chega ao taskkill
+ * fixa o seu mock de `queryCimProcesses` com o MESMO dono do snapshot (a
+ * linha injetada), porque nome/comando iguais e CreationDate igual são agora
+ * condição de passagem. Não há caminho de produto aqui.
+ */
+const killProcessReal = ProtectionEngineService.prototype.killProcess;
+ProtectionEngineService.prototype.killProcess = function killProcessComFotoDeTeste(...args) {
+  if (this.processesPhotoAt === 0 && this.processes.length > 0) {
+    this.processesPhotoAt = Date.now();
+  }
+  return killProcessReal.apply(this, args);
+};
+
+/**
+ * P1-PROCESS-TRUTH: `processes.list` passou a devolver `{ processes, truth }`.
+ * estes testes falam do inventário; a verdade tem testes próprios
+ * (test/p1-process-truth.test.js) e nada aqui é afrouxado — só explícito.
+ */
+const listaDeProcessos = async (engine) => (await engine.listProcesses()).processes;
+
 
 /**
  * P0 ISOLAMENTO DE RUNTIME: diretórios base injetados nos testes, para que
@@ -137,12 +164,15 @@ describe("killProcess — reconciliação autoritativa publica só após o PID d
         victim.once("error", reject);
       });
 
-      engine.processes = [processEntry({
+      const row = processEntry({
         pid: victim.pid,
         name: "powershell.exe",
         path: "C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe",
         commandLine: "powershell -NoProfile -Command Start-Sleep -Seconds 120",
-      })];
+      });
+      engine.processes = [row];
+      // R2: a revalidação pré-ação consulta a fonte; o alvo é o MESMO dono.
+      engine.queryCimProcesses = async () => [row];
 
       const seen = [];
       engine.eventBus.on("process.killed", () => seen.push("killed"));
@@ -251,7 +281,7 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
     // Estado do bug: cache truncado a 200 e sem qualquer caminho de volta ao SO.
     engine.processes = osTruth.slice(0, 200);
 
-    const list = await engine.listProcesses();
+    const list = await listaDeProcessos(engine);
     assert.equal(list.length, 331, "a lista devolve a verdade do SO, não o cache capado");
     assert.ok(list.some((p) => p.pid === 4000 + 330), "o processo de PID mais alto continua visível");
     assert.equal(engine.processes.length, 331, "o cache fica reconciliado com a verdade");
@@ -346,15 +376,22 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
     assert.equal(marked, 5, "cada pedido de lista assinala observador, mesmo quando responde de cache");
   });
 
-  it("enumeração falhou → serve o cache de eventos, nunca lista vazia silenciosa", async () => {
+  it("enumeração falhou → serve o cache de eventos e DISSO-o: nunca lista vazia silenciosa", async () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     engine.processes = [processEntry({ pid: 777, name: "mantido.exe" })];
     engine.processMonitor.list = async () => {
       throw new Error("PowerShell caiu");
     };
-    const list = await engine.listProcesses();
+    const { processes: list, truth } = await engine.listProcesses();
     assert.equal(list.length, 1);
     assert.equal(list[0].pid, 777);
+    // P1-PROCESS-TRUTH: as linhas sobrevivem, mas a palavra do Windows não foi
+    // obtida. Sem este par, «servir o cache» era indistinguível de «o SO disse
+    // isto agora».
+    assert.equal(truth.state, "failed", "a resposta diz que a enumeração falhou");
+    assert.equal(truth.servedFrom, "cache", "e que as linhas não são uma foto nova");
+    assert.equal(truth.enumeratedAt, null, "não houve foto, portanto não se afirma idade");
+    assert.match(truth.attempt.error.message, /PowerShell caiu/, "o motivo chega à interface");
   });
 
   it("process.started já não empurra processos para fora do cache (cap de 200 removido)", () => {
@@ -373,12 +410,14 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
 describe("killProcess — diagnóstico do taskkill propagado (P0)", () => {
   it("acesso negado (exit 5) → status/exitCode/stderr próprios, com a mensagem real, sem mexer na lista", async () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
-    engine.processes = [processEntry({
+    const row = processEntry({
       pid: 41111,
       name: "notepad.exe",
       path: "C:\\Windows\\System32\\notepad.exe",
       commandLine: "notepad.exe",
-    })];
+    });
+    engine.processes = [row];
+    engine.queryCimProcesses = async (filter) => (filter.startsWith("ProcessId=") ? [row] : []);
     engine.runTaskkill = async (pid) => ({
       ok: false,
       status: "access-denied",
@@ -449,7 +488,9 @@ describe("killProcess — diagnóstico do taskkill propagado (P0)", () => {
     const engine = new ProtectionEngineService(baseDir);
     const logsDir = path.join(baseDir, "logs");
     await fs.mkdir(logsDir, { recursive: true });
-    engine.processes = [processEntry({ pid: 41112, name: "calc.exe", path: "C:\\Windows\\System32\\calc.exe" })];
+    const row = processEntry({ pid: 41112, name: "calc.exe", path: "C:\\Windows\\System32\\calc.exe" });
+    engine.processes = [row];
+    engine.queryCimProcesses = async (filter) => (filter.startsWith("ProcessId=") ? [row] : []);
     engine.runTaskkill = async (pid) => ({
       ok: false,
       status: "access-denied",
@@ -539,7 +580,7 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
     return child;
   }
 
-  it("A1: kill de PID fora do cache usa query-alvo e não dispara enumeração completa", async () => {
+  it("A1-R1: PID fora do cache é recusado; query-alvo não substitui a referência do snapshot", async () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
@@ -558,16 +599,17 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
           commandLine: "node dorme.js",
         })];
       };
-      // Mock do taskkill: mata mesmo o filho do teste e reporta exit 0.
+      let taskkill = 0;
       engine.runTaskkill = async (pid) => {
-        victim.kill();
-        await new Promise((resolve) => victim.once("exit", resolve));
+        taskkill += 1;
         return { ok: true, status: "ok", pid, exitCode: 0, stdout: "SUCCESS: terminated.", stderr: "" };
       };
 
       const result = await engine.killProcess(victim.pid);
-      assert.equal(result.status, "killed");
-      assert.equal(result.exitCode, 0);
+      assert.equal(result.success, false, "sem snapshot não há autorização");
+      assert.equal(result.status, "failed");
+      assert.match(String(result.error ?? ""), /snapshot|referência|identidade/i);
+      assert.equal(taskkill, 0, "taskkill nunca corre sem referência do snapshot");
       assert.equal(enumerations, 0, "nenhuma listProcesses()/monitor.list completa no caminho do kill");
     } finally {
       try {
@@ -590,9 +632,9 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
     };
     engine.queryCimProcesses = async () => []; // sem instância homónima: not-found limpo
 
-    const first = await engine.listProcesses();
+    const first = await listaDeProcessos(engine);
     assert.equal(first.length, 2);
-    const cachedAgain = await engine.listProcesses();
+    const cachedAgain = await listaDeProcessos(engine);
     assert.equal(cachedAgain.length, 2);
     assert.equal(calls, 1, "dentro do TTL serve o cache");
 
@@ -608,7 +650,7 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
     assert.equal(kill.status, "already-exited");
     assert.equal(engine.processesEnumeratedAt, 0, "a remoção do cache tem de invalidar a janela de frescura");
 
-    const after = await engine.listProcesses();
+    const after = await listaDeProcessos(engine);
     assert.equal(calls, 2, "o refresh imediato re-enumerada (não serve o cache com a entrada morta nem a restaura)");
     assert.ok(after.every((p) => p.pid !== 22001), "o morto nunca volta à lista");
   });
@@ -617,19 +659,22 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const stub = await spawnSleeper(); // faz de PID do launcher
     try {
-      engine.processes = [processEntry({
+      const stubRow = processEntry({
         pid: stub.pid,
         name: "Notepad.exe",
         path: `C:\\Users\\x\\AppData\\Local\\Microsoft\\WindowsApps\\Notepad.exe`,
         commandLine: `\\??\\C:\\Users\\x\\AppData\\Local\\Microsoft\\WindowsApps\\Notepad.exe`,
-      })];
+      });
+      engine.processes = [stubRow];
       engine.runTaskkill = async (pid) => {
         stub.kill();
         await new Promise((resolve) => stub.once("exit", resolve));
         return { ok: true, status: "ok", pid, exitCode: 0, stdout: "SUCCESS: terminated.", stderr: "" };
       };
       // A query por nome devolve o processo REAL (outro PID, vivo: o próprio teste).
+      // A revalidação pré-ação usa `ProcessId=` e tem de ver o mesmo dono.
       engine.queryCimProcesses = async (filter) => {
+        if (filter.startsWith("ProcessId=")) return [stubRow];
         assert.match(filter, /^Name=/, "o caminho de stub pergunta ao OS pelo nome");
         return [processEntry({
           pid: process.pid,
@@ -657,12 +702,13 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
 
   it("A3: not-found com OUTRA instância de identidade idêntica → alias-stub explícito", async () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
-    engine.processes = [processEntry({
+    const row = processEntry({
       pid: 23001,
       name: "app.exe",
       path: "C:\\Temp\\app.exe",
       commandLine: "app.exe --mesma-identidade",
-    })];
+    });
+    engine.processes = [row];
     engine.runTaskkill = async (pid) => ({
       ok: false,
       status: "not-found",
@@ -671,12 +717,15 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
       stdout: "",
       stderr: 'ERROR: The process "23001" not found.',
     });
-    engine.queryCimProcesses = async () => [processEntry({
-      pid: process.pid, // vivo por definição
-      name: "app.exe",
-      path: "C:\\Temp\\app.exe",
-      commandLine: "app.exe --mesma-identidade",
-    })];
+    engine.queryCimProcesses = async (filter) =>
+      filter.startsWith("ProcessId=")
+        ? [row] // pré-ação: a fonte confirma o MESMO dono do snapshot
+        : [processEntry({
+            pid: process.pid, // vivo por definição
+            name: "app.exe",
+            path: "C:\\Temp\\app.exe",
+            commandLine: "app.exe --mesma-identidade",
+          })];
 
     const result = await engine.killProcess(23001);
     assert.equal(result.status, "alias-stub");
@@ -688,12 +737,13 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
-      engine.processes = [processEntry({
+      const row = processEntry({
         pid: victim.pid,
         name: "chrome.exe",
         path: "C:\\Program Files\\Google\\Chrome\\chrome.exe",
         commandLine: "chrome.exe --no-window",
-      })];
+      });
+      engine.processes = [row];
       engine.runTaskkill = async (pid) => {
         victim.kill();
         await new Promise((resolve) => victim.once("exit", resolve));
@@ -701,7 +751,10 @@ describe("kill — reliability do snapshot (A1/A2/A3)", () => {
       };
       // Instância homónima viva (outro chrome do utilizador) NÃO dispara alias-stub
       // porque o alvo não tem marcador de stub e o killed-same-identity está desligado.
-      engine.queryCimProcesses = async () => [processEntry({ pid: process.pid, name: "chrome.exe", commandLine: "chrome.exe" })];
+      engine.queryCimProcesses = async (filter) =>
+        filter.startsWith("ProcessId=")
+          ? [row]
+          : [processEntry({ pid: process.pid, name: "chrome.exe", commandLine: "chrome.exe" })];
 
       const result = await engine.killProcess(victim.pid);
       assert.equal(result.status, "killed");
@@ -769,9 +822,10 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
       await gate;
       return [dead, alive];
     };
-    engine.queryCimProcesses = async () => [];
-    engine.runTaskkill = okTaskkill;
     engine.processes = [dead, alive];
+    // R2: a fonte é consultada antes de agir; o alvo é o mesmo dono do snapshot.
+    engine.queryCimProcesses = async (filter) => (filter.startsWith("ProcessId=") ? [dead] : []);
+    engine.runTaskkill = okTaskkill;
     engine.processesEnumeratedAt = 0;
 
     const inflight = engine.listProcesses(); // NÃO se espera: a enumeração fica em voo
@@ -779,7 +833,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
     assert.equal(kill.status, "killed", JSON.stringify(kill));
 
     releaseEnumeration();
-    const raced = await inflight;
+    const raced = (await inflight).processes;
     assert.ok(!raced.some((entry) => entry.pid === 31001), "o resultado velho não pode repor o PID morto");
     // Mecanismo (mudou com a reconciliação): a foto é fundida com o que o
     // monitor observou durante a foto, e o que saiu está tombstonado — o
@@ -789,7 +843,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
     assert.ok(!engine.processes.some((entry) => entry.pid === 31001), "o morto fica de fora do cache");
 
     // E o pedido seguinte é servido do cache reconciliado, com o morto fora.
-    const after = await engine.listProcesses();
+    const after = await listaDeProcessos(engine);
     assert.equal(enumerations, 1, "sem re-enumeração: a foto já estava reconciliada");
     assert.deepEqual(after.map((entry) => entry.pid), [31002]);
   });
@@ -822,7 +876,7 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
     engine.processMonitor.list = async () => [dead];
 
     await engine.killProcess(33001);
-    const list = await engine.listProcesses();
+    const list = await listaDeProcessos(engine);
     assert.equal(list.length, 0, "mesmo listado pelo SO, o morto confirmado não volta");
   });
 
@@ -830,8 +884,15 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
-      engine.processes = [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
-      engine.queryCimProcesses = async () => []; // o Windows já o não lista
+      const row = processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" });
+      engine.processes = [row];
+      let queries = 0;
+      engine.queryCimProcesses = async () => {
+        queries += 1;
+        // 1.ª query (pré-ação): a fonte confirma o alvo — o kill é autorizado.
+        // Depois do taskkill o CIM perde-o enquanto o handle o mantém "vivo".
+        return queries === 1 ? [row] : [];
+      };
       engine.runTaskkill = okTaskkill; // NÃO mata o filho: é precisamente o caso do handle pendurado
       engine.killProbeMinIntervalMs = 0;
       engine.killReapIntervalMs = 10;
@@ -857,14 +918,16 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
-      engine.processes = [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
+      const row = processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" });
+      engine.processes = [row];
       let queries = 0;
       engine.queryCimProcesses = async () => {
         queries += 1;
-        // 1.ª ausência (pode ser PowerShell a falhar); depois volta com a MESMA
-        // identidade → o processo está vivo e é o nosso alvo.
-        if (queries === 1) return [];
-        return [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
+        // 1.ª query = revalidação pré-ação (o alvo é confirmado);
+        // 2.ª = 1.ª ausência do reap (pode ser PowerShell a falhar);
+        // depois volta com a MESMA identidade → vivo, nunca killed falso.
+        if (queries === 2) return [];
+        return [row];
       };
       engine.runTaskkill = okTaskkill;
       engine.killProbeMinIntervalMs = 0;
@@ -890,22 +953,24 @@ describe("P0-A — morto confirmado nunca volta; CIM é a autoridade", () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const victim = await spawnSleeper();
     try {
-      engine.processes = [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
+      const row = processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" });
+      engine.processes = [row];
       let queries = 0;
       engine.queryCimProcesses = async () => {
         queries += 1;
-        return [processEntry({ pid: victim.pid, name: "node.exe", commandLine: "node dorme.js" })];
+        return [row];
       };
       engine.runTaskkill = okTaskkill;
       // Guarda de 10 s sobre um deadline de 400 ms com intervalo de 20 ms:
-      // ~20 iterações, UMA consulta-alvo. Antes: ~20 PowerShell.
+      // ~20 iterações, DUAS consultas-alvo (revalidação pré-ação + uma probe).
+      // Antes: ~20 PowerShell — é a tempestade que isto impede.
       engine.killProbeMinIntervalMs = 10_000;
       engine.killReapIntervalMs = 20;
       engine.killReapDeadlineMs = 400;
 
       const result = await engine.killProcess(victim.pid);
       assert.equal(result.status, "timeout");
-      assert.equal(queries, 1, `uma query por kill, não uma por iteração (${queries})`);
+      assert.equal(queries, 2, `duas queries por kill (pré-ação + 1 probe), não uma por iteração (${queries})`);
     } finally {
       try {
         victim.kill();
@@ -992,7 +1057,9 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const ghost = processEntry({ pid: 98765432, name: "fantasma.exe" });
     engine.processes = [ghost];
-    engine.queryCimProcesses = async () => [];
+    // Pré-ação: a fonte confirma o mesmo dono; a ausência é descoberta no
+    // taskkill — é esse o cenário deste teste.
+    engine.queryCimProcesses = async () => [ghost];
     const called = [];
     engine.runTaskkill = async (pid) => {
       called.push(pid);
@@ -1012,7 +1079,7 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const ghost = processEntry({ pid: 98765436, name: "fantasma.exe" });
     engine.processes = [ghost];
-    engine.queryCimProcesses = async () => [];
+    engine.queryCimProcesses = async (filter) => (filter.startsWith("ProcessId=") ? [ghost] : []);
     const called = [];
     engine.runTaskkill = async (pid) => {
       called.push(pid);
@@ -1086,10 +1153,12 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
     const filho = await spawnSleeper();
     try {
       const rootPid = 98765433;
-      engine.processes = [processEntry({ pid: rootPid, name: "launcher.exe" })];
+      const root = processEntry({ pid: rootPid, name: "launcher.exe" });
+      engine.processes = [root];
       // A arvore, vista pelo Windows: o filho existe e esta vivo, mas o ppid ja
       // nao e o da raiz original (re-parented) — exactamente o caso do launcher.
       engine.queryCimProcesses = async (filter) => {
+        if (filter.startsWith("ProcessId=")) return [root];
         if (filter.startsWith("ParentProcessId=")) {
           return [processEntry({ pid: filho.pid, name: "node.exe", ppid: rootPid, commandLine: "node dorme.js" })];
         }
@@ -1125,9 +1194,13 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
   it("a varredura nunca abate componente protegido do CyberSafe", async () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const rootPid = 98765434;
-    engine.processes = [processEntry({ pid: rootPid, name: "launcher.exe" })];
+    const root = processEntry({ pid: rootPid, name: "launcher.exe" });
+    engine.processes = [root];
     const systemChild = processEntry({ pid: 4, name: "System", ppid: rootPid });
-    engine.queryCimProcesses = async (filter) => (filter.startsWith("ParentProcessId=") ? [systemChild] : []);
+    engine.queryCimProcesses = async (filter) => {
+      if (filter.startsWith("ProcessId=")) return [root];
+      return filter.startsWith("ParentProcessId=") ? [systemChild] : [];
+    };
     const targeted = [];
     engine.runTaskkill = async (pid) => {
       targeted.push(pid);
@@ -1145,8 +1218,9 @@ describe("kill round 2 — retry verificado e arvore abatida um a um", () => {
   it("actions.log registou cada tentativa, com o comando real", async () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const rootPid = 98765435;
-    engine.processes = [processEntry({ pid: rootPid, name: "fantasma.exe" })];
-    engine.queryCimProcesses = async () => [];
+    const root = processEntry({ pid: rootPid, name: "fantasma.exe" });
+    engine.processes = [root];
+    engine.queryCimProcesses = async (filter) => (filter.startsWith("ProcessId=") ? [root] : []);
     engine.runTaskkill = async (pid) => failed255(pid);
     const logsDir = await fs.mkdtemp(path.join(os.tmpdir(), "cs-kill-attempt-"));
     engine.logsDir = logsDir;

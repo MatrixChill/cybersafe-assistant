@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useAuth } from "../contexts/AuthContext";
-import { Mail, Lock, Eye, EyeOff, Loader2, ArrowRight } from "lucide-react";
+import { Mail, Lock, Eye, EyeOff, Loader2, ArrowRight, AlertCircle } from "lucide-react";
 import { motion } from "framer-motion";
 import { BrandLogo } from "../components/BrandLogo";
 
@@ -22,7 +22,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
     setError("");
     setIsLoading(true);
 
-    const result = await login({ email, password });
+    const result = await login({ email, password, remember });
     if (!result.success) {
       setError(result.error || "Erro ao fazer login.");
     }
@@ -78,7 +78,8 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
               animate={{ opacity: 1, height: "auto" }}
               className="auth-error"
             >
-              <span>{error}</span>
+              <AlertCircle className="w-4 h-4 shrink-0 mt-[1px]" aria-hidden />
+              <span className="min-w-0">{error}</span>
             </motion.div>
           )}
 
@@ -178,7 +179,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
         className="auth-branding"
       >
         <BrandLogo size="sm" />
-        <span>Protected by CyberSafe Security</span>
+        <span>Proteção local — o estado real aparece no Painel</span>
       </motion.div>
     </div>
   );

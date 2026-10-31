@@ -1,0 +1,11 @@
+import { it } from 'node:test';
+import assert from 'node:assert/strict';
+import { ProtectionEngineService } from '../dist/engine.js';
+const previous='2026-10-16T10:00:00.000Z';
+const all={yaraUpdated:true,clamUpdated:true,hashesUpdated:true,errors:[],warnings:[],timestamp:'2026-10-18T20:00:00.000Z'};
+async function call(result,throws=false) {const events=[];const context={definitionsUpdatedAt:previous,updater:{async checkAndUpdate(force){assert.equal(force,true);if(throws)throw new Error('fixture');return result;}},eventBus:{publish(...args){events.push(args)}}};const response=await ProtectionEngineService.prototype.updateDefinitions.call(context);return {response,context,events};}
+it('falha YARA não gera sucesso global e preserva resultados/erros',async()=>{const {response,events}=await call({...all,yaraUpdated:false,errors:['YARA source:404']});assert.equal(response.success,false);assert.equal(response.yaraUpdated,false);assert.equal(response.clamUpdated,true);assert.deepEqual(response.errors,['YARA source:404']);assert.notEqual(events[0][1],'low');});
+it('nenhum motor atualizado não avança data de definições',async()=>{const {response,context}=await call({...all,yaraUpdated:false,clamUpdated:false,hashesUpdated:false,errors:['falha']});assert.equal(response.success,false);assert.equal(context.definitionsUpdatedAt,previous);assert.equal(response.updatedAt,previous);});
+it('sucesso total requer três resultados e sem avisos',async()=>{const {response,events}=await call(all);assert.equal(response.success,true);assert.equal(response.yaraUpdated,true);assert.equal(response.hashesUpdated,true);assert.deepEqual(response.warnings,[]);assert.equal(events[0][1],'low');});
+it('avisos preservados impedem sucesso sem limitações',async()=>{const {response}=await call({...all,warnings:['cobertura limitada']});assert.equal(response.success,false);assert.deepEqual(response.warnings,['cobertura limitada']);});
+it('exceção não inventa data nem perde forma do contrato',async()=>{const {response,context}=await call(null,true);assert.equal(response.success,false);assert.equal(response.yaraUpdated,false);assert.equal(response.clamUpdated,false);assert.equal(response.hashesUpdated,false);assert.ok(response.errors.length>0);assert.equal(context.definitionsUpdatedAt,previous);});

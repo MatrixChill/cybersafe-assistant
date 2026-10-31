@@ -107,7 +107,7 @@ afterEach(async () => {
 
 describe("FASE 4 — quantas invocações, e com que argumentos", () => {
   it("20 ficheiros ⇒ 1 spawn, e os 20 vão nos argumentos", async () => {
-    const fake = makeCountingSpawner();
+    const fake = makeCountingSpawner({ stdout: Array.from({ length: 20 }, (_, i) => path.join(tmp, `f${i}.txt`)).map((f) => `${f}: OK\n`).join("") + "----------- SCAN SUMMARY ----------\nKnown viruses: 1\nEngine version: 1.5.2\nScanned directories: 0\nScanned files: 20\nInfected files: 0\nTotal errors: 0\nData scanned: 0.00MiB\nTime: 0.01s\n" });
     const bridge = new ClamavBridge({
       definitionsDir: await makeFakeReadyDefinitions(tmp),
       spawn: fake.spawn,

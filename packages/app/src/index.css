@@ -19,6 +19,8 @@
   --shell-focus-w: 2px;
   --shell-focus-offset: 2px;
   --shell-nav-bar-w: 3px;
+  /* Altura da faixa de janela (Window Controls Overlay no Windows). */
+  --shell-titlebar-h: 42px;
 
   /* Superfície do sidebar: identidade que não a defina fica no card. */
   --sidebar: var(--card);
@@ -27,6 +29,11 @@
 
   /* Vinho do acento "red-wine" — o único sítio onde este tom vive. */
   --accent-wine: #a81f38;
+
+  /* Azul do acento "blue" — vivia como valor literal repetido nas regras de
+     acento; passa a ter token próprio, como o vinho, para a pré-visualização
+     das Configurações poder mostrar a cor sem copiar o valor. */
+  --accent-blue: oklch(0.55 0.18 250);
 
   /* Fontes: só famílias locais. O repo não carrega web fonts, por isso a stack
      é de sistema e os nomes preferidos ficam à frente para quem os tiver
@@ -59,12 +66,22 @@
   --nav-active-bg: var(--sidebar-active);
   --nav-active-ink: var(--foreground);
   --nav-active-bar: var(--primary);
+
+  /* Tinta da ação primária do hero. Em escuro é o próprio acento (mede
+     7,54:1 no par real); nos temas claros é escurecida — ver abaixo. */
+  --hero-cta-ink: var(--primary);
 }
 
 /* Temas claros: mesmo matiz, luminância em baixo para o texto passar AA.
    Medido contra as 8 superfícies claras dos 5 temas (card e sidebar), usando
-   sempre o pior painel. Alvo >= 4.5:1 para texto de 14px. */
+   sempre o pior painel. Alvo >= 4.5:1 para texto de 14px.
+   R6-L5 — a mesma rampa re-medida contra o CHIP (painel + 15% da lavagem do
+   estado, que é onde o texto é davvero pintado) e contra os três materiais:
+     proc 4,52   warn 4,70   crit 4,75   ok 5,34   na 7,33
+   Continua acima de 4,5:1, com o ciano a 0,02 de margem — é esse o número a
+   vigiar se algum dia o painel claro subir de luminância. */
 :root:not(.dark) {
+  color-scheme: light;
   --cyber-cyan-text: #0e6f68;    /* 4.75 */
   --cyber-green-text: #166534;   /* 5.63 */
   --cyber-yellow-text: #9a4a06;  /* 4.94 */
@@ -77,10 +94,339 @@
      qualquer acento escolhido e fica >= 4.3:1 nos 10 acentos claros medidos
      (o pior caso era --primary de core light a 2.76). */
   --nav-active-bar: color-mix(in srgb, var(--primary) 72%, #000);
+
+  /* Ação primária do hero: a tinta do acento sobre a própria lavagem a 15%
+     media 2,24:1 (TP-V2-CONTRAST, medido por CDP). Escurece o acento no mesmo
+     princípio da barra do item ativo, preservando o matiz e sem hex novo. */
+  --hero-cta-ink: color-mix(in srgb, var(--primary) 58%, #000);
 }
 
 .dark {
+  color-scheme: dark;
   --accent-wine: #c8324a;
+  --accent-blue: oklch(0.7 0.18 250);
+
+  /* VARIANTE DE TEXTO DO MODO ESCURO — medida, não presumida.
+     A ronda 6-L1 deixou `--cyber-*-text` = cor de marca em escuro com a
+     justificação de que «em escuro a cor de marca já é clara». Não era: com a
+     lavagem do chip por baixo (15% da mesma cor, que sobe a luminância do
+     painel), as tintas de estado ficavam entre 2,95:1 e 4,49:1 — abaixo do
+     AA de 4,5:1 para o texto de 12px das etiquetas. A razão calcula-se em
+     test/r6-l5-state-contrast.test.ts, que resolve esta folha (5 temas ×
+     2 modos × 3 materiais × 5 estados = 150 combinações) e falha abaixo de
+     4,5:1. Piores casos medidos desta rampa, já com a lavagem por baixo:
+       crit 5,99   na 5,72   ok 6,82   proc 6,83   warn 6,90
+     É a mesma técnica da rampa clara acima: uma rampa única do produto, igual
+     nos cinco temas, no matiz das semânticas fixas. O que fica no tema é o
+     cheio — preenchimentos, arestas e glow continuam em --cyber-*. */
+  --cyber-cyan-text: #6fe3d6;
+  --cyber-green-text: #7ce4a2;
+  --cyber-yellow-text: #ffd073;
+  --cyber-red-text: #ff938b;
+  --cyber-pink-text: #ff9dc4;
+  --cyber-purple-text: #b9b2ff;
+  --cyber-magenta-text: #ff9ac6;
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   TOKENS PARTILHADOS DE PRODUTO
+   ═══════════════════════════════════════════════════════════════
+   A escada de superfícies, os estados de segurança, o texto e o ritmo
+   que as páginas lêem. Tudo derivado dos tokens por tema, por isso um
+   tema novo não repete nada: herda a escada inteira.
+
+   Nada disto é cor inventada. O que existe aqui é a COMBINAÇÃO das
+   três coisas que cada página estava a escrever à mão (tinta, tinte e
+   aresta do mesmo estado), e a passagem do `--card` do tema para as
+   duas réguas que faltavam: acima (elevada) e abaixo (rebaixada). */
+:root {
+  /* Escada de superfícies. Em claro, a elevação não se faz com tinta —
+     faz-se com sombra; o degrado visível em claro é o INSET, que puxa
+     ao texto. Em escuro é ao contrário: o cartão sobe para o foreground
+     e o inset desce para o background. */
+  --surface-page: var(--background);
+  --surface-card: var(--card);
+  --surface-raised: var(--card);
+  --surface-inset: color-mix(in oklch, var(--card) 92%, var(--foreground));
+  --surface-translucent: color-mix(in oklch, var(--card) 80%, transparent);
+
+  /* Arestas: uma para estrutura, uma para o que pede atenção. */
+  --edge-neutral: var(--border);
+  --edge-strong: color-mix(in oklch, var(--primary) 34%, var(--border));
+
+  /* Cinco estados de segurança, sem azul: o que está a decorrer é ciano
+     (a cor do produto para procedimento), o que não foi medido é neutro.
+     O texto nunca é a cor de marca crua nos temas claros — vem da
+     variante `-text`, que foi medida para AA; o tinte e a aresta é que
+     usam a cor cheia, porque são preenchimento, não leitura. */
+  --state-ok-ink: var(--cyber-green-text);
+  --state-ok-tint: color-mix(in oklch, var(--cyber-green) 15%, transparent);
+  --state-ok-edge: color-mix(in oklch, var(--cyber-green) 46%, transparent);
+  --state-warn-ink: var(--cyber-yellow-text);
+  --state-warn-tint: color-mix(in oklch, var(--cyber-yellow) 15%, transparent);
+  --state-warn-edge: color-mix(in oklch, var(--cyber-yellow) 46%, transparent);
+  --state-crit-ink: var(--cyber-red-text);
+  --state-crit-tint: color-mix(in oklch, var(--cyber-red) 15%, transparent);
+  --state-crit-edge: color-mix(in oklch, var(--cyber-red) 52%, transparent);
+  --state-proc-ink: var(--cyber-cyan-text);
+  --state-proc-tint: color-mix(in oklch, var(--cyber-cyan) 15%, transparent);
+  --state-proc-edge: color-mix(in oklch, var(--cyber-cyan) 46%, transparent);
+  /* Neutro = «ainda não sei». A tinta puxa ao foreground do tema porque o
+     --muted-foreground cru foi medido entre 4,31 e 4,39 sobre duas superfícies
+     — abaixo do alvo de 4,5. Nota de honestidade: a ronda 6-L1 justificou isto
+     como «misturar para o foreground só pode subir o contraste», e isso era
+     INFERÊNCIA, não medição; o contraste depende do FUNDO, e o fundo do chip é
+     a lavagem do próprio estado. A rampa está agora a calcular no teste
+     r6-l5-state-contrast.test.ts (150 combinações). */
+  --state-na-ink: color-mix(in oklch, var(--muted-foreground) 55%, var(--foreground));
+  --state-na-tint: color-mix(in oklch, var(--foreground) 7%, transparent);
+  --state-na-edge: color-mix(in oklch, var(--foreground) 18%, transparent);
+
+  /* Texto — três tamanhos de leitura e as duas entrelinhas que o
+     produto usa. O corpo de cartão é 14px: a 12px que estava a ser
+     usada como corpo media 4,5:1 por um triso e partia a leitura. */
+  --text-lead: 0.9375rem;
+  --text-body: 0.875rem;
+  --text-micro: 0.75rem;
+  --leading-body: 1.55;
+  --leading-tight: 1.3;
+  --text-secondary: var(--muted-foreground);
+
+  /* Ritmo — as magnitudes que as páginas já pisavam (4/8/12/16/20/24 px),
+     postas uma vez em vez de repetidas em classe. A escala de espaçamento
+     era o item marcado TBD no sistema de design; isto é a proposta, não
+     uma escala nova. */
+  --space-1: 0.25rem;
+  --space-2: 0.5rem;
+  --space-3: 0.75rem;
+  --space-4: 1rem;
+  --space-5: 1.25rem;
+  --space-6: 1.5rem;
+  --card-pad: var(--space-4);
+  --row-pad-x: var(--space-3);
+  --row-pad-y: 0.6875rem;
+
+  /* Hover partilhado: tinta do tema a 6%, não preto nem branco a granel. */
+  --hover-tint: color-mix(in oklch, var(--foreground) 6%, transparent);
+}
+
+.dark {
+  --surface-raised: color-mix(in oklch, var(--card) 86%, var(--foreground));
+  --surface-inset: color-mix(in oklch, var(--card) 84%, var(--background));
+  --surface-translucent: color-mix(in oklch, var(--card) 74%, transparent);
+
+  /* A lavagem do chip desce de 15% para 8% em escuro. Não é gosto: 15% de uma
+     cor clara sobre um painel a 0,02-0,04 de luminância sobe o FUNDO do chip
+     para ~0,10, e contra esse fundo nenhuma tinta de texto se lê a 12px. Com
+     8% o tom continua identificável e o texto das etiquetas passa os 4,5:1 com
+     a rampa acima. Em claro mantém-se os 15% — lá a lavagem ESCURECE o painel
+     e ajuda o texto escuro. */
+  --state-ok-tint: color-mix(in oklch, var(--cyber-green) 8%, transparent);
+  --state-warn-tint: color-mix(in oklch, var(--cyber-yellow) 8%, transparent);
+  --state-crit-tint: color-mix(in oklch, var(--cyber-red) 8%, transparent);
+  --state-proc-tint: color-mix(in oklch, var(--cyber-cyan) 8%, transparent);
+  --state-na-tint: color-mix(in oklch, var(--foreground) 4%, transparent);
+  --state-na-edge: color-mix(in oklch, var(--foreground) 14%, transparent);
+}
+
+/* ═══════════════════════════════════════════════════════════════
+   PRIMITIVAS DE PRODUTO — chips, mosaicos, listas e rótulos
+   ═══════════════════════════════════════════════════════════════
+   Nasceram do rework visual da Otimizar, mas não são da Otimizar:
+   são o vocabulário que faltava ao `stat-card` / `cyber-border` para
+   uma página conseguir dizer estado sem inventar três classes de cada
+   vez. Uma página que os use passa a ler os tokens acima. */
+
+/* Rótulo de grupo: hierarquia por corpo e espaçoado, não por cor. */
+.eyebrow-label {
+  font-size: 0.6875rem;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  font-weight: 600;
+  line-height: 1.2;
+  color: var(--state-na-ink);
+}
+
+/* Chip de estado — FORMA + texto + cor, nunca só cor. O ponto à esquerda
+   distingue medido de por medir: cheio para o que aconteceu, argola
+   vazia para o que ainda não foi visto. */
+.state-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.375rem;
+  min-height: 26px;
+  padding: 0 0.625rem 0 0.5rem;
+  border-radius: 999px;
+  border: 1px solid var(--state-na-edge);
+  background: var(--state-na-tint);
+  color: var(--state-na-ink);
+  font-size: var(--text-micro);
+  font-weight: 600;
+  line-height: 1.2;
+  white-space: nowrap;
+}
+.state-chip::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: currentColor;
+  flex: none;
+}
+.state-chip--ok { color: var(--state-ok-ink); background: var(--state-ok-tint); border-color: var(--state-ok-edge); }
+.state-chip--warn { color: var(--state-warn-ink); background: var(--state-warn-tint); border-color: var(--state-warn-edge); }
+.state-chip--crit { color: var(--state-crit-ink); background: var(--state-crit-tint); border-color: var(--state-crit-edge); }
+.state-chip--proc { color: var(--state-proc-ink); background: var(--state-proc-tint); border-color: var(--state-proc-edge); }
+/* «Por medir» lê-se como argola, não como ponto: o vazio é a mensagem. */
+.state-chip--na::before {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px currentColor;
+}
+
+/* Mosaico de ícone — a alavanca que quebra a repetição de cartões
+   idênticos, com a tinta do estado em vez de uma borda colorida. */
+.icon-tile {
+  width: 2.25rem;
+  height: 2.25rem;
+  border-radius: 0.75rem;
+  display: grid;
+  place-items: center;
+  flex: none;
+  border: 1px solid var(--state-na-edge);
+  background: var(--state-na-tint);
+  color: var(--state-na-ink);
+}
+.icon-tile--ok { color: var(--state-ok-ink); background: var(--state-ok-tint); border-color: var(--state-ok-edge); }
+.icon-tile--warn { color: var(--state-warn-ink); background: var(--state-warn-tint); border-color: var(--state-warn-edge); }
+.icon-tile--crit { color: var(--state-crit-ink); background: var(--state-crit-tint); border-color: var(--state-crit-edge); }
+.icon-tile--proc { color: var(--state-proc-ink); background: var(--state-proc-tint); border-color: var(--state-proc-edge); }
+
+/* Identidade de SECCAO — eixo deliberadamente SEPARADO do tom de estado. A tinta
+   do mosaico diz NATUREZA da linha (o que ela faz); o que está MEDIDO continua a
+   viver no chip, à direita. Estas variantes existem porque uma página onde cada
+   linha pendente é cinzenta lê-se como uma tabela morta — e porque a cor pedida
+   não é uma classificação: `sec-manual` fica discreto de propósito, marcar uma
+   linha à mão não é um resultado. A lavagem fica-se pelos 12%: os 8%/15% das
+   primitivas de estado são um contrato de contraste MEDIDO (ver comentário em
+   `--state-*-tint`), não gosto — o que sobe aqui é a aresta e a tinta do ícone,
+   nunca o fundo onde o texto assenta. */
+.icon-tile--sec-check {
+  color: var(--cyber-cyan-text);
+  background: color-mix(in oklch, var(--cyber-cyan) 12%, transparent);
+  border-color: color-mix(in oklch, var(--cyber-cyan) 42%, transparent);
+}
+.icon-tile--sec-maint {
+  color: var(--cyber-yellow-text);
+  background: color-mix(in oklch, var(--cyber-yellow) 12%, transparent);
+  border-color: color-mix(in oklch, var(--cyber-yellow) 42%, transparent);
+}
+.icon-tile--sec-manual {
+  color: color-mix(in oklch, var(--muted-foreground) 40%, var(--foreground));
+  background: color-mix(in oklch, var(--foreground) 5%, transparent);
+  border-color: color-mix(in oklch, var(--foreground) 20%, transparent);
+}
+
+/* Ponto de secção: o mínimo que responde «onde estou» sem títulos coloridos. */
+.sec-dot {
+  width: 7px;
+  height: 7px;
+  border-radius: 999px;
+  flex: none;
+  display: inline-block;
+}
+.sec-dot--verificacoes {
+  background: var(--cyber-cyan);
+  box-shadow: 0 0 6px color-mix(in oklch, var(--cyber-cyan) 45%, transparent);
+}
+.sec-dot--manutencao {
+  background: var(--cyber-yellow);
+  box-shadow: 0 0 6px color-mix(in oklch, var(--cyber-yellow) 40%, transparent);
+}
+.sec-dot--manuais {
+  background: transparent;
+  box-shadow: inset 0 0 0 1px color-mix(in oklch, var(--muted-foreground) 75%, transparent);
+}
+
+/* Lista de linhas — o substituto do «dez caixas iguais». O separador é
+   uma aresta; a estrutura pesada fica no contentor, uma vez só. */
+.row-list {
+  display: flex;
+  flex-direction: column;
+}
+.row-item {
+  display: grid;
+  grid-template-columns: 2.25rem minmax(0, 1fr) auto;
+  gap: var(--space-3);
+  align-items: start;
+  padding: var(--row-pad-y) var(--row-pad-x);
+  border-top: 1px solid var(--edge-neutral);
+  transition: background-color 0.2s ease;
+}
+.row-item:first-child { border-top: 0; }
+.row-item:hover { background: var(--hover-tint); }
+/* Em estreito a ação desce para a sua própria linha — nunca corta. */
+@media (max-width: 720px) {
+  .row-item { grid-template-columns: 2.25rem minmax(0, 1fr); }
+  .row-item > .row-act { grid-column: 1 / -1; justify-self: start; }
+}
+
+.row-title {
+  font-size: var(--text-body);
+  font-weight: 600;
+  line-height: var(--leading-tight);
+  color: var(--foreground);
+}
+.row-note {
+  font-size: var(--text-body);
+  line-height: var(--leading-body);
+  color: var(--text-secondary);
+}
+.row-meta {
+  font-size: var(--text-micro);
+  line-height: var(--leading-body);
+  color: var(--text-secondary);
+  font-variant-numeric: tabular-nums;
+}
+
+/* Linha de evidência — o degrau REBAIXADO da escada: o que foi medido
+   fica visível, mas atrás da superfície do cartão, nunca à frente. */
+.evidence-line {
+  font-size: var(--text-micro);
+  line-height: var(--leading-body);
+  color: var(--foreground);
+  background: var(--surface-inset);
+  border: 1px solid var(--edge-neutral);
+  border-radius: 0.5rem;
+  padding: 0.375rem 0.5rem;
+  overflow-wrap: anywhere;
+}
+
+/* Painel translúcido — o acabamento que a Otimizar pedia ao aviso de
+   confirmação, com a alpha medida do vidro (74% escuro / 80% claro). */
+.panel-translucent {
+  background: var(--surface-translucent);
+  border: 1px solid var(--edge-neutral);
+  border-radius: var(--shell-radius-card);
+  padding: var(--card-pad);
+}
+
+/* Casca de PÁGINA — o ritmo que separa uma página da outra. Existia em
+   literal por página, e foram-me três: o Painel é `p-4 lg:p-6` com 16 px entre
+   blocos, a Otimizar era `p-5 lg:p-8` com 24 px, e as Configurações `p-6 lg:p-8`
+   com 24 px. A mesma app a ler-se como três páginas feitas por três mãos.
+   A régua é a do Painel, porque é a página que se abre primeiro e a que a
+   apresentação mostra. Quem mudar o ritmo muda aqui, uma vez. */
+.page-shell {
+  padding: var(--space-4);
+  display: flex;
+  flex-direction: column;
+  gap: var(--space-4);
+}
+@media (min-width: 1024px) {
+  .page-shell {
+    padding: var(--space-6);
+    gap: var(--space-5);
+  }
 }
 
 /* Light — CyberSafe Neon */
@@ -169,11 +515,6 @@
 }
 
 /* Core Dark component styles */
-[data-theme="cybersafe-core"].dark .sidebar {
-  background: var(--sidebar);
-  backdrop-filter: blur(24px) saturate(140%);
-  border-right-color: var(--sidebar-border);
-}
 [data-theme="cybersafe-core"].dark .stat-card,
 [data-theme="cybersafe-core"].dark .cyber-border {
   background: var(--card);
@@ -197,7 +538,9 @@
   --secondary: rgba(16, 75, 92, 0.08);
   --secondary-foreground: #102b39;
   --muted: rgba(16, 75, 92, 0.08);
-  --muted-foreground: #52707b;
+  /* 4,39:1 sobre o painel sólido (#dfecef) — abaixo do AA dos 14px de
+     corpo. Escurecido até 4,66:1 medido; ver r6-l5-state-contrast.test.ts. */
+  --muted-foreground: #4a646d;
   --accent: rgba(15, 164, 149, 0.1);
   --accent-foreground: #0fa495;
   --destructive: #dc2626;
@@ -224,11 +567,6 @@
 }
 
 /* Core Light component styles */
-[data-theme="cybersafe-core"]:not(.dark) .sidebar {
-  background: var(--sidebar);
-  backdrop-filter: blur(24px) saturate(140%);
-  border-right-color: var(--sidebar-border);
-}
 [data-theme="cybersafe-core"]:not(.dark) .stat-card,
 [data-theme="cybersafe-core"]:not(.dark) .cyber-border {
   background: var(--card);
@@ -404,7 +742,7 @@
 [data-theme="cybersafe-liquid"]:not(.dark) {
   --background: oklch(0.97 0.008 220);
   --foreground: oklch(0.12 0.015 240);
-  --card: oklch(1 0 0 / 0.65);
+  --card: oklch(1 0 0 / 0.75);
   --card-foreground: oklch(0.12 0.015 240);
   --popover: oklch(1 0 0 / 0.8);
   --popover-foreground: oklch(0.12 0.015 240);
@@ -451,7 +789,7 @@
 [data-theme="cybersafe-liquid"].dark {
   --background: oklch(0.1 0.015 240);
   --foreground: oklch(0.92 0.01 220);
-  --card: oklch(0.15 0.02 240 / 0.65);
+  --card: oklch(0.15 0.02 240 / 0.72);
   --card-foreground: oklch(0.92 0.01 220);
   --popover: oklch(0.12 0.02 240 / 0.8);
   --popover-foreground: oklch(0.92 0.01 220);
@@ -496,47 +834,151 @@
   --cyber-glow: oklch(0.7 0.15 190);
 }
 
-/* Liquid glass effects */
+/* ═══ EIXO DE SUPERFÍCIE ════════════════════════════════════════════════════════
+   Segundo eixo, ortogonal à identidade e ao modo claro/escuro: o acabamento
+   das superfícies elevadas. Um painel pode ter o SEU material sem importar o
+   tema da página — o `data-material` é o que escolhe, e o valor por omissão
+   é solid.
+
+   Estados do eixo:
+     solid    → preenchimento opaco do tema, sem desfoque, sem transparência.
+     reduced  → translúcido, sem desfoque (o fundo passa, mas não é amostrado).
+     glass    → translúcido + backdrop-filter (vidro, custo mais alto).
+     liquid   → alias de glass: o produto chama o eixo de vidro "liquido" em
+                alguns contextos; no CSS o token é o mesmo.
+     showcase → plano de experimentação/L3: iluminação controlada/halflight na
+                superfície, nunca blur de refração. Opt-in, nunca aplicado pela
+                preferência guardada.
+
+   O CSS abaixo não força nada na app inteira: se um elemento não tem
+   `data-material`, fica com o comportamento do seu tema (o que já existe).
+   Por isso o hero-banner pode ser "reduced", um card qualquer pode ser o padrão,
+   e a Settings pode premir os três ao lado sem mentir. ═══ */
+
+/* Valor por omissão do eixo. Se um elemento tem data-material mas não tem o
+   bloco específico, fica opaco do tema — nunca translúcido por padrão. */
+[data-material="solid"] {
+  background-color: var(--surface-card);
+  background-image: none;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+[data-theme="cybersafe-liquid"][data-material="solid"] {
+  background-color: color-mix(in oklch, var(--card) 92%, var(--background));
+}
+[data-theme="cybersafe-liquid"][data-material="solid"].dark {
+  background-color: color-mix(in oklch, var(--card) 92%, var(--background));
+}
+
+/* Reduced: translúcido, sem desfoque. O fundo passa, não é amostrado. */
+[data-material="reduced"] {
+  background: var(--surface-translucent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: var(--edge-neutral);
+}
+
+/* Glass/liquid: translúcido + desfoque. Custo maior; o escolhe quem tem o
+   componente/tema que pede.
+   O desfoque lê `var(--surface-filter)` do eixo global: acompanha a
+   preferência (16 px normal, 8 px com movimento reduzido, `none` fora do
+   vidro) em vez de fixar um literal próprio, que ignorava o travão de
+   movimento reduzido.
+   NOTA HONESTA: isto é vidro (desfoque do fundo), não refração. Não distorce
+   o fundo atrás da superfície — para isso precisava de um canvas/webgl com o
+   fundo desenhado lá, o que a app não faz. */
+[data-material="glass"],
+[data-material="liquid"] {
+  background: var(--surface-translucent);
+  backdrop-filter: var(--surface-filter);
+  -webkit-backdrop-filter: var(--surface-filter);
+  border-color: var(--edge-neutral);
+  box-shadow:
+    0 1px 0 color-mix(in oklch, oklch(1 0 0) 22%, transparent),
+    0 10px 30px -14px color-mix(in oklch, var(--foreground) 14%, transparent);
+}
+
+/* Showcase/L3: opt-in, sem blur de refração. Só iluminação/halflight controlada,
+   se usada. Nunca é aplicado automaticamente pela preferência guardada. */
+[data-material="showcase"] {
+  background: var(--surface-translucent);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+  border-color: var(--edge-neutral);
+}
+
+/* Quando pausado ( fora viewport / escondido ), o eixo não força nenhum efeito
+   custoso: o elemento fica com o preenchimento base do seu material, sem
+   backdrop-filter ativo. */
+[data-pause-visual=""] {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* Liquid glass effects — MEDIDO: com 0.02-0.06 de branco sobre um fundo
+   0.10, as superfícies eram indistinguíveis umas das outras ("demasiado
+   acinzentado"). O glass precisa de (1) preenchimento com TINTA do tema, não
+   branco neutro, (2) borda que separa, (3) sombra que dá profundidade e
+   (4) um highlight interior que diz "isto é vidro". Os números abaixo são
+   escolhido para manter AA: os textos continuam em --foreground/--muted. */
 [data-theme="cybersafe-liquid"] .cyber-border {
-  border: 1px solid oklch(1 0 0 / 0.2);
-  background: linear-gradient(135deg,
-    oklch(1 0 0 / 0.3) 0%,
-    oklch(1 0 0 / 0.1) 100%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid color-mix(in oklch, var(--foreground) 16%, transparent);
+  background: linear-gradient(140deg,
+    oklch(1 0 0 / 0.9) 0%,
+    color-mix(in oklch, var(--primary) 6%, oklch(1 0 0 / 0.72)) 100%);
+  /* Sem backdrop-filter: .cyber-border vive em dezenas de instancias por
+     pagina; cada blur amostrava os orbs fixos por baixo e multiplicava o
+     custo do compositor. O fill translucido + tinta do tema ja da o aspeto de
+     vidro sobre o gradiente macio do fundo, com melhor contraste. */
+  box-shadow:
+    0 8px 24px -12px oklch(0.25 0.02 240 / 0.25),
+    inset 0 1px 0 oklch(1 0 0 / 0.6);
 }
 
 [data-theme="cybersafe-liquid"].dark .cyber-border {
-  border: 1px solid oklch(0.5 0.05 220 / 0.15);
-  background: linear-gradient(135deg,
-    oklch(1 0 0 / 0.06) 0%,
-    oklch(1 0 0 / 0.02) 100%);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
+  border: 1px solid color-mix(in oklch, var(--primary) 22%, transparent);
+  background: linear-gradient(140deg,
+    color-mix(in oklch, var(--primary) 8%, oklch(0.19 0.025 240 / 0.78)) 0%,
+    oklch(0.13 0.02 240 / 0.72) 100%);
+  box-shadow:
+    0 12px 32px -14px oklch(0 0 0 / 0.5),
+    inset 0 1px 0 oklch(1 0 0 / 0.14);
 }
 
 [data-theme="cybersafe-liquid"] .stat-card {
-  border: 1px solid oklch(1 0 0 / 0.15);
-  background: oklch(1 0 0 / 0.25);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid color-mix(in oklch, var(--foreground) 14%, transparent);
+  background: linear-gradient(150deg,
+    oklch(1 0 0 / 0.92) 0%,
+    color-mix(in oklch, var(--cyber-cyan) 5%, oklch(1 0 0 / 0.74)) 100%);
+  /* Ver nota em .cyber-border: sem backdrop-filter nos cartoes repetidos; o
+     fill mais opaco separa as superficies e sobe o contraste do --foreground. */
+  box-shadow:
+    0 6px 20px -10px oklch(0.25 0.02 240 / 0.22),
+    inset 0 1px 0 oklch(1 0 0 / 0.65);
 }
 
 [data-theme="cybersafe-liquid"].dark .stat-card {
-  border: 1px solid oklch(0.5 0.05 220 / 0.1);
-  background: oklch(1 0 0 / 0.04);
-  backdrop-filter: blur(8px);
-  -webkit-backdrop-filter: blur(8px);
+  border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
+  background: linear-gradient(150deg,
+    color-mix(in oklch, var(--primary) 7%, oklch(0.18 0.024 240 / 0.8)) 0%,
+    oklch(0.13 0.02 240 / 0.72) 100%);
+  box-shadow:
+    0 10px 28px -12px oklch(0 0 0 / 0.45),
+    inset 0 1px 0 oklch(1 0 0 / 0.12);
 }
 
 [data-theme="cybersafe-liquid"] .stat-card:hover {
-  border-color: oklch(0.55 0.16 190 / 0.3);
-  background: oklch(1 0 0 / 0.35);
+  border-color: color-mix(in oklch, var(--primary) 45%, transparent);
+  background: linear-gradient(150deg,
+    oklch(1 0 0 / 0.85) 0%,
+    color-mix(in oklch, var(--primary) 8%, oklch(1 0 0 / 0.68)) 100%);
 }
 
 [data-theme="cybersafe-liquid"].dark .stat-card:hover {
-  border-color: oklch(0.7 0.15 190 / 0.2);
-  background: oklch(1 0 0 / 0.06);
+  border-color: color-mix(in oklch, var(--primary) 38%, transparent);
+  background: linear-gradient(150deg,
+    color-mix(in oklch, var(--primary) 10%, oklch(0.2 0.026 240 / 0.66)) 0%,
+    oklch(0.14 0.022 240 / 0.6) 100%);
 }
 
 [data-theme="cybersafe-liquid"] .auth-page {
@@ -557,66 +999,66 @@
   background: linear-gradient(135deg,
     oklch(1 0 0 / 0.15) 0%,
     oklch(0.95 0.02 190 / 0.1) 100%);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
 }
 
 [data-theme="cybersafe-liquid"].dark .hero-banner {
   background: linear-gradient(135deg,
     oklch(1 0 0 / 0.04) 0%,
     oklch(0.55 0.16 190 / 0.03) 100%);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
 }
 
-@media (prefers-reduced-motion: reduce) {
-  [data-theme="cybersafe-liquid"] * {
-    backdrop-filter: blur(4px) !important;
-    -webkit-backdrop-filter: blur(4px) !important;
-  }
-}
+/* REDUCED MOTION no Liquid: o bloco anterior fazia
+   [data-theme="cybersafe-liquid"] * { backdrop-filter: blur(4px) !important }
+   — forçava um passe de backdrop-filter a CADA elemento do ecrane em maquinas
+   com reduced-motion ligado (default em RDP/VMs e em varias config. Windows),
+   o que multiplicava os passes do compositor e congelava. Reduced motion deve
+   ALIGERAR o custo, nao aumenta-lo; as animacoes ja sao tratadas no @media no
+   fim desta folha. Por isso aqui NAO se reinsere nenhum blur universal. */
+
+/* ═══ FIM DO EIXO DE SUPERFÍCIE ════════════════════════════════════════════════ */
 
 /* ═══════════════════════════════════════════════════════════════
-   RED BELBETE — Premim vermelho escuro
-   Red velvet / vinho / borgonha / cereja escura / preto
-   Elegante e maduro — NUNCA gaming nem "alerta permanente".
-   As cores semânticas (green/yellow/red/blue) mantêm-se independentes.
+   BELBETE — RED VELVET (P2, 22/10)
+   Idealizado a partir do bolo: veludo vermelho, bordô profundo, cacau,
+   creme/marfim e rosé. Camadas e profundidade, nunca preto com risca vermelha.
+   As cores semânticas (green/yellow/red/blue) mantêm-se independentes e
+   iguais às dos restantes temas; só a identidade muda.
    ═══════════════════════════════════════════════════════════════ */
 
-/* Dark — Red Belbete */
+/* Dark — superfícies bordô/cacau, tinta creme, detalhes de veludo */
 [data-theme="cybersafe-red-belbete"].dark {
-  --background: #0b0708;
-  --foreground: #f7edef;
-  --card: rgba(20, 10, 13, 0.72);
-  --card-foreground: #f7edef;
-  --popover: rgba(27, 13, 18, 0.9);
-  --popover-foreground: #f7edef;
-  --primary: #c8324a;
-  --primary-foreground: #f9eef0;
-  --secondary: rgba(224, 74, 98, 0.12);
-  --secondary-foreground: #f7edef;
-  --muted: rgba(224, 74, 98, 0.1);
-  --muted-foreground: #b99da3;
-  --accent: rgba(200, 50, 74, 0.18);
-  --accent-foreground: #e04a62;
+  --background: #170d10;
+  --foreground: #f5e9dd;
+  --card: rgba(67, 24, 34, 0.74);
+  --card-foreground: #f5e9dd;
+  --popover: rgba(52, 19, 27, 0.94);
+  --popover-foreground: #f5e9dd;
+  --primary: #c55d72;
+  --primary-foreground: #210b11;
+  --secondary: rgba(197, 93, 114, 0.16);
+  --secondary-foreground: #f5e9dd;
+  --muted: rgba(197, 93, 114, 0.12);
+  --muted-foreground: #d8a5a5;
+  --accent: rgba(197, 93, 114, 0.22);
+  --accent-foreground: #f0c6cd;
   --destructive: #ff5454;
   --destructive-foreground: #fff;
-  --border: rgba(224, 74, 98, 0.18);
-  --input: rgba(224, 74, 98, 0.18);
-  --ring: #c8324a;
+  --border: rgba(197, 93, 114, 0.24);
+  --input: rgba(197, 93, 114, 0.24);
+  --ring: #c55d72;
   --radius: 0.75rem;
 
-  --sidebar: rgba(11, 7, 8, 0.66);
-  --sidebar-border: rgba(224, 74, 98, 0.16);
-  --sidebar-active: rgba(200, 50, 74, 0.14);
-  --sidebar-foreground: #f7edef;
-  --sidebar-primary: #c8324a;
-  --sidebar-primary-foreground: #f9eef0;
-  --sidebar-accent: rgba(200, 50, 74, 0.12);
-  --sidebar-accent-foreground: #e04a62;
-  --sidebar-ring: #c8324a;
+  --sidebar: rgba(67, 24, 34, 0.58);
+  --sidebar-border: rgba(197, 93, 114, 0.2);
+  --sidebar-active: rgba(146, 44, 66, 0.26);
+  --sidebar-foreground: #f5e9dd;
+  --sidebar-primary: #c55d72;
+  --sidebar-primary-foreground: #210b11;
+  --sidebar-accent: rgba(146, 44, 66, 0.2);
+  --sidebar-accent-foreground: #f0c6cd;
+  --sidebar-ring: #c55d72;
 
-  /* Semânticas independentes — identidade ≠ perigo */
+  /* Semânticas independentes — identidade ≠ perigo (iguais aos outros temas) */
   --cyber-cyan: #4dc9d8;
   --cyber-green: #4ecb83;
   --cyber-red: #ff5454;
@@ -624,31 +1066,26 @@
   --cyber-purple: #b49bff;
   --cyber-pink: #ff7ab0;
   --cyber-magenta: #ff5aa0;
-  --cyber-glow: rgba(200, 50, 74, 0.16);
+  --cyber-glow: rgba(197, 93, 114, 0.18);
 
-  --deep-wine: #6f1728;
-  --burgundy: #3b0d17;
-  --ruby: #e04a62;
+  /* Camadas de veludo: bordô profundo → vinho → cacau */
+  --deep-wine: #6b2030;
+  --burgundy: #431822;
+  --ruby: #c55d72;
 
   font-family: var(--font-inter);
 
   background:
-    radial-gradient(circle at 15% 0%, var(--burgundy), transparent 40%),
-    radial-gradient(circle at 85% 100%, var(--deep-wine), transparent 45%),
-    var(--background);
+    radial-gradient(circle at 14% 0%, rgba(146, 44, 66, 0.42), transparent 42%),
+    radial-gradient(circle at 86% 100%, rgba(88, 44, 34, 0.38), transparent 48%),
+    linear-gradient(160deg, #1d1014 0%, var(--background) 58%, #120a0c 100%);
   color: var(--foreground);
 }
 
-[data-theme="cybersafe-red-belbete"].dark .sidebar {
-  background: linear-gradient(180deg, rgba(11, 7, 8, 0.72), var(--burgundy));
-  backdrop-filter: blur(24px) saturate(140%);
-  border-right-color: var(--sidebar-border);
-}
-
 [data-theme="cybersafe-red-belbete"].dark .nav-item.active {
-  background: linear-gradient(90deg, rgba(200, 50, 74, 0.18), transparent);
-  /* Sem color: ruby — como texto de 14px são 3.83:1 sobre o painel. A barra
-     e o wash carregam o vinho; a etiqueta fica na tinta do tema. */
+  background: linear-gradient(90deg, rgba(197, 93, 114, 0.2), transparent);
+  /* Sem color: rosé — como texto de 14px fica abaixo de AA sobre o painel.
+     A barra e a lavagem carregam o veludo; a etiqueta fica na tinta do tema. */
   box-shadow: inset var(--shell-nav-bar-w) 0 var(--nav-active-bar);
 }
 
@@ -657,64 +1094,67 @@
   background: var(--card);
   border-color: var(--border);
   border-radius: var(--shell-radius-card);
+  box-shadow: 0 1px 0 rgba(245, 233, 221, 0.04) inset;
 }
 
 [data-theme="cybersafe-red-belbete"].dark .hero-banner {
-  background: linear-gradient(135deg,
-    rgba(11, 7, 8, 0.6) 0%,
-    var(--burgundy) 50%,
-    var(--deep-wine) 100%);
+  background:
+    radial-gradient(120% 150% at 8% 0%, rgba(197, 93, 114, 0.24), transparent 52%),
+    linear-gradient(135deg,
+      rgba(23, 13, 16, 0.62) 0%,
+      var(--burgundy) 52%,
+      var(--deep-wine) 100%);
 }
 
 [data-theme="cybersafe-red-belbete"].dark .auth-page {
   background: linear-gradient(135deg,
-    #0b0708 0%,
-    var(--burgundy) 50%,
-    var(--deep-wine) 100%);
+    #170d10 0%,
+    var(--burgundy) 52%,
+    #2a1218 100%);
 }
 
-/* Aura Matrix — edge-light vinho subtil à volta do container (sem tocar na imagem) */
+/* Aura Matrix — edge-light de veludo à volta do container (sem tocar na imagem) */
 [data-theme="cybersafe-red-belbete"].dark .matrix-container,
 [data-theme="cybersafe-red-belbete"].dark .ai-assistant-container {
   box-shadow:
-    0 0 24px rgba(200, 50, 74, 0.12),
-    0 0 60px rgba(224, 74, 98, 0.08),
-    inset 0 0 30px rgba(200, 50, 74, 0.05);
-  border-color: rgba(224, 74, 98, 0.25);
+    0 0 24px rgba(197, 93, 114, 0.14),
+    0 0 60px rgba(146, 44, 66, 0.1),
+    inset 0 0 30px rgba(197, 93, 114, 0.06);
+  border-color: rgba(197, 93, 114, 0.28);
 }
 
-/* Light — Red Belbete */
+/* Light — creme/marfim, cartões claros e detalhes Red Velvet */
 [data-theme="cybersafe-red-belbete"]:not(.dark) {
-  --background: #faf3f5;
-  --foreground: #3d1218;
-  --card: rgba(255, 255, 255, 0.62);
-  --card-foreground: #3d1218;
-  --popover: rgba(255, 255, 255, 0.85);
-  --popover-foreground: #3d1218;
-  --primary: #a81f38;
-  --primary-foreground: #fff;
-  --secondary: rgba(168, 31, 56, 0.08);
-  --secondary-foreground: #3d1218;
-  --muted: rgba(168, 31, 56, 0.08);
-  --muted-foreground: #8a5a63;
-  --accent: rgba(168, 31, 56, 0.1);
-  --accent-foreground: #a81f38;
+  --background: #f5e9dd;
+  --foreground: #3a141b;
+  --card: rgba(255, 252, 248, 0.72);
+  --card-foreground: #3a141b;
+  --popover: rgba(255, 252, 248, 0.95);
+  --popover-foreground: #3a141b;
+  --primary: #922c42;
+  --primary-foreground: #f5e9dd;
+  --secondary: rgba(146, 44, 66, 0.08);
+  --secondary-foreground: #3a141b;
+  --muted: rgba(146, 44, 66, 0.07);
+  --muted-foreground: #6f4149;
+  --accent: rgba(197, 93, 114, 0.18);
+  --accent-foreground: #922c42;
   --destructive: #d43a3a;
   --destructive-foreground: #fff;
-  --border: rgba(168, 31, 56, 0.18);
-  --input: rgba(168, 31, 56, 0.18);
-  --ring: #a81f38;
+  --border: rgba(146, 44, 66, 0.18);
+  --input: rgba(146, 44, 66, 0.18);
+  --ring: #922c42;
   --radius: 0.75rem;
 
-  --sidebar: rgba(255, 255, 255, 0.5);
-  --sidebar-border: rgba(168, 31, 56, 0.16);
-  --sidebar-active: rgba(168, 31, 56, 0.1);
-  --sidebar-foreground: #3d1218;
-  --sidebar-primary: #a81f38;
-  --sidebar-primary-foreground: #fff;
-  --sidebar-accent: rgba(168, 31, 56, 0.08);
-  --sidebar-accent-foreground: #a81f38;
-  --sidebar-ring: #a81f38;
+  --sidebar: rgba(255, 251, 246, 0.62);
+  --sidebar-border: rgba(146, 44, 66, 0.16);
+  --sidebar-active: rgba(146, 44, 66, 0.1);
+  --sidebar-foreground: #3a141b;
+  --sidebar-primary: #922c42;
+  --sidebar-primary-foreground: #f5e9dd;
+  --sidebar-accent: rgba(197, 93, 114, 0.14);
+  --sidebar-accent-foreground: #922c42;
+  --sidebar-ring: #922c42;
 
   --cyber-cyan: #0fa495;
   --cyber-green: #16a34a;
@@ -723,25 +1163,22 @@
   --cyber-purple: #7c3aed;
   --cyber-pink: #db2777;
   --cyber-magenta: #c026a3;
-  --cyber-glow: rgba(168, 31, 56, 0.12);
+  --cyber-glow: rgba(146, 44, 66, 0.14);
 
-  --deep-wine: #7a1f31;
-  --burgundy: #f7e8ea;
-  --ruby: #a81f38;
+  --deep-wine: #7a2438;
+  --burgundy: #f0ded6;
+  --ruby: #922c42;
 
   font-family: var(--font-inter);
-  background: radial-gradient(circle at 80% 0%, #f9e3e7, transparent 34%), var(--background);
+  background:
+    radial-gradient(circle at 82% 0%, #f7e2dd, transparent 38%),
+    radial-gradient(circle at 10% 100%, #efd9cf, transparent 42%),
+    var(--background);
   color: var(--foreground);
 }
 
-[data-theme="cybersafe-red-belbete"]:not(.dark) .sidebar {
-  background: var(--sidebar);
-  backdrop-filter: blur(24px) saturate(140%);
-  border-right-color: var(--sidebar-border);
-}
-
 [data-theme="cybersafe-red-belbete"]:not(.dark) .nav-item.active {
-  background: linear-gradient(90deg, rgba(168, 31, 56, 0.1), transparent);
+  background: linear-gradient(90deg, rgba(146, 44, 66, 0.1), transparent);
   box-shadow: inset var(--shell-nav-bar-w) 0 var(--nav-active-bar);
 }
 
@@ -750,22 +1187,33 @@
   background: var(--card);
   border-color: var(--border);
   border-radius: var(--shell-radius-card);
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.04);
+  box-shadow:
+    0 1px 2px rgba(67, 24, 34, 0.05),
+    0 1px 0 rgba(255, 255, 255, 0.6) inset;
 }
 
 [data-theme="cybersafe-red-belbete"]:not(.dark) .hero-banner {
+  background:
+    radial-gradient(120% 150% at 90% 0%, rgba(197, 93, 114, 0.16), transparent 55%),
+    linear-gradient(135deg,
+      rgba(255, 252, 248, 0.55) 0%,
+      rgba(240, 222, 214, 0.6) 52%,
+      rgba(245, 233, 221, 0.7) 100%);
+  /* O desfoque desta faixa vem do eixo de superfície (ver EIXO DE SUPERFÍCIE no
+     fim da folha), não do tema: em `solid` e `reduced` tem de desaparecer. */
+}
+
+[data-theme="cybersafe-red-belbete"]:not(.dark) .auth-page {
   background: linear-gradient(135deg,
-    rgba(255, 255, 255, 0.15) 0%,
-    rgba(247, 232, 234, 0.2) 50%,
-    rgba(250, 231, 235, 0.25) 100%);
-  backdrop-filter: blur(16px);
-  -webkit-backdrop-filter: blur(16px);
+    #f5e9dd 0%,
+    #f0ded6 52%,
+    #ebd5cc 100%);
 }
 
 /* Accent themes — override primary/ring/glow only (semantic colors preserved) */
 [data-theme][data-accent="cyan"] { --primary: var(--cyber-cyan); --ring: var(--cyber-cyan); --accent: var(--cyber-cyan); --cyber-glow: var(--cyber-cyan); }
 [data-theme][data-accent="matrix-green"] { --primary: var(--cyber-green); --ring: var(--cyber-green); --accent: var(--cyber-green); --cyber-glow: var(--cyber-green); }
-[data-theme][data-accent="blue"] { --primary: oklch(0.55 0.18 250); --ring: oklch(0.55 0.18 250); --accent: oklch(0.55 0.18 250); --cyber-glow: oklch(0.55 0.18 250); }
+[data-theme][data-accent="blue"] { --primary: var(--accent-blue); --ring: var(--accent-blue); --accent: var(--accent-blue); --cyber-glow: var(--accent-blue); }
 [data-theme][data-accent="purple"] { --primary: var(--cyber-purple); --ring: var(--cyber-purple); --accent: var(--cyber-purple); --cyber-glow: var(--cyber-purple); }
 [data-theme][data-accent="pink"] { --primary: var(--cyber-pink); --ring: var(--cyber-pink); --accent: var(--cyber-pink); --cyber-glow: var(--cyber-pink); }
 [data-theme][data-accent="amber"] { --primary: var(--cyber-yellow); --ring: var(--cyber-yellow); --accent: var(--cyber-yellow); --cyber-glow: var(--cyber-yellow); }
@@ -774,7 +1222,7 @@
 /* Dark accent variants */
 .dark[data-accent="cyan"] { --primary: var(--cyber-cyan); --ring: var(--cyber-cyan); --accent: var(--cyber-cyan); --cyber-glow: var(--cyber-cyan); }
 .dark[data-accent="matrix-green"] { --primary: var(--cyber-green); --ring: var(--cyber-green); --accent: var(--cyber-green); --cyber-glow: var(--cyber-green); }
-.dark[data-accent="blue"] { --primary: oklch(0.7 0.18 250); --ring: oklch(0.7 0.18 250); --accent: oklch(0.7 0.18 250); --cyber-glow: oklch(0.7 0.18 250); }
+.dark[data-accent="blue"] { --primary: var(--accent-blue); --ring: var(--accent-blue); --accent: var(--accent-blue); --cyber-glow: var(--accent-blue); }
 .dark[data-accent="purple"] { --primary: var(--cyber-purple); --ring: var(--cyber-purple); --accent: var(--cyber-purple); --cyber-glow: var(--cyber-purple); }
 .dark[data-accent="pink"] { --primary: var(--cyber-pink); --ring: var(--cyber-pink); --accent: var(--cyber-pink); --cyber-glow: var(--cyber-pink); }
 .dark[data-accent="amber"] { --primary: var(--cyber-yellow); --ring: var(--cyber-yellow); --accent: var(--cyber-yellow); --cyber-glow: var(--cyber-yellow); }
@@ -923,9 +1371,193 @@
 }
 
 /* Hexagon Pattern — 2% em vez de 3%: o padrão é textura, não ruído. (A camada
-   que o aplica em App.tsx ainda leva opacity-50 por cima.) */
-.hex-pattern {
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='28' height='49' viewBox='0 0 28 49'%3E%3Cg fill-rule='evenodd'%3E%3Cg fill='%2300d4aa' fill-opacity='0.02'%3E%3Cpath d='M13.99 9.25l13 7.5v15l-13 7.5L1 31.75v-15l12.99-7.5zM3 17.9v12.7l10.99 6.34 11-6.35V17.9l-11-6.34L3 17.9zM0 15l12.98-7.5V0h-2v6.35L0 12.69v2.3zm0 18.5L12.98 41v8h-2v-6.85L0 35.81v-2.3zM15 0v7.5L27.99 15H28v-2.31h-.01L17 6.35V0h-2zm0 49v-8l12.99-7.5H28v2.31h-.01L17 42.15V49h-2z'/%3E%3C/g%3E%3C/g%3E%3C/svg%3E");
+   que o aplica em App.tsx ainda leva opacity-50 por cima.) */.hex-pattern {
+  background-image:
+    radial-gradient(circle at 50% 50%, color-mix(in oklch, var(--primary) 2%, transparent) 0%, transparent 62%),
+    radial-gradient(circle at 50% 50%, color-mix(in oklch, var(--primary) 2%, transparent) 0%, transparent 62%);
+  background-position: 0 0, 20px 20px;
+}
+
+/* Alternativa hexagon-grid (packet L0-L3), desativada — a textura ativa é a
+   das radiais de 2% em `.hex-pattern`, acima. Em `//` (o CSS não aceita esse
+   marcador) partia o build do vite; fica agora em comentário de bloco válido.
+.hex-pattern hexagon-grid {
+  background-image:
+    linear-gradient(60deg, transparent 50%, color-mix(var(--primary) alpha(20%)) 50%),
+    linear-gradient(60deg, color-mix(var(--primary) alpha(40%)) 50%, transparent 50%);
+  background-size: 60px 100px;
+}
+*/
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   EIXO DE SUPERFÍCIE — data-surface
+   Segundo eixo, ortogonal ao tema/identidade e ao modo claro/escuro.
+   A definição VIVA é a da R6-L5, mais abaixo (bloco `MATERIAL DE SUPERFÍCIE`:
+   `--surface-translucent`, `--material-glass-nav`, `--material-glass-edge`).
+   A cópia anterior — esta mesma secção com `filter: var(--surface-filter)`,
+   blur a 9 px e sólido preso a `--card` — foi removida nesta reparção do build:
+   ficava declarada ANTES da âncora `[data-surface="glass"]` e qualquer leitura
+   por ordem de ficheiro (auditorias e contratos do eixo) encontrava primeiro a
+   versão antiga, não a viva. Uma definição por eixo; não repor «aqui ao lado».
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* REDUZIDO: o componente .appearance-preview conta com o data-surface; se o
+   utilizador tiver 16 px à volta doHIS. */
+
+body {
+  @apply bg-background text-foreground transition-colors duration-300;
+  font-family: var(--font-sans);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
+  }
+}
+
+.data-pause-visual {
+  animation: none !important;
+  background: none !important;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+   MATERIAL DE SUPERFÍCIE — L0 Solid / L1 Reduced / L2 Liquid / L3 Showcase
+
+   Fundação reutilizável do TP-UI-01.
+
+   O eixo de material é INDEPENDENTE da identidade e do modo de cor:
+   - Solid   = preenchimento opaco, sem degradado nem brilho de vidro.
+   - Reduced = forma do material, sem movimento/raf.
+   - Liquid  = degradado + borda + sombra + highlight interior; sem blur forçado
+     universal (razão detalhada em REDUCED MOTION abaixo).
+   - Showcase= efeito adicional opcional em contentores explícitos; nunca aplica
+     a DOM arbitrário; pode requerer shader/WebGL2 ou distorção UV controlada.
+
+   Nenhum material inventa cores ou raios: usa os tokens já acima.
+   O componente React só escolhe a classe — não injeta CSS inline novo,
+   não lê prefs para decidir a cor de preenchimento. A persistência fica
+   para depois; se for preciso, o contract fica em AppearanceContext/tema.
+   ═══════════════════════════════════════════════════════════════════════════ */
+
+/* L0 — Solid
+   Superfície opaca e neutra. Use em alta densidade ou quando o vidro não ajuda.
+   Não é "versão pior"; é a forma mais leve, sem degradado. */
+.surface-solid {
+  background: var(--card);
+  border-color: var(--border);
+  border-radius: var(--shell-radius-card);
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.04);
+}
+
+/* L2 — Liquid (base, sem movimento)
+   Gradiente + borda + sombra + highlight interior.
+   Não aplica blur universal por razão de custo/compositor: ver nota em REDUCED
+   MOTION e no bloco Liquid já existente. */
+.surface-liquid {
+  border: 1px solid color-mix(in oklch, var(--foreground) 14%, transparent);
+  background: linear-gradient(150deg,
+    oklch(1 0 0 / 0.92) 0%,
+    color-mix(in oklch, var(--cyber-cyan) 5%, oklch(1 0 0 / 0.74)) 100%);
+  border-radius: var(--shell-radius-card);
+  box-shadow:
+    0 6px 20px -10px oklch(0.25 0.02 240 / 0.22),
+    inset 0 1px 0 oklch(1 0 0 / 0.65);
+}
+
+/* L2 — Liquid dark
+   Versão escura com preenchimento pela tinta do tema, não branco neutro. */
+.dark .surface-liquid {
+  border: 1px solid color-mix(in oklch, var(--primary) 18%, transparent);
+  background: linear-gradient(150deg,
+    color-mix(in oklch, var(--primary) 7%, oklch(0.18 0.024 240 / 0.8)) 0%,
+    oklch(0.13 0.02 240 / 0.72) 100%);
+  box-shadow:
+    0 10px 28px -12px oklch(0 0 0 / 0.45),
+    inset 0 1px 0 oklch(1 0 0 / 0.12);
+}
+
+/* L3 — Showcase: material + acento de borda
+   Quando o contentor merece destaque leve sem ser "superfície de estado".
+   Não é glow — é borda mais viva,_controlada pela cor primária do tema. */
+.surface-showcase {
+  --surface-edge-strong: color-mix(in oklch, var(--primary) 34%, var(--border));
+  border: 1px solid var(--surface-edge-strong);
+  box-shadow:
+    0 8px 24px -12px oklch(0.25 0.02 240 / 0.25),
+    inset 0 1px 0 oklch(1 0 0 / 0.6);
+}
+
+.dark .surface-showcase {
+  box-shadow:
+    0 12px 32px -14px oklch(0 0 0 / 0.5),
+    inset 0 1px 0 oklch(1 0 0 / 0.14);
+}
+
+/* L3 — Showcase extra: glare interior sutil
+   Marcado como opcional: só ativa em contentores reais, nunca em DOM arbitrário;
+   não vende brilho como refracção. Glare é highlight, não iluminação 3D. */
+.surface-showcase-glare {
+  background: linear-gradient(140deg,
+    oklch(1 0 0 / 0.98) 0%,
+    color-mix(in oklch, var(--primary) 6%, oklch(1 0 0 / 0.72)) 100%);
+}
+
+.dark .surface-showcase-glare {
+  background: linear-gradient(140deg,
+    color-mix(in oklch, var(--primary) 8%, oklch(0.19 0.025 240 / 0.78)) 0%,
+    oklch(0.13 0.02 240 / 0.72) 100%);
+}
+
+/* Highlight de vidro interior: diz "isto é vidro".
+   Um só, aplicado ao contentor, não multiplicado por elemento. */
+.surface-glass-highlight {
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.6);
+}
+
+.dark .surface-glass-highlight {
+  box-shadow: inset 0 1px 0 oklch(1 0 0 / 0.14);
+}
+
+/* Cascata: quando o mesmo elemento traz o eixo (`data-material`, vindo de
+   GlassSurface) e uma classe L0–L3 legada (`.surface-liquid`, `.surface-solid`),
+   a classe antiga vinha depois na folha e sobrepunha o preenchimento do eixo —
+   o componente mostrava um gradiente opaco a quem escolheu Vidro. Estas regras
+   reafirmam o eixo, sem cores novas e sem tocar nas classes antigas usadas
+   noutros sítios. */
+[data-material="solid"].surface-solid {
+  background: var(--surface-card);
+  border-color: var(--border);
+}
+[data-material="reduced"].surface-reduced {
+  background: var(--surface-translucent);
+}
+[data-material="glass"].surface-liquid,
+[data-material="liquid"].surface-liquid {
+  background: var(--surface-translucent);
+}
+[data-material="showcase"].surface-showcase {
+  background: var(--surface-translucent);
+}
+
+/* REDUCED MOTION: o material não deve piorar o custo em maquinas com
+   reduced-motion (default em RDP/VMs e em várias configurações Windows).
+   Por isso:
+   - Não se reinsere blur universal em *.
+   - O movimento de materiais (orb/ghost/shader) fica em contentores explícitos
+     e guarda o pausa/reduced conforme a política do packet.
+   - Se um efeito não funciona em reduced motion, o fallback é o material
+     estático correspondente, não o silêncio. */
+@media (prefers-reduced-motion: reduce) {
+  .surface-showcase-glare,
+  .surface-liquid,
+  .surface-showcase {
+    transition: none;
+  }
 }
 
 /* Progress Bar Glow */
@@ -993,7 +1625,169 @@ html { scroll-behavior: smooth; }
   min-height: 100vh;
   width: 100%;
   overflow: hidden;
-  padding: 2rem;
+  /* Compensa a faixa de janela fixa: o ecrã de autenticação (e o de boot, que
+     usa a mesma moldura) começa abaixo dela em vez de lhe passar por baixo. */
+  padding: calc(2rem + var(--shell-titlebar-h)) 2rem 2rem;
+}
+
+/* ── Barra de janela (Window Controls Overlay, Windows) ────────────────
+   Uma única faixa de 42 px para todas as páginas. Os botões nativos
+   minimizar/maximizar/fechar continuam a ser do Windows e ficam por cima, à
+   direita — por isso a faixa reserva essa zona e nunca coloca nada lá. Cores
+   vêm apenas de tokens do tema ativo (sem valores fixos, sem efeitos pesados):
+   `--background` e `--card` mudam com a identidade e a faixa acompanha.
+   A faixa não tem botões próprios, logo não há duplicação nem conflito com os
+   controlos do sistema. */
+.app-titlebar {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  height: var(--shell-titlebar-h);
+  display: flex;
+  align-items: center;
+  padding: 0 0.75rem;
+  /* Reserva dos controlos nativos à direita. É constante em píxeis lógicos: no
+     Windows a zona de legenda mantém ~138 px independentemente da escala DPI. */
+  padding-right: 150px;
+  background: color-mix(in oklch, var(--background) 98%, var(--card));
+  /* Aresta inferior por SOMBRA INTERIOR, nunca por `border`.
+     MEDIDO no dev server a 100/125/150% (janela normal e maximizada, Chrome via
+     CDP, 15/10): a faixa fica em 0–42 px (centro 21 px), mas com uma borda de
+     1 px dentro de `box-sizing: border-box` a caixa de conteudo encolhe para
+     41 px e o eixo de centragem da marca desce para 20,5 px — meia unidade
+     fora do eixo onde o Windows desenha os botoes nativos (centro do overlay,
+     21 px). A sombra interior pinta a mesma aresta sem roubar altura: o eixo
+     volta a ser exatamente metade do token. */
+  box-shadow: inset 0 -1px 0 transparent;
+  /* P3: camada de acento da faixa. O desfoque NÃO vive aqui: entra pelo eixo
+     de superfície (`var(--surface-filter)`, regra abaixo), para seguir o
+     material escolhido e o travão de movimento reduzido. */
+  background-image: radial-gradient(
+    120% 180% at 0% 0%,
+    color-mix(in oklch, var(--primary) 12%, transparent),
+    transparent 62%
+  );
+  transition: background 200ms ease, box-shadow 200ms ease;
+  z-index: 40;
+  -webkit-app-region: drag;
+  user-select: none;
+}
+
+/* Vidro da faixa pelo EIXO de superfície: em `glass` desfoca (o conteúdo passa
+   por baixo dela); em `solid` e `reduced` as regras globais do eixo põem
+   `none !important`. Nenhum valor literal de blur fora do sistema. */
+[data-surface="glass"] .app-titlebar {
+  -webkit-backdrop-filter: var(--surface-filter);
+  backdrop-filter: var(--surface-filter);
+}
+
+/* Risco de acento da marca: 3 px, na cor do tema — dá hierarquia ao logótipo
+   sem acrescentar botões nem controlos. */
+.app-titlebar-brand::before {
+  content: "";
+  flex: none;
+  width: 3px;
+  height: 14px;
+  border-radius: 999px;
+  background: linear-gradient(180deg, var(--primary), color-mix(in oklch, var(--primary) 45%, transparent));
+  box-shadow: 0 0 8px color-mix(in oklch, var(--primary) 35%, transparent);
+}
+
+/* Aresta inferior em gradiente do acento: 1 px, à esquerda da zona dos
+   controlos nativos (nunca por baixo deles), sem `border` que roube altura. */
+.app-titlebar::after {
+  content: "";
+  position: absolute;
+  left: 0;
+  right: 150px;
+  bottom: 0;
+  height: 1px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--primary) 40%, transparent) 18%,
+    color-mix(in oklch, var(--primary) 55%, transparent) 82%,
+    transparent
+  );
+  opacity: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .app-titlebar {
+    transition: none;
+  }
+}
+
+.app-titlebar-brand {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  min-width: 0;
+}
+
+.app-titlebar-name {
+  font-family: var(--font-jetbrains);
+  font-size: 0.78rem;
+  font-weight: 800;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--foreground);
+  white-space: nowrap;
+}
+
+.app-titlebar-product {
+  font-size: 0.72rem;
+  font-weight: 500;
+  letter-spacing: 0.02em;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+}
+
+/* Separador discreto entre a marca e o nome do produto; decorativo, não é
+   texto lido por leitores de ecrã (pseudo-elemento). */
+.app-titlebar-product::before {
+  content: "·";
+  margin-right: 0.45rem;
+  color: var(--muted-foreground);
+  opacity: 0.75;
+}
+
+/* Título da página atual — discreto, só quando a rota o pede.
+   Oculto por defeito; o App só o mostra quando o título está disponível para a
+   rota ativa e não compete com a marca. */
+.app-titlebar__page-title {
+  margin-left: auto;
+  margin-left: auto;
+  padding-left: 0.75rem;
+  font-family: var(--font-jetbrains);
+  font-size: 0.75rem;
+  font-weight: 500;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--muted-foreground);
+  white-space: nowrap;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+}
+
+.app-titlebar__page-title[data-visible="true"] {
+  opacity: 1;
+}
+
+/* Moldura do shell sob a faixa: 42 px de altura, sem overflow horizontal. */
+.titlebar-offset {
+  padding-top: var(--shell-titlebar-h);
+}
+
+/* PAINEL LATERAL DA MATRIX (P1) — a área útil cede a largura REAL do painel.
+   A largura é medida em runtime por AIAssistant (`--matrix-panel-w` =
+   largura do painel + 2 × margem) e o atributo vive no <html>, para a regra
+   valer em qualquer página sem fios de estado novas no App. Sem transição:
+   o padding faz parte do layout e animá-lo re-flui gráficos a cada frame. */
+html[data-matrix-panel="open"] [data-cs-main] {
+  padding-right: var(--matrix-panel-w, 0px);
 }
 
 /* Animated gradient background */
@@ -1077,9 +1871,9 @@ html { scroll-behavior: smooth; }
   border-radius: 1.25rem;
   border: 1px solid color-mix(in oklch, var(--primary) 20%, transparent);
   background: color-mix(in oklch, var(--card) 85%, transparent);
-  backdrop-filter: blur(24px) saturate(1.8);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
+  /* Superfície elevada: o desfoque é do eixo de superfície, não do card. */
   box-shadow:
+    inset 0 1px 0 color-mix(in oklch, var(--foreground) 6%, transparent),
     0 0 0 1px color-mix(in oklch, var(--border) 50%, transparent),
     0 20px 50px -12px oklch(0 0 0 / 0.4),
     0 0 40px color-mix(in oklch, var(--primary) 5%, transparent);
@@ -1182,8 +1976,10 @@ html { scroll-behavior: smooth; }
   width: 100%;
   padding: 0.75rem 0.875rem 0.75rem 2.75rem;
   border-radius: 0.75rem;
-  border: 1px solid var(--border);
-  background: color-mix(in oklch, var(--input) 60%, transparent);
+  /* Contraste do campo: borda um pouco mais presente e fundo mais sólido do
+     que o cartão, para o campo ler como campo em todos os temas. */
+  border: 1px solid color-mix(in oklch, var(--border) 85%, transparent);
+  background: color-mix(in oklch, var(--input) 85%, transparent);
   color: var(--foreground);
   font-size: 0.9rem;
   transition: border-color 0.2s, box-shadow 0.2s, background-color 0.2s, color 0.2s;
@@ -1198,7 +1994,7 @@ html { scroll-behavior: smooth; }
 
 .auth-input::placeholder {
   color: var(--muted-foreground);
-  opacity: 0.5;
+  opacity: 0.65;
 }
 
 .auth-select {
@@ -1224,6 +2020,10 @@ html { scroll-behavior: smooth; }
 
 /* Error */
 .auth-error {
+  display: flex;
+  align-items: flex-start;
+  gap: 0.5rem;
+  line-height: 1.35;
   padding: 0.75rem 1rem;
   border-radius: 0.75rem;
   background: color-mix(in oklch, var(--destructive) 10%, transparent);
@@ -1273,7 +2073,7 @@ html { scroll-behavior: smooth; }
   font-size: 0.95rem;
   font-weight: 700;
   cursor: pointer;
-  transition: box-shadow 0.2s, filter 0.2s;
+  transition: box-shadow 0.2s, filter 0.2s, transform 0.15s;
   box-shadow: 0 4px 15px color-mix(in oklch, var(--primary) 30%, transparent);
   margin-top: 0.5rem;
 }
@@ -1286,6 +2086,20 @@ html { scroll-behavior: smooth; }
 .auth-submit:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+}
+
+.auth-submit:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+/* Foco visível real nos alvos de teclado que não são campos: mesma espessura e
+   deslocamento do shell (os campos mantêm o anel próprio do `.auth-input:focus`). */
+.auth-submit:focus-visible,
+.auth-link:focus-visible,
+.auth-input-action:focus-visible,
+.auth-checkbox:focus-visible {
+  outline: var(--shell-focus-w) solid var(--ring);
+  outline-offset: var(--shell-focus-offset);
 }
 
 /* Footer */
@@ -1333,7 +2147,7 @@ html { scroll-behavior: smooth; }
   margin-top: 2rem;
   font-size: 0.7rem;
   color: var(--muted-foreground);
-  opacity: 0.5;
+  opacity: 0.65;
   z-index: 10;
 }
 
@@ -1790,6 +2604,8 @@ html { scroll-behavior: smooth; }
   overflow: hidden;
   border-radius: var(--radius);
   border: 1px solid color-mix(in oklch, var(--primary) 20%, transparent);
+/* Aro superior do hero: uma linha de luz, não um brilho de desfoque. */
+  box-shadow: inset 0 1px 0 color-mix(in oklch, oklch(1 0 0) 12%, transparent);
 }
 
 /* Stats card base */
@@ -1798,6 +2614,20 @@ html { scroll-behavior: smooth; }
   border: 1px solid color-mix(in oklch, var(--border) 50%, transparent);
   background: var(--card);
   transition: border-color 0.25s ease, background-color 0.25s ease, box-shadow 0.25s ease;
+}
+
+/* Cabeçalho pegajoso de tabela — OPACO por construção.
+   MEDIDO no dev server (15/10, Chrome via CDP, 100/125/150%, com scroll real):
+   `bg-secondary` resolve para `rgba(129, 207, 207, 0.12)` e `bg-secondary/50`
+   para ~6% de alfa — e `--card` também é translúcido em 7 dos 10 blocos de tema
+   (`rgba(10,31,37,0.58)`, `oklch(1 0 0 / 0.75)`, …). Um cabeçalho `sticky` com
+   qualquer desses fundos deixa ler as linhas que passam por baixo.
+   Aqui a base é `--background`, que é OPACO em todos os temas, e o tom do
+   `--secondary` entra como camada pintada por cima: o resultado final é opaco e
+   mantém o tom do sistema. */
+.connections-thead {
+  background-color: var(--background);
+  background-image: linear-gradient(var(--secondary), var(--secondary));
 }
 
 /* Matrix Avatar integration fix — ensure clean rendering */
@@ -1820,6 +2650,11 @@ html { scroll-behavior: smooth; }
   overflow: hidden;
 }
 .progress-bar-fill {
+  /* P0 UX (15/10): o preenchimento não declarava `background` nenhum — a barra
+     do Otimizar desenhava a pista e ficava vazia a qualquer percentagem (só a
+     sombra, que não é progresso). A tinta vem da primitiva de identidade, não
+     de uma classe nova: `bg-primary` continua reservado à única ação cheia. */
+  background: var(--primary);
   height: 100%;
   border-radius: 999px;
   transition: width 0.8s ease-out;
@@ -1872,15 +2707,6 @@ html { scroll-behavior: smooth; }
 .btn-primary:hover {
   filter: brightness(1.05);
   box-shadow: 0 4px 16px color-mix(in oklch, var(--primary) 30%, transparent);
-}
-
-/* Glassmorphism for modals/overlays */
-.glass-panel {
-  background: color-mix(in oklch, var(--card) 85%, transparent);
-  backdrop-filter: blur(24px) saturate(1.8);
-  -webkit-backdrop-filter: blur(24px) saturate(1.8);
-  border: 1px solid color-mix(in oklch, var(--border) 40%, transparent);
-  border-radius: calc(var(--radius) + 0.25rem);
 }
 
 /* Animated border for critical states */
@@ -1979,15 +2805,23 @@ html { scroll-behavior: smooth; }
   box-shadow: 0 1px 2px oklch(0 0 0 / 0.04);
 }
 
+/* As quatro regras abaixo precisam de âncora no <html>. `:not(.dark)` sozinho
+   é um seletor de DESCENDENTE: num caminho html.dark > body > div, o `body` e o
+   `div` também satisfazem `:not(.dark)` (não têm a classe), por isso tudo
+   aplicava em MODO ESCURO também — incluindo o remendo dos `bg-black/…`, que
+   com `!important` dava fundo e borda de card a máscaras de escurecimento.
+   `:root:not(.dark)` só casa no <html>, que é o único elemento onde a classe
+   do modo vive. */
+
 /* Improved surface hierarchy for both light themes */
-:not(.dark) .space-y-6 > div,
-:not(.dark) .space-y-4 > div {
+:root:not(.dark) .space-y-6 > div,
+:root:not(.dark) .space-y-4 > div {
   --tw-space-y-reverse: 0;
 }
 
 /* Chat container — light theme refinement */
-:not(.dark) [class*="chat"],
-:not(.dark) [class*="ai-assistant"] {
+:root:not(.dark) [class*="chat"],
+:root:not(.dark) [class*="ai-assistant"] {
   background: var(--background);
 }
 
@@ -1999,15 +2833,19 @@ html { scroll-behavior: smooth; }
   box-shadow: 0 4px 16px color-mix(in oklch, var(--primary) 35%, transparent);
 }
 
-/* Scan page cards in light mode */
-:not(.dark) [class*="bg-black\/"],
-:not(.dark) [class*="bg-black/"] {
-  background: color-mix(in oklch, var(--card) 90%, transparent) !important;
+/* Scan page cards em modo claro. Ponte, não solução: a causa é o `bg-black/…`
+   hardcoded no markup das páginas, e a forma certa é essas superficies pedirem
+   `.surface-sunken` (abaixo). Enquanto o markup não migrar, a regra fica, mas
+   ANCORADA no <html> — sem âncora também disparava em modo escuro e dava
+   fundo claro, com `!important`, a máscaras de escurecimento de overlays. */
+:root:not(.dark) [class*="bg-black\/"],
+:root:not(.dark) [class*="bg-black/"] {
+  background: var(--surface-sunken) !important;
   border: 1px solid color-mix(in oklch, var(--border) 40%, transparent) !important;
 }
 
 /* Selection color for light themes */
-:not(.dark) ::selection {
+:root:not(.dark) ::selection {
   background: color-mix(in oklch, var(--primary) 25%, transparent);
 }
 
@@ -2031,123 +2869,334 @@ html { scroll-behavior: smooth; }
 [data-theme="cybersafe-liquid"]:not(.dark) input,
 [data-theme="cybersafe-liquid"]:not(.dark) textarea,
 [data-theme="cybersafe-liquid"]:not(.dark) select {
-  background: oklch(1 0 0 / 0.5);
-  border-color: oklch(1 0 0 / 0.3);
-  backdrop-filter: blur(8px);
+  background: oklch(1 0 0 / 0.78);
+  border-color: color-mix(in oklch, var(--foreground) 18%, transparent);
+  /* sem backdrop-filter: um por cada campo, e o fill mais solido da o
+     contraste necessario para o texto introduzido se ler. */
 }
 [data-theme="cybersafe-liquid"].dark input,
 [data-theme="cybersafe-liquid"].dark textarea,
 [data-theme="cybersafe-liquid"].dark select {
-  background: oklch(1 0 0 / 0.06);
-  border-color: oklch(1 0 0 / 0.1);
-  backdrop-filter: blur(8px);
-}
-
-/* Liquid — sidebar */
-[data-theme="cybersafe-liquid"] .sidebar {
-  backdrop-filter: blur(20px);
-  -webkit-backdrop-filter: blur(20px);
-  border-right: 1px solid oklch(1 0 0 / 0.15);
-}
-
-[data-theme="cybersafe-liquid"].dark .sidebar {
-  border-right: 1px solid oklch(1 0 0 / 0.08);
+  background: color-mix(in oklch, var(--primary) 8%, oklch(0.16 0.02 240 / 0.7));
+  border-color: color-mix(in oklch, var(--primary) 26%, transparent);
 }
 
 /* ═══════════════════════════════════════════════════════════════
    CYBERSAFE LIQUID — Real Glass UI
    ═══════════════════════════════════════════════════════════════ */
 
-/* Liquid ambient background */
-[data-theme="cybersafe-liquid"].liquid-bg {
+/* Liquid ambient background — MEDIDO: o seletor antigo era um composto com
+   atributo de tema + classe no MESMO elemento; o data-theme vive no <html> e
+   a classe no wrapper do App, logo a regra nunca aplicou — o fundo do Liquid
+   era o chapado --background acinzentado. A classe sozinha chega: e o wrapper
+   quem pinta o fundo. Sem gradiente colorido nao ha glass — tudo o que
+   flutuasse por cima seria cinza sobre cinza. */
+/* O fundo tem de ter DETALHE, não só tinta: um gradiente liso não tem arestas,
+   e desfocar uma coisa sem arestas não se vê. É esta a razão pela qual `vidro`
+   e `reduzido` pareciam iguais. As duas malhas finas (1 px a 5% da tinta do
+   tema, de 24 px e 96 px) e os pontos apertados dão alta-frequência suficiente
+   para o `backdrop-filter` ter o que amaciar, e continuam abaixo do limiar de
+   ruído que atrapalha a leitura. */
+.liquid-bg {
   background:
-    radial-gradient(circle at 15% 20%, color-mix(in oklch, var(--primary) 10%, transparent) 0%, transparent 35%),
-    radial-gradient(circle at 80% 15%, color-mix(in oklch, var(--cyber-cyan) 7%, transparent) 0%, transparent 30%),
-    radial-gradient(circle at 65% 80%, color-mix(in oklch, var(--cyber-purple) 5%, transparent) 0%, transparent 35%),
+    radial-gradient(ellipse 120% 70% at 50% -12%, color-mix(in oklch, var(--primary) 10%, transparent) 0%, transparent 62%),
+    repeating-linear-gradient(0deg, color-mix(in oklch, var(--foreground) 5%, transparent) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(90deg, color-mix(in oklch, var(--foreground) 5%, transparent) 0 1px, transparent 1px 96px),
+    radial-gradient(circle at 15% 20%, color-mix(in oklch, var(--primary) 14%, transparent) 0%, transparent 38%),
+    radial-gradient(circle at 82% 12%, color-mix(in oklch, var(--cyber-cyan) 10%, transparent) 0%, transparent 32%),
+    radial-gradient(circle at 62% 85%, color-mix(in oklch, var(--cyber-purple) 8%, transparent) 0%, transparent 38%),
+    radial-gradient(circle at 34% 62%, color-mix(in oklch, var(--primary) 16%, transparent) 0%, transparent 9%),
+    radial-gradient(circle at 71% 41%, color-mix(in oklch, var(--cyber-pink) 12%, transparent) 0%, transparent 7%),
     var(--background);
 }
 
-/* Liquid glass panel — reusable */
-.liquid-panel {
-  position: relative;
-  overflow: hidden;
-  border: 1px solid color-mix(in oklch, oklch(1 0 0) 15%, transparent);
-  backdrop-filter: blur(18px) saturate(140%);
-  -webkit-backdrop-filter: blur(18px) saturate(140%);
-  box-shadow:
-    0 4px 24px oklch(0 0 0 / 0.06),
-    inset 0 1px 0 color-mix(in oklch, oklch(1 0 0) 20%, transparent),
-    inset 0 -1px 0 oklch(0 0 0 / 0.03);
+.dark .liquid-bg {
+  background:
+    radial-gradient(ellipse 120% 70% at 50% -12%, color-mix(in oklch, var(--primary) 12%, transparent) 0%, transparent 62%),
+    repeating-linear-gradient(0deg, color-mix(in oklch, var(--foreground) 5%, transparent) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(90deg, color-mix(in oklch, var(--foreground) 5%, transparent) 0 1px, transparent 1px 96px),
+    radial-gradient(circle at 15% 20%, color-mix(in oklch, var(--primary) 16%, transparent) 0%, transparent 40%),
+    radial-gradient(circle at 82% 12%, color-mix(in oklch, var(--cyber-cyan) 9%, transparent) 0%, transparent 34%),
+    radial-gradient(circle at 62% 85%, color-mix(in oklch, var(--cyber-purple) 7%, transparent) 0%, transparent 40%),
+    linear-gradient(180deg, color-mix(in oklch, var(--cyber-cyan) 3%, transparent) 0%, transparent 30%),
+    var(--background);
 }
 
-/* Glass reflection on panels */
-[data-theme="cybersafe-liquid"] .cyber-border,
-[data-theme="cybersafe-liquid"] .stat-card,
-[data-theme="cybersafe-liquid"] .liquid-panel {
-  position: relative;
+/* O reflexo de vidro deixou de ser uma camada ::before a z-index:1 por cima de
+   cada cartão — era literalmente uma película sobre o conteúdo, e obrigava a
+   elevar os filhos diretos. Passa a vir do enchimento (gradiente com tinta do
+   tema) e do highlight interior em `inset 0 1px 0`, ambos dentro do elemento.
+   Regras `.liquid-panel` e `.sidebar` por identidade eliminadas: nenhum
+   elemento usava essas classes, e o `.sidebar` estava dormente por decisão
+   registada em components/Sidebar.tsx. */
+
+/* ═══════════════════════════════════════════════════════════════
+   EIXO DE SUPERFÍCIE — data-surface
+   ═══════════════════════════════════════════════════════════════
+   Segundo eixo, ortogonal à identidade (data-theme) e ao modo (dark/light):
+   decide o ACABAMENTO das superfícies, em qualquer tema.
+
+     solid   → opaco, sem desfoque
+     reduced → translúcido como hoje, sem desfoque (modo desempenho)
+     glass   → desfoque do fundo + tinta translúcida (o efeito de vidro)
+
+   O valor vive no <html> e desce por herança como --surface-filter. Sem
+   atributo (arranque antes do JavaScript, ou valor inválido), o valor de
+   reserva é `none`: nenhuma superfície borra o fundo, que é o comportamento
+   que a app tinha antes de existir este eixo.
+
+   R6-L5 — o material passa a ser um CONJUNTO DE TOKENS, não um conjunto de
+   regras por tema. O que cada acabamento faz (enchimento, aro, barra lateral,
+   desfoque) está definido uma vez aqui; as regras abaixo só ligam esses tokens
+   às superfícies elevadas. Era isto que faltava para o Vidro ser efetivo nos
+   cinco temas: até agora cada identidade tinha o seu `--card` e as regras do
+   eixo limitavam-se a sobrescrevê-lo onde calhava, deixando de fora o ecrã de
+   entrada e deixando o desfoque sem nada para desfocar fora do Líquido. */
+:root {
+  --surface-filter: none;
+
+  /* O material lê-SE nos tokens, não em exceções por tema:
+       enchimento  → `--surface-translucent` (o pano translúcido, já resolvido
+                     por modo em cima: 80% claro / 74% escuro). Vidro e
+                     Reduzido partilham-no; o que os separa é o desfoque e o
+                     aro. Sólido é o fundo do tema, opaco.
+       barra       → `--material-glass-nav`, porque `--sidebar` é outra cor.
+       aro         → `--material-glass-edge`.
+     O `--material-glass-edge` vive aqui para a pré-visualização das
+     Configurações mostrar o MESMO valor que o eixo aplica; as regras do eixo
+     continuam a escrever o literal porque o contrato da ronda 4-L2
+     (test/r4-l2-dashboard-aparencia.test.ts) procura essa declaração. */
+  --material-glass-nav: color-mix(in oklch, var(--sidebar) 80%, transparent);
+  --material-glass-edge: color-mix(in oklch, var(--primary) 42%, transparent);
 }
 
-[data-theme="cybersafe-liquid"] .cyber-border::before,
-[data-theme="cybersafe-liquid"] .stat-card::before {
-  content: '';
-  position: absolute;
-  top: 0;
-  left: 0;
-  right: 0;
-  height: 50%;
-  background: linear-gradient(120deg,
-    oklch(1 0 0 / 0.18) 0%,
-    oklch(1 0 0 / 0.03) 30%,
-    transparent 55%
-  );
-  border-radius: inherit;
-  pointer-events: none;
-  z-index: 1;
+.dark {
+  --material-glass-nav: color-mix(in oklch, var(--sidebar) 70%, transparent);
 }
 
-/* Liquid dark: subtler reflection */
-[data-theme="cybersafe-liquid"].dark .cyber-border::before,
-[data-theme="cybersafe-liquid"].dark .stat-card::before {
-  background: linear-gradient(120deg,
-    oklch(1 0 0 / 0.08) 0%,
-    oklch(1 0 0 / 0.01) 30%,
-    transparent 55%
-  );
+[data-surface="glass"] { --surface-filter: blur(16px) saturate(150%); }
+[data-surface="reduced"] { --surface-filter: none; }
+[data-surface="solid"] { --surface-filter: none; }
+
+/* Superfícies ELEVADAS — a lista é curta e é deliberada.
+   MEDIDO em 2026-10-09 (ver test/liquid-glass-contrast.test.ts): o `.cyber-border`
+   vive em ~90 instâncias por ecrã e um passe de backdrop-filter por instância
+   multiplicava o trabalho do compositor até congelar a máquina. Por isso o
+   desfoque só se aplica a superficies estruturais, únicas ou poucas por ecrã:
+   a barra lateral, a faixa do Painel, os cartões de indicador e o ecrã de
+   entrada. Nas superficies repetidas o vidro continua a vir do enchimento
+   translúcido com tinta do tema, da borda e do highlight interior.
+   `.surface-elevated` é o utilitário para novas camadas (modais, painéis do
+   assistente, avisos flutuantes): quem a aplicou, pede o acabamento. */
+[data-surface="glass"] .surface-elevated,
+[data-surface="glass"] .sidebar-surface,
+[data-surface="glass"] .hero-banner,
+[data-surface="glass"] .stat-card,
+[data-surface="glass"] .auth-card {
+  backdrop-filter: var(--surface-filter);
+  -webkit-backdrop-filter: var(--surface-filter);
 }
 
-/* Liquid sidebar — real glass */
-[data-theme="cybersafe-liquid"] .sidebar {
-  background: color-mix(in oklch, var(--background) 40%, transparent) !important;
-  backdrop-filter: blur(24px) saturate(150%);
-  -webkit-backdrop-filter: blur(24px) saturate(150%);
-  border-right: 1px solid color-mix(in oklch, oklch(1 0 0) 12%, transparent);
+/* `solid` quer dizer opaco, não só sem desfoque. O `background-color` em
+   forma longa entra por DEBAIXO do gradiente translúcido que cada identidade
+   já declara, e achata-o contra o fundo do tema — sem repetir um único valor
+   de cor por tema.
+   Os dois prefixos (`.dark` e `:not(.dark)`) não são detalhe: os blocos por
+   identidade usam `[data-theme=...].dark` e `[data-theme=...]:not(.dark)`, que
+   valem 0-3-0. Uma regra só com `[data-surface="solid"]` ficaria a perder e o
+   modo sólido manteria transparência onde promete que não há. */
+[data-surface="solid"].dark .cyber-border,
+[data-surface="solid"].dark .stat-card,
+[data-surface="solid"].dark .surface-elevated,
+[data-surface="solid"].dark .auth-card,
+[data-surface="solid"].dark .hero-banner,
+[data-surface="solid"].dark .sidebar-surface,
+[data-surface="solid"]:not(.dark) .cyber-border,
+[data-surface="solid"]:not(.dark) .stat-card,
+[data-surface="solid"]:not(.dark) .surface-elevated,
+[data-surface="solid"]:not(.dark) .auth-card,
+[data-surface="solid"]:not(.dark) .hero-banner,
+[data-surface="solid"]:not(.dark) .sidebar-surface {
+  background-color: var(--background);
 }
 
-[data-theme="cybersafe-liquid"].dark .sidebar {
-  background: color-mix(in oklch, oklch(0.08 0.015 240) 55%, transparent) !important;
-  border-right: 1px solid color-mix(in oklch, oklch(1 0 0) 6%, transparent);
+/* A BORDA é onde o vidro se vê. Com o fundo desfocado por trás, o aro
+   iluminado pela cor do tema é a luz de rebordo que diz «isto é uma placa de
+   vidro»; em `reduzido` e `sólido` fica o aro neutro do próprio tema. É a
+   segunda alavanca de distância entre os três materiais, para além do desfoque
+   e da transparência, e não custa um passe de compositor.
+   Os dois prefixos de modo repetem-se por a mesma razão do bloco `solid`: as
+   regras por identidade valem 0-3-0 e um seletor só com [data-surface] perdia. */
+[data-surface="glass"].dark .surface-elevated,
+[data-surface="glass"].dark .sidebar-surface,
+[data-surface="glass"].dark .hero-banner,
+[data-surface="glass"].dark .stat-card,
+[data-surface="glass"].dark .auth-card,
+[data-surface="glass"]:not(.dark) .surface-elevated,
+[data-surface="glass"]:not(.dark) .sidebar-surface,
+[data-surface="glass"]:not(.dark) .hero-banner,
+[data-surface="glass"]:not(.dark) .stat-card,
+[data-surface="glass"]:not(.dark) .auth-card {
+  border-color: color-mix(in oklch, var(--primary) 42%, transparent);
 }
 
-/* Liquid active sidebar item — glass capsule */
-[data-theme="cybersafe-liquid"] .sidebar button.active,
-[data-theme="cybersafe-liquid"] .sidebar [data-active="true"] {
-  background: color-mix(in oklch, var(--primary) 12%, transparent);
-  backdrop-filter: blur(8px);
-  border: 1px solid color-mix(in oklch, var(--primary) 20%, transparent);
+/* VIDRO EM QUALQUER TEMA — R6-L5. A transparência é o que falta para o desfoque
+   se ver. Em Neão e Terminal o `--card` é opaco, por isso o `backdrop-filter`
+   da ronda 2 não tinha efeito nenhum nesses temas: não era o fundo que faltava,
+   era a superfície não deixar passar nada.
+   A lista deixou de ter variante de modo: o que separa claro de escuro já vive
+   nos tokens (`--surface-translucent` traz as duas medidas, 74% e 80%). O
+   prefixo `[data-theme]` não é decoração — dá à regra 0-3-0, o mesmo que os
+   blocos por identidade, e sendo posterior na folha é assim que o material
+   ganha finalmente ao tema. Estava falta aqui o ecrã de entrada (`.auth-card`),
+   que em Sólido continuava translúcido a 85% enquanto todo o resto achatava. */
+/* ANCORADA NO CONTRATO DE OUTRA RONDA — os dois blocos abaixo repetem em
+   literal o que os tokens em cima já dizem (74% do `--card` é exatamente
+   `--surface-translucent` em escuro; 70% do `--sidebar` é exatamente
+   `--material-glass-nav`). Não é escolha minha: o teste
+   test/r4-l2-dashboard-aparencia.test.ts procura estas duas declarações
+   escritas, e essa procura é mais antiga que esta refatoração. O teste
+   r6-l5-state-contrast.test.ts compara os dois caminhos valor a valor, por
+   isso a duplicação não pode divergir em silêncio. */
+[data-surface="glass"].dark .stat-card {
+  background-color: color-mix(in oklch, var(--card) 74%, transparent);
 }
 
-/* Liquid hero */
-[data-theme="cybersafe-liquid"] .hero-banner {
-  background: color-mix(in oklch, var(--card) 30%, transparent) !important;
-  backdrop-filter: blur(20px) saturate(130%) !important;
-  -webkit-backdrop-filter: blur(20px) saturate(130%) !important;
-  border: 1px solid color-mix(in oklch, oklch(1 0 0) 15%, transparent);
+[data-surface="glass"].dark .sidebar-surface {
+  background-color: color-mix(in oklch, var(--sidebar) 70%, transparent);
 }
 
-[data-theme="cybersafe-liquid"].dark .hero-banner {
-  background: color-mix(in oklch, oklch(0.1 0.015 240) 40%, transparent) !important;
-  border: 1px solid color-mix(in oklch, oklch(1 0 0) 6%, transparent);
+[data-theme][data-surface="glass"] .surface-elevated,
+[data-theme][data-surface="glass"] .stat-card,
+[data-theme][data-surface="glass"] .hero-banner,
+[data-theme][data-surface="glass"] .auth-card {
+  background-color: var(--surface-translucent);
 }
+
+[data-theme][data-surface="glass"] .sidebar-surface {
+  background-color: var(--material-glass-nav);
+}
+
+/* REDUZIDO É O DEGRAU DO MEIO — o mesmo pano translúcido do vidro, sem desfoque
+   e sem aro iluminado. Não havia regra nenhuma: o reduzido herdava o `--card`
+   do tema, que em Neão e Terminal é opaco, por isso nesses dois temas Reduzido
+   e Sólido eram o mesmo acabamento (era exatamente a queixa da ronda 3-E).
+   A barra lateral fica de fora de propósito: ela lê `--sidebar`, que é outra
+   cor do tema, e achatá-la contra o `--card` apagava a distinção da barra. */
+[data-theme][data-surface="reduced"] .surface-elevated,
+[data-theme][data-surface="reduced"] .stat-card,
+[data-theme][data-surface="reduced"] .hero-banner,
+[data-theme][data-surface="reduced"] .auth-card {
+  background-color: var(--surface-translucent);
+}
+
+/* O FUNDO TEM DE TER COM O QUE O DESFOQUE SE MOSTRE — fora do Líquido não
+   tinha. `.liquid-bg` só é posto no invólucro quando a identidade é Líquido
+   (src/App.tsx:789); nos outros quatro temas o `backdrop-filter` do vidro
+   desfocava um gradiente liso, que é invisível por definição. É esta a razão
+   por que «Vidro» não se aplicava onde devia, e é por isso que a malha passa a
+   vir do EIXO, não da identidade: aplicada no contentor que faz scroll
+   (`<main>`), fica por baixo de todas as superfícies e não custa um passe de
+   compositor por cartão. O Líquido fica de fora porque já pinta a sua malha em
+   `.liquid-bg` — somá-las duas passava o teto de 8% de tinta do fundo.
+   São as mesmas três réguas do Líquido (linhas de 1 px a 4% do `--foreground`,
+   de 24 px e 96 px) sobre a grelha de 40 px que o `main` já tinha. */
+[data-surface="glass"]:not([data-theme="cybersafe-liquid"]) main {
+  background-image:
+    repeating-linear-gradient(0deg, color-mix(in oklch, var(--foreground) 4%, transparent) 0 1px, transparent 1px 24px),
+    repeating-linear-gradient(90deg, color-mix(in oklch, var(--foreground) 4%, transparent) 0 1px, transparent 1px 96px),
+    linear-gradient(color-mix(in oklch, var(--primary) 3%, transparent) 1px, transparent 1px),
+    linear-gradient(90deg, color-mix(in oklch, var(--primary) 3%, transparent) 1px, transparent 1px);
+  background-size: auto, auto, 40px 40px, 40px 40px;
+}
+
+/* Superfície REBAIXADA — o substituto explícito dos `bg-black/20|30|40` que o
+   markup espalha pelas páginas. Preto com alfa sobre um tema CLARO dá lama
+   cinzenta; sobre um escuro é legítimo. O token resolve por modo, a classe é
+   uma só: `.surface-sunken`. As páginas não são deste scope, por isso a ponte
+   (a regra ancorada em `:root:not(.dark)` lá em cima) mantém-se, mas a ler o
+   mesmo token em vez de um valor inventado dentro do remendo. */
+:root {
+  --surface-sunken: color-mix(in oklch, var(--card) 90%, transparent);
+}
+
+.dark {
+  --surface-sunken: oklch(0 0 0 / 0.35);
+}
+
+.surface-sunken {
+  background: var(--surface-sunken);
+}
+
+/* `reduced` e `solid` têm de desligar o desfoque DE FACTO, não só nas regras
+   deste ficheiro. O `backdrop-blur-*` do Tailwind é posto diretamente no markup
+   de páginas que não pertencem a este eixo (App, AIAssistant, ExitConfirmDialog,
+   OnboardingOverlay, ProtectionDetails, TaskManager, Threats, Business) — sem
+   este travão ficaria desfoque residual nesses modos. Remover custo com `*` é
+   sempre mais barato; o que congelava máquinas era ADDICIONAR blur universal. */
+[data-surface="reduced"] *:not([data-surface-preview]),
+[data-surface="reduced"] *::before,
+[data-surface="reduced"] *::after,
+[data-surface="solid"] *:not([data-surface-preview]),
+[data-surface="solid"] *::before,
+[data-surface="solid"] *::after {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+}
+
+/* O fundo ambiente faz parte do efeito: `.liquid-bg` é a única fonte dos
+   realces radiais (as três camadas fixas que o App punha por cima estavam
+   duplicadas e saíram). Sem conteúdo colorido por trás do desfoque, o vidro
+   volta a ler-se como painel escuro. */
+
+/* ═══ TÍTULO DE PÁGINA ═════════════════════════════════════════════════════
+   O realce vem do TEMA, não de uma cor escrita na página. É o mesmo motivo do
+   item ativo da barra lateral: uma régua de `--shell-nav-bar-w` na tinta de
+   `--nav-active-bar` (em claro, o acento escurecido para preto e medido
+   >= 4,3:1 nos dez acentos; em escuro, o `--primary` do tema). Vai por
+   `box-shadow inset` e não por `border`: a barra não muda a caixa, por isso
+   trocar de acento não desloca o título. A tipografia fica nas classes que as
+   páginas já usam — esta só acrescenta o destaque. Vive aqui, e não na zona dos
+   tokens partilhados, porque a régua de teste da ronda 6-L1 fecha o vocabulário
+   de variáveis daquela região a um conjunto deliberado. */
+.page-title {
+  box-shadow: inset var(--shell-nav-bar-w) 0 var(--nav-active-bar);
+  padding-left: var(--space-3);
+}
+
+/* ═══ PRÉ-VISUALIZAÇÃO DOS MATERIAIS (Configurações › Aparência) ═══════════
+   R6-L5 — os dois defeitos relatados tinham a mesma origem: o painel era uma
+   superficie ELEVADA do eixo.
+
+   1. Em Vidro, `.surface-elevated` dá-lhe um pano TRANSLÚCIDO. Colado ao topo
+      do contentor que faz scroll (`<main>`, em `lg:sticky`), tudo o que passava
+      por baixo via-se por dentro do painel — é a sobreposição de queixa.
+   2. Quando o painel é mais alto que o retângulo de visualização, o `top-4`
+      prende-o e o que fica fora nunca se alcança: o painel não «acompanhava» o
+      scroll porque já não tinha para onde ir.
+
+   A solução que sobrevive aos cinco temas e aos três acabamentos: o CONTENTOR
+   da amostra passa a ser uma placa opaca — `--background`, o fundo do próprio
+   tema, o mesmo achatamento que o modo Sólido já faz. O material continua a ser
+   mostrado pelos três cartões dentro do palco, que é onde ele tem de se ver.
+   Nenhum valor por tema e nenhum por modo: `--background` resolve sozinho nos
+   dez blocos de identidade.
+
+   O CONTROLO DE ALTURA só existe onde há sticky. O contentor que faz scroll é o
+   `<main>` (`App.tsx:828`, `flex-1 overflow-y-auto`); abaixo de `lg` a grelha
+   passa a uma coluna, o painel volta ao fluxo normal e não cola ao topo de
+   lado nenhum — limitá-lo ali só lhe meteria uma barra de scroll dentro de uma
+   janela curta, a trocar em miúdos o defeito que se quis curar. Por isso o
+   teto, o scroll próprio e a calha vivem no mesmo `min-width: 1024px` em que o
+   markup põe `lg:sticky`. */
+[data-theme][data-surface] .appearance-preview {
+  background-color: var(--background);
+  border-color: var(--border);
+}
+
+/* A amostra é uma placa no fluxo da página: sem `sticky`, sem teto de altura e
+   sem scroll próprio. Foi o sticky que a fazia andar colada ao topo; agora rola
+   com o resto das Configurações e nunca fica presa a meio caminho. */
 
 /* Reduced motion */
 @media (prefers-reduced-motion: reduce) {
@@ -2161,6 +3210,11 @@ html { scroll-behavior: smooth; }
     transition-property: none !important;
     scroll-behavior: auto !important;
   }
+  /* Movimento reduzido ALIGERA o custo do eixo de superfície: o raio desce, o
+     acabado escolhido pelo utilizador mantém-se. Não se repõe desfoque
+     universal — foi exatamente isso que congelou máquinas com RDP/VMs (nota no
+     bloco Liquid acima deste ficheiro). */
+  [data-surface="glass"] { --surface-filter: blur(8px) saturate(120%); }
   .scanlines::before,
   .matrix-rain::before,
   .auth-bg-orb,
@@ -2169,3 +3223,659 @@ html { scroll-behavior: smooth; }
   }
 }
 
+
+/* ══════════════════════════════════════════════════════════════════════════
+   TP-V2-VISUAL — profundidade, aro iluminado e prosa legível
+   ──────────────────────────────────────────────────────────────────────────
+   Aditivo e deliberadamente pequeno: nenhuma regra existente foi substituída.
+   Não declara `backdrop-filter` (o desfoque continua a ser o contrato do eixo
+   de superfície: `--surface-filter` e os blocos `[data-material]` já testados).
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Painel com "edge light" (aro superior iluminado) e profundidade. Usa os
+   MESMOS tokens do eixo: translúcido, borda e card. Em Sólido torna-se opaco,
+   porque a promessa desse material é o fundo do tema. */
+.surface-lift {
+  background: var(--surface-translucent);
+  border: 1px solid color-mix(in oklch, var(--border) 72%, transparent);
+  box-shadow:
+    inset 0 1px 0 color-mix(in oklch, oklch(1 0 0) 10%, transparent),
+    0 1px 2px color-mix(in oklch, var(--background) 55%, transparent);
+  border-radius: var(--shell-radius-card, 0.75rem);
+}
+
+[data-surface="solid"] .surface-lift {
+  background: var(--background);
+}
+
+
+/* Prosa em sans: 13 px com entrelinha 1.6 e tracking discreto. Mono continua
+   reservada a números, datas, caminhos e identificadores técnicos. */
+.copy-human {
+  font-family: var(--font-sans);
+  font-size: 0.8125rem;
+  line-height: 1.6;
+  letter-spacing: 0.006em;
+}
+
+.copy-human strong,
+.copy-human .copy-emphasis {
+  font-weight: 600;
+  letter-spacing: 0;
+}
+
+/* Hierarquia da telemetria: os dois cartões principais respiram mais. */
+@media (min-width: 1024px) {
+  .telemetry-lead {
+    grid-column: span 2;
+  }
+}
+
+/* Movimento reduzido: as superfícies e a transição de material param. A
+   informação não anima porque a preferência do sistema assim o pede. */
+@media (prefers-reduced-motion: reduce) {
+  .surface-lift,
+  .hero-banner,
+  .stat-card,
+  .nav-item,
+  .surface-elevated {
+    transition-duration: 0.01ms !important;
+    animation-duration: 0.01ms !important;
+  }
+}
+
+/* ═══ TP-V2-VISUAL round 2 — hierarquia primário/secundário no Dashboard ═══
+   A revisão do Maestro apontou «muitos cartões idênticos de contorno ciano» e
+   ausência de nível visual. O hero-banner passou a ser a única superfície
+   PRIMÁRIA (preenchimento do material, sem borda ciana própria). A telemetria e
+   a atividade são SECUNDÁRIAS: contornos discretos e sem sombra, para não
+   competirem com o hero. Regras no fim do ficheiro, com `.dashboard-page` a
+   subir a especificidade acima dos overrides de identidade (empate → vence a
+   ordem). Não altera tokens nem o eixo de material; só o peso do contorno. */
+.dashboard-page .dash-secondary .stat-card {
+  border-color: color-mix(in oklch, var(--border) 30%, transparent);
+  box-shadow: none;
+}
+.dashboard-page .dash-secondary .stat-card:hover {
+  box-shadow: none;
+}
+/* A faixa de evidência é leitura de apoio, não cartões de estado: mais leve. */
+.dashboard-page [data-testid="evidence-strip"] .surface-lift {
+  border: 1px solid color-mix(in oklch, var(--border) 24%, transparent);
+  box-shadow: none;
+}
+/* Títulos de secção em sans, corpo em sans; mono fica só nos números/caminhos. */
+.dashboard-page .dash-secondary .text-muted-foreground {
+  letter-spacing: 0;
+}
+
+/* ═══ TP-LG-PREMIUM — vidro líquido com reflexo e aro duplo (22/10) ═══════════
+   Objetivo: o Líquido deixar de ser «o mesmo cartão translúcido dos outros» sem
+   custo de compositor novo. NÃO há refração WebGL: desenhar o fundo num canvas
+   para o distorcer custa uma segunda árvore de render e não sobrevive ao
+   redimensionamento da janela; o ganho é decorativo e o risco de frame-drop em
+   máquinas fracas é real. O realismo vem de três coisas baratas:
+     1. reflexo especular estático (faixa diagonal clara, não animada);
+     2. aro duplo — luz em cima, sombra em baixo — que dá espessura à placa;
+     3. profundidade assimétrica (sombra larga para baixo, sem halo à volta).
+   Tudo vive no Líquido: as outras identidades mantêm o seu caráter.
+   ────────────────────────────────────────────────────────────────────────── */
+
+/* Tokens de acabamento. Nomes novos: `--surface-*` continua a ser o contrato do
+   eixo e nenhum valor existente é reescrito. */
+[data-theme="cybersafe-liquid"]:not(.dark) {
+  --glass-sheen: oklch(1 0 0 / 0.30);
+  --glass-sheen-soft: oklch(1 0 0 / 0.10);
+  --glass-rim-top: oklch(1 0 0 / 0.85);
+  --glass-rim-bottom: oklch(0.18 0.02 240 / 0.12);
+  --glass-rim-side: oklch(1 0 0 / 0.26);
+  --glass-glow: color-mix(in oklch, var(--primary) 24%, transparent);
+  --glass-depth: 0 14px 30px -20px oklch(0.22 0.02 240 / 0.38);
+}
+
+[data-theme="cybersafe-liquid"].dark {
+  --glass-sheen: oklch(1 0 0 / 0.15);
+  --glass-sheen-soft: oklch(1 0 0 / 0.05);
+  --glass-rim-top: oklch(1 0 0 / 0.24);
+  --glass-rim-bottom: oklch(0 0 0 / 0.5);
+  --glass-rim-side: oklch(1 0 0 / 0.07);
+  --glass-glow: color-mix(in oklch, var(--primary) 30%, transparent);
+  --glass-depth: 0 18px 40px -22px oklch(0 0 0 / 0.7);
+}
+
+/* Um só reflexo, reutilizado por todas as superfícies: a mesma luz vinda do
+   mesmo ângulo faz as placas parecerem do mesmo material. */
+[data-theme="cybersafe-liquid"][data-surface="glass"] .cyber-border {
+  background-image:
+    linear-gradient(115deg,
+      transparent 0 34%,
+      var(--glass-sheen-soft) 43%,
+      var(--glass-sheen) 49%,
+      var(--glass-sheen-soft) 55%,
+      transparent 64%),
+    linear-gradient(140deg,
+      oklch(1 0 0 / 0.9) 0%,
+      color-mix(in oklch, var(--primary) 6%, oklch(1 0 0 / 0.72)) 100%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-top),
+    inset 0 -1px 0 var(--glass-rim-bottom),
+    inset 1px 0 0 var(--glass-rim-side),
+    var(--glass-depth);
+}
+
+[data-theme="cybersafe-liquid"].dark[data-surface="glass"] .cyber-border {
+  background-image:
+    linear-gradient(115deg,
+      transparent 0 34%,
+      var(--glass-sheen-soft) 43%,
+      var(--glass-sheen) 49%,
+      var(--glass-sheen-soft) 55%,
+      transparent 64%),
+    linear-gradient(140deg,
+      color-mix(in oklch, var(--primary) 8%, oklch(0.19 0.025 240 / 0.78)) 0%,
+      oklch(0.13 0.02 240 / 0.72) 100%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-top),
+    inset 0 -1px 0 var(--glass-rim-bottom),
+    inset 1px 0 0 var(--glass-rim-side),
+    var(--glass-depth);
+}
+
+[data-theme="cybersafe-liquid"][data-surface="glass"] .stat-card {
+  background-image:
+    linear-gradient(115deg,
+      transparent 0 34%,
+      var(--glass-sheen-soft) 43%,
+      var(--glass-sheen) 49%,
+      var(--glass-sheen-soft) 55%,
+      transparent 64%),
+    linear-gradient(150deg,
+      oklch(1 0 0 / 0.92) 0%,
+      color-mix(in oklch, var(--cyber-cyan) 5%, oklch(1 0 0 / 0.74)) 100%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-top),
+    inset 0 -1px 0 var(--glass-rim-bottom),
+    inset 1px 0 0 var(--glass-rim-side),
+    var(--glass-depth);
+  transition:
+    transform 180ms cubic-bezier(0.2, 0.7, 0.2, 1),
+    box-shadow 180ms ease,
+    border-color 180ms ease;
+}
+
+[data-theme="cybersafe-liquid"].dark[data-surface="glass"] .stat-card {
+  background-image:
+    linear-gradient(115deg,
+      transparent 0 34%,
+      var(--glass-sheen-soft) 43%,
+      var(--glass-sheen) 49%,
+      var(--glass-sheen-soft) 55%,
+      transparent 64%),
+    linear-gradient(150deg,
+      color-mix(in oklch, var(--primary) 7%, oklch(0.18 0.024 240 / 0.8)) 0%,
+      oklch(0.13 0.02 240 / 0.72) 100%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-top),
+    inset 0 -1px 0 var(--glass-rim-bottom),
+    inset 1px 0 0 var(--glass-rim-side),
+    var(--glass-depth);
+}
+
+/* Hero e entrada ganham o mesmo aro; são placas únicas, por isso levam o brilho
+   do tema, não só a sombra. */
+[data-theme="cybersafe-liquid"][data-surface="glass"] .hero-banner,
+[data-theme="cybersafe-liquid"][data-surface="glass"] .auth-card {
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-top),
+    inset 0 -1px 0 var(--glass-rim-bottom),
+    var(--glass-depth),
+    0 0 34px -22px var(--glass-glow);
+}
+
+/* Painéis flutuantes (assistente, modais, avisos) usam o mesmo reflexo: são a
+   camada que o utilizador vê a abrir por cima do conteúdo, e era onde o
+   acabamento mais destoava do resto. A barra lateral leva só o aro, para não
+   atravessar a navegação com uma faixa clara. */
+[data-theme="cybersafe-liquid"][data-surface="glass"] .surface-elevated {
+  background-image:
+    linear-gradient(115deg,
+      transparent 0 34%,
+      var(--glass-sheen-soft) 43%,
+      var(--glass-sheen) 49%,
+      var(--glass-sheen-soft) 55%,
+      transparent 64%);
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-top),
+    inset 0 -1px 0 var(--glass-rim-bottom),
+    inset 1px 0 0 var(--glass-rim-side),
+    var(--glass-depth);
+}
+
+[data-theme="cybersafe-liquid"][data-surface="glass"] .sidebar-surface {
+  box-shadow:
+    inset 0 1px 0 var(--glass-rim-top),
+    inset -1px 0 0 var(--glass-rim-side);
+}
+
+/* Elevação ao passar o rato: 2 px no transform (compositor, sem reflow) e um
+   aro mais quente. Só em ponteiros finos — em toque não há hover e o salto
+   ficava preso depois do tap. */
+@media (hover: hover) and (pointer: fine) {
+  [data-theme="cybersafe-liquid"][data-surface="glass"] .stat-card:hover {
+    transform: translateY(-2px);
+    border-color: color-mix(in oklch, var(--primary) 52%, transparent);
+  }
+}
+
+/* Os três degraus deixam de se distinguir só pelo desfoque. Reduzido mantém a
+   transparência que promete, mas fica plano (um aro, zero profundidade), que é
+   também o modo barato; Sólido não tem nem aro nem sombra. Nenhum dos dois usa
+   `--primary`, para não herdar o aro iluminado que é exclusivo do Vidro. */
+[data-surface="reduced"] .cyber-border,
+[data-surface="reduced"] .stat-card,
+[data-surface="reduced"] .surface-elevated,
+[data-surface="reduced"] .hero-banner,
+[data-surface="reduced"] .auth-card,
+[data-surface="reduced"] .sidebar-surface {
+  box-shadow: inset 0 1px 0 color-mix(in oklch, oklch(1 0 0) 12%, transparent);
+}
+
+[data-surface="solid"] .cyber-border,
+[data-surface="solid"] .stat-card,
+[data-surface="solid"] .surface-elevated,
+[data-surface="solid"] .hero-banner,
+[data-surface="solid"] .auth-card,
+[data-surface="solid"] .sidebar-surface {
+  box-shadow: none;
+}
+
+/* Fallback para equipamentos fracos: não é um caminho novo de CSS, é o degrau
+   Reduzido do eixo (acima) — mantém o pano translúcido e o aro, tira o desfoque
+   e a profundidade. Um `@supports not (backdrop-filter: ...)` seria a tentação
+   óbvia, mas este repositório tem um guarda que só sanciona o desfoque pelo
+   token do eixo; a condição de feature-query passaria a ser lida como uma
+   declaração fora do sistema. A via suportada e testada é `data-surface=reduced`,
+   exposta nas Configurações como «Reduzido». */
+
+/* A preferência do sistema manda: sem movimento, o cartão não salta. */
+@media (prefers-reduced-motion: reduce) {
+  [data-theme="cybersafe-liquid"][data-surface="glass"] .stat-card,
+  [data-theme="cybersafe-liquid"][data-surface="glass"] .stat-card:hover {
+    transform: none;
+  }
+}
+
+/* A hierarquia do Dashboard manda acima do acabamento: os cartões secundários
+   continuam planos e não saltam, para o hero continuar a ser a única superfície
+   primária. (A regra equivalente vive antes desta secção; esta repetição existe
+   porque o aro premium tem a mesma especificidade e é declarado mais abaixo.) */
+.dashboard-page .dash-secondary .stat-card,
+.dashboard-page .dash-secondary .stat-card:hover {
+  box-shadow: none;
+  transform: none;
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CS-V2 · fase 1 (TP-PAP-DESIGN-V2-PHASE1-20261027) — BLOCO ADITIVO
+
+   1. Nada acima deste comentário foi tocado. O ficheiro cresce só no fim: o
+      prefixo de 141 371 bytes é byte-idêntico ao PRE, provado por guarda.
+   2. Zero cor literal nova. Tudo é `color-mix()` sobre tokens que as
+      identidades já publicam (`--primary`, `--sidebar-border`,
+      `--sidebar-foreground`, `--foreground`). Introduzir hex criaria um segundo
+      vocabulário e voltaria a conflatar identidade com material — a família de
+      defeito que já produziu três bugs neste produto.
+   3. Eixos separados e respeitados: identidade (`data-theme`), modo
+      (`.dark`/`.light`), material (`data-material`), movimento
+      (`prefers-reduced-motion` + `useReducedMotion`). Este bloco só pinta.
+   4. Nada aqui comunica estado de motor, saúde, cobertura ou resultado.
+   5. O sidebar NÃO recebe `data-material` nesta fase: material = transparência,
+      e pôr o rail de navegação translúcido mudaria o contraste do texto de
+      navegação sobre um fundo variável. Isso exige medição por tema e não foi
+      medida. Preferir o ganho visual ao contraste teria sido o mesmo erro de
+      sempre; fica declarado, não feito.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* --- Sidebar -------------------------------------------------------------
+   `.sidebar-surface` fica ONDE ESTÁ: é o gancho do rail para o eixo
+   `data-surface` (10 regras na base, todas prefixadas por esse atributo —
+   vidro, sólido claro/escuro, reduced, por tema). Numa fase anterior chamei-lhe
+   «classe fantasma» com base num grep ancorado ao início da linha, que nunca
+   apanha um selector escrito depois de `[data-surface="..."] `. Removê-la teria
+   desligado o sidebar do material inteiro. `.cs-sidebar` é um acréscimo por
+   cima, não uma substituição: um scrim de 4% da tinta do sidebar a desvanecer
+   nos primeiros terços, que dá profundidade ao topo sem tocar em cor de texto
+   nenhuma. */
+.cs-sidebar {
+  background-image: linear-gradient(
+    180deg,
+    color-mix(in oklch, var(--sidebar-foreground) 4%, transparent),
+    transparent 34%
+  );
+}
+
+/* O pill activo já tem wash (`--nav-active-bg`), tinta e barra inset. Falta-lhe
+   o fio de luz no topo, a mesma linguagem do `surface-showcase-glare` que já
+   vive neste ficheiro: uma aresta de 1px a 12%, que não escurece nem clareia o
+   rótulo. `.nav-item` já é `position: relative`. */
+.nav-item.active::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  pointer-events: none;
+  box-shadow: inset 0 1px 0 color-mix(in oklch, var(--foreground) 12%, transparent);
+}
+
+/* --- Spotlight: luz que segue o ponteiro --------------------------------
+   O host é o próprio cartão (`.cs-spotlight-host`); o feixe é um filho
+   absoluto na camada 0, abaixo do conteúdo que estas páginas já isolam com
+   `relative z-10`. Sem canvas, sem WebGL, sem rAF.
+   O omissão das coordenadas leva o gradiente para fora do elemento: enquanto o
+   ponteiro não entrou, não há luz residual nem flash num canto. */
+.cs-spotlight-host {
+  position: relative;
+}
+.cs-spotlight-beam {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0;
+  background: radial-gradient(
+    260px circle at var(--cs-spot-x, -9999px) var(--cs-spot-y, -9999px),
+    color-mix(in oklch, var(--primary) 18%, transparent),
+    transparent 70%
+  );
+  transition: opacity 180ms ease;
+}
+.cs-spotlight-beam[data-cs-spot="on"] {
+  opacity: 1;
+}
+
+/* Material opaco aguenta mais luz; vidro já paga desfoque, e um feixe por cima
+   competiria com ele. A intensidade segue o eixo do material, não o tema. */
+.cs-spotlight-host[data-material="solid"] .cs-spotlight-beam {
+  background: radial-gradient(
+    260px circle at var(--cs-spot-x, -9999px) var(--cs-spot-y, -9999px),
+    color-mix(in oklch, var(--primary) 14%, transparent),
+    transparent 70%
+  );
+}
+.cs-spotlight-host[data-material="glass"] .cs-spotlight-beam,
+.cs-spotlight-host[data-material="liquid"] .cs-spotlight-beam {
+  background: radial-gradient(
+    260px circle at var(--cs-spot-x, -9999px) var(--cs-spot-y, -9999px),
+    color-mix(in oklch, var(--primary) 10%, transparent),
+    transparent 72%
+  );
+}
+
+/* --- Fallbacks -----------------------------------------------------------
+   (a) Movimento reduzido: o feixe deixa de existir, não apenas de animar. O
+       hook também devolve `ativo=false`, por isso não há trabalho invisível.
+   (b) Sem `color-mix`: todo este bloco é ignorado e a superfície fica
+       exactamente como estava. Degradado, não quebrado.
+   (c) Contraste forçado: sem scrim, sem fio de luz, sem feixe. */
+@media (prefers-reduced-motion: reduce) {
+  .cs-spotlight-beam,
+  .cs-spotlight-beam[data-cs-spot="on"] {
+    opacity: 0;
+    transition: none;
+  }
+  .nav-item.active::after {
+    box-shadow: none;
+  }
+}
+
+@supports not (color: color-mix(in oklch, red 50%, blue)) {
+  .cs-sidebar,
+  .cs-spotlight-beam,
+  .nav-item.active::after {
+    background-image: none;
+    background: none;
+    box-shadow: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .cs-sidebar,
+  .cs-spotlight-beam,
+  .nav-item.active::after {
+    background: none;
+    box-shadow: none;
+  }
+}
+
+/* ══════════════════════════════════════════════════════════════════════════
+   CS-V2 · fase 2 (TP-PAP-DESIGN-V2-PHASE2-20261027) — BLOCO ADITIVO
+
+   Mesmas disciplina e promessas da fase 1:
+    1. Só acréscimo no fim do ficheiro; o prefixo de 147 184 bytes (POST da
+       fase 1) fica byte-idêntico — provado por guarda de hash.
+    2. Zero cor literal nova e zero token novo: o estado usa `--state-ok-ink`,
+       `--state-warn-ink`, `--state-crit-ink` e `--state-na-ink`, que já são os
+       tokens de tinta acessível por identidade (`:160-181`) com tints ajustados
+       no modo claro (`:222-226`). Reinventar uma cor de estado por tema era
+       conflatar identidade com material — a família de defeito com três bugs
+       já emitidos neste produto.
+    3. Nada aqui comunica estado. A palavra e o `data-state` vêm do contrato;
+       este bloco só pinta o que o componente já decidiu.
+    4. O fio de acento é tinta, não semântica: aparece igual num motor ativo e
+       num indisponível, para que a decoração nunca possa ser lida como sinal.
+   ══════════════════════════════════════════════════════════════════════════ */
+
+/* O cartão de motor é conteúdo secundário: mantém-se plano, como o resto da
+   coluna abaixo do hero. A hierarquia «o hero é a única superfície primária»
+   já existe para `.dash-secondary .stat-card`; repito a supressão porque o
+   aro premium tem a mesma especificidade e é declarado mais acima. */
+.cs-engine-card {
+  position: relative;
+  overflow: hidden;
+  /* Um item de grelha tem `min-width: auto` por omissão — recusa-se a ficar mais
+     estreito que o conteúdo mínimo, e com o `overflow: hidden` do cartão o
+     resultado é o rótulo cortado. É o cartão que tem de poder encolher até à
+     sua pista; aos 4 em linha, a 1200 px de página, isso são ~212 px. */
+  min-width: 0;
+  background-image: linear-gradient(
+    140deg,
+    color-mix(in oklch, var(--primary) 6%, transparent),
+    transparent 60%
+  );
+}
+
+/* Cabeçalho do cartão de motor. Duas regras, uma intenção: o nome é a
+   identidade dos quatro e por isso QUEBRA ao limite da palavra em vez de ser
+   truncado, e o estado é uma classificação — não se parte nem se comprime, e
+   quando não cabe na linha desce para a sua própria (`flex-wrap` no TSX).
+   O `overflow-wrap` só age numa palavra mais larga que a pista; não é
+   `anywhere`, porque partir «assinaturas» ao meio seria o mesmo defeito com
+   outra roupa. */
+.cs-engine-nome {
+  overflow-wrap: break-word;
+}
+.dashboard-page .cs-engine-card,
+.dashboard-page .cs-engine-card:hover {
+  box-shadow: none;
+  transform: none;
+}
+.cs-engine-card::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 2px;
+  pointer-events: none;
+  background: linear-gradient(
+    90deg,
+    transparent,
+    color-mix(in oklch, var(--primary) 45%, transparent),
+    transparent
+  );
+  opacity: 0.3;
+}
+
+/* Tinta do estado — os quatro valores do contrato, mais o desconhecido.
+   O seletor só casa `data-state` literais do contrato: um valor fora dos
+   quatro (serviço novo a emitir texto que esta UI não conhece) fica com a
+   cor de `--state-na-ink`, isto é, a cor do «não sabemos». Ficar de fora da
+   tabela é a afirmação correta; pintar verde por omissão seria a contrária. */
+.cs-engine-state {
+  color: var(--state-na-ink);
+}
+.cs-engine-state[data-state="active"] {
+  color: var(--state-ok-ink);
+}
+.cs-engine-state[data-state="degraded"] {
+  color: var(--state-warn-ink);
+}
+.cs-engine-state[data-state="error"] {
+  color: var(--state-crit-ink);
+}
+.cs-engine-state[data-state="unavailable"],
+.cs-engine-state[data-state="sem-leitura"] {
+  color: var(--state-na-ink);
+}
+
+/* A borda esquerda do cartão repete a tinta do estado, para que o estado não
+   dependa apenas de cor: já depende da palavra (`engineStatusText`) e da
+   estrutura (`data-state`), e isto é redundância acessível, não o único sinal. */
+.cs-engine-card[data-state="active"] { border-left: 2px solid var(--state-ok-edge); }
+.cs-engine-card[data-state="degraded"] { border-left: 2px solid var(--state-warn-edge); }
+.cs-engine-card[data-state="error"] { border-left: 2px solid var(--state-crit-edge); }
+.cs-engine-card[data-state="unavailable"],
+.cs-engine-card[data-state="sem-leitura"] { border-left: 2px solid var(--state-na-edge); }
+
+/* Fallbacks: sem `color-mix`, o gradiente e o fio desaparecem e o cartão fica
+   exatamente como era um `.stat-card`. Em contraste forçado o fio e o wash
+   vão embora, mas a borda de estado fica — o SO decide a cor, não nós. */
+@supports not (color: color-mix(in oklch, red 50%, blue)) {
+  .cs-engine-card {
+    background-image: none;
+  }
+  .cs-engine-card::before {
+    background: none;
+  }
+}
+
+@media (forced-colors: active) {
+  .cs-engine-card {
+    background-image: none;
+  }
+  .cs-engine-card::before {
+    display: none;
+  }
+  .cs-engine-card,
+  .cs-engine-card[data-state] {
+    border-left: 2px solid CanvasText;
+  }
+}
+
+/* ═══ CS-V2 · SCANNER — TP-PAP-DESIGN-V2-SCANNER-VISUAL-20261027 ══════════════════
+   As superfícies do Scanner passam a ler os tokens que o tema já define. Não
+   há cor literal nova aqui: --surface-card, --surface-inset, --edge-neutral,
+   --edge-strong, --state-*-edge/--state-*-ink e --shell-radius-card já
+   existem (index.css:146-227) e já variam por identidade e por modo.
+
+   Porque entra: as métricas e os cartões de ação do Scanner usavam
+   `bg-black/20` — um wash preto fixo que no modo claro escurece por cima do
+   cartão e em nenhuma identidade acompanha o tema. Aqui passa a
+   `--surface-inset`, com degradação honesta para `--surface-card` onde o
+   motor não suportar `color-mix`.
+
+   Tudo está dependurado em `.cs-scanner-root`: as regras não saem do Scanner,
+   e o marcador da raiz é o que diz que a página já é V2.
+
+   O que a cor significa: fala de PROCESSO, nunca de limpeza. `completed`
+   recebe a tinta de progresso (ciano), não a de sucesso; o verde só existe em
+   `data-ton`, que é o tom que o próprio cartão de resultado já calcula a
+   partir do veredicto reportado. Um motor que não respondeu não fica verde.
+
+   O que NÃO entra, e porquê (limitações declaradas no handoff):
+   - movimento: o eixo de duração ainda não tem token, nada se acrescenta;
+   - espaçamento: o produto não tem escala de spacing, nada se inventa;
+   - `data-material`: o Scanner não lê o contexto de aparência — seis testes
+     lêem este ficheiro como texto e montam a página sem `AppearanceProvider`;
+     ligar o material exigiria tocar ficheiros de outro owner. */
+
+.cs-scanner-root .cs-scanner-header {
+  border-bottom: 1px solid var(--edge-neutral);
+}
+
+.cs-scanner-root .cs-scanner-tile,
+.cs-scanner-root .cs-scanner-acao,
+.cs-scanner-root .cs-scanner-resumo,
+.cs-scanner-root .cs-scanner-skeleton {
+  background-color: var(--surface-card);
+  border: 1px solid var(--edge-neutral);
+  border-radius: var(--shell-radius-card);
+}
+
+@supports (color: color-mix(in oklch, red 50%, blue)) {
+  .cs-scanner-root .cs-scanner-tile,
+  .cs-scanner-root .cs-scanner-acao,
+  .cs-scanner-root .cs-scanner-resumo,
+  .cs-scanner-root .cs-scanner-skeleton {
+    background-color: var(--surface-inset);
+  }
+}
+
+/* Cartão do ficheiro concreto: o estado é o da máquina de análise dirigida. */
+.cs-scanner-root .cs-scanner-perfile {
+  border-left: 2px solid var(--edge-strong);
+}
+.cs-scanner-root .cs-scanner-perfile[data-fase="a_analisar"] {
+  border-left-color: var(--state-proc-edge);
+}
+.cs-scanner-root .cs-scanner-perfile[data-fase="sem_ligacao"] {
+  border-left-color: var(--state-na-edge);
+}
+.cs-scanner-root .cs-scanner-perfile[data-fase="erro"],
+.cs-scanner-root .cs-scanner-perfile[data-fase="sem_resposta"] {
+  border-left-color: var(--state-crit-edge);
+}
+
+/* Uma linha por facto devolvido. A tinta é do estado, não do resultado. */
+.cs-scanner-root .cs-scanner-facto > b {
+  color: var(--state-na-ink);
+}
+.cs-scanner-root .cs-scanner-facto[data-estado="completed"] > b {
+  color: var(--state-proc-ink);
+}
+.cs-scanner-root .cs-scanner-facto[data-estado="inconclusive"] > b {
+  color: var(--state-warn-ink);
+}
+.cs-scanner-root .cs-scanner-facto[data-estado="failed"],
+.cs-scanner-root .cs-scanner-facto[data-estado="engine-unavailable"] > b {
+  color: var(--state-crit-ink);
+}
+
+/* Cartão de resultado: o tom já é do componente; a aresta só o repete. */
+.cs-scanner-root .cs-scanner-result {
+  border-left: 2px solid var(--state-na-edge);
+}
+.cs-scanner-root .cs-scanner-result[data-ton="green"] {
+  border-left-color: var(--state-ok-edge);
+}
+.cs-scanner-root .cs-scanner-result[data-ton="yellow"] {
+  border-left-color: var(--state-warn-edge);
+}
+.cs-scanner-root .cs-scanner-result[data-ton="red"] {
+  border-left-color: var(--state-crit-edge);
+}
+
+@media (forced-colors: active) {
+  .cs-scanner-root .cs-scanner-tile,
+  .cs-scanner-root .cs-scanner-acao {
+    background-color: Canvas;
+  }
+  .cs-scanner-root .cs-scanner-perfile,
+  .cs-scanner-root .cs-scanner-result {
+    border-left: 2px solid CanvasText;
+  }
+}
+
+/* POST017: final content can scroll clear of the floating MATRIX controls. */
+[data-cs-main] {
+  padding-bottom: var(--matrix-floating-clearance, 0px);
+  scroll-padding-bottom: var(--matrix-floating-clearance, 0px);
+}

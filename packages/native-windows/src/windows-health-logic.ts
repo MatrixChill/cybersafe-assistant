@@ -135,7 +135,16 @@ export function buildRecommendations(input: WindowsHealthInput): WindowsHealthRe
   }
 
   // Serviço importante indisponível
-  const unavailable = input.services.filter((s) => IMPORTANT_WINDOWS_SERVICES.includes(s.name) && !s.running);
+  const unavailable = input.services.filter((s) => {
+    const name = s.name.toLowerCase();
+    if (s.running || !IMPORTANT_WINDOWS_SERVICES.some((important) => important.toLowerCase() === name)) return false;
+    // Windows Update pode estar parado entre pedidos/triggers. Apenas o estado
+    // manual + stopped é esperado; disabled, erros e estados desconhecidos alertam.
+    const expectedDemandStop = name === "wuauserv"
+      && s.startType.toLowerCase() === "manual"
+      && s.status.toLowerCase() === "stopped";
+    return !expectedDemandStop;
+  });
   if (unavailable.length > 0) {
     recommendations.push({
       id: "service-down",

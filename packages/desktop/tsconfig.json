@@ -9,7 +9,16 @@
     "forceConsistentCasingInFileNames": true,
     "outDir": "dist",
     "rootDir": "..",
-    "lib": ["ESNext", "DOM"]
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "jsx": "react-jsx",
+    "types": ["vite/client", "node"],
+    "verbatimModuleSyntax": true,
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "baseUrl": ".",
+    "paths": {
+      "@/*": ["../app/src/*"]
+    }
   },
   "include": ["src/**/*", "../app/src/**/*"]
 }

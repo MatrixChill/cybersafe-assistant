@@ -1,5 +1,5 @@
 ﻿import { useState, useMemo } from "react";
-import { FileBarChart, Download, Filter, Calendar, AlertTriangle, Shield, Activity, ArrowUpRight } from "lucide-react";
+import { FileBarChart, Download, Filter, Calendar, AlertTriangle, Shield, Activity, ArrowUpRight, Printer } from "lucide-react";
 import { cn } from "@/lib/utils";
 // Fonte central de textos/classes do nível de proteção (consumo READ-ONLY).
 import { levelMeta, engineStatusText } from "@/lib/protectionHealth";
@@ -149,7 +149,21 @@ const severityLabel: Record<string, string> = {
 
 export default function ReportsPage({ events, threats, quarantine, protection, pcState }: ReportsPageProps) {
   const [severityFilter, setSeverityFilter] = useState<SeverityFilter>("all");
-  const [showExportToast, setShowExportToast] = useState(false);
+  /* Estado do caminho do PDF. Cinco casos e cada um diz o que aconteceu:
+     - inerte: ainda ninguém pediu nada;
+     - a_guardar: o pedido vai;
+     - guardado: há caminho REAL devolvido pelo main, e é esse que se mostra;
+     - erro: a mensagem DEVOLVIDA, não uma nossa;
+     - impressao: o relatório abriu na janela de impressão (caminho antigo).
+     `canceled: true` volta a `inerte` em silêncio — fechar o diálogo de
+     gravação não é uma falha e não se anuncia como tal. */
+  const [pdfEstado, setPdfEstado] = useState<
+    | { tipo: "inerte" }
+    | { tipo: "a_guardar" }
+    | { tipo: "guardado"; caminho: string }
+    | { tipo: "erro"; mensagem: string }
+    | { tipo: "impressao" }
+  >({ tipo: "inerte" });
 
   const filteredThreats = useMemo(() => {
     if (severityFilter === "all") return threats;
@@ -205,18 +219,85 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
       case "high": return "text-cyber-red bg-cyber-red/10 border-cyber-red/20";
       case "medium": return "text-cyber-yellow bg-cyber-yellow/10 border-cyber-yellow/20";
       case "low": return "text-cyber-green bg-cyber-green/10 border-cyber-green/20";
-      default: return "text-muted-foreground bg-white/5 border-white/10";
+      default: return "text-muted-foreground bg-secondary/50 border-border";
     }
   };
 
-  const exportPdf = () => {
-    // Gera um relatório imprimível A4 e abre na janela Electron com ícone CyberSafe.
+  /** Nome de ficheiro sugerido: só data, nunca um caminho do utilizador. */
+  function nomeSugerido(now: Date): string {
+    const dois = (n: number) => String(n).padStart(2, "0");
+    return `cybersafe-relatorio-${now.getFullYear()}-${dois(now.getMonth() + 1)}-${dois(now.getDate())}.pdf`;
+  }
+
+  /** O caminho antigo: janela de impressão, onde o próprio utilizador escolhe
+      «guardar como PDF». Mantido de propósito — é a única rota que funciona
+      sem o bridge do main. */
+  function abrirParaImpressao(html: string) {
+    if (window.electronAPI?.openReportWindow) {
+      void window.electronAPI.openReportWindow(html);
+      setPdfEstado({ tipo: "impressao" });
+      return;
+    }
+    const win = window.open("", "_blank", "width=860,height=640");
+    if (!win) {
+      setPdfEstado({ tipo: "erro", mensagem: "O navegador bloqueou a janela de impressão; nada foi guardado." });
+      return;
+    }
+    win.document.write(html);
+    win.document.close();
+    win.focus();
+    // A impressão é disparada pelo próprio utilizador no diálogo; se a janela
+    // já tiver fechado antes disto, não há nada para reportar — e dizemos porquê.
+    setTimeout(() => { try { win.print(); } catch { /* janela fechada entretanto */ } }, 400);
+    setPdfEstado({ tipo: "impressao" });
+  }
+
+  /** Gravação real do PDF pelo main (diálogo de escolha + renderização A4).
+      Só afirmamos o que o `result` devolve: caminho, cancelamento ou a mensagem
+      de erro dele. Sem caminho não há frase de sucesso, e `canceled` não é
+      erro — fechar o diálogo é uma resposta legítima e fica em silêncio. */
+  async function guardarPdf(html: string, nome: string) {
+    const api = window.electronAPI?.exportReportPdf;
+    if (typeof api !== "function") {
+      setPdfEstado({
+        tipo: "erro",
+        mensagem: "Esta janela não tem o guardador de PDF do CyberSafe. Usa «Abrir para imprimir».",
+      });
+      return;
+    }
+    setPdfEstado({ tipo: "a_guardar" });
+    try {
+      const result = await api(html, nome);
+      if (result.canceled === true) {
+        setPdfEstado({ tipo: "inerte" });
+        return;
+      }
+      if (result.success && typeof result.path === "string" && result.path !== "") {
+        setPdfEstado({ tipo: "guardado", caminho: result.path });
+        return;
+      }
+      setPdfEstado({
+        tipo: "erro",
+        mensagem: result.error ?? "A gravação não devolveu caminho nem razão; não se pode afirmar que guardou.",
+      });
+    } catch (e) {
+      setPdfEstado({
+        tipo: "erro",
+        mensagem: e instanceof Error ? e.message : "A gravação do PDF falhou sem mensagem.",
+      });
+    }
+  }
+
+  const exportPdf = (destino: "pdf" | "impressao" = "pdf") => {
+    // Gera o relatório A4 e entrega-o ao destino escolhido: gravação real por
+    // `exportReportPdf` (default) ou a janela de impressão, que continua
+    // disponível e é a única rota fora do Electron.
     const now = new Date();
     const hostname = typeof window !== "undefined" && window.location?.hostname ? window.location.hostname : "";
     const pcName = hostname || "Este computador";
     const rows = filteredThreats.slice(0, 50).map((t) => `
       <tr>
-        <td>${new Date(t.createdAt).toLocaleString("pt-BR")}</td>
+        <td>${new Date(t.createdAt).toLocaleString("pt-PT")}</td>
         <td><span class="sev sev-${t.severity}">${t.severity.toUpperCase()}</span></td>
         <td>${t.domain || t.source}</td>
         <td>${t.source}</td>
@@ -295,7 +376,7 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
       : `<div class="mini"><span class="k"><span class="sev sev-gray">Desconhecido</span></span><span class="v">Sem findings reportados pelo PC Center</span></div>`;
 
     const html = `<!doctype html>
-<html lang="pt-BR">
+<html lang="pt-PT">
 <head>
 <meta charset="utf-8" />
 <title>Relatório de Segurança — CyberSafe</title>
@@ -358,7 +439,7 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
       </div>
     </div>
     <div class="meta">
-      <b>Data/hora:</b> ${now.toLocaleString("pt-BR")}<br/>
+      <b>Data/hora:</b> ${now.toLocaleString("pt-PT")}<br/>
       <b>Computador:</b> ${pcName}<br/>
       <b>Estado do PC:</b> ${pcState?.overall ?? "indisponivel"}<br/>
       <b>Versão CyberSafe:</b> 0.1.1
@@ -419,21 +500,16 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
   <div class="footer">
     <p>Este relatório resume o estado observado pelo CyberSafe e não constitui auditoria formal.</p>
     <p>Ausência de ameaças detetadas não significa garantia absoluta de segurança.</p>
-    <p>Documento gerado pela aplicação CyberSafe Assistant em ${now.toLocaleString("pt-BR")}.</p>
+    <p>Documento gerado pela aplicação CyberSafe Assistant em ${now.toLocaleString("pt-PT")}.</p>
   </div>
 </body>
 </html>`;
 
-    if (window.electronAPI?.openReportWindow) {
-      window.electronAPI.openReportWindow(html);
-    } else {
-      const win = window.open("", "_blank", "width=860,height=640");
-      if (!win) return;
-      win.document.write(html);
-      win.document.close();
-      win.focus();
-      setTimeout(() => { try { win.print(); } catch { } }, 400);
+    if (destino === "pdf") {
+      void guardarPdf(html, nomeSugerido(now));
+      return;
     }
+    abrirParaImpressao(html);
   };
 
   return (
@@ -447,17 +523,29 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
             Resumo consolidado de segurança e histórico de eventos
           </p>
         </div>
-        <button
-          onClick={() => {
-            exportPdf();
-            setShowExportToast(true);
-            setTimeout(() => setShowExportToast(false), 3000);
-          }}
-          className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors text-sm font-mono"
-        >
-          <Download className="w-4 h-4" />
-          Exportar PDF
-        </button>
+        {/* Duas ações separadas porque são duas coisas diferentes: gravar o
+            PDF pelo CyberSafe (diálogo de escolha + A4 real) e abrir a janela
+            de impressão, que era o único caminho que existia e continua a
+            existir. A segunda é a reserva quando não há bridge. */}
+        <div className="flex flex-wrap items-center justify-end gap-2 shrink-0">
+          <button
+            type="button"
+            onClick={() => exportPdf("pdf")}
+            disabled={pdfEstado.tipo === "a_guardar"}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg bg-primary/10 text-primary border border-primary/20 hover:bg-primary/20 transition-colors text-sm font-mono disabled:cursor-not-allowed disabled:opacity-60"
+          >
+            <Download className="w-4 h-4" />
+            {pdfEstado.tipo === "a_guardar" ? "A guardar…" : "Guardar PDF"}
+          </button>
+          <button
+            type="button"
+            onClick={() => exportPdf("impressao")}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-border text-foreground hover:bg-secondary/60 transition-colors text-sm font-mono"
+          >
+            <Printer className="w-4 h-4" />
+            Abrir para imprimir
+          </button>
+        </div>
       </div>
 
       {/* Stats Cards */}
@@ -491,7 +579,7 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
               "px-3 py-1.5 text-xs font-mono rounded border transition-all",
               severityFilter === f
                 ? "bg-primary text-primary-foreground border-primary"
-                : "bg-secondary/50 text-muted-foreground border-white/5 hover:bg-white/5"
+                : "bg-secondary/50 text-muted-foreground border-border hover:bg-secondary/50"
             )}
           >
             {severityLabel[f as SeverityFilter] ?? f.toUpperCase()}
@@ -522,11 +610,11 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
               {filteredThreats.map((threat, idx) => (
                 <div
                   key={threat.summary + threat.createdAt + idx}
-                  className="grid grid-cols-12 gap-4 items-center p-4 border-b border-white/5 hover:bg-white/[0.02] transition-colors"
+                  className="grid grid-cols-12 gap-4 items-center p-4 border-b border-border hover:bg-secondary/30 transition-colors"
                 >
                   <div className="col-span-2 text-xs font-mono text-muted-foreground flex items-center gap-2">
                     <Calendar className="w-3 h-3" />
-                    {new Date(threat.createdAt).toLocaleString("pt-BR", { dateStyle: "short", timeStyle: "short" })}
+                    {new Date(threat.createdAt).toLocaleString("pt-PT", { dateStyle: "short", timeStyle: "short" })}
                   </div>
                   <div className="col-span-2">
                     <span className={cn("text-[10px] font-mono uppercase px-2 py-1 rounded border", severityColor(threat.severity))}>
@@ -547,12 +635,55 @@ export default function ReportsPage({ events, threats, quarantine, protection, p
         </div>
       </div>
 
-      {/* Export Toast */}
-      {showExportToast && (
-        <div className="fixed bottom-6 right-6 z-[110] animate-in slide-in-from-bottom-4">
-          <div className="px-4 py-3 rounded-lg bg-card border border-primary/30 shadow-lg text-sm font-mono text-primary flex items-center gap-2">
-            <Download className="w-4 h-4" />
-            Relatório aberto — guarda como PDF no diálogo impressão
+      {/* Confirmação do que ACONTECEU, não uma promessa genérica. `guardado`
+          só existe com o caminho devolvido pelo main; `canceled` não chega a
+          aqui (volta a `inerte`, em silêncio); `erro` mostra a mensagem
+          recebida. `impressao` é o caminho antigo e diz o que ele exige ao
+          utilizador. */}
+      {pdfEstado.tipo === "guardado" && (
+        <div className="fixed bottom-6 right-6 z-[110] animate-in slide-in-from-bottom-4 max-w-[min(100%-3rem,42rem)]" role="status" aria-live="polite">
+          <div className="px-4 py-3 rounded-lg bg-card border border-primary/30 shadow-lg text-sm font-mono text-primary flex items-start gap-2">
+            <Download className="w-4 h-4 mt-0.5 shrink-0" aria-hidden />
+            <span className="break-all">PDF guardado em: {pdfEstado.caminho}</span>
+            <button
+              type="button"
+              onClick={() => setPdfEstado({ tipo: "inerte" })}
+              className="ml-auto shrink-0 underline underline-offset-2 text-xs"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pdfEstado.tipo === "impressao" && (
+        <div className="fixed bottom-6 right-6 z-[110] animate-in slide-in-from-bottom-4 max-w-[min(100%-3rem,32rem)]" role="status" aria-live="polite">
+          <div className="px-4 py-3 rounded-lg bg-card border border-primary/30 shadow-lg text-sm font-mono text-primary flex items-start gap-2">
+            <Printer className="w-4 h-4 mt-0.5 shrink-0" aria-hidden />
+            <span>Relatório aberto na janela de impressão — aí escolhe «Guardar como PDF».</span>
+            <button
+              type="button"
+              onClick={() => setPdfEstado({ tipo: "inerte" })}
+              className="ml-auto shrink-0 underline underline-offset-2 text-xs"
+            >
+              Fechar
+            </button>
+          </div>
+        </div>
+      )}
+
+      {pdfEstado.tipo === "erro" && (
+        <div className="fixed bottom-6 right-6 z-[110] animate-in slide-in-from-bottom-4 max-w-[min(100%-3rem,36rem)]" role="alert" aria-live="assertive">
+          <div className="px-4 py-3 rounded-lg bg-card border border-destructive/40 shadow-lg text-sm font-mono text-destructive flex items-start gap-2">
+            <AlertTriangle className="w-4 h-4 mt-0.5 shrink-0" aria-hidden />
+            <span>{pdfEstado.mensagem}</span>
+            <button
+              type="button"
+              onClick={() => setPdfEstado({ tipo: "inerte" })}
+              className="ml-auto shrink-0 underline underline-offset-2 text-xs"
+            >
+              Fechar
+            </button>
           </div>
         </div>
       )}

@@ -1,0 +1,158 @@
+{
+  "schema": 1,
+  "geradoEm": "2026-10-24T16:08:09.973Z",
+  "motivo": "TP-PACKAGING-QODER-ARTEFACTS-CAND25-20261024 B: textos oficiais de licença dos módulos nativos YARA, com proveniência verificável. Só foram obtidos textos de licença/notices oficiais — nenhum binário, base, dependência ou toolchain foi descarregado.",
+  "publicacao": {
+    "noArtefacto": "resources/licenses",
+    "via": "buildAppManifest → build.extraResources { from: assets/licenses, to: licenses }"
+  },
+  "entradas": [
+    {
+      "pacote": "@litko/yara-x",
+      "versao": "0.5.0",
+      "licencaDeclarada": "MIT",
+      "repositorio": "https://github.com/cawalch/node-yara-x",
+      "commit": "cf73daf5c8d8ebf2e9902709f14e44e75d088ccf",
+      "fonteDoTexto": "https://raw.githubusercontent.com/cawalch/node-yara-x/cf73daf5c8d8ebf2e9902709f14e44e75d088ccf/LICENSE-MIT",
+      "ficheiro": "node-yara-x-0.5.0-LICENSE-MIT.txt",
+      "sha256": "07148344eb00239d3d9a7a432a87ca276d63cdd05978f20ece70528aadd4bcc4",
+      "bytes": 1064,
+      "provaAdicional": "registry.npmjs.org/@litko%2Fyara-x/0.5.0 → license=MIT, gitHead=cf73daf…"
+    },
+    {
+      "pacote": "@litko/yara-x-win32-x64-msvc",
+      "versao": "0.5.0",
+      "licencaDeclarada": "MIT",
+      "repositorio": "https://github.com/cawalch/node-yara-x",
+      "commit": "cf73daf5c8d8ebf2e9902709f14e44e75d088ccf",
+      "fonteDoTexto": "https://raw.githubusercontent.com/cawalch/node-yara-x/cf73daf5c8d8ebf2e9902709f14e44e75d088ccf/LICENSE-MIT",
+      "ficheiro": "node-yara-x-0.5.0-LICENSE-MIT.txt",
+      "sha256": "07148344eb00239d3d9a7a432a87ca276d63cdd05978f20ece70528aadd4bcc4",
+      "notas": "binário win32-x64; o tarball NÃO foi descarregado — integridade do registry (sha512) registada em THIRD-PARTY-NOTICES.txt; o .node instalado na U tem sha256 92d1908115641d9800782bbb3a65144591a4259d0e37cecfe2ddeffaf152257b e a equivalência com o tarball não foi verificada nesta tarefa"
+    },
+    {
+      "pacote": "yara-x (motor Rust por baixo do wrapper)",
+      "versao": "1.10.0",
+      "licencaDeclarada": "BSD-3-Clause",
+      "repositorio": "https://github.com/VirusTotal/yara-x",
+      "tag": "v1.10.0",
+      "fonteDaLicenca": "https://raw.githubusercontent.com/VirusTotal/yara-x/v1.10.0/LICENSE",
+      "ficheiro": "yara-x-1.10.0-LICENSE-upstream.txt",
+      "sha256": "fdf05444c9178e662fa28810d94a1fa6ec32d7be798241c98094213317265880",
+      "bytes": 1509,
+      "provaVersao": "Cargo.lock do commit acima: name=\"yara-x\" version=\"1.10.0\" checksum=23e52ec9e65a5d6110091731ed74971e68262311ef1659b826cca004ff365206; Cargo.toml do upstream declara license=\"BSD-3-Clause\" (não inferido do wrapper)",
+      "notas": "a cópia BSD-3 distribuída pelo wrapper (node-yara-x-0.5.0-LICENSE-BSD-3-Clause-yara-x.txt, sha256 ec74e063c87c55a5db5c897af95707afec006be64732e4d73baeee9f597a8589) é idêntica ao upstream salvo a nova-linha final"
+    }
+  ],
+  "obrigacaoPorResolver": {
+    "texto": "252/253 documentalmente cobertos: 251 com texto oficial versionado previamente recolhido + ppmd-rust 1.2.1 por declaração CC0 versionada/dedicação original e termos oficiais CC0 1.0. ascii_tree 0.1.1 continua pendente. A distinção dos critérios de evidência é preservada; nenhum pacote foi removido.",
+    "bloqueador": true,
+    "residuos": [
+      {
+        "componente": "ascii_tree",
+        "versao": "0.1.1",
+        "motivo": "material inacessível: o depósito declarado em `Cargo.toml.orig` E na metadata oficial da plataforma crates.io (https://github.com/bpressure/ascii_tree) responde HTTP 404 «Not Found» na API de repositórios. Sem âncora de commit (o arquivo não traz `.cargo_vcs_info.json`) e com o `include` do próprio crate a excluir ficheiros de licença (`[\".gitignore\", \"Cargo.toml\", \"src/*.rs\", \"README.md\"]`), não há caminho versionado para o texto MIT nem para a linha de copyright."
+      }
+    ],
+    "progresso": "classificação por metadados (kind/target/crate-type lidos do índice esparso e do arquivo-fonte oficial, checksums iguais ao Cargo.lock) + texto por componente com sha256, origem e linhas de copyright copiadas do próprio texto; exclusões host/proc-macro registadas com justificação, sem lhes atribuir obrigação. Na última passagem dirigida: três dos cinco resíduos fecharam (r-efi pelo AUTHORS que viaja dentro do arquivo verificado; crc-catalog e cranelift-assembler-x64 no commit exacto registado pelo próprio `.cargo_vcs_info.json`, este último pelo ancestral do workspace com identidade do depósito provada por comparação byte-a-byte do manifesto do path_in_vcs).; Codex confirmou a declaração CC0 e dedicação no próprio arquivo 1.2.1; ausência de ficheiro LICENSE separado não foi tratada como obrigação de atribuição que a CC0 não estabelece.",
+    "faltaExactamente": "ascii_tree 0.1.1: obter texto/aviso de copyright do detentor/upstream associado à versão, ou confirmação autorizada dos termos e aviso a redistribuir. A declaração MIT existe; aviso específico não recuperado. Não inventar ano/titularidade.",
+    "evidenciaFechoParcial": "resolutions/ppmd-rust-1.2.1/SOURCE-PROOF.json"
+  },
+  "limitações": [
+    "Não é parecer jurídico: apenas textos oficiais, com origem e digest registados.",
+    "Verificada apenas a proveniência dos TEXTOS (URL + commit/tag + sha256). A correspondência binário↔licença do .node instalado não foi re-medida (o tarball npm não foi descarregado).",
+    "O número de pacotes alcançáveis no Cargo.lock é limite superior de alcançabilidade, NÃO uma contagem medida do que liga no artefacto: o lock não codifica crate-type, features nem target. A classificação presente em rust/COMPONENTS.txt usa metadados verificados para separar incorporável-provável de host/build; cfg com feature=… não é avaliável sem reconstruir e fica incluído, não excluído.",
+    "Não se afirma que dependências de build/host exijam redistribuição: ficam listadas com o motivo da exclusão, sem obrigação inventada.",
+    "O identificador SPDX «GPL-3.0» (forma deprecated) não tem texto canónico próprio na lista do SPDX; o crate que o declara traz LICENSE-GPL3 no seu próprio arquivo-fonte, e é esse texto, com o seu digest, que publica."
+  ],
+  "actualizadoEm": "2026-10-24T21:06:47.611789+00:00",
+  "actualizadoPor": "Codex Lead (documentary resolution only; staged outside U)",
+  "equivalenciaBinarioRegistry": {
+    "grau": "instalado + declarado em node_modules/.package-lock.json + SRI coerente com o registry; conteúdo do tarball não verificado",
+    "binario": {
+      "sha256_instalado": "92d1908115641d9800782bbb3a65144591a4259d0e37cecfe2ddeffaf152257b",
+      "bytes": 21342208
+    },
+    "provas": [
+      "instalado em node_modules/@litko/yara-x-win32-x64-msvc e registado em node_modules/.package-lock.json (lockfileVersion 3, sha256 do lock 00a1f31f8431241e2ea67ba00bd3e2f288596a7ed6bc0891e8cc1f9d3a0b1518) com resolved=https://registry.npmjs.org/@litko/yara-x-win32-x64-msvc/-/yara-x-win32-x64-msvc-0.5.0.tgz",
+      "SRI do mesmo resolved no lock (sha512-7hpMrTGY6m/Fx+2DJjcBmwW8fzbtm77JUE5sC9AbGozd/rfnW43EF7QyJ0RVhSgHp1x8izJkTWje/y4wyGWSiQ==) coincide com dist.integrity devolvido pela API pública do registry para essa versão",
+      "o package.json instalado declara license=MIT; idêntico no wrapper (MIT)",
+      "bytes do .node instalado medidos localmente: 21342208 B, sha256 92d1908115641d9800782bbb3a65144591a4259d0e37cecfe2ddeffaf152257b"
+    ],
+    "limites": [
+      "o SRI do registry é sobre o TARBALL, não sobre o ficheiro .node extraído; a correspondência byte a byte entre o .node instalado e o conteúdo do tarball não foi verificada porque o tarball não foi descarregado",
+      "não existe ficheiro de licença dentro do directório do módulo instalado, pelo que a licença não viaja por node_modules — é o motivo pelo qual a publicação central em resources/licenses conta"
+    ],
+    "interpretacao": "grau de prova: instalado + declarado no lock do projecto + SRI coerente com o registry. Não é verificação de conteúdo do artefacto, e ausência dessa verificação não é indício de malware nem de adulteração."
+  },
+  "licencasRust": {
+    "indicePorComponente": "rust/COMPONENTS.txt",
+    "sha256Indice": "cefc4e8985296337587697797d0f01831878ab7764229cb2848ecd80e3acd704",
+    "maquina": "rust/INDICE.json",
+    "sha256Maquina": "e583a319472b431347fe647a3013f2b4310b24ca5dab1c5e323285c94136daa9",
+    "textos": "202 textos distintos em rust/textos/",
+    "alvoCompilacao": "x86_64-pc-windows-msvc",
+    "contagens": {
+      "componentesNoIndice": 328,
+      "incorporavelProvavel": 253,
+      "hostProcMacroOuTransitivo": 43,
+      "excluidasPorAresta": 32,
+      "comTextoNoCrate": 270,
+      "comTextoUpstreamTagExacta": 16,
+      "comTextoUpstreamRefNaoExacta": 8,
+      "semTexto": 1,
+      "semTextoDentroDoIncorporavel": 1,
+      "semTextoForaDoIncorporavel": 0,
+      "componentesSemArquivoRecolhido": 32,
+      "identificadoresSemTextoSpdx": [
+        "GPL-3.0"
+      ],
+      "textosPublicadosDistintos": 202,
+      "spdx": 15,
+      "spdxPendencia": [
+        "GPL-3.0"
+      ],
+      "cobertosPorDeclaracaoVersionadaMaisTermosOficiais": 1,
+      "comTextoOficialVersionadoAnterior": 251
+    },
+    "cobertura": {
+      "incorporável-provável": {
+        "comTexto": 252,
+        "semTexto": 1
+      },
+      "build-only (host/proc-macro)": {
+        "comTexto": 43,
+        "semTexto": 0
+      }
+    },
+    "particao": {
+      "componentesNoIndice": 328,
+      "incorporavelProvavel": 253,
+      "hostProcMacro": 43,
+      "excluidasPorAresta": 32,
+      "somaDasClasses": 296,
+      "comExcluidas": 328,
+      "coerente": true,
+      "porClasse": {
+        "incorporável-provável": {
+          "comTexto": 252,
+          "semTexto": 1
+        },
+        "build-only (host/proc-macro)": {
+          "comTexto": 43,
+          "semTexto": 0
+        }
+      }
+    },
+    "comoFoiFeito": "Cargo.lock oficial do commit do wrapper → índice esparso do crates.io (checksum 328/328 igual ao lock) para kind/target/optional de cada aresta → arquivo-fonte .crate oficial de cada versão fixada, com sha256 verificado igual ao lock ANTES de extrair só ficheiros de texto/metadata regulares → crate-type lido no Cargo.toml para separar proc-macro/host → textos canónicos SPDX por identificador declarado e, onde o .crate não traz texto, LICENSE do repositório oficial na tag resolvida pela API.",
+    "oQueNaoE": "não é análise do binário linkado: a classificação é o limite superior defensável a partir de metadados oficiais, sem reconstruir; e não é parecer jurídico."
+  },
+  "resolucaoCodex20261024": {
+    "component": "ppmd-rust",
+    "version": "1.2.1",
+    "license": "CC0-1.0",
+    "state": "documentary-coverage-confirmed",
+    "evidence": "resolutions/ppmd-rust-1.2.1/SOURCE-PROOF.json",
+    "basis": "251 pre-existing version-specific texts + 1 version-specific author dedication/declaration and official canonical CC0 terms; do not call all 252 upstream version-specific LICENSE files."
+  }
+}

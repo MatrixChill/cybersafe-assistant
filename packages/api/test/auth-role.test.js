@@ -10,6 +10,9 @@ import bcrypt from "bcryptjs";
 // DB em temp (nunca a DB real em ~/.cybersafe-service) e sem bind à porta 4000.
 const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), "cybersafe-api-auth-role-"));
 const dbPath = path.join(tmpDir, "cybersafe.db");
+process.env.CYBERSAFE_DEV_ISOLATION = "1";
+process.env.CYBERSAFE_DEV_ROOT = tmpDir;
+process.env.CYBERSAFE_API_PORT = "4193";
 process.env.CYBERSAFE_DB_PATH = dbPath;
 process.env.CYBERSAFE_API_NO_LISTEN = "1";
 
@@ -44,6 +47,10 @@ legacy
   );
 legacy.close();
 
+// S1: o segredo JWT passou a ser obrigatório e sem fallback. A fixture injeta o
+// seu próprio segredo (nunca o valor de produção nem um valor previsível).
+process.env.JWT_SECRET = `test-secret-auth-role-${Math.random().toString(36).slice(2)}${Date.now()}`;
+
 // A migration corre no import do db.js; o index.js exporta o app sem escutar.
   const { prisma, closeDb } = await import("../dist/db.js");
 const { app } = await import("../dist/index.js");
@@ -53,7 +60,7 @@ let baseUrl;
 
 before(async () => {
   await new Promise((resolve) => {
-    server = app.listen(0, () => resolve());
+    server = app.listen(0, "127.0.0.1", () => resolve());
   });
   baseUrl = `http://127.0.0.1:${server.address().port}`;
 });
@@ -128,57 +135,48 @@ describe("register público não cria admins", () => {
   });
 });
 
-describe("bootstrap DEV promove apenas a conta dev", () => {
-  test("sem token → 401", async () => {
+describe("S2 — o bootstrap DEV não existe no produto (NODE_ENV ausente)", () => {
+  test("POST /auth/dev/ensure-admin sem token → 404 (a rota não existe)", async () => {
     const res = await fetch(`${baseUrl}/auth/dev/ensure-admin`, { method: "POST" });
-    assert.equal(res.status, 401);
+    assert.equal(res.status, 404);
   });
 
-  test("token de outra conta → 403 (a conta dev não é promovida por terceiros)", async () => {
-    const { json } = await login("escalate@cybersafe.local", "password123");
+  test("com token válido da conta dev → 404 e a conta continua role 'user'", async () => {
+    const { status, json } = await login(DEV_EMAIL, DEV_PASSWORD);
+    assert.equal(status, 200);
+
     const res = await fetch(`${baseUrl}/auth/dev/ensure-admin`, {
       method: "POST",
       headers: { Authorization: `Bearer ${json.token}` },
     });
-    assert.equal(res.status, 403);
+    assert.equal(res.status, 404);
+
+    const user = await prisma.user.findUnique({ where: { email: DEV_EMAIL } });
+    assert.equal(user.role, "user", "não há promoção automática a admin no produto");
   });
 
-  test("conta dev legada (personal/premium) é promovida a admin sem virar business", async () => {
+  test("tentativas repetidas também não promovem", async () => {
     const { json } = await login(DEV_EMAIL, DEV_PASSWORD);
-    assert.equal(json.user.role, "user", "antes da promoção o role é o default da migração");
+    for (let i = 0; i < 3; i++) {
+      const res = await fetch(`${baseUrl}/auth/dev/ensure-admin`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${json.token}` },
+      });
+      assert.equal(res.status, 404);
+    }
 
-    const res = await fetch(`${baseUrl}/auth/dev/ensure-admin`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${json.token}` },
-    });
-    assert.equal(res.status, 200);
-    const promoted = await res.json();
-    assert.equal(promoted.user.role, "admin");
-    assert.equal(promoted.user.type, "personal");
-    assert.equal(promoted.user.plan, "premium");
-    assert.ok(!("passwordHash" in promoted.user));
+    const user = await prisma.user.findUnique({ where: { email: DEV_EMAIL } });
+    assert.equal(user.role, "user");
   });
 
-  test("a promoção persiste e é idempotente", async () => {
-    const { json } = await login(DEV_EMAIL, DEV_PASSWORD);
-    assert.equal(json.user.role, "admin");
-
-    const res = await fetch(`${baseUrl}/auth/dev/ensure-admin`, {
-      method: "POST",
-      headers: { Authorization: `Bearer ${json.token}` },
-    });
-    assert.equal(res.status, 200);
-    assert.equal((await res.json()).user.role, "admin");
-  });
-
-  test("/auth/me devolve o role (payload completo após promoção)", async () => {
+  test("/auth/me devolve o role persistido ('user') — sem promoção", async () => {
     const { json } = await login(DEV_EMAIL, DEV_PASSWORD);
     const res = await fetch(`${baseUrl}/auth/me`, {
       headers: { Authorization: `Bearer ${json.token}` },
     });
     assert.equal(res.status, 200);
     const { user } = await res.json();
-    assert.equal(user.role, "admin");
+    assert.equal(user.role, "user");
     assert.ok(!("passwordHash" in user));
   });
 });

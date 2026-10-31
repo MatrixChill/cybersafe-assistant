@@ -1,3 +1,4 @@
+import { getAuthToken } from "../lib/authSession";
 import { Shield, ExternalLink, CheckCircle2, XCircle, Trophy, RotateCcw, ArrowRight, Sparkles, Star, Target } from "lucide-react"
 import { useState, useEffect } from "react"
 import { TRAINING_SCENARIOS, type TrainingScenario } from "@cybersafe/shared-types"
@@ -12,6 +13,50 @@ interface ScenarioResult {
   correct: boolean
 }
 
+// S3: a API local só escuta em loopback IPv4 e /api/training-score é uma rota
+// privada. 127.0.0.1 (nunca "localhost", que pode resolver para ::1) e o token
+// da sessão lido do armazenamento local, sem credenciais no código.
+//
+// A porta NÃO é fixa: o runner publica a base isolada da sessão em
+// `window.__CYBERSAFE_API_BASE__` (o mesmo preload que AuthContext/AIAssistant
+// usam). Hardcodar 4000 fazia a leitura/gravação falhar em silêncio nas sessões
+// isoladas (p. ex. 4100).
+export function simulatorApiBase(
+  win: { __CYBERSAFE_API_BASE__?: string } | undefined = typeof window !== "undefined"
+    ? (window as unknown as { __CYBERSAFE_API_BASE__?: string })
+    : undefined,
+): string {
+  const publicado = typeof win?.__CYBERSAFE_API_BASE__ === "string"
+    ? win.__CYBERSAFE_API_BASE__.trim()
+    : "";
+  return (publicado || "http://127.0.0.1:4000").replace(/\/+$/, "")
+}
+/**
+ * O placar do cenário: acertos sobre o TOTAL do desafio.
+ *
+ * Antes era `score/currentIndex + (respondida ? 1 : 0)`: no primeiro cenário,
+ * antes de responder, o ecrã mostrava «0/0» — uma fração sem denominador, ou
+ * seja um zero por ausência de resposta apresentado como medição. O total do
+ * desafio é conhecido desde o início, por isso é ele o denominador; sem
+ * cenários não há placar nenhum e diz-se «—».
+ */
+export function placarCenarios(acertos: number, total: number): string {
+  if (!Number.isFinite(total) || total <= 0) return "—";
+  const seguros = Number.isFinite(acertos) ? Math.max(0, Math.min(acertos, total)) : 0;
+  return `${seguros}/${total}`;
+}
+
+
+
+function authHeaders(): Record<string, string> {
+  try {
+    const token = getAuthToken()
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  } catch {
+    return {}
+  }
+}
+
 export default function SimulatorPage() {
   const [gameState, setGameState] = useState<"menu" | "playing" | "result">("menu")
   const [currentIndex, setCurrentIndex] = useState(0)
@@ -23,7 +68,7 @@ export default function SimulatorPage() {
 
   // Load past scores
   useEffect(() => {
-    fetch("http://localhost:4000/api/training-score")
+    fetch(`${simulatorApiBase()}/api/training-score`, { headers: authHeaders() })
       .then(r => r.json())
       .then(data => {
         if (data.recentResults) setPastScores(data.recentResults.slice(0, 5))
@@ -59,9 +104,9 @@ export default function SimulatorPage() {
     if (currentIndex + 1 >= scenarios.length) {
       const finalCorrect = results.filter(r => r.correct).length
       
-      fetch("http://localhost:4000/api/training-score", {
+      fetch(`${simulatorApiBase()}/api/training-score`, {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: { "Content-Type": "application/json", ...authHeaders() },
         body: JSON.stringify({ correctCount: finalCorrect, totalCount: scenarios.length }),
       }).catch(() => {})
 
@@ -86,7 +131,7 @@ export default function SimulatorPage() {
             Simulador de <span className="text-primary">Phishing</span>
           </h1>
           <p className="text-muted-foreground text-sm mt-1">
-            Treine sua capacidade de identificar links perigosos
+            Treina a tua capacidade de identificar ligações perigosas
           </p>
         </div>
 
@@ -95,7 +140,7 @@ export default function SimulatorPage() {
           <div className="absolute inset-0 bg-gradient-to-br from-primary/5 via-transparent to-cyber-cyan/5 pointer-events-none" />
 
           {/* Matrix guide */}
-          <div className="flex items-center gap-4 text-left mb-6 p-4 rounded-xl bg-black/20 border border-white/5">
+          <div className="flex items-center gap-4 text-left mb-6 p-4 rounded-xl bg-black/20 border border-border">
             <MatrixAvatar mood="guide" size="sm" />
             <p className="text-xs text-muted-foreground leading-relaxed">
               <span className="font-mono text-primary font-bold">Matrix</span>: "Vou treinar contigo! Lembra-te: desconfia de domínios estranhos, falta de HTTPS e pedidos urgentes de login. Boa sorte!"
@@ -110,10 +155,10 @@ export default function SimulatorPage() {
             Desafio de Identificação de Phishing
           </h2>
           <p className="text-sm text-muted-foreground max-w-lg mx-auto mb-8 leading-relaxed">
-            Você receberá 6 URLs reais para analisar. Para cada uma, decida se é 
+            Vais receber 6 URLs reais para analisar. Em cada uma, decide se é
             <span className="text-cyber-green font-semibold"> segura</span> ou 
             <span className="text-cyber-red font-semibold"> perigosa</span>. 
-            Após cada resposta, receberá uma explicação detalhada.
+            Depois de cada resposta, recebes uma explicação detalhada.
           </p>
 
           <button
@@ -145,7 +190,7 @@ export default function SimulatorPage() {
           <div className="cyber-border rounded-xl p-6">
             <h3 className="font-mono font-semibold text-foreground flex items-center gap-2 mb-4">
               <Trophy className="w-4 h-4 text-cyber-yellow" />
-              Seus Resultados Anteriores
+              Os teus resultados anteriores
             </h3>
             <div className="space-y-2">
               {pastScores.map((s, i) => (
@@ -158,7 +203,7 @@ export default function SimulatorPage() {
                       <Star className={cn("w-4 h-4", s.score >= 80 ? "text-cyber-green" : s.score >= 50 ? "text-cyber-yellow" : "text-cyber-red")} />
                     </div>
                     <span className="text-xs font-mono text-muted-foreground">
-                      {new Date(s.completedAt).toLocaleDateString("pt-BR")}
+                      {new Date(s.completedAt).toLocaleDateString("pt-PT")}
                     </span>
                   </div>
                   <span className={cn(
@@ -185,7 +230,7 @@ export default function SimulatorPage() {
               </h4>
               <p className="text-sm text-muted-foreground leading-relaxed">
                 Este simulador educativo utiliza cenários reais de phishing para ensinar a identificar 
-                URLs maliciosas. Aprenda a reconhecer domínios lookalike, falta de HTTPS, 
+                URLs maliciosas. Aprende a reconhecer domínios lookalike, falta de HTTPS, 
                 engenharia social e outros padrões de ataque.
               </p>
             </div>
@@ -211,7 +256,7 @@ export default function SimulatorPage() {
               Cenário <span className="text-primary">{currentIndex + 1}/{scenarios.length}</span>
             </h1>
             <p className="text-muted-foreground text-sm mt-1">
-              Analise o URL e decida se é seguro ou perigoso
+              Analisa o URL e decide se é seguro ou perigoso
             </p>
           </div>
           
@@ -229,8 +274,8 @@ export default function SimulatorPage() {
                 />
               ))}
             </div>
-            <span className="text-sm font-mono text-muted-foreground">
-              {score}/{currentIndex + (selectedAnswer ? 1 : 0)}
+            <span className="text-sm font-mono text-muted-foreground tabular-nums">
+              {placarCenarios(score, scenarios.length)}
             </span>
           </div>
         </div>
@@ -355,7 +400,7 @@ export default function SimulatorPage() {
           Resultado <span className="text-primary">Final</span>
         </h1>
         <p className="text-muted-foreground text-sm mt-1">
-          Veja como você se saiu no desafio de phishing
+          Vê como te saíste no desafio de phishing
         </p>
       </div>
 
@@ -378,10 +423,10 @@ export default function SimulatorPage() {
         </div>
         
         <h2 className="text-xl font-bold font-mono text-foreground mb-2">
-          {percentage >= 80 ? "Excelente! 🎉" : percentage >= 50 ? "Bom trabalho! 👍" : "Continue praticando 💪"}
+          {percentage >= 80 ? "Excelente! 🎉" : percentage >= 50 ? "Bom trabalho! 👍" : "Continua a praticar 💪"}
         </h2>
         <p className="text-sm text-muted-foreground mb-6">
-          Você acertou <span className="text-primary font-bold">{score}</span> de <span className="text-primary font-bold">{total}</span> cenários
+          Acertaste <span className="text-primary font-bold">{score}</span> de <span className="text-primary font-bold">{total}</span> cenários
         </p>
 
         {/* Score Bar */}

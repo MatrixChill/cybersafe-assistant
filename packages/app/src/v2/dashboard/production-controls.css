@@ -1,0 +1,11 @@
+/* Real commands and diagnostics added to the original lab composition. */
+.cs-v2 .v2-dashboard .scan-options { position:relative; }
+.cs-v2 .v2-dashboard .scan-options > summary { cursor:pointer; list-style:none; }
+.cs-v2 .v2-dashboard .scan-options > .inset { position:absolute; right:0; top:30px; z-index:30; display:grid; gap:8px; width:245px; background:var(--v2-panel); box-shadow:var(--v2-panel-shadow); }
+.cs-v2 .v2-dashboard .dashboard-diagnostics { margin-top:24px; font-size:12px; color:var(--v2-muted); }
+.cs-v2 .v2-dashboard .dashboard-diagnostics > summary { cursor:pointer; border-top:1px solid var(--v2-border); padding:16px 0; }
+.cs-v2 .v2-dashboard .dashboard-diagnostics section { padding:18px; background:var(--v2-panel); border:1px solid var(--v2-border); border-radius:var(--v2-card-radius); margin-bottom:12px; }
+.cs-v2 .v2-dashboard .dashboard-diagnostics h3 { margin-bottom:12px; }
+.cs-v2 .v2-dashboard .dashboard-diagnostics dl { display:grid; grid-template-columns:80px minmax(0,1fr); gap:8px; }
+.cs-v2 .v2-dashboard .dashboard-diagnostics dd { margin:0; }
+.cs-v2 .v2-dashboard .dashboard-diagnostics section details { padding:12px 0; border-top:1px solid var(--v2-border); }

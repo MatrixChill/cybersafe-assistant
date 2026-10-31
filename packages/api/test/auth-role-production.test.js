@@ -44,6 +44,9 @@ legacy
   );
 legacy.close();
 
+// S1: segredo JWT obrigatório e sem fallback — a fixture injeta o seu próprio.
+process.env.JWT_SECRET = `test-secret-auth-role-prod-${Math.random().toString(36).slice(2)}${Date.now()}`;
+
   const { prisma, closeDb } = await import("../dist/db.js");
 const { app } = await import("../dist/index.js");
 
@@ -70,8 +73,8 @@ after(async () => {
   }
 });
 
-describe("NODE_ENV=production — bootstrap DEV inacessível", () => {
-  test("login da conta dev continua a funcionar (o guard só mata o endpoint dev)", async () => {
+describe("NODE_ENV=production — bootstrap DEV não existe no produto", () => {
+  test("login da conta dev continua a funcionar (o endpoint dev é que saiu do produto)", async () => {
     const res = await fetch(`${baseUrl}/auth/login`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -82,7 +85,7 @@ describe("NODE_ENV=production — bootstrap DEV inacessível", () => {
     assert.equal(json.user.role, "user");
   });
 
-  test("POST /auth/dev/ensure-admin sem token → 404 (o guard corre antes da autenticação)", async () => {
+  test("POST /auth/dev/ensure-admin sem token → 404 (a rota não existe no produto)", async () => {
     const res = await fetch(`${baseUrl}/auth/dev/ensure-admin`, { method: "POST" });
     assert.equal(res.status, 404);
   });

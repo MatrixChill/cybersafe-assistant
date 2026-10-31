@@ -33,7 +33,11 @@ function finding(overrides: Partial<Finding> = {}): Finding {
   };
 }
 
-const source = readFileSync(new URL("../src/pages/DashboardPage.tsx", import.meta.url), "utf8");
+// Migração V2-FIRST: o bloco Dado deixou de viver no `DashboardPage` de V1
+// (substituído pelo contentor de dados); a dona atual é a secção de diagnóstico
+// do Painel. O conteúdo das frases continua a ser do `buildFindingGuidance` de
+// shared-types — nada de escala local.
+const source = readFileSync(new URL("../src/v2/dashboard/LabDiagnostics.tsx", import.meta.url), "utf8");
 
 describe("WS-5 T1 — DADO: os numeros vem do evidence, sem re-arredondar", () => {
   test("cpuPercent e memoryBytes aparecem com o valor exato do evidence", () => {
@@ -85,8 +89,14 @@ describe("WS-5 T2 — evidence ausente ou vazio: sem bloco Dado", () => {
       /g\.dado\.length\s*>\s*0/.test(source),
       "o bloco Dado tem de ser condicionado ao dado existir",
     );
-    assert.ok(
-      !/Dado<\/[a-z]+>\s*\{\s*g\.dado\.map/.test(source),
+    // O que se proibe é um `map` SEM verificação. Em V2 o `map` vem logo a
+    // seguir ao `h4`, mas dentro do guarda `g.dado.length>0` — por isso a
+    // verificação é essa, e não a distância entre os dois tokens.
+    const mapa = source.indexOf("g.dado.map");
+    assert.ok(mapa >= 0, "o bloco Dado é escrito pelo derivador, não copiado à mão");
+    assert.match(
+      source.slice(Math.max(0, mapa - 120), mapa + 120),
+      /g\.dado\.length\s*>\s*0\s*&&[\s\S]{0,120}<h4>Dado<\/h4>/,
       "nao pode haver um bloco Dado que mapeie o dado sem verificar que existe",
     );
   });
@@ -104,7 +114,9 @@ describe("WS-5 T3 — actionable false: honesto, e sem botao de accao", () => {
   test("este teste falha se alguem algum dia meter um botao de accao aqui", () => {
     // O painel mostra a orientacao. Nao pode haver um botao de accao no bloco
     // de orientacao: o produto nao executa nenhuma accao automatica aqui.
-    const bloco = source.slice(source.indexOf("orientacao", source.indexOf("PcStateAttention")));
+    const ancora = source.indexOf("{g.orientacao");
+    assert.ok(ancora >= 0, "a página tem de mostrar a orientação do achado (sem isto o teste abaixo era vazio)");
+    const bloco = source.slice(ancora);
     assert.ok(
       !/<button[^>]*onClick=\{[^}]*action/i.test(bloco),
       "a orientacao nao pode ter um botao de accao: nao ha executor",

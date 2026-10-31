@@ -45,14 +45,8 @@ test.after(async () => {
 const CANARY = "// cybersafe-fallback-canary\nrule CyberSafe_Canary_EICAR\n{\n strings:\n $e = \"EICAR-STANDARD-ANTIVIRUS-TEST-FILE\"\n condition:\n $e\n}\n";
 
 /**
- * Duas regras, e não uma.
- *
- * O contrato classifica um corpus de uma só regra como `limited`/`degraded`:
- * uma regra não é uma base de deteção, e afirmar cobertura normal com uma
- * regra é a mesma mentira que a UI mostrava ao utilizador. Este teste quer
- * provar que o `coverage` atravessa o named-pipe e que é semanticamente
- * distinto do `status` — para isso precisa de um corpus que legitimamente dê
- * `normal`, não um que o motor tem o direito de rebaixar.
+ * Duas regras sintéticas demonstram que o `coverage` atravessa o named-pipe e
+ * é semanticamente distinto de `status`; não demonstram cobertura real.
  */
 const REAL =
   'rule CyberSafe_Real_Detection\n{\n strings:\n $a = "EvilStringParaDeteccao"\n condition:\n $a\n}\n' +
@@ -79,18 +73,18 @@ describe("W1 — o coverage atravessa o named-pipe", () => {
     );
   });
 
-  test("corpus real: status active E coverage normal, semanticamente distintos", async () => {
+  test("corpus sintético: status active E coverage unknown, semanticamente distintos", async () => {
     const file = await rulesFile(REAL);
     const yara = new YaraEngine(file);
     await yara.load(file);
 
     const sent = overThePipe({ status: yara.health.status, detail: yara.health.detail, coverage: yara.health.coverage });
 
-    assert.equal(sent.status, "active", "corpus real dá motor activo");
+    assert.equal(sent.status, "active", "as regras compilam e o motor fica operacional");
     assert.equal(
       sent.coverage,
-      "normal",
-      "corpus real que compilou é a única evidência que autoriza 'normal'",
+      "unknown",
+      "regras sintéticas compiladas não autorizam cobertura normal",
     );
   });
 
@@ -119,5 +113,58 @@ describe("W1 — o coverage atravessa o named-pipe", () => {
 
     // Nenhum ramo pode produzir 'normal' a partir de 'unavailable'.
     assert.notEqual(yaraField.coverage, "normal");
+  });
+
+  test("o updater periódico recarrega o corpus YARA atualizado em memória", async () => {
+    const baseDir = await fsp.mkdtemp(path.join(os.tmpdir(), "cybersafe-yara-reload-"));
+    tmpDirs.push(baseDir);
+    const engine = new ProtectionEngineService(baseDir);
+    const rulesPath = path.join(baseDir, "definitions", "yara", "default.yar");
+
+    const sourceRules = [
+      "rule update_source_eicar { condition: filesize > 1 }",
+      "rule update_source_packer { condition: filesize > 2 }",
+      "rule update_source_crypto { condition: filesize > 3 }",
+      "rule update_source_ransomware { condition: filesize > 4 }",
+    ];
+    engine.updater.downloadText = async (url) => {
+      const sourceIndex = [
+        "MALW_Eicar.yar",
+        "packer_compiler_signatures.yar",
+        "crypto_signatures.yar",
+        "RANSOM_MS17-010_Wannacrypt.yar",
+      ].findIndex((name) => url.endsWith(name));
+      assert.notEqual(sourceIndex, -1, `fonte YARA inesperada: ${url}`);
+      return sourceRules[sourceIndex];
+    };
+    engine.updater.updateClamAV = async () => {
+      throw new Error("freshclam disabled in isolated test");
+    };
+    engine.updater.updateHashFeed = async () => {
+      throw new Error("hash feed disabled in isolated test");
+    };
+
+    try {
+      const result = await engine.updater.checkAndUpdate(true);
+      const yara = engine.getProtectionState().engine.yara;
+
+      assert.equal(result.yaraUpdated, true);
+      assert.equal(yara.status, "active", "o novo corpus tem de ser carregado sem reiniciar o serviço");
+      assert.equal(yara.coverage, "unknown", "as regras sintéticas continuam sem cobertura validada");
+      // EICAR + ransom (production/test) + controlo positivo; packer/crypto
+      // são referência e não entram no corpus de ameaça.
+      assert.equal(engine.yara.ruleCount, 3, "o contador tem de refletir o corpus atualizado");
+
+      // O reload do updater acontece antes de o manifesto ser publicado; uma
+      // leitura posterior tem de ver as classes e excluir a referência.
+      await engine.yara.load(rulesPath);
+      assert.match(
+        engine.yara.health.detail ?? "",
+        /2 reference source\(s\) excluded/,
+        "a referência fica fora do corpus e da contagem production",
+      );
+    } finally {
+      await engine.dispose();
+    }
   });
 });

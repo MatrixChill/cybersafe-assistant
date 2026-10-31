@@ -1,0 +1,2 @@
+import{test}from'node:test';import assert from'node:assert/strict';import fs from'node:fs';
+test('default process enumeration owns PowerShell directly and has a bounded read deadline',()=>{const s=fs.readFileSync(new URL('../src/index.ts',import.meta.url),'utf8');const a=s.indexOf('  const runPrimary ='),b=s.indexOf('\n  let rows:',a),body=s.slice(a,b);assert.ok(body.includes('promisify(execFile)'),'do not leave an unowned shell between the monitor and PowerShell');assert.ok(body.includes('timeout: 15000'),'hung CIM cannot hold single-flight forever');});

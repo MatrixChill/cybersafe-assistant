@@ -1,0 +1,87 @@
+CyberSafe Assistant — third-party notices (YARA engine)
+
+Este ficheiro cobre as dependências nativas de terceiros cujo binário é
+embutido no instalador. Os textos completos estão neste directório e viajam
+no artefacto em resources/licenses.
+
+1) @litko/yara-x 0.5.0 (wrapper Node-API) e @litko/yara-x-win32-x64-msvc 0.5.0 (binário correspondente)
+   Licença declarada no registry: MIT
+   Repositório oficial:  https://github.com/cawalch/node-yara-x
+   Commit (gitHead do registry para 0.5.0): cf73daf5c8d8ebf2e9902709f14e44e75d088ccf
+   Texto oficial recuperado desse commit: node-yara-x-0.5.0-LICENSE-MIT.txt
+     sha256 07148344eb00239d3d9a7a432a87ca276d63cdd05978f20ece70528aadd4bcc4
+     fonte  https://raw.githubusercontent.com/cawalch/node-yara-x/cf73daf5c8d8ebf2e9902709f14e44e75d088ccf/LICENSE-MIT
+   Integridade do tarball publicada no registry (sha512, não descarregado aqui):
+     sha512-7hpMrTGY6m/Fx+2DJjcBmwW8fzbtm77JUE5sC9AbGozd/rfnW43EF7QyJ0RVhSgHp1x8izJkTWje/y4wyGWSiQ==
+
+2) YARA-X 1.10.0 (motor Rust por baixo do wrapper acima)
+   Licença: BSD-3-Clause — declarada no Cargo.toml oficial do upstream
+   Repositório oficial: https://github.com/VirusTotal/yara-x (tag v1.10.0)
+   Versão resolvida em Cargo.lock do commit acima: yara-x = 1.10.0
+   checksum crates.io: 23e52ec9e65a5d6110091731ed74971e68262311ef1659b826cca004ff365206
+   Texto oficial: yara-x-1.10.0-LICENSE-upstream.txt
+     sha256 fdf05444c9178e662fa28810d94a1fa6ec32d7be798241c98094213317265880
+     fonte  https://raw.githubusercontent.com/VirusTotal/yara-x/v1.10.0/LICENSE
+   Cópia distribuída pelo próprio repositório do wrapper (idêntica salvo
+   nova-linha final): node-yara-x-0.5.0-LICENSE-BSD-3-Clause-yara-x.txt
+     sha256 ec74e063c87c55a5db5c897af95707afec006be64732e4d73baeee9f597a8589
+
+3) Dependências Rust do motor YARA-X — índice por componente em rust/COMPONENTS.txt
+   Método (metadados verificados, não opinião):
+     Cargo.lock oficial do commit cf73daf5c8d8ebf2e9902709f14e44e75d088ccf
+       sha256 36f74efac130312646712d8aa7f551dc30d114bf541ac5e833f572a95ed665d5 (329 pacotes)
+     → índice esparso do crates.io: kind/target/optional de cada aresta; checksum das
+       328 entradas resolvidas é o do Cargo.lock (328/328 iguais)
+     → arquivo-fonte .crate oficial de cada versão fixada, com sha256 do arquivo
+       verificado igual ao do Cargo.lock ANTES de extrair apenas ficheiros de texto
+       e metadata regulares (Cargo.toml, LICENSE*, LICENCE*, COPYING*, NOTICE*)
+     → crate-type lido no Cargo.toml para separar proc-macro/host
+     → textos canónicos SPDX por identificador declarado; onde o .crate não traz
+       texto, o LICENSE do repositório oficial na tag resolvida pela API
+   Classes medidas: 253 incorporável-provável, 43 host (proc-macro ou só alcançáveis
+   por ele), 32 excluídas por aresta dev/build ou cfg impossível para
+   x86_64-pc-windows-msvc. Total indexado: 328 = 253 + 43 + 32.
+   Cobertura documental: 252/253 = 251 com texto oficial versionado + ppmd-rust
+   1.2.1 com declaração/dedicação original versionada e termos oficiais CC0 1.0.
+   Isto não é a obtenção de 252 ficheiros LICENSE do upstream. ascii_tree 0.1.1
+   continua pendente; o bloqueador mantém-se. A resolução documental preparada
+   (texto MIT integral, nota factual e prova de ausência de aviso) está em
+   resolutions/ascii_tree-0.1.1/ e NÃO fecha o gate: nenhum aviso autêntico foi
+   encontrado e o titular não foi contactado. Prova parcial e textos preservados
+   em resolutions/ppmd-rust-1.2.1/. Fecharam nesta
+   última passagem: r-efi 5.3.0 pelo AUTHORS que viaja dentro do próprio arquivo
+   verificado (aviso triple-licensed, titularidade e lista de autores); crc-catalog
+   2.4.0 pelos dois textos declarados no commit exacto registado pelo arquivo;
+   cranelift-assembler-x64 0.125.4 pelo texto do ancestral do workspace no mesmo
+   commit, com a identidade do depósito provada por comparação byte-a-byte do
+   manifesto do path_in_vcs e não por semelhança de nome.
+   202 textos distintos publicados em rust/textos/, deduplicados por conteúdo, com o
+   digest de cada um; 14 identificadores SPDX canónicos; o identificador deprecated
+   «GPL-3.0» não tem texto canónico próprio, e aí publica o LICENSE-GPL3 do próprio
+   crate. As linhas de copyright são copiadas literalmente do texto obtido,
+   começando pelas linhas de titularidade (`Copyright …`) e só depois, na ausência
+   delas, pela frase genérica de aviso — que não nomeia detentor nenhum.
+   O que este índice NÃO é: análise do binário linkado. A classificação é o limite
+   superior defensável a partir de metadados oficiais (cfg com feature=… não é
+   avaliável sem reconstruir, pelo que esses componentes ficam DENTRO do conjunto
+   coberto, não fora). Não é parecer jurídico, e não se atribui obrigação de
+   redistribuição a dependências de build/host que não viajam no artefacto.
+
+
+Equivalência binário ↔ registry (grau de prova; separada das licenças acima)
+   .node instalado: 21342208 bytes
+     sha256 92d1908115641d9800782bbb3a65144591a4259d0e37cecfe2ddeffaf152257b
+   Registado em node_modules/.package-lock.json (lockfileVersion 3) com o URL
+   resolved do registry e o SRI sha512-7hpMrTGY6m/Fx+2DJjcBmwW8fzbtm77JUE5sC9Ab
+   Gozd/rfnW43EF7QyJ0RVhSgHp1x8izJkTWje/y4wyGWSiQ== , o mesmo valor devolvido
+   pela API pública do registry para essa versão.
+   Limite: o SRI é calculado sobre o TARBALL, não sobre o .node extraído; a
+   correspondência byte a byte entre o ficheiro instalado e o conteúdo do tarball
+   não foi verificada, porque o tarball não foi descarregado. Essa ausência de
+   verificação não é indício de adulteração nem de malware — é apenas o grau de
+   prova disponível sem download.
+
+Obrigação por resolver: fechar o subconjunto efectivamente incorporado e o texto
+de licença desse conjunto. É pendência verificada, não uma lista de licenças
+em falta contada a partir do lock. A licença do motor foi lida no upstream
+oficial, não inferida do manifesto do wrapper.

@@ -161,7 +161,14 @@ describe("diff do poll — rajadas de eventos", () => {
     assert.deepEqual(exited, [], "nenhum exited inventado");
   });
 
-  it("round em voo nao se acumula (a cadencia degrada, a fila nao cresce)", async () => {
+  it("round em voo partilha a enumeração — e NÃO é deitado fora", async () => {
+    // TP-MONITOR-P0: este teste costumava provar o defeito sem o saber. «Round
+    // saltado» protegia o preço (uma enumeração do SO de cada vez) mas custava o
+    // round inteiro: como a enumeração (2-4 s medida) é mais lenta que a cadência
+    // rápida (2 s), cada tick apanhava uma enumeração em curso, `previous` nunca
+    // era atualizado e o Monitor mostrava 496 processos com zero eventos.
+    // O invariante de custo mantém-se; o que mudou é que o round junta-se à
+    // enumeração em curso em vez de desistir dela.
     let calls = 0;
     let release;
     const gate = new Promise((r) => {
@@ -172,15 +179,21 @@ describe("diff do poll — rajadas de eventos", () => {
       if (calls === 1) await gate;
       return world([[1, "a.exe"]]);
     });
+    const started = [];
+    monitor.on("process.started", (p) => started.push(p.pid));
+    // Não awaitidos: os três agora ESPERAM o mesmo round, por isso a gate tem de
+    // ser aberta antes de os aguardar (é a mudança de semântica, não um artefacto).
     const first = monitor.poll();
-    // Enquanto o primeiro round nao acaba, mais dois nao podem entrar.
-    await monitor.poll();
-    await monitor.poll();
-    assert.equal(calls, 1, "os rounds sobrepostos sao saltados, nao enfileirados");
+    const segundo = monitor.poll();
+    const terceiro = monitor.poll();
+    assert.equal(calls, 1, "os rounds sobrepostos partilham UMA enumeração do SO");
     release();
-    await first;
+    await Promise.all([first, segundo, terceiro]);
+    assert.equal(calls, 1, "esperar o round não custou uma segunda enumeração");
+    assert.deepEqual(started, [1], "o round partilhado anunciou o processo uma única vez");
     await monitor.poll();
     assert.equal(calls, 2, "depois de livre, volta a correr");
+    assert.deepEqual(started, [1], "round sem diff não re-anuncia");
   });
 });
 
@@ -354,5 +367,133 @@ describe("single-flight partilhado — nunca duas enumeracoes do SO ao mesmo tem
     await monitor.list();
     await monitor.list();
     assert.equal(calls, 2, "o single-flight nao pode colar nem travar o monitor para sempre");
+  });
+});
+
+describe("ciclo de vida — stop() durante um poll em voo nao rearma (FIX P2)", () => {
+  it("stop() a meio de uma enumeracao deixa o timer morto e nao faz enumeracao extra", async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let calls = 0;
+    const monitor = new ProcessMonitor(
+      async () => {
+        calls++;
+        await gate;
+        return world([[1, "seed.exe"]]);
+      },
+      { now: () => relogio.agora },
+    );
+
+    // Restart (previous nao vazio): start() passa por poll() e fica preso na enumeracao.
+    monitor.previous = world([[7, "antigo.exe"]]);
+    const startPromise = monitor.start();
+    await new Promise((r) => setImmediate(r));
+    await monitor.stop();
+
+    assert.equal(monitor.timer, null, "stop() tem de deixar o timer morto");
+
+    release();
+    await startPromise;
+    await new Promise((r) => setTimeout(r, 25));
+
+    assert.equal(monitor.timer, null, "o finally do poll nao pode reagendar depois de stop()");
+    assert.equal(calls, 1, "nenhuma enumeracao extra depois do stop()");
+  });
+});
+
+describe("ciclo de vida — stop() -> start() com uma operacao anterior ainda pendente", () => {
+  it("retoma a monitorizacao com UM unico timer, sem perder nem duplicar eventos", async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let calls = 0;
+    const monitor = new ProcessMonitor(
+      async () => {
+        calls++;
+        await gate;
+        return world([[1, "novo.exe"]]);
+      },
+      { now: () => relogio.agora },
+    );
+
+    const anunciados = [];
+    monitor.on("process.started", (p) => anunciados.push(p.pid));
+
+    // Restart (previous nao vazio): este start() fica preso na enumeracao partilhada.
+    monitor.previous = world([[7, "antigo.exe"]]);
+    const primeiroStart = monitor.start();
+    await new Promise((r) => setImmediate(r));
+
+    await monitor.stop();
+    assert.equal(monitor.timer, null, "stop() deixa o timer morto");
+
+    // Conta os timers de poll vivos: so interessam os de intervalo de cadencia.
+    const timersVivos = new Set();
+    const realSetTimeout = globalThis.setTimeout;
+    const realClearTimeout = globalThis.clearTimeout;
+    globalThis.setTimeout = (fn, ms, ...a) => {
+      const h = realSetTimeout(fn, ms, ...a);
+      if (ms >= 1000) timersVivos.add(h);
+      return h;
+    };
+    globalThis.clearTimeout = (h) => {
+      timersVivos.delete(h);
+      return realClearTimeout(h);
+    };
+    try {
+      // start() imediato, ainda com a operacao anterior em voo.
+      await monitor.start();
+      assert.notEqual(monitor.timer, null, "a monitorizacao tem de estar retomada (timer vivo)");
+
+      // A operacao antiga termina AGORA: o processo nascido no intervalo
+      // tem de ser anunciado, uma unica vez.
+      release();
+      await primeiroStart;
+      await new Promise((r) => setImmediate(r));
+
+      assert.deepEqual(anunciados, [1], "o processo nascido no intervalo anuncia-se exactamente uma vez");
+      assert.equal(calls, 1, "a enumeracao partilhada nao pode correr duas vezes");
+      assert.equal(timersVivos.size, 1, "so pode ficar UM timer de poll vivo depois de stop() -> start()");
+      assert.notEqual(monitor.timer, null, "o monitor continua agendado");
+    } finally {
+      globalThis.setTimeout = realSetTimeout;
+      globalThis.clearTimeout = realClearTimeout;
+      await monitor.stop();
+    }
+  });
+
+  it("arranque frio partilhado: semeia sem rajada e fica com um timer", async () => {
+    let release;
+    const gate = new Promise((r) => { release = r; });
+    let calls = 0;
+    const monitor = new ProcessMonitor(
+      async () => {
+        calls++;
+        await gate;
+        return world([[1, "ja-existia.exe"], [2, "tambem.exe"]]);
+      },
+      { now: () => relogio.agora },
+    );
+
+    const anunciados = [];
+    monitor.on("process.started", (p) => anunciados.push(p.pid));
+
+    // Uma enumeracao ja em voo vinda de outro caminho (ex.: list() da UI) —
+    // exatamente o caso que o seedOnly() tem de saber partilhar.
+    const listPromise = monitor.list();
+    await new Promise((r) => setImmediate(r));
+
+    await monitor.stop(); // protecao desligada: previous continua vazio
+    // Arranque frio: o seedOnly partilha a enumeracao em voo (e espera por ela).
+    const startPromise = monitor.start();
+
+    release();
+    await listPromise;
+    await startPromise;
+    await new Promise((r) => setImmediate(r));
+
+    assert.deepEqual(anunciados, [], "arranque frio nao pode anunciar o que ja existia (rajada)");
+    assert.equal(calls, 1, "semeia com a enumeracao em voo, sem duplicar");
+    assert.notEqual(monitor.timer, null, "depois de semear, o poll fica agendado");
+    await monitor.stop();
   });
 });

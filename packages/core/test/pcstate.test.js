@@ -265,6 +265,16 @@ describe("PcState — Disk", () => {
     assert.equal(findById(state, "system:disk-low"), null);
     assert.equal(findById(state, "system:disk-recommended"), null);
   });
+
+  test("SEM leitura do disco ⇒ nenhum finding de espaço (nunca um 0% inventado)", () => {
+    const engine = new PcStateEngine();
+    // `usagePercent: null` é ausência de medição, não "disco vazio": se o motor
+    // tratasse o null como 0, o utilizador via um achado "disco quase cheio"
+    // nascido de uma leitura que nunca aconteceu.
+    const state = engine.update(baseInput({ hardware: hw({ disk: null }) }));
+    assert.equal(findById(state, "system:disk-low"), null);
+    assert.equal(findById(state, "system:disk-recommended"), null);
+  });
 });
 
 describe("PcState — Sem problemas conhecidos", () => {

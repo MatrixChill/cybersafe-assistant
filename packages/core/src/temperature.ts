@@ -1,8 +1,11 @@
+import { runHardwareQuery } from './hardware-query.js';
 import { exec } from "child_process";
 import { promisify } from "util";
 import * as si from "systeminformation";
 import type { TemperatureProvider, TemperatureReading } from "./temperature-provider.js";
-import { isDedicatedGpu } from "./gpu-selection.js";
+import { pickPrimaryGpuController } from "./gpu-selection.js";
+import { AdlSensorProvider } from "./adl-provider.js";
+import { readAdlSensors } from "./adl-bridge.js";
 
 const execAsync = promisify(exec);
 
@@ -27,22 +30,45 @@ const execAsync = promisify(exec);
 // ── Reading vazio (sentinela para "unavailable") ──
 function emptyReading(source: string): TemperatureReading {
   return {
-    cpuPackageC: null, cpuCoreMaxC: null, gpuCoreC: null, gpuHotspotC: null, gpuMemoryJunctionC: null,
-    gpuCoreSensor: null, gpuHotspotSensor: null,
+    cpuPackageC: null, cpuCoreMaxC: null, cpuSensor: null,
+    gpuCoreC: null, gpuHotspotC: null, gpuMemoryJunctionC: null,
+    gpuCoreSensor: null, gpuHotspotSensor: null, gpuMemorySensor: null,
     nvme: [], motherboard: [], fans: [], source, timestamp: new Date().toISOString(),
   };
 }
 
 /**
- * Aceita apenas valores fisicamente plausíveis para um sensor térmico.
- * Um valor fora deste intervalo é tratado como "sem leitura" — nunca é
- * arredondado nem publicado.
+ * Aceita apenas NÚMEROS fisicamente plausíveis para um sensor térmico.
+ * `String → Number` foi removido de propósito: um sensor que devolve texto não
+ * é uma medição, e coerzi-lo transformaria lixo em graus. Um valor fora do
+ * intervalo é tratado como "sem leitura" — nunca é arredondado nem publicado.
  */
 function sanitizeTemperature(raw: unknown): number | null {
-  const value = typeof raw === "number" ? raw : Number(raw);
-  if (!Number.isFinite(value)) return null;
-  if (value <= 0 || value > 150) return null;
-  return Math.round(value);
+  if (typeof raw !== "number" || !Number.isFinite(raw)) return null;
+  if (raw <= 0 || raw > 150) return null;
+  return Math.round(raw);
+}
+
+/**
+ * Leitura ADL admitida pelo coordenador de hardware. O `adl-bridge` já tem
+ * single-flight próprio, cache de 3 s, timeout duro com kill e backoff; entrar
+ * na fila serve para NÃO somar polling térmico concorrente com as fontes WMI,
+ * e `share:false` é deliberado: partilhar a promessa do coordenador duplicaria
+ * o controlo de concorrência sobre o mesmo worker.
+ */
+const readAdlSensorsQueued = () => runHardwareQuery("adl", () => readAdlSensors());
+
+// Inventory and thermal consumers use the same expensive graphics query.
+let graphicsInFlight: ReturnType<typeof si.graphics> | null = null;
+let graphicsCache: { value: Awaited<ReturnType<typeof si.graphics>>; at: number } | null = null;
+export function readGraphics(): ReturnType<typeof si.graphics> {
+  if (graphicsInFlight) return graphicsInFlight;
+  if (graphicsCache && Date.now() - graphicsCache.at < 4000) return Promise.resolve(graphicsCache.value);
+  graphicsInFlight = runHardwareQuery('graphics', () => si.graphics(), true).then(value => {
+    graphicsCache = { value, at: Date.now() };
+    return value;
+  }).finally(() => { graphicsInFlight = null; });
+  return graphicsInFlight;
 }
 
 // ── 1. systeminformation (user-mode: WMI/CIM + APIs de fornecedor de GPU) ──
@@ -52,8 +78,8 @@ export class SystemInformationProvider implements TemperatureProvider {
   async isAvailable(): Promise<boolean> {
     try {
       const [cpuTemp, graphics] = await Promise.all([
-        si.cpuTemperature().catch(() => null),
-        si.graphics().catch(() => null),
+        runHardwareQuery('cpu-temperature', () => si.cpuTemperature(), true).catch(() => null),
+        readGraphics().catch(() => null),
       ]);
       // Este provider é a ÚNICA fonte segura de temperatura de GPU, por isso
       // está "disponível" quando consegue ler CPU *ou* GPU. Um CPU sem sensor
@@ -70,8 +96,8 @@ export class SystemInformationProvider implements TemperatureProvider {
     const reading = emptyReading(this.name);
     try {
       const [cpuTemp, gpuTemp] = await Promise.all([
-        si.cpuTemperature().catch(() => null),
-        si.graphics().catch(() => null),
+        runHardwareQuery('cpu-temperature', () => si.cpuTemperature(), true).catch(() => null),
+        readGraphics().catch(() => null),
       ]);
       const cpuPackage = sanitizeTemperature(cpuTemp?.main);
       if (cpuPackage !== null) reading.cpuPackageC = cpuPackage;
@@ -81,11 +107,13 @@ export class SystemInformationProvider implements TemperatureProvider {
           .filter((c): c is number => c !== null);
         if (valid.length) reading.cpuCoreMaxC = Math.max(...valid);
       }
-      // Escolhe a GPU DEDICADA (nunca a primeira com temperatura: seria a integrada).
+      // Escolhe o controlador PRINCIPAL por pontuação (dedicado > VRAM > ordem
+      // de chegada), nunca "o primeiro com temperatura": o primeiro seria a iGPU
+      // do CPU e a temperatura mostrada como "GPU" seria a da gráfica integrada.
       const gpuControllers = (gpuTemp?.controllers ?? []).filter(
         (g) => sanitizeTemperature(g.temperatureGpu) !== null,
       );
-      const chosen = gpuControllers.find((g) => isDedicatedGpu(g.model)) ?? gpuControllers[0];
+      const chosen = pickPrimaryGpuController(gpuControllers);
       const gpuCore = sanitizeTemperature(chosen?.temperatureGpu);
       if (gpuCore !== null) {
         // O systeminformation expõe apenas UMA temperatura por controlador
@@ -101,12 +129,16 @@ export class SystemInformationProvider implements TemperatureProvider {
 // ── 2. ACPI WMI (user-mode, sem driver) ──
 export class AcpiProvider implements TemperatureProvider {
   name = "ACPI";
+  private readonly exec: (cmd: string) => Promise<{ stdout: string; stderr: string }>;
+
+  constructor(execImpl?: (cmd: string) => Promise<{ stdout: string; stderr: string }>) {
+    this.exec = execImpl ?? defaultExecAsync;
+  }
 
   async isAvailable(): Promise<boolean> {
     try {
-      const { stdout } = await execAsync(
+      const { stdout } = await this.exec(
         'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $t = (Get-CimInstance MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | Select-Object -First 1).CurrentTemperature; if ($t -gt 0) { Write-Output \'ok\' }"',
-        { windowsHide: true, timeout: 3000 }
       );
       return stdout.trim() === "ok";
     } catch { return false; }
@@ -115,16 +147,31 @@ export class AcpiProvider implements TemperatureProvider {
   async read(): Promise<TemperatureReading> {
     const reading = emptyReading(this.name);
     try {
-      const { stdout } = await execAsync(
+      const { stdout } = await this.exec(
         'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; $t = (Get-CimInstance MSAcpi_ThermalZoneTemperature -ErrorAction SilentlyContinue | Select-Object -First 1).CurrentTemperature; if ($t -gt 0) { Write-Output ([math]::Round($t/10 - 273.15)) }"',
-        { windowsHide: true, timeout: 3000 }
       );
       const temp = sanitizeTemperature(parseInt(stdout.trim(), 10));
-      if (temp !== null && temp > -20) reading.cpuPackageC = temp;
+      // MSAcpi_ThermalZoneTemperature reporta a ZONA TÉRMICA do motherboard,
+      // NÃO a CPU Package. Não há prova de que seja a Package — atribuí-la a
+      // cpuPackageC seria uma alegação não provada. Registamos como
+      // motherboard thermal zone com identificação genérica, deixando
+      // cpuPackageC null por honestidade.
+      if (temp !== null && temp > -20) {
+        reading.motherboard.push({
+          name: "ACPI Thermal Zone",
+          tempC: temp,
+        });
+      }
     } catch { /* unavailable */ }
     return reading;
   }
 }
+
+/** Wrapper padrão: promisify(exec) com timeout. Teste injeta override via constructor. */
+const defaultExecAsync = async (cmd: string): Promise<{ stdout: string; stderr: string }> => {
+  const { stdout, stderr } = await runHardwareQuery('acpi', () => execAsync(cmd, { windowsHide: true, timeout: 3000 }));
+  return { stdout, stderr };
+};
 
 /**
  * No-op de compatibilidade: o sidecar de temperatura foi removido (ver nota de
@@ -139,12 +186,26 @@ export function disposeTempHelper(): void {
 let lastReading: TemperatureReading | null = null;
 let lastReadAt = 0;
 const CACHE_TTL_MS = 4000;
+let inFlight: Promise<TemperatureReading> | null = null;
 
 export async function readTemperature(): Promise<TemperatureReading> {
-  const now = Date.now();
-  if (lastReading && (now - lastReadAt) < CACHE_TTL_MS) return lastReading;
+  if (inFlight) return inFlight;
+  if (lastReading && Date.now() - lastReadAt < CACHE_TTL_MS) return lastReading;
+  inFlight = collectTemperature().finally(() => { inFlight = null; });
+  return inFlight;
+}
+
+async function collectTemperature(): Promise<TemperatureReading> {
 
   const providers: TemperatureProvider[] = [
+    // Prioridade verificável (a ordem É o contrato, não uma coincidência):
+    //  1. AMD ADL — API user-mode do driver AMD já instalado. É a única fonte
+    //     que deu temperatura de GPU REAL medida nesta máquina (49→66→48 °C a
+    //     26/10, sensor TEMPERATURE_EDGE na RX 5600 XT) e a única que pode dar
+    //     °C de CPU sem driver de kernel nem elevação. Corre num worker próprio.
+    //  2. systeminformation — WMI/CIM e APIs de fornecedor.
+    //  3. ACPI thermal zone — zona do motherboard, nunca rotulada como CPU.
+    new AdlSensorProvider(readAdlSensorsQueued),
     new SystemInformationProvider(),
     new AcpiProvider(),
   ];
@@ -157,10 +218,11 @@ export async function readTemperature(): Promise<TemperatureReading> {
 
   for (const provider of providers) {
     try {
-      if (!(await provider.isAvailable())) continue;
+      // read() already handles unsupported/failed sensors with null fields.
+      // Probing availability first repeats the same expensive OS queries.
       const reading = await provider.read();
       let contributed = false;
-      if (merged.cpuPackageC === null && reading.cpuPackageC !== null) { merged.cpuPackageC = reading.cpuPackageC; contributed = true; }
+      if (merged.cpuPackageC === null && reading.cpuPackageC !== null) { merged.cpuPackageC = reading.cpuPackageC; merged.cpuSensor = reading.cpuSensor ?? null; contributed = true; }
       if (merged.cpuCoreMaxC === null && reading.cpuCoreMaxC !== null) { merged.cpuCoreMaxC = reading.cpuCoreMaxC; contributed = true; }
       if (merged.gpuCoreC === null && reading.gpuCoreC !== null) {
         merged.gpuCoreC = reading.gpuCoreC;
@@ -172,16 +234,31 @@ export async function readTemperature(): Promise<TemperatureReading> {
         merged.gpuHotspotSensor = reading.gpuHotspotSensor ?? null;
         contributed = true;
       }
-      if (merged.gpuMemoryJunctionC === null && reading.gpuMemoryJunctionC !== null) { merged.gpuMemoryJunctionC = reading.gpuMemoryJunctionC; contributed = true; }
+      if (merged.gpuMemoryJunctionC === null && reading.gpuMemoryJunctionC !== null) {
+        merged.gpuMemoryJunctionC = reading.gpuMemoryJunctionC;
+        merged.gpuMemorySensor = reading.gpuMemorySensor ?? null;
+        contributed = true;
+      }
       if (merged.nvme.length === 0 && reading.nvme.length > 0) { merged.nvme = reading.nvme; contributed = true; }
       if (merged.motherboard.length === 0 && reading.motherboard.length > 0) { merged.motherboard = reading.motherboard; contributed = true; }
       if (merged.fans.length === 0 && reading.fans.length > 0) { merged.fans = reading.fans; contributed = true; }
+      // Utilização do GPU: vem na MESMA aquisição que a temperatura (mesmo PMLog),
+      // por isso partilha a ordem de prioridade e o rótulo de origem. Um provider
+      // que reportou `null` preenche o campo na mesma — a diferença entre "não
+      // reportou" (undefined) e "reportou e não havia valor" (null) é a pergunta
+      // que a UI precisa de poder fazer.
+      if (merged.gpuPercent === undefined && reading.gpuPercent !== undefined) {
+        merged.gpuPercent = reading.gpuPercent;
+        merged.gpuMemoryPercent = reading.gpuMemoryPercent;
+        merged.gpuPercentSensor = reading.gpuPercentSensor ?? null;
+        if (reading.gpuPercent !== null) contributed = true;
+      }
       if (contributed) contributors.push(provider.name);
     } catch { /* próximo provider */ }
   }
 
   merged.source = contributors.length > 0 ? contributors.join("+") : "unavailable";
   lastReading = merged;
-  lastReadAt = now;
+  lastReadAt = Date.now();
   return merged;
 }

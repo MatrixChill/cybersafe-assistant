@@ -38,8 +38,8 @@ describe("cadencia do renderer — o contrato do consumidor", () => {
 
     assert.doesNotMatch(app, /setInterval\([^)]*,\s*10_000\s*\)/, "o App nao pode ter o intervalo hardcoded");
     assert.doesNotMatch(page, /setInterval\([^)]*,\s*10_000\s*\)/, "a pagina nao pode ter o intervalo hardcoded");
-    assert.match(app, /import[^;]*PROCESSES_POLL_MS[^;]*from\s+["'].*processActions["']/,
-      "o App tem de importar a constante, nao reescreve-la");
+    assert.match(app, /import[^;]*(PROCESSES_POLL_MS|processosPollMs)[^;]*from\s+["'].*processActions["']/,
+      "o App tem de importar a cadencia da tabela, nao reescreve-la");
     assert.match(page, /PROCESSES_POLL_MS\s*\/\s*1000/, "a copy da pagina mostra o numero que vem da constante");
   });
 

@@ -4,94 +4,268 @@ import crypto from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import type { AnalysisResult, ProcessKillProtectionReason, QuarantineEntry, KillProcessResult } from "@cybersafe/shared-types";
 
+type StoredQuarantineEntry = QuarantineEntry & { originalMode?: number };
+type QuarantineResult = { success: boolean; error?: string };
+
 export class QuarantineManager {
   private readonly quarantineDir: string;
   private readonly manifestPath: string;
-  private entries = new Map<string, QuarantineEntry>();
+  private entries = new Map<string, StoredQuarantineEntry>();
+  private pending: Promise<unknown> = Promise.resolve();
 
   constructor(baseDir: string) {
-    this.quarantineDir = path.join(baseDir, "quarantine");
+    this.quarantineDir = path.resolve(baseDir, "quarantine");
     this.manifestPath = path.join(this.quarantineDir, "manifest.json");
   }
 
   async init() {
     await fs.mkdir(this.quarantineDir, { recursive: true });
     try {
-      const raw = await fs.readFile(this.manifestPath, "utf-8");
-      const parsed = JSON.parse(raw) as QuarantineEntry[];
+      const parsed = JSON.parse(await fs.readFile(this.manifestPath, "utf-8")) as StoredQuarantineEntry[];
       this.entries = new Map(parsed.map((entry) => [entry.id, entry]));
     } catch (error: any) {
       if (error?.code !== "ENOENT") throw error;
     }
   }
 
-  private async flush() {
-    await fs.writeFile(
-      this.manifestPath,
-      JSON.stringify(Array.from(this.entries.values()), null, 2),
-      "utf-8",
-    );
+  private serialize<T>(operation: () => Promise<T>): Promise<T> {
+    const result = this.pending.then(operation);
+    this.pending = result.catch(() => undefined);
+    return result;
+  }
+
+  private async flush(entries = this.entries) {
+    const temporary = path.join(this.quarantineDir, `.manifest-${crypto.randomUUID()}.tmp`);
+    try {
+      const handle = await fs.open(temporary, "wx", 0o600);
+      try {
+        await handle.writeFile(JSON.stringify(Array.from(entries.values()), null, 2), "utf-8");
+        await handle.sync();
+      } finally {
+        await handle.close();
+      }
+      await fs.rename(temporary, this.manifestPath);
+    } finally {
+      await fs.rm(temporary, { force: true }).catch(() => undefined);
+    }
+  }
+
+  // No recursive removal and no aliases outside the direct quarantine directory.
+  // These checks assume the directory is not concurrently controlled by another writer.
+  private async checkedSource(entry: StoredQuarantineEntry): Promise<string> {
+    const file = entry.quarantinePath;
+    if (typeof file !== "string" || !path.isAbsolute(file)
+      || path.dirname(path.resolve(file)) !== this.quarantineDir
+      || !path.basename(file).endsWith(".quarantine")) {
+      throw new Error("Caminho de quarentena invalido.");
+    }
+    const root = await fs.lstat(this.quarantineDir);
+    if (!root.isDirectory() || root.isSymbolicLink()
+      || await fs.realpath(this.quarantineDir) !== this.quarantineDir) {
+      throw new Error("Caminho de quarentena invalido.");
+    }
+    let stat;
+    try { stat = await fs.lstat(file); }
+    catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") {
+        throw new Error("Ficheiro em quarentena em falta.");
+      }
+      throw error;
+    }
+    if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) {
+      throw new Error("Caminho de quarentena invalido.");
+    }
+    return file;
+  }
+
+  private async digest(file: string): Promise<string> {
+    const digest = crypto.createHash("sha256");
+    const handle = await fs.open(file, "r");
+    try {
+      const buffer = Buffer.alloc(64 * 1024);
+      for (;;) {
+        const { bytesRead } = await handle.read(buffer, 0, buffer.length, null);
+        if (!bytesRead) break;
+        digest.update(buffer.subarray(0, bytesRead));
+      }
+      return digest.digest("hex");
+    } finally { await handle.close(); }
   }
 
   async quarantine(analysis: AnalysisResult): Promise<QuarantineEntry | null> {
-    try {
-      const id = crypto.randomUUID();
-      const quarantinePath = path.join(this.quarantineDir, `${id}.quarantine`);
-      await fs.rename(analysis.artifactPath, quarantinePath);
-      // Remove all permissions to prevent execution
-      await fs.chmod(quarantinePath, 0o000);
-      const entry: QuarantineEntry = {
-        id,
-        originalPath: analysis.artifactPath,
-        quarantinePath,
-        fileName: analysis.fileName,
-        sha256: analysis.sha256,
-        verdict: analysis.verdict,
-        riskScore: analysis.riskScore,
-        quarantinedAt: new Date().toISOString(),
-      };
-      this.entries.set(id, entry);
-      await this.flush();
-      return entry;
-    } catch {
-      return null;
-    }
+    return this.serialize(async () => {
+      let entry: StoredQuarantineEntry | undefined;
+      let moved = false;
+      try {
+        const stat = await fs.lstat(analysis.artifactPath);
+        if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) return null;
+        const sha256 = await this.digest(analysis.artifactPath);
+        if (analysis.sha256 && sha256 !== analysis.sha256.toLowerCase()) return null;
+        const current = await fs.lstat(analysis.artifactPath);
+        if (current.size !== stat.size || current.mtimeMs !== stat.mtimeMs || current.ctimeMs !== stat.ctimeMs || current.ino !== stat.ino) return null;
+        const id = crypto.randomUUID();
+        const quarantinePath = path.join(this.quarantineDir, `${id}.quarantine`);
+        const rules = Array.isArray(analysis.rulesTriggered) ? analysis.rulesTriggered.filter(Boolean) : [];
+        entry = {
+          id, originalPath: analysis.artifactPath, quarantinePath,
+          fileName: analysis.fileName, sha256, verdict: analysis.verdict,
+          riskScore: analysis.riskScore,
+          // Preserva a razão real, sem inventar regras.
+          detectionReason: rules.length > 0 ? rules.join(", ") : undefined,
+          quarantinedAt: new Date().toISOString(), originalMode: stat.mode & 0o777,
+          isolationStatus: "recovery-required",
+        };
+        // Persist recovery metadata before moving the only copy.
+        const next = new Map(this.entries).set(id, entry);
+        await this.flush(next);
+        this.entries = next;
+        await fs.rename(analysis.artifactPath, quarantinePath);
+        moved = true;
+        if (await this.digest(quarantinePath) !== sha256) throw new Error("Destino alterado durante o isolamento.");
+        const destination = await fs.lstat(quarantinePath);
+        if (!destination.isFile() || destination.isSymbolicLink() || destination.nlink !== 1) throw new Error("Destino de quarentena inválido.");
+        try {
+          await fs.lstat(analysis.artifactPath);
+          throw new Error("O caminho original voltou a existir; isolamento não confirmado.");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        await fs.chmod(quarantinePath, 0o000);
+        const confirmed: StoredQuarantineEntry = {...entry,isolationStatus:"confirmed"};
+        const confirmedEntries = new Map(this.entries).set(id,confirmed);
+        await this.flush(confirmedEntries);
+        const persisted = JSON.parse(await fs.readFile(this.manifestPath,"utf8")) as StoredQuarantineEntry[];
+        if (!persisted.some(item=>item.id===id && item.sha256===sha256 && item.quarantinePath===quarantinePath && item.isolationStatus==="confirmed")) throw new Error("Manifesto não confirmou isolamento.");
+        this.entries = confirmedEntries;
+        return confirmed;
+      } catch {
+        // A moved file retains its recovery entry, even when chmod fails.
+        if (entry && moved) {
+          // Confirmation may have been persisted before a read failed. Revert
+          // metadata to uncertainty without moving or deleting the only bytes.
+          try { await this.flush(this.entries); } catch { /* existing metadata and bytes are retained */ }
+        }
+        if (entry && !moved && this.entries.has(entry.id)) {
+          const next = new Map(this.entries);
+          next.delete(entry.id);
+          try { await this.flush(next); this.entries = next; } catch { /* retain recovery metadata */ }
+        }
+        return null;
+      }
+    });
   }
 
-  async restore(id: string, restoredBy = "user"): Promise<boolean> {
-    const entry = this.entries.get(id);
-    if (!entry) return false;
-
-    try {
-      await fs.mkdir(path.dirname(entry.originalPath), { recursive: true });
-      await fs.rename(entry.quarantinePath, entry.originalPath);
-      entry.restoredAt = new Date().toISOString();
-      entry.restoredBy = restoredBy;
-      this.entries.delete(id);
-      await this.flush();
-      return true;
-    } catch {
-      return false;
-    }
+  async restore(id: string, _restoredBy = "user"): Promise<QuarantineResult> {
+    return this.serialize(async () => {
+      const entry = this.entries.get(id);
+      if (!entry) return { success: false, error: "Entrada de quarentena nao encontrada." };
+      const staging = path.join(this.quarantineDir, `.restore-${crypto.randomUUID()}.tmp`);
+      let published = false;
+      try {
+        const source = await this.checkedSource(entry);
+        if (typeof entry.originalPath !== "string" || !path.isAbsolute(entry.originalPath)) {
+          throw new Error("Caminho original invalido (nao e absoluto).");
+        }
+        if (typeof entry.sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(entry.sha256)) {
+          throw new Error("Digest de quarentena ausente ou invalido; restauro recusado.");
+        }
+        const original = path.resolve(entry.originalPath);
+        try {
+          await fs.lstat(original);
+          throw new Error("Ja existe um ficheiro nesse destino. Restauro recusado para nao o substituir.");
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
+        }
+        // Persistence failure must be detected before publishing any destination.
+        await this.flush();
+        await fs.mkdir(path.dirname(original), { recursive: true });
+        if (await fs.realpath(path.dirname(original)) !== path.dirname(original)) {
+          throw new Error("Pasta de destino com redirecionamento; restauro recusado.");
+        }
+        // Windows can read a read-only quarantine file without changing its mode.
+        // On POSIX, open while owner-readable, then remove that permission BEFORE copying.
+        let input;
+        try { input = await fs.open(source, "r"); }
+        catch (error) {
+          if (!["EACCES", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+          await fs.chmod(source, 0o400);
+          try { input = await fs.open(source, "r"); }
+          finally {
+            try { await fs.chmod(source, 0o000); }
+            catch {
+              await input?.close();
+              throw new Error("Falha ao repor isolamento da quarentena; permissao de leitura pode permanecer. Restauro recusado.");
+            }
+          }
+        }
+        try {
+          const output = await fs.open(staging, "wx", 0o600);
+          try {
+            const buffer = Buffer.alloc(64 * 1024);
+            for (;;) {
+              const { bytesRead } = await input.read(buffer, 0, buffer.length, null);
+              if (!bytesRead) break;
+              await output.writeFile(buffer.subarray(0, bytesRead));
+            }
+            await output.sync();
+          } finally { await output.close(); }
+        } finally { await input.close(); }
+        if (await this.digest(staging) !== entry.sha256.toLowerCase()) {
+          throw new Error("Digest de quarentena diferente; restauro recusado.");
+        }
+        // Exclusive publication: EEXIST refuses even a destination created after the check.
+        // Cross-volume/unsupported hard links fail closed; never fall back to rename.
+        await fs.link(staging, original);
+        published = true;
+        await fs.unlink(staging);
+        const mode = entry.originalMode;
+        await fs.chmod(original, Number.isInteger(mode) && mode! >= 0 && mode! <= 0o777 ? mode! : 0o600);
+        await this.checkedSource(entry);
+        await fs.rm(source);
+        const next = new Map(this.entries);
+        next.delete(id);
+        await this.flush(next);
+        this.entries = next;
+        return { success: true };
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException).code;
+        const detail = code === "EEXIST"
+          ? "Ja existe um ficheiro nesse destino. Restauro recusado para nao o substituir."
+          : (error as Error).message;
+        return published
+          ? { success: true, error: `Ficheiro restaurado; limpeza, permissoes ou metadados pendentes. Entrada preservada para recuperacao. ${detail}` }
+          : { success: false, error: detail || "Falha ao restaurar o ficheiro." };
+      } finally {
+        await fs.rm(staging, { force: true }).catch(() => undefined);
+      }
+    });
   }
 
-  async delete(id: string): Promise<boolean> {
-    const entry = this.entries.get(id);
-    if (!entry) return false;
-    try {
-      await fs.rm(entry.quarantinePath, { force: true });
-      this.entries.delete(id);
-      await this.flush();
-      return true;
-    } catch {
-      return false;
-    }
+  async delete(id: string): Promise<QuarantineResult> {
+    return this.serialize(async () => {
+      const entry = this.entries.get(id);
+      if (!entry) return { success: false, error: "Entrada de quarentena nao encontrada." };
+      let removed = false;
+      try {
+        const source = await this.checkedSource(entry);
+        await this.flush();
+        await fs.rm(source);
+        removed = true;
+        const next = new Map(this.entries);
+        next.delete(id);
+        await this.flush(next);
+        this.entries = next;
+        return { success: true };
+      } catch (error) {
+        return removed
+          ? { success: true, error: `Ficheiro eliminado; metadados pendentes. Entrada preservada para recuperacao. ${(error as Error).message}` }
+          : { success: false, error: (error as Error).message || "Falha ao eliminar o ficheiro." };
+      }
+    });
   }
 
   list(): QuarantineEntry[] {
-    return Array.from(this.entries.values()).sort((a, b) =>
-      b.quarantinedAt.localeCompare(a.quarantinedAt),
-    );
+    return Array.from(this.entries.values()).sort((a, b) => b.quarantinedAt.localeCompare(a.quarantinedAt));
   }
 }
 

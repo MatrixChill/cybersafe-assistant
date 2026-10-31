@@ -686,8 +686,8 @@ describe("primeira interação não submete — a cadeia UI→serviço, hipótes
     );
   });
 
-  test("H1b — a row não tem nenhum caminho de submissão: só existe UM call site de killProcessTree", () => {
-    const callSites = pageSource.match(/api\.killProcessTree/g) ?? [];
+  test("H1b — seleção só prepara; existe um único ponto de confirmação individual", () => {
+    const callSites = pageSource.match(/return confirmIndividualTermination/g) ?? [];
     assert.equal(callSites.length, 1, `esperado 1 ponto de submissão, encontrados ${callSites.length}`);
     // E esse ponto vive dentro do handler do confirm, não dentro do selector.
     const selectBody = pageSource.slice(
@@ -696,7 +696,7 @@ describe("primeira interação não submete — a cadeia UI→serviço, hipótes
     );
     assert.doesNotMatch(
       selectBody,
-      /killProcessTree|electronAPI|api\./,
+      /killProcessTree|confirmIndividualTermination/,
       "selectKillTarget só pode congelar o alvo e abrir o modal",
     );
   });
@@ -728,7 +728,7 @@ describe("primeira interação não submete — a cadeia UI→serviço, hipótes
     // Um confirm sem alvo não submete nada (e agora diz isso no trace).
     assert.match(
       pageSource,
-      /if \(!target\)\s*(?:\{[^}]*return;[^}]*\}|return;)/,
+      /if \(!target \|\| !terminationTicket\.current\) return;/,
       "handleKill tem de abortar sem alvo, sem tocar em IPC",
     );
   });
@@ -767,21 +767,27 @@ describe("primeira interação não submete — a cadeia UI→serviço, hipótes
     );
   });
 
-  test("H8 — a segunda interação é o confirm do modal: o render do modal é o que aparece depois da seleção", () => {
-    // Sequência verificável sem DOM: sem selecção não há markup de modal; com
-    // alvo congelado, o markup do modal aparece e identifica o processo certo.
+  test("H8 — sem seleção não há modal; a política individual é visível", () => {
+    // EXPECTATIVA ALTERADA A PROPÓSITO (PAP-P0, 2026-10-27). Antes esta prova
+    // afirmava que a row oferecia «Encerrar processo» e que a selecção montava o
+    // modal. Com o serviço F1 a recusar `process.killTree`, a row deixou de
+    // seleccionar alvo: o funil recusa e informa. O que se mantém verificável é
+    // o essencial — sem selecção não há modal, e o `KillConfirmModal` continua
+    // a ser o componente que identificaria o processo se um alvo existisse.
     const page = renderToStaticMarkup(
       createElement(TaskManagerPage, { processes: [proc({ pid: 4321, name: "Notepad.exe" })] }),
     );
-    assert.doesNotMatch(page, /Terminar este processo\?/, "antes de escolher, não há modal nenhum");
-    assert.match(page, /Terminar Processo/, "a row oferece a acção — mas é o botão de SELECIONAR");
+    assert.doesNotMatch(page, /Terminar este processo\?/, "sem alvo escolhido não há modal nenhum");
+    assert.doesNotMatch(page, /Encerrar processo/, "a row não oferece terminação");
+    assert.match(page, /Terminação individual limitada/, "a row diz em que modo a página está");
+    assert.match(page, /data-row-action="4321"/, "a acção da linha continua exposta e focável");
     const comModal = renderToStaticMarkup(createElement(KillConfirmModal, {
       target: freezeKillTarget(proc({ pid: 4321, name: "Notepad.exe" })),
       isKilling: false,
       onCancel: () => {},
       onConfirm: () => {},
     }));
-    assert.match(comModal, /Terminar este processo\?/, "depois da selecção, o modal de confirmação aparece");
-    assert.match(comModal, /Sim, Terminar/, "e é ele que submete");
+    assert.match(comModal, /Terminar este processo\?/, "o modal continua a identificar o processo");
+    assert.match(comModal, /Sim, Terminar/, "e é ele que submete — a página é que o não monta");
   });
 });

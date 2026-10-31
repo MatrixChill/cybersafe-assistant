@@ -1,0 +1,121 @@
+/* Camada de apresentação V2 do Histórico — H1 (anatomia de tabela do lab).
+ *
+ * Fonte visual: `pap-design-lab-codex-20261027/v2/src/SecurityPages.tsx:638
+ * `History()` e `styles.css:1350-1400` (`.table-toolbar`, `.table-scroll`,
+ * `table`, `th`, `td`). É a mesma grelha de leitura que o laboratório usa para
+ * «cada análise, com contexto»: colunas curtas, números em monoespaçado, o
+ * resultado dito por palavra e o detalhe atrás de um botão.
+ *
+ * Única desvio declarado do lab: `table { white-space: nowrap }`
+ * (`styles.css:1383`). No lab as células são 6 strings curtas de demonstração;
+ * aqui há caminhos de escopo, seis contadores por célula e dois botões
+ * rotulados. Com `nowrap` real, a tabela cresce até ao transbordo e o
+ * `.table-scroll` passa a esconder informação atrás de um eixo — por isso o
+ * `nowrap` fica transcrito (é a métrica da fonte) e é levantado nas três
+ * colunas que carregam dados largos. Se o gate visual disser que a linha fica
+ * mais alta do que o lab quer, é aqui que se ajusta, não no markup.
+ *
+ * Sem importação por componente: `node:test` + `tsx` não carregam `.css`.
+ * A ligação à cascata vai em delta proposto separado para o `main.tsx` do
+ * integrador. */
+
+.cs-v2 .v2-history .table-scroll {
+  overflow-x: auto;
+}
+
+.cs-v2 .v2-history .history-table {
+  border-collapse: collapse;
+  width: 100%;
+  text-align: left;
+  white-space: nowrap;
+  font-size: 11px;
+}
+
+.cs-v2 .v2-history .history-table th[scope="col"] {
+  font-size: 9px;
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+  font-weight: 500;
+  color: var(--v2-subtle);
+  padding: 13px 12px;
+  border-block: 1px solid var(--v2-border);
+  background: var(--v2-inset);
+}
+
+.cs-v2 .v2-history .history-table td {
+  padding: 18px 12px;
+  border-bottom: 1px solid var(--v2-border);
+  color: var(--v2-muted);
+  vertical-align: top;
+}
+
+/* Células com dados largos: o `nowrap` do lab não serve caminhos nem contadores. */
+.cs-v2 .v2-history .history-col-analise,
+.cs-v2 .v2-history .history-table td.mono,
+.cs-v2 .v2-history .history-col-acoes {
+  white-space: normal;
+}
+
+/* Coluna 1 do lab: `<strong>` com o tipo e `<small>` com o resto. O mosaico de
+ * estado é do produto (leva a degradação reportada) e fica à frente.
+ * Nada de `display:flex` na CÉLULA: mudar o display de um `td`/`th` faz o
+ * layout de tabela desaparecer para o leitor de ecrã (Chrome/Safari deixam de
+ * expor linha/célula). O alinhamento é feito dentro da célula. */
+.cs-v2 .v2-history .history-col-analise > span {
+  display: inline-grid;
+  vertical-align: middle;
+  margin-right: 10px;
+}
+
+.cs-v2 .v2-history .history-col-analise strong {
+  font-size: 13px;
+  color: var(--v2-text);
+}
+
+.cs-v2 .v2-history .history-col-analise small {
+  display: block;
+  margin-top: 5px;
+  color: var(--v2-subtle);
+  font-size: 10px;
+}
+
+/* Números do contrato, um por linha, no tipo de dado do tema. */
+.cs-v2 .v2-history .history-table td.mono {
+  font-family: var(--v2-font-data);
+}
+
+.cs-v2 .v2-history .history-table td.mono span {
+  display: block;
+}
+
+/* O resultado é dito por palavra; a nota de cobertura vem abaixo, sem tinta de
+ * veredicto — o histórico não conclui proteção. */
+.cs-v2 .v2-history .history-col-nota {
+  display: block;
+  margin-top: 5px;
+  color: var(--v2-subtle);
+  font-size: 10px;
+}
+
+/* Acções à direita, empilhadas pelo fluxo (mesma razão da célula anterior: a
+ * célula não deixa de ser célula). */
+.cs-v2 .v2-history .history-col-acoes {
+  text-align: right;
+}
+
+.cs-v2 .v2-history .history-col-acoes button {
+  margin-left: 6px;
+}
+
+.cs-v2 .v2-history .history-col-acoes span {
+  display: block;
+  margin-top: 6px;
+}
+
+/* A região expansível é uma linha IRMÃ da linha de dados (mesmo `<tbody>`,
+ * `<td colSpan>`), não uma coluna dentro da linha — é o que permite à linha
+ * manter a anatomia de 6 colunas do lab. */
+.cs-v2 .v2-history .history-detalhe td {
+  padding: 0 12px 18px;
+  border-bottom: 1px solid var(--v2-border);
+}

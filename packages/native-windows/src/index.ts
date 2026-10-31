@@ -3,7 +3,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { spawn } from "node:child_process";
 import * as fs from "node:fs/promises";
-import chokidar, { type FSWatcher } from "chokidar";
+import { IsolatedFileWatcher } from "./watcher-process.js";
 import * as si from "systeminformation";
 import type { ConnectionSnapshot, ProcessSnapshot } from "@cybersafe/shared-types";
 
@@ -11,10 +11,11 @@ export * from "./wfp-filter.js";
 export * from "./amsi-provider.js";
 export * from "./etw-consumer.js";
 export * from "./powershell.js";
+export * from "./usb-storage.js";
 import { WindowsHealthEngine } from "./powershell.js";
 
 export interface FileObservation {
-  kind: "file.created" | "file.modified" | "file.renamed";
+  kind: "file.created" | "file.modified" | "file.deleted";
   path: string;
   observedAt: string;
 }
@@ -29,7 +30,7 @@ export interface PersistenceObservation {
 export interface NativeWindowsWatcherEvents {
   "file.created": (event: FileObservation) => void;
   "file.modified": (event: FileObservation) => void;
-  "file.renamed": (event: FileObservation) => void;
+  "file.deleted": (event: FileObservation) => void;
   "registry.persistence.changed": (event: PersistenceObservation) => void;
   "scheduledtask.changed": (event: PersistenceObservation) => void;
 }
@@ -82,12 +83,29 @@ export class WatcherErrorDeduper {
   }
 }
 
+/** Superfície do watcher isolado que esta classe usa — permite injetar um duplo
+    em teste sem tocar no processo filho nem no Windows. */
+export type VigiaIsolada = EventEmitter & {
+  start(paths: string[]): Promise<void>;
+  stop(): Promise<void>;
+  readonly pid?: number;
+};
+
 export class NativeWindowsWatcher extends EventEmitter {
-  private watcher: FSWatcher | null = null;
+  private watcher: VigiaIsolada | null = null;
   private registryTimer: NodeJS.Timeout | null = null;
   private lastRegistrySnapshot = "";
   private validatedPaths: string[] = [];
   private errorDeduper = new WatcherErrorDeduper();
+  /** Raízes que deixaram de estar vigiadas — attach falhado em arranque ou morte em runtime. */
+  private coberturaDegradada = new Map<string, string>();
+  /** Raízes rejeitadas ANTES do arranque pelo validador de acessibilidade. */
+  private exclusoesValidacao: { path: string; reason: string; code: string }[] = [];
+  private generation = 0;
+
+  constructor(private readonly criarVigia: () => VigiaIsolada = () => new IsolatedFileWatcher()) {
+    super();
+  }
 
   getDefaultPaths() {
     const home = os.homedir();
@@ -107,7 +125,7 @@ export class NativeWindowsWatcher extends EventEmitter {
    */
   private async validateAndFilterPaths(paths: string[]): Promise<string[]> {
     const validPaths: string[] = [];
-    const invalidPaths: Array<{ path: string; reason: string }> = [];
+    const invalidPaths: Array<{ path: string; reason: string; code: string }> = [];
 
     for (const p of paths) {
       try {
@@ -127,7 +145,12 @@ export class NativeWindowsWatcher extends EventEmitter {
           reason = `Error: ${err.code || err.message}`;
         }
 
-        invalidPaths.push({ path: p, reason });
+        invalidPaths.push({ path: p, reason, code: err.code || "UNKNOWN" });
+        // A exclusao de uma raiz e uma perda de cobertura tao real quanto uma
+        // raiz que morre em runtime: ate aqui so existia um console.warn, que nao
+        // chega a lado nenhum — o painel mostrava 4 raizes sem dizer porque e o
+        // motor continuava a contar como se as 6 estivessem vivas.
+        this.exclusoesValidacao.push({ path: p, reason, code: err.code || "UNKNOWN" });
         console.warn(
           `[NativeWindowsWatcher] Path validation failed: ${p} - ${reason}`
         );
@@ -151,9 +174,47 @@ export class NativeWindowsWatcher extends EventEmitter {
     return validPaths;
   }
 
+  /**
+   * Caminhos REALMENTE vigiados: os que passaram a validação e foram entregues
+   * ao watcher. Ao contrário de `getDefaultPaths()` (os pedidos), uma path
+   * inexistente/inacessível NÃO aparece aqui. Quem reporta saúde deve usar este
+   * getter, senão afirma vigiar um caminho que foi descartado.
+   */
+  getMonitoredPaths(): string[] {
+    // Uma raiz apagada em runtime deixou de ser vigiada: listá-la aqui seria
+    // afirmar cobertura que o filho já reportou como perdida.
+    return this.validatedPaths.filter((p) => !this.coberturaDegradada.has(p));
+  }
+
+  /** Raízes pedidas e validadas que DEIXARAM de estar vigiadas, com o motivo. */
+  getDegradedCoverage(): Record<string, string> {
+    return Object.fromEntries(this.coberturaDegradada);
+  }
+
   async start(paths = this.getDefaultPaths()): Promise<void> {
+    this.exclusoesValidacao = [];
+    const generation = ++this.generation;
     // Validate and filter paths before creating watcher
     this.validatedPaths = await this.validateAndFilterPaths(paths);
+    if (generation !== this.generation) return;
+
+    // Publicado ANTES de qualquer `ready`: a razão da exclusão tem de existir no
+    // momento em que a lista de vigiadas encolhe. Até aqui só existia um
+    // `console.warn` — invisível no painel e no log do serviço — e o motor
+    // mostrava 4 raízes sem dizer por que motivo, enquanto contava as 6.
+    for (const ex of this.exclusoesValidacao) {
+      this.coberturaDegradada.set(ex.path, "raiz-excluida-validacao");
+      console.warn(`[NativeWindowsWatcher] Cobertura degradada (raiz-excluida-validacao): ${ex.path} — ${ex.reason}`);
+      this.emit("watcher.coverage", {
+        motivo: "raiz-excluida-validacao",
+        path: ex.path,
+        message: `a raiz foi excluída antes do arranque (${ex.reason}) — não está vigiada`,
+        novos: 0,
+        total: 0,
+        code: ex.code,
+        timestamp: new Date().toISOString(),
+      });
+    }
 
     if (this.validatedPaths.length === 0) {
       throw new Error(
@@ -161,35 +222,13 @@ export class NativeWindowsWatcher extends EventEmitter {
       );
     }
 
-    // Temp continua a ser monitorizado (é uma área relevante para segurança),
-    // mas toleramos erros transitórios e ignoramos apenas os artefactos
-    // temporários do próprio CyberSafe (evita que o scan reaja a si próprio).
-    const ownTempPattern = /cybersafe-(zip|scanner|temp|probe)/i;
-
-    // Destroy any existing watcher to prevent resource leak
-    if (this.watcher) {
-      await this.watcher.close();
-      this.watcher = null;
-    }
-
-    this.watcher = chokidar.watch(this.validatedPaths, {
-      persistent: true,
-      ignoreInitial: true,
-      // Junctions/reparse points NÃO são seguidos (Documents\Meus Vídeos,
-      // Minhas Imagens, Minhas Músicas) — evita loops e spam de EPERM.
-      followSymlinks: false,
-      ignored: [
-        /(^|[\/\\])\../, // ignore hidden files
-        /node_modules/, // ignore node_modules
-        /\.log$/, // ignore log files
-        /cybersafe-assistant[\/\\]logs/, // specific ignore for app logs
-        ownTempPattern, // ignore own temp artifacts (keep watching Temp otherwise)
-      ],
-      awaitWriteFinish: {
-        stabilityThreshold: 3000,
-        pollInterval: 2000,
-      },
-    });
+    // Chokidar keeps its original coverage/options in a separate process.
+    // worker_threads would still share libuv's filesystem pool with the scanner.
+    if (this.watcher) await this.watcher.stop();
+    if (generation !== this.generation) return;
+    if (this.registryTimer) clearInterval(this.registryTimer);
+    this.watcher = this.criarVigia();
+    const watcher = this.watcher;
 
     // Erros de runtime: esperados/transitórios são tolerados + deduplicados;
     // os inesperados continuam visíveis (uma vez).
@@ -206,6 +245,15 @@ export class NativeWindowsWatcher extends EventEmitter {
       this.emit("watcher.error", { error, timestamp: new Date().toISOString() });
     });
 
+    // Cobertura degradada (eventos perdidos por overflow, ou raiz apagada em
+    // runtime): NÃO é erro, NÃO derruba a proteção, mas tem de chegar ao serviço
+    // — é o único sinal de que a vigilância deixada é menor do que a pedida.
+    this.watcher.on("coverage", (info: { motivo: string; path: string; message: string; eventosSemNome: number }) => {
+      if (info.path) this.coberturaDegradada.set(info.path, info.motivo);
+      console.warn(`[NativeWindowsWatcher] Cobertura degradada (${info.motivo}): ${info.message}`);
+      this.emit("watcher.coverage", { ...info, timestamp: new Date().toISOString() });
+    });
+
     this.watcher
       .on("add", (entryPath) => this.emit("file.created", {
         kind: "file.created",
@@ -217,17 +265,26 @@ export class NativeWindowsWatcher extends EventEmitter {
         path: entryPath,
         observedAt: new Date().toISOString(),
       }))
-      .on("unlink", (entryPath) => this.emit("file.renamed", {
-        kind: "file.renamed",
+      // D1: um `unlink` é uma REMOÇÃO, não um rename. Antes emitia-se
+      // `file.renamed` e inventava-se um rename de um ficheiro que deixou de
+      // existir. Um rename real chega como `add`+`unlink` do chokidar; não o
+      // fundimos aqui (fundir exigiria correlação e podia mentir). Enquanto o
+      // ficheiro existir, a criação continua a emitir `file.created`.
+      .on("unlink", (entryPath) => this.emit("file.deleted", {
+        kind: "file.deleted",
         path: entryPath,
         observedAt: new Date().toISOString(),
       }));
+
+    await this.watcher.start(this.validatedPaths);
+    if (generation !== this.generation) { await watcher.stop(); return; }
 
     console.log(
       `[NativeWindowsWatcher] File watcher started on ${this.validatedPaths.length} paths`
     );
 
     await this.captureRegistrySnapshot();
+    if (generation !== this.generation) return;
     this.registryTimer = setInterval(() => {
       void this.captureRegistrySnapshot();
     }, 30_000);
@@ -236,10 +293,12 @@ export class NativeWindowsWatcher extends EventEmitter {
   private registryInFlight = false;
 
   private async captureRegistrySnapshot() {
+    const generation = this.generation;
     if (this.registryInFlight) return;
     this.registryInFlight = true;
     try {
       const snapshot = await readRegistryRunKeys();
+      if (generation !== this.generation) return;
       if (this.lastRegistrySnapshot && this.lastRegistrySnapshot !== snapshot) {
         this.emit("registry.persistence.changed", {
           kind: "registry.persistence.changed",
@@ -254,15 +313,17 @@ export class NativeWindowsWatcher extends EventEmitter {
   }
 
   async stop() {
+    ++this.generation;
     if (this.registryTimer) {
       clearInterval(this.registryTimer);
       this.registryTimer = null;
     }
     if (this.watcher) {
       try {
-        await this.watcher.close();
+        await this.watcher.stop();
       } catch (error) {
         console.error("[NativeWindowsWatcher] Error closing watcher:", error);
+        throw error;
       }
       this.watcher = null;
     }
@@ -373,10 +434,24 @@ export class ProcessMonitor extends EventEmitter {
    * Agora existe uma única promessa em curso: nunca há duas enumerações do SO
    * ao mesmo tempo, venha ela de onde vier.
    */
-  private enumerationInFlight: Promise<Map<number, ProcessSnapshot>> | null = null;
-  /** Ultimo instante em que alguem pediu a lista de processos. */
+private enumerationInFlight: Promise<Map<number, ProcessSnapshot>> | null = null;
+  /**
+   * Promessa do ROUND em curso (enumeração partilhada + diff). É o que `poll()`
+   * devolve a quem chegar enquanto o round decorre — juntar-se, não perder o
+   * round. Distinta de `enumerationInFlight`, que é só a enumeração do SO.
+   */
+  private roundEmCurso: Promise<void> | null = null;
+  /** Ultimo instante em alguém pediu a lista de processos. */
   private lastObserverAt: number | null = null;
   private readonly now: () => number;
+  /**
+   * Sinal de vida do ciclo de polling. `start()` liga, `stop()` desliga.
+   *
+   * FIX P2: sem isto, um `stop()` enquanto `this.poll()` está em voo deixava o
+   * `.finally(() => this.schedule())` reagendar o timer para sempre, e o
+   * ProcessMonitor ressurgia em background após a proteção ter parado.
+   */
+  private running = false;
 
   /**
    * Seam de teste, mesmo padrão do `SnapshotProcessesDeps` abaixo e do
@@ -393,8 +468,64 @@ export class ProcessMonitor extends EventEmitter {
   }
 
   async start() {
-    await this.poll();
-    this.schedule();
+    this.running = true;
+    // FIX P1-2 burst de arranque: distingue arranque frio de restart.
+    //
+    // Arranque frio (previous vazio): semeia previous SEM emitir — evita o
+    // burst de "PROCESSO INICIADO" para todos os processos que já existiam
+    // antes de a proteção arrancar.
+    //
+    // Restart (previous não vazio): poll() normal — anuncia apenas os processos
+    // que nasceram enquanto a proteção esteve desligada, sem re-emissão total
+    // (previous já tem os antigos, pelo que só os novos geram eventos).
+    if (this.previous.size === 0) {
+      await this.seedOnly();
+    } else if (this.roundEmCurso) {
+      // Já existe um round em curso (tipicamente a enumeração que a UI pediu).
+      // O arranque da proteção NÃO fica refém dele: o round que está a decorrer
+      // vai correr até ao fim e anuncia os processos nascidos enquanto a
+      // proteção esteve desligada — anunciá-los-ia duas vezes se o start() abrisse
+      // outro round por cima. Bloquear aqui o start() faria a montagem da proteção
+      // esperar por uma enumeração alheia (2-4 s, ou para sempre se o CIM
+      // emperar), e o `start()` é um passo fatal da lista de arranque.
+    } else {
+      await this.poll();
+    }
+    if (this.running) this.schedule();
+  }
+
+  /**
+   * Semeia `previous` com o estado actual do SO SEM emitir eventos.
+   *
+   * Público para: (a) `start()` usa-o como arranque frio; (b) testes de
+   * medição podem verificar o comportamento antes e depois do fix.
+   *
+   * Usa o mesmo single-flight de `poll()` — se houver uma enumeração em curso,
+   * espera por ela (não duplica). Ao contrário de `poll()`, se a enumeração
+   * falhar, `previous` não é alterado (mantém-se vazio, como antes do fix, o
+   * que é conservador: o próximo poll real anuncia tudo — preferível a perder
+   * processos que nasceram durante a falha).
+   */
+  async seedOnly(): Promise<void> {
+    if (this.enumerationInFlight) {
+      // Há uma enumeração em curso: aguardar sem duplicar.
+      try {
+        const current = await this.enumerationInFlight;
+        this.previous = current;
+      } catch {
+        // Falha: deixar previous intacto (conservador).
+      }
+      return;
+    }
+    let current: Map<number, ProcessSnapshot>;
+    try {
+      current = await this.enumerate();
+    } catch (error) {
+      console.warn("[ProcessMonitor] Semente de arranque falhada (enumeração indisponível):", error);
+      return; // previous fica vazio — próximo poll anuncia tudo (conservador).
+    }
+    this.previous = current;
+    // Propositadamente não emite nenhum evento.
   }
 
   /**
@@ -430,15 +561,19 @@ export class ProcessMonitor extends EventEmitter {
    * intervalo muda a meio do caminho.
    */
   private schedule() {
+    if (!this.running) return;
     if (this.timer) clearTimeout(this.timer);
     this.timer = setTimeout(() => {
-      void this.poll().finally(() => this.schedule());
+      void this.poll().finally(() => {
+        if (this.running) this.schedule();
+      });
     }, this.scheduleDelayMs());
     // Não segura o processo vivo só por causa do timer do poll.
     this.timer.unref?.();
   }
 
   async stop() {
+    this.running = false;
     if (this.timer) {
       clearTimeout(this.timer);
       this.timer = null;
@@ -467,15 +602,28 @@ export class ProcessMonitor extends EventEmitter {
    * Um round de descoberta. Público (e não `private`) só para o seam de teste
    * poder correr rounds sem esperar pela cadência de produção.
    *
-   * Um round que chega enquanto outro está em curso SAI (não espera, não
-   * enfileira, não duplica). É o que o `pollInFlight` fazia antes, e continua
-   * a ser o certo para um timer: a cadência degrada, a fila não cresce. O que
-   * mudou é que a enumeração por baixo é agora a mesma promessa partilhada
-   * com `list()`, portanto "sair" nunca significa "deixar passar" uma segunda
-   * enumeração do SO.
+   * CORRIGIDO (TP-MONITOR-P0): antes, um round que chegava com uma enumeração em
+   * curso SAÍA (`if (this.enumerationInFlight) return`). Isso não era defesa de
+   * custo — era o «zero eventos» do Monitor. A cadência rápida é 2 000 ms e a
+   * enumeração foi medida pelo próprio fonte em 2 000-4 000 ms: enquanto a UI
+   * estava aberta, PRATICAMENTE TODO o tick apanhava uma enumeração em curso, o
+   * round era deitado fora e `previous` nunca era atualizado. Como quem serve a
+   * lista é `list()`, o inventário continuava fresco (496 processos) enquanto o
+   * histórico de segurança ficava vazio — quanto mais se olhava, menos se via.
+   *
+   * Agora o round JUNTA-SE ao round em curso: partilha a mesma promessa de
+   * `enumerate()` e o mesmo diff, por isso continua a existir UMA enumeração do SO
+   * de cada vez (o invariante que o `pollInFlight` protegia) e o round não se
+   * perde. Um só diff de cada vez significa também nenhuma emissão duplicada.
    */
-  async poll() {
-    if (this.enumerationInFlight) return;
+  async poll(): Promise<void> {
+    if (this.roundEmCurso) return this.roundEmCurso;
+    this.roundEmCurso = this.executarRound().finally(() => { this.roundEmCurso = null; });
+    return this.roundEmCurso;
+  }
+
+  /** O corpo do round: uma enumeração (partilhada) e o diff que produz eventos. */
+  private async executarRound(): Promise<void> {
     let current: Map<number, ProcessSnapshot>;
     try {
       current = await this.enumerate();
@@ -501,6 +649,42 @@ export class ProcessMonitor extends EventEmitter {
 }
 
 /**
+ * Estágio que falhou numa enumeração de processos. É deliberadamente local ao
+ * native-windows: o contrato público (`ProcessEnumerationError.code`) continua
+ * `cim | parse | unknown` e não é alterado aqui (shared-types pertence ao
+ * integrador). O estágio concreto viaja na mensagem e no erro lançado.
+ */
+export type ProcessSnapshotFailureStage = "spawn" | "execution" | "parse" | "empty";
+
+/** Erro de enumeração com estágio verificável por testes/diagnóstico. */
+export class ProcessSnapshotFailure extends Error {
+  constructor(
+    readonly stage: ProcessSnapshotFailureStage,
+    message: string,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options);
+    this.name = "ProcessSnapshotFailure";
+  }
+}
+
+const enumDiagnostics = {
+  attempts: 0,
+  failed: 0,
+  spawn: 0,
+  execution: 0,
+  parse: 0,
+  empty: 0,
+  enrichment: 0,
+  lastEnrichmentFailureAt: null as number | null,
+};
+
+/** Contadores de diagnóstico; nunca incluem caminhos, PIDs ou comandos. */
+export function processEnumerationDiagnosticsSnapshot() {
+  return { ...enumDiagnostics };
+}
+
+/**
  * Fontes injetáveis de `snapshotProcesses` (seam de teste, mesmo padrão do
  * `executor` já usado nesta página). Por defeito são as reais; o chamador de
  * produção nunca passa nada.
@@ -516,6 +700,12 @@ export async function snapshotProcesses(
   deps: SnapshotProcessesDeps = {},
 ): Promise<Map<number, ProcessSnapshot>> {
   const map = new Map<number, ProcessSnapshot>();
+  enumDiagnostics.attempts += 1;
+  const fail = (stage: ProcessSnapshotFailureStage, message: string, cause?: unknown): never => {
+    enumDiagnostics.failed += 1;
+    enumDiagnostics[stage] += 1;
+    throw new ProcessSnapshotFailure(stage, message, cause === undefined ? undefined : { cause });
+  };
 
   // ── Fase (a) PRIMÁRIA (CIM) ──────────────────────────────────────────────
   // É a única fonte de verdade da lista. Se ela falha, esta função REJEITA:
@@ -525,28 +715,47 @@ export async function snapshotProcesses(
   const runPrimary =
     deps.runPrimary ??
     (async () => {
-      const { exec } = await import("node:child_process");
+      const { execFile } = await import("node:child_process");
       const { promisify } = await import("node:util");
-      const execAsync = promisify(exec);
-      // Saída JSON (a versão CSV anterior partia campos com vírgulas e gerava dados corrompidos).
-      const { stdout } = await execAsync(
-        'powershell -NoProfile -Command "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine, @{n=\'CreatedIso\';e={$_.CreationDate.ToUniversalTime().ToString(\'o\')}} | ConvertTo-Json -Compress"',
-        { windowsHide: true }
-      );
+      const execFileAsync = promisify(execFile);
+      // Direct ownership: timeout terminates the queried PowerShell, not a cmd
+      // launcher. Existing rejection/ProcessTruth fallback remains unchanged.
+      const { stdout } = await execFileAsync("powershell.exe", [
+        "-NoProfile", "-NonInteractive", "-Command",
+        "[Console]::OutputEncoding = [System.Text.Encoding]::UTF8; Get-CimInstance Win32_Process | Select-Object ProcessId, Name, CommandLine, @{n='CreatedIso';e={$_.CreationDate.ToUniversalTime().ToString('o')}} | ConvertTo-Json -Compress",
+      ], { windowsHide: true, timeout: 15000 });
       return stdout;
     });
 
+  let raw = "";
+  try {
+    raw = await runPrimary();
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException)?.code;
+    const killed = (err as { killed?: boolean })?.killed === true;
+    const signal = (err as { signal?: string })?.signal;
+    // A fase de FILA não existe aqui: `snapshotProcesses` chama o PowerShell
+    // diretamente, sem o executor partilhado. O que se distingue é o que o
+    // SO respondeu: não arrancou, arrancou e falhou/expirou, ou respondeu lixo.
+    if (code === "ENOENT") {
+      fail("spawn", "CIM execução: powershell.exe indisponível (spawn ENOENT)", err);
+    }
+    if (killed || signal) {
+      fail("execution", "CIM execução: tempo esgotado a enumerar Win32_Process", err);
+    }
+    fail("execution", `CIM execução: falhou${code ? ` (código ${String(code)})` : ""}`, err);
+  }
+
   let rows: unknown;
   try {
-    const raw = await runPrimary();
     rows = JSON.parse(raw.trim());
   } catch (err) {
-    console.error("[ProcessMonitor] Falha ao coletar processos do S.O:", err);
-    throw new Error("Enumeração de processos indisponível (CIM falhou)", { cause: err });
+    // Sem a palavra CIM no texto: o classificador público testa CIM primeiro e
+    // um parse de CIM seria rotulado como falha de fonte, não de payload.
+    fail("parse", "JSON parse: payload de processos não é JSON utilizável", err);
   }
 
   const list = Array.isArray(rows) ? rows : rows && typeof rows === "object" ? [rows] : [];
-  const now = new Date().toISOString();
 
   for (const raw of list) {
     const pid = parseInt(raw.ProcessId, 10);
@@ -571,9 +780,12 @@ export async function snapshotProcesses(
       //
       // O CIM devolve CreationDate em formato DMTF; pedimos o ISO já formatado
       // para não interpretar DMTF em TypeScript. Sem CreationDate (CIM antigo,
-      // acesso parcial) caímos em `now`, que é o comportamento antigo — degradado,
-      // mas honesto: sem identidade não há prova de ownership.
-      startedAt: String(raw.CreatedIso || now),
+      // acesso parcial) fica `""` — NUNCA a hora do poll. Um timestamp do
+      // cliente sobre um snapshot antigo era exatamente a mentira que a
+      // identidade de criação existe para impedir: sem fonte, não se afirma
+      // quando o processo nasceu (e a UI mostra ausência, não um instante
+      // inventado).
+      startedAt: String(raw.CreatedIso || ""),
       signer: undefined,
       trusted: "neutral",
     });
@@ -582,7 +794,7 @@ export async function snapshotProcesses(
   // Primária devolveu zero processos utilizáveis = também não-verdade (no Windows
   // há sempre processos). Mesma política: falhar alto em vez de lista vazia.
   if (map.size === 0) {
-    throw new Error("Enumeração de processos devolveu zero registos (CIM sem verdade)");
+    fail("empty", "CIM vazio: zero registos utilizáveis (não é «o SO não tem processos»)");
   }
 
   // ── Fase (b) ENRIQUECIMENTO (systeminformation) ─────────────────────────
@@ -607,11 +819,60 @@ export async function snapshotProcesses(
   try {
     await enrich(map);
   } catch (err) {
-    // Lista verdadeira, só sem métricas: segue na mesma.
-    console.warn("[ProcessMonitor] Enriquecimento (systeminformation) falhou; lista sem cpu/mem:", err);
+    // Lista verdadeira, só sem métricas: segue na mesma. O estágio fica em
+    // contadores próprios — «enriquecimento falhou» não é «CIM falhou» e não
+    // pode ser servido como se a enumeração tivesse rebentado.
+    enumDiagnostics.enrichment += 1;
+    enumDiagnostics.lastEnrichmentFailureAt = Date.now();
+    console.warn("[ProcessMonitor] Enriquecimento (systeminformation) falhou; lista sem cpu/mem:", (err as Error)?.message ?? String(err));
   }
 
   return map;
+}
+
+// Map numeric TcpState values (from Get-NetTCPConnection) to human-readable names.
+// CORREGIDO 15/10 (Maestro qoder, evidencia medida por Freebuff nesta maquina
+// via Group-Object + MIB_TCP_STATE documentado): o mapa anterior estava
+// desalinhado (dizia 1->Listen, 5->FinWait1, 12->Bound; o real e 2->Listen,
+// 5->Established, 8->CloseWait, 11->TimeWait, 12->DeleteTcb, 100->Bound).
+// 100 = estado "Bound" que o cmdlet devolve serializado como numero e que o
+// renderer imprimia cru. Estado nao mapeado = "Desconhecido", nunca codigo
+// ao vivo nem percentagem fingida. Exportado puro para teste sem PowerShell.
+export const TCP_STATE_MAP: Record<string, string> = {
+  "0": "Unknown",
+  "1": "Closed",
+  "2": "Listen",
+  "3": "SynSent",
+  "4": "SynReceived",
+  "5": "Established",
+  "6": "FinWait1",
+  "7": "FinWait2",
+  "8": "CloseWait",
+  "9": "Closing",
+  "10": "LastAck",
+  "11": "TimeWait",
+  "12": "DeleteTcb",
+  // Also handle string values that PowerShell may return directly
+  "Closed": "Closed",
+  "Listen": "Listen",
+  "SynSent": "SynSent",
+  "SynReceived": "SynReceived",
+  "Established": "Established",
+  "FinWait1": "FinWait1",
+  "FinWait2": "FinWait2",
+  "CloseWait": "CloseWait",
+  "Closing": "Closing",
+  "LastAck": "LastAck",
+  "TimeWait": "TimeWait",
+  "DeleteTCB": "DeleteTcb",
+  "DeleteTcb": "DeleteTcb",
+  "Bound": "Bound",
+};
+
+export function normalizeTcpState(raw: string): string {
+  if (!raw) return "Desconhecido";
+  const mapped = TCP_STATE_MAP[raw] ?? TCP_STATE_MAP[raw.toLowerCase()];
+  return mapped ?? "Desconhecido";
 }
 
 export async function snapshotConnections(): Promise<ConnectionSnapshot[]> {
@@ -630,40 +891,7 @@ export async function snapshotConnections(): Promise<ConnectionSnapshot[]> {
 
     if (!res.ok || !res.data) return [];
 
-    // Map numeric TcpState values (from Get-NetTCPConnection) to human-readable names
-    const STATE_MAP: Record<string, string> = {
-      "1": "Listen",
-      "2": "SynSent",
-      "3": "SynReceived",
-      "4": "Established",
-      "5": "FinWait1",
-      "6": "FinWait2",
-      "7": "CloseWait",
-      "8": "Closing",
-      "9": "LastAck",
-      "10": "TimeWait",
-      "11": "DeleteTCB",
-      "12": "Bound",
-      // Also handle string values that PowerShell may return directly
-      "Listen": "Listen",
-      "SynSent": "SynSent",
-      "SynReceived": "SynReceived",
-      "Established": "Established",
-      "FinWait1": "FinWait1",
-      "FinWait2": "FinWait2",
-      "CloseWait": "CloseWait",
-      "Closing": "Closing",
-      "LastAck": "LastAck",
-      "TimeWait": "TimeWait",
-      "DeleteTCB": "DeleteTCB",
-    };
-
-    const normalizeState = (raw: string): string => {
-      if (!raw) return "Desconhecido";
-      // Try numeric map first, then string map
-      const mapped = STATE_MAP[raw] ?? STATE_MAP[raw.toLowerCase()];
-      return mapped ?? "Desconhecido";
-    };
+    const normalizeState = normalizeTcpState;
 
     const isUnspecifiedAddress = (addr: string): boolean => {
       return !addr || addr === "0.0.0.0" || addr === "::" || addr === "[::]";

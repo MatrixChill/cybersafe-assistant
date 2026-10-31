@@ -49,5 +49,6 @@ test("generic analysis plus native heuristics and one VT hit cannot auto-quarant
   const strong = await service.scanArtifact(target, "system-scanner", { skipVirusTotal: true });
   assert.equal(strong.overallSeverity, "critical");
   assert.equal(strong.results[0].verdict, "malicious");
-  assert.equal(quarantines, 1);
+  assert.equal(quarantines, 0, "a deteção forte não substitui autorização explícita para mover ficheiros");
+  assert.equal(events.some(e=>e.type==="quarantine.added"),false);
 });

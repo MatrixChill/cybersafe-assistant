@@ -60,32 +60,23 @@ const plural = (n: number, singular: string, pluralWord: string) =>
  * conservadora: sem `coverage` não affirmamos cobertura, mas também não
  * escondemos o motor — a linha principal já diz que está activo.
  *
- * ── Porque `status` entra aqui ────────────────────────────────────────────
- * `coverage: "normal"` só é credível com o motor `active`. Um motor
- * `unavailable` ou `degraded` a declarar cobertura normal é um estado
- * contradictório, e a UI não escolhe: desce para `unknown`. Não existe caminho
- * no serviço que produza o par — o guard está aqui porque os dados chegam por
- * um named-pipe e um emissor novo não conhece esta regra.
+ * O valor legado `normal` não transporta evidência de proveniência ou alcance.
+ * A compilação, por si só, mantém a cobertura `unknown`; por isso nenhum valor
+ * recebido neste contrato autoriza a afirmação "Cobertura normal".
  *
- * O mesmo guard existe em `coberturaUserCopy` (app/components/
- * ProtectionDetails.tsx). São dois sitios com copy propria: se um deles
- * aceitar o par contradictorio, o utilizador recebe as duas versoes e a
- * errada. Testado em app/test/yara-coverage-gate.test.ts.
+ * `coberturaUserCopy` (app/components/ProtectionDetails.tsx) aplica a mesma
+ * regra ao texto apresentado no painel.
  */
 function coberturaCopy(
   coverage: EngineSubsystemCoverage | undefined,
   oQue: "regras" | "assinaturas",
-  status: EngineSubsystemStatus = "active",
 ): string {
-  const efetiva: EngineSubsystemCoverage | undefined =
-    status !== "active" && coverage === "normal" ? "unknown" : coverage;
-  switch (efetiva) {
+  switch (coverage) {
     case "limited":
       return `Cobertura limitada: só ${oQue} de canário de teste. Não detetam malware.`;
     case "normal":
-      return `Cobertura normal: ${oQue} de deteção carregadas.`;
     case "unknown":
-      return "Cobertura não determinada: o serviço não comunicou o que está carregado.";
+      return "Cobertura não verificada: a origem e o alcance das definições carregadas não foram validados.";
     default:
       return "Cobertura não comunicada por este serviço.";
   }
@@ -107,7 +98,7 @@ export function engineContextCopy(name: string, sub?: EngineSubsystemHealth): En
         const texto = n === null
           ? "Motor de análise por regras ativo."
           : `Motor de análise por regras ativo — ${n} ${plural(n, "regra carregada", "regras carregadas")}.`;
-        return { estado, texto, contexto: coberturaCopy(sub?.coverage, "regras", status) };
+        return { estado, texto, contexto: coberturaCopy(sub?.coverage, "regras") };
       }
       break;
     }
@@ -117,7 +108,7 @@ export function engineContextCopy(name: string, sub?: EngineSubsystemHealth): En
         const texto = n === null
           ? "Base local ativa."
           : `Base local ativa — ${n} ${plural(n, "assinatura carregada", "assinaturas carregadas")}.`;
-        return { estado, texto, contexto: coberturaCopy(sub?.coverage, "assinaturas", status) };
+        return { estado, texto, contexto: coberturaCopy(sub?.coverage, "assinaturas") };
       }
       break;
     }

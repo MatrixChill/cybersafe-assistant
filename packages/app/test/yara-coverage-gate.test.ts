@@ -66,7 +66,7 @@ function renderizar(yaraStatus: EngineSubsystemStatus, coverage: Cobertura, deta
   );
 }
 
-/** As quatro situacoes reais, por (status, coverage) que o servico emite. */
+/** Combinações medidas e legado, com a mensagem que o utilizador deve ver. */
 const REAIS: {
   nome: string;
   status: EngineSubsystemStatus;
@@ -84,11 +84,19 @@ const REAIS: {
     statusText: "Degradado",
   },
   {
-    nome: "corpus válido: motor ACTIVO, cobertura NORMAL",
+    nome: "corpus sem proveniência validada: motor ACTIVO, cobertura NÃO VERIFICADA",
+    status: "active",
+    coverage: "unknown",
+    detalhe: "Loaded 842 rule(s) from file",
+    frase: "Cobertura não verificada: a origem e o alcance das definições carregadas não foram validados.",
+    statusText: "Ativo",
+  },
+  {
+    nome: "valor normal legado: cobertura não verificada sem evidência",
     status: "active",
     coverage: "normal",
     detalhe: "Loaded 842 rule(s) from file",
-    frase: "Cobertura normal",
+    frase: "Cobertura não verificada: a origem e o alcance das definições carregadas não foram validados.",
     statusText: "Ativo",
   },
   {
@@ -96,7 +104,7 @@ const REAIS: {
     status: "unavailable",
     coverage: "unknown",
     detalhe: "YARA não inicializado",
-    frase: "Cobertura não determinada",
+    frase: "Cobertura não verificada: o motor não está ativo.",
     statusText: "Indisponível",
   },
   {
@@ -109,7 +117,7 @@ const REAIS: {
   },
 ];
 
-describe("gate do YARA — os quatro casos reais, no HTML renderizado", () => {
+describe("gate do YARA — estados medidos e legado, no HTML renderizado", () => {
   for (const caso of REAIS) {
     test(caso.nome, () => {
       const markup = renderizar(caso.status, caso.coverage, caso.detalhe);
@@ -124,7 +132,7 @@ describe("gate do YARA — os quatro casos reais, no HTML renderizado", () => {
       );
       // Nenhum dos quatro pode afirmar cobertura normal por accident. O caso
       // "normal" e o unico onde a frase aparece, e affirmamos isso abaixo.
-      for (const errado of REAIS.filter((c) => c !== caso).map((c) => c.frase)) {
+      for (const errado of new Set(REAIS.filter((c) => c.frase !== caso.frase).map((c) => c.frase))) {
         assert.ok(
           !markup.includes(errado),
           `o caso ${caso.nome} tambem renderizou "${errado}"`,
@@ -177,13 +185,16 @@ describe("gate do YARA — a mesma verdade no texto de contexto (engineContextCo
   // A cobertura aparece em DOIS sitios com codigo proprio: o painel
   // ProtectionDetails e o texto de contexto dos findings. Se so um deles
   // respeitar o gate, o utilizador recebe as duas versoes e a errada.
-  test("active + normal diz cobertura normal; active + limited diz limitada", () => {
-    const normal = engineContextCopy("yara", {
+  test("active + unknown comunica cobertura não verificada; active + limited diz limitada", () => {
+    const unknown = engineContextCopy("yara", {
       status: "active",
       detail: "Loaded 842 rule(s) from file",
-      coverage: "normal",
+      coverage: "unknown",
     } as never);
-    assert.match(normal.contexto ?? "", /Cobertura normal/);
+    assert.match(
+      unknown.contexto ?? "",
+      /Cobertura não verificada: a origem e o alcance das definições carregadas não foram validados\./,
+    );
 
     const limitada = engineContextCopy("yara", {
       status: "active",

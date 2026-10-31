@@ -1,5 +1,6 @@
 import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
-import { readdir, stat } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
+import { readdir, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import * as path from "node:path";
@@ -50,6 +51,7 @@ export type ClamavErrorReason =
   | "inconsistent-exit"
   | "timeout"
   | "aborted"
+  | "limits-exceeded"
   | "engine-missing"
   | "exit-0-with-errors"
   | "exit-unknown"
@@ -105,6 +107,11 @@ const DB_LOAD_FAILURE =
   /cl_load|cli_cvdparse|cli_loadhash|cl_caserc|can'?t load|unable to load|cannot load|can'?t initialize the database|no supported database files/i;
 /** "Can't open file X" / "Can't access file X" — o clamscan não leu o ficheiro. */
 const UNREADABLE = /can't (?:open|access) file\s+(.*)$/i;
+/**
+ * O ClamAV não chegou a avaliar o ficheiro por exceder os seus limites
+ * internos (tamanho/entropia/contagem). Não é uma deteção: é uma lacuna.
+ */
+const CLAMAV_LIMITS_EXCEEDED = /^Heuristics\.Limits\.Exceeded\b/i;
 
 /**
  * Separa `caminho: resto` pelo ÚLTIMO ": ".
@@ -169,17 +176,24 @@ export function parseClamavOutput(input: ClamavParseInput): ClamavBatchOutcome {
     if (!signature) continue;
     foundByPath.set(pathKey(split.target), signature[1].trim());
   }
-  // Linhas `<path>: OK` — o clamscan nomeia cada ficheiro que varreu e não
-  // encontrou nada. Isto NÃO é o mesmo que "não foi nomeado": é evidência
-  // positiva, por ficheiro, de que a análise acabou. Sem isto, um batch em que o
-  // clamscan nomeia 4 dos 5 ficheiros trataria os 4 nomeados como se também
-  // não tivessem sido avaliados (e o inverso: daria `clean` a quem não foi
-  // nomeado só porque o resumo não falou em erros).
+  // Linhas `<path>: OK` e `<path>: Empty file` — o clamscan nomeia cada
+  // ficheiro que varreu e não encontrou nada. Isto NÃO é o mesmo que "não foi
+  // nomeado": é evidência positiva, por ficheiro, de que a análise acabou. Sem
+  // isto, um batch em que o clamscan nomeia 4 dos 5 ficheiros trataria os 4
+  // nomeados como se também não tivessem sido avaliados (e o inverso: daria
+  // `clean` a quem não foi nomeado só porque o resumo não falou em erros).
+  //
+  // MEDIDO 2026-10-16 (instalação real, pasta com um ficheiro vazio): o
+  // clamscan imprime `<path>: Empty file` e NÃO conta o ficheiro em
+  // `Scanned files` — sem o aceitar aqui, a aritmética de cobertura falhava e
+  // o único ficheiro sem `: OK` era classificado `inconsistent-exit`,
+  // degradando o motor por um lote que correu bem. Um ficheiro vazio foi
+  // avaliado: não há nada a ler.
   const scannedByPath = new Set<string>();
   for (const rawLine of stdout.split(/\r?\n/)) {
     const split = splitOnLastColonSpace(rawLine.trim());
     if (!split) continue;
-    if (/^OK$/i.test(split.rest.trim())) scannedByPath.add(pathKey(split.target));
+    if (/^(?:OK|Empty file)$/i.test(split.rest.trim())) scannedByPath.add(pathKey(split.target));
   }
 
   // Índice basename -> ficheiros PEDIDOS com esse nome. O basename só pode
@@ -214,7 +228,7 @@ export function parseClamavOutput(input: ClamavParseInput): ClamavBatchOutcome {
     return byName.length === 1 ? byName[0][1] : undefined;
   };
 
-  /** O clamscan nomeou ESTE ficheiro com `: OK`? Então foi avaliado. */
+  /** O clamscan nomeou ESTE ficheiro com `: OK` (ou `: Empty file`)? Então foi avaliado. */
   const confirmedScanned = (file: string): boolean => {
     if (scannedByPath.has(pathKey(file))) return true;
     const wanted = unambiguousBase(file);
@@ -309,6 +323,17 @@ export function parseClamavOutput(input: ClamavParseInput): ClamavBatchOutcome {
 
     // 1. Deteção — a informação principal nunca se perde.
     const signature = signatureFor(file);
+    // O ClamAV nomeia os limites internos como "FOUND", mas isso não é uma
+    // assinatura de malware: o ficheiro não foi avaliado por inteiro. Nunca
+    // pode sair daqui como `detected`; é uma lacuna nomeada.
+    if (signature && CLAMAV_LIMITS_EXCEEDED.test(signature)) {
+      return {
+        ...base,
+        verdict: "error",
+        reason: "limits-exceeded",
+        detail: "Análise não concluída: o ficheiro excede os limites internos do ClamAV.",
+      };
+    }
     if (signature) {
       const removed = !stillThere();
       return {
@@ -369,9 +394,9 @@ export function parseClamavOutput(input: ClamavParseInput): ClamavBatchOutcome {
       };
     }
 
-    // 5c. O clamscan NOMEOU este ficheiro com `: OK`. Evidência positiva e por
-    // ficheiro: foi varrido e não havia nada. Vale acima de qualquer aritmética
-    // do resumo.
+    // 5c. O clamscan NOMEOU este ficheiro com `: OK` (ou `: Empty file`).
+    // Evidência positiva e por ficheiro: foi varrido e não havia nada. Vale
+    // acima de qualquer aritmética do resumo.
     if (confirmedScanned(file)) {
       return { ...base, verdict: "clean" };
     }
@@ -422,22 +447,35 @@ export function parseClamavOutput(input: ClamavParseInput): ClamavBatchOutcome {
     //  - exit > 1 = "algo correu mal": explicado quando os erros que ele DECLAROU
     //    estão todos nomeados. Um exit 2 sem nenhum erro declarado continua a ser
     //    inexplicado — e vai parar a `error`, como sempre.
+    // CLA03-02: `clean` via summary exige EVIDÊNCIA. O ficheiro foi:
+    //  - comprovadamente varrido (`: OK` na saída), OU
+    //  - o resumo cobre TODOS os ficheiros pedidos (Scanned + Errors == N).
+    // Basta uma destas provas de cobertura, além de explicar o exit e
+    // atribuir todas as infeções/erros declarados aos ficheiros corretos.
+    const evidenceCoversFile = confirmedScanned(file) || summaryAccountsForEveryFile;
+
     const declaredExplainsExit =
-      (code === 1 && infectedCount > 0 && unattributedInfections === 0) ||
-      (typeof code === "number" && code > 1 && totalErrors > 0 && unattributedErrors === 0);
+      (code === 1 && infectedCount > 0 && unattributedInfections === 0 && evidenceCoversFile) ||
+      // CLA03-01: ramo code > 1 com mesma guarda.
+      (typeof code === "number" && code > 1 && totalErrors > 0 && unattributedErrors === 0 && evidenceCoversFile);
     if (declaredExplainsExit) {
       return { ...base, verdict: "clean" };
     }
 
     // 6. Saída limpa: evidência COMPLETA — sem erros e sem infeções declaradas.
-    if (code === 0 && totalErrors === 0) {
+    if (code === 0 && totalErrors === 0 && summaryInfected !== null && infectedCount === 0 && scannedFiles >= files.length) {
       return { ...base, verdict: "clean" };
     }
-    // 6b. `summaryAccountsForEveryFile` (Scanned + Errors == N) ficou sem uso
-    // depois de F5: é contagem, não evidência sobre CADA ficheiro. Deixada morta
-    // e registada em vez de apagada — quem a leia tem de a reavaliar em vez de
-    // a rediscover. O que F5 substituiu: `clean` só com o resumo completo e
-    // sem erros declarados.
+    if (code === 0 && totalErrors === 0) {
+      return {
+        ...base,
+        verdict: "error",
+        reason: "inconsistent-exit",
+        detail: "O ClamAV terminou com código 0, mas sem confirmação de análise deste ficheiro nem um resumo completo e limpo.",
+      };
+    }
+    // 6b. Exit 0 com erros declarados contradiz o resultado global: a guarda
+    // de cobertura dos exits explicados acima não autoriza este caso.
     if (code === 0) {
       // exit 0 com erros declarados: o clamscan é contraditório, e "clean"
       // seria afirmar mais do que ele próprio afirmou.
@@ -494,14 +532,16 @@ function clamavStatusFrom(
   if (timedOut) {
     return { status: "degraded", detail: "Um scan do ClamAV excedeu o tempo limite e foi terminado." };
   }
-  // Um clamscan que devolve 1 (infectado) sem nomear um ficheiro está a
+  // Um clamscan que sai sem conseguir identificar um ficheiro está a
   // contradizer-se a si próprio. Anunciar o motor como `active` enquanto a
   // saída dele é inconsistente é a mesma classe de mentira que o result model
-  // veio desfazer — noutro sítio.
+  // veio desfazer — noutro sítio. O CÓDIGO mostrado é o real: a mensagem antiga
+  // dizia sempre "código 1" mesmo quando o clamscan tinha saído com 0 e o que
+  // faltava era só evidência por ficheiro (medido 2026-10-16, instalação real).
   if (outcomes.some((f) => f.reason === "inconsistent-exit")) {
     return {
       status: "degraded",
-      detail: "O ClamAV devolveu código 1 sem identificar nenhum ficheiro — a saída é inconsistente.",
+      detail: `O ClamAV devolveu uma saída inconsistente (código ${code ?? "desconhecido"}) sem identificar nenhum ficheiro.`,
     };
   }
   // Sem código de saída e sem timeout nem kill, o processo morreu sem dizer
@@ -536,6 +576,31 @@ export interface ClamavScanOptions {
    * trabalhar sozinho com ~1 GB de RAM, e o `ScanManager` nem reparava.
    */
   signal?: AbortSignal;
+  /** Diagnostic correlation only; never changes scan behavior. */
+  scanId?: string;
+  /**
+   * Classe de prioridade na vaga GLOBAL do ClamAV.
+   *
+   * Por omissão deriva do `scanId` (presente = scan do utilizador; ausente =
+   * background), que é a impressão digital medida em produção. Só é preciso
+   * declará-la quando um chamador de background precisar de subir de classe.
+   * NUNCA muda quantos clamscans correm ao mesmo tempo (MAX_CLAMSCAN = 1).
+   */
+  priority?: ClamavJobPriority;
+  /**
+   * Quantos ficheiros o clamscan JÁ TERMINOU de analisar, em tempo real.
+   *
+   * O número vem das LINHAS PRÓPRIAS do clamscan (`<caminho>: OK` e
+   * `<caminho>: <assinatura> FOUND`), contadas à medida que o stdout corre —
+   * nunca de um temporizador e nunca de um estimador. O clamscan nomeia cada
+   * ficheiro que varreu, uma linha de cada vez: se a linha existe, o ficheiro
+   * foi avaliado. É o mesmo critério que `parseClamavOutput` usa para dizer
+   * `clean`, usado aqui só para a contagem.
+   *
+   * Sem isto o batch é uma caixa preta: um Quick Scan de 765 ficheiros passava
+   * minutos com 0/N e o temporizador a correr (P0 SCANNER_REAL_BATCH_STALL).
+   */
+  onProgress?: (processedFiles: number) => void;
 }
 
 /** Como o spawn termina — o suficiente para decidir detecção vs. diagnóstico. */
@@ -604,10 +669,40 @@ export interface ClamavSpawnHandle {
 export type ClamavSpawnFn = (
   file: string,
   args: string[],
-  request: { timeoutMs: number; windowsHide: boolean },
+  request: { timeoutMs: number; windowsHide: boolean; onProgress?: (processedFiles: number) => void; scanId?: string },
   /** Opcional: só os testes o usam. Ver `ClamavProcessHooks`. */
   hooks?: ClamavProcessHooks,
 ) => ClamavSpawnHandle;
+
+/**
+ * Tecto do argv do clamscan.
+ *
+ * MEDIDO (2026-10-05): com 765 caminhos reais o argv deu 65 166 caracteres e
+ * o `spawn()` do Node LANÇOU `ENAMETOOLONG` — o Windows recusa uma command line
+ * acima de 32 767 (CreateProcess). O clamscan nunca nasceu, e o `prefetchClamav`
+ * do serviço tratou a excepção como "sem prefetch", devolvendo TODOS os
+ * ficheiros ao clamscan individual: a cascata de ~981 MB por ficheiro que a
+ * FASE 4 existia para impedir.
+ *
+ * O orçamento é deliberadamente MUITO abaixo do tecto do SO: 8 000 caracteres
+ * dão folga para o caminho do executável, o `--database=` e o ambiente, e
+ * continuam a ser legíveis num `Get-Process`. Acima disso os caminhos vão num
+ * ficheiro de lista (`--file-list=`), que o ClamAV 1.5 aceita.
+ */
+const MAX_CLAMSCAN_ARGV_CHARS = 8000;
+
+/** Custo de cada argumento na command line: aspas + separador. */
+function argvChars(args: string[]): number {
+  return args.reduce((n, a) => n + a.length + 3, 0);
+}
+
+/** Opt-in diagnostics only; details passed here must never contain source paths or file contents. */
+function scanPerfLog(event: string, scanId?: string, details = ""): void {
+  if (process.env.CYBERSAFE_DEBUG_SCAN !== "1") return;
+  console.log(
+    `[ScanPerf] ${event} scanId=${scanId ?? "n/a"} at=${new Date().toISOString()}${details ? ` ${details}` : ""}`,
+  );
+}
 
 export interface ClamavBridgeOptions {
   /**
@@ -631,6 +726,20 @@ export interface ClamavBridgeOptions {
   maxConcurrent?: number | "GLOBAL";
   /** Seam de teste. Nunca definido em produção. */
   spawn?: ClamavSpawnFn;
+  /** Seam de teste da PROVA DE CARGA. Nunca definido em produção. */
+  probeRun?: ClamavLoadRun;
+  /**
+   * Modo de operação. `false` nas políticas readonly/fixture do serviço: a
+   * prova de carga NÃO faz spawn nem escreve fixture — o motor fica
+   * `degraded` com a razão honesta ("prova de carga desativada neste modo"),
+   * nunca `active` sem prova, nunca um clamscan fora da vida do bridge.
+   * Default: `true`.
+   */
+  loadProofEnabled?: boolean;
+  /** Timeout da PROVA DE CARGA (default: `CLAMAV_LOAD_PROBE_TIMEOUT_MS`). Testes injectam. */
+  probeTimeoutMs?: number;
+  /** Órçamento do `dispose()` à espera da morte dos filhos (default 5 s). Testes injectam. */
+  disposeBudgetMs?: number;
   /**
    * P1-1 (1) — a base de assinaturas está a ser TROCADA agora?
    *
@@ -656,7 +765,7 @@ export interface ClamavBridgeOptions {
    * A implementação vive em `service/src/clam-database-gate.ts`; aqui só se
    * consome o contrato, para o core não depender do serviço.
    */
-  acquireDatabaseLease?: () => ClamDatabaseLeaseHandle | ClamDatabaseLeaseRefusal | null;
+  acquireDatabaseLease?: (scanId?: string) => ClamDatabaseLeaseHandle | ClamDatabaseLeaseRefusal | null;
 }
 
 /**
@@ -754,6 +863,13 @@ export const CLAMAV_ENGINE_PROCESS_NAMES: ReadonlySet<string> = new Set([
 
 /** Default do timeout de um scan individual. */
 const DEFAULT_SCAN_TIMEOUT_MS = 10_000;
+/**
+ * Custo FIXO de um clamscan: arranque + carga da base de assinaturas.
+ * MEDIDO (2026-10-16, controlo 2x): ~7,2 s nesta maquina. Entra no orcamento
+ * DEFAULT do batch (ver `timeoutMs` em runScan); um override explicito de
+ * `scanTimeoutMs` mantem o contrato antigo (N x override) e ignora este termo.
+ */
+const DEFAULT_SCAN_STARTUP_MS = 10_000;
 
 /**
  * Tecto de output capturado por scan.
@@ -799,11 +915,42 @@ const DEFAULT_KILL_GRACE_MS = 2_000;
 const globalClamavSlots = {
   active: 0,
   poisoned: 0,
-  waiting: [] as Array<(granted: ClamavSlotResult) => void>,
+  /** Fila dos scans do UTILIZADOR (têm scanId: quick/full/custom do ScanManager). */
+  waitingUser: [] as Array<(granted: ClamavSlotResult) => void>,
+  /** Fila de BACKGROUND (análise unitária de ficheiro/processo, sem scanId). */
+  waitingBackground: [] as Array<(granted: ClamavSlotResult) => void>,
+  /** Jobs de background RECUSADOS por fila cheia (backpressure honesta). */
+  droppedBackground: 0,
 };
 
-/** `poisoned` = não há vaga segura; o scan tem de dizer `unavailable`. */
-type ClamavSlotResult = "granted" | "poisoned";
+/**
+ * Classe de prioridade de um job na vaga GLOBAL.
+ *
+ * `user`     = trabalho de um scan que o utilizador pediu (tem scanId).
+ * `background` = análise unitária automática (ficheiro observado, processo
+ *              iniciado, correlação ETW). É o default, e é o conservador: só
+ *              quem declara (ou traz scanId) sobe de prioridade.
+ */
+export type ClamavJobPriority = "user" | "background";
+
+/**
+ * Tecto de jobs de BACKGROUND à espera da vaga.
+ *
+ * MEDIDO (2026-10-07, Quick Scan real): a fila chegou a `waiting=79-80` e o
+ * batch de 730 candidatos do scan do utilizador NUNCA arrancou — ficou atrás de
+ * ~80 análises unitárias. Uma fila sem tecto é memória a crescer e um backlog
+ * de minutos que ninguém vê.
+ *
+ * MEDIDO (mesma janela): o pior caso observado foi 80. 128 dá folga a esse caso
+ * (a prioridade resolve-o, sem descartar nada) e continua FINITO: acima dele o
+ * job leva uma recusa HONESTA (`overloaded` -> `unavailable`), em vez de se
+ * acumular em silêncio. Não se perde o evento: publica-se que ele não foi
+ * analisado, e o próximo evento do mesmo ficheiro volta a tentar.
+ */
+const MAX_QUEUED_BACKGROUND_JOBS = 128;
+
+/** `poisoned` = não há vaga segura. `overloaded` = fila de background cheia. */
+type ClamavSlotResult = "granted" | "poisoned" | "overloaded" | "aborted";
 
 /**
  * A mensagem de um motor cuja vaga ficou presa. ÚNICA, e usada pelos DOIS
@@ -815,16 +962,50 @@ const POISONED_SCAN_DETAIL =
   "ClamAV indisponível: um clamscan anterior não confirmou a morte e continua a marcar ~1 GB. " +
   "O motor volta quando esse processo terminar.";
 
+/**
+ * A recusa por BACKPRESSURE, dita como o que é: o motor está ocupado e este
+ * ficheiro NÃO foi analisado agora. Não é "limpo" e não é "erro de leitura".
+ */
+const OVERLOADED_SCAN_DETAIL =
+  "Motor de análise ocupado: há demasiadas análises automáticas em espera. " +
+  "Este ficheiro não foi analisado agora; será reanalisado no próximo evento.";
+
+/**
+ * Contador monotónico dos nomes de ficheiro-lista.
+ *
+ * CODEX (2026-10-07, finding HIGH): com `pid + Date.now()`, dois batches
+ * preparados no MESMO milissegundo escreviam para o mesmo caminho — o segundo
+ * sobrescrevia a lista do primeiro, e o cleanup de um apagava a lista que o
+ * outro ainda ia usar. `MAX_CLAMSCAN=1` serializa os PROCESSOS, não a
+ * preparação (que corre antes da vaga).
+ */
+let batchListSeq = 0;
+
 /** Há alguma vaga envenenada? Então nenhum clamscan novo pode nascer. */
 function clamavSlotsPoisoned(): boolean {
   return globalClamavSlots.poisoned > 0;
 }
 
-async function acquireClamavSlot(limit: number): Promise<ClamavSlotResult> {
+async function acquireClamavSlot(
+  limit: number,
+  priority: ClamavJobPriority = "background",
+  signal?: AbortSignal,
+): Promise<ClamavSlotResult> {
   if (globalClamavSlots.poisoned > 0) return "poisoned";
+  // Cancelado antes de esperar: não entra na fila de todo.
+  if (signal?.aborted) return "aborted";
   if (globalClamavSlots.active < limit) {
     globalClamavSlots.active++;
     return "granted";
+  }
+  // BACKPRESSURE: a fila de background tem tecto. Um scan do utilizador nunca é
+  // recusado por isto — ele é uma ação explícita e cabe sempre.
+  if (
+    priority === "background" &&
+    globalClamavSlots.waitingBackground.length >= MAX_QUEUED_BACKGROUND_JOBS
+  ) {
+    globalClamavSlots.droppedBackground++;
+    return "overloaded";
   }
   // A vaga é TRANSFERIDA, não emprestada: quem espera NÃO incrementa ao ser
   // acordado, porque quem libera NÃO decrementa.
@@ -834,11 +1015,48 @@ async function acquireClamavSlot(limit: number): Promise<ClamavSlotResult> {
   // decrementado, e qualquer chamador que chegasse nesse intervalo era
   // admitido em directo. Medido em `clamav-cap-review.test.js`: pico de 7
   // clamscans com o limite declarado a 1. Era o mesmo P0, outra vez.
-  return new Promise<ClamavSlotResult>((resolve) => globalClamavSlots.waiting.push(resolve));
+  return new Promise<ClamavSlotResult>((resolve) => {
+    const queue =
+      priority === "user"
+        ? globalClamavSlots.waitingUser
+        : globalClamavSlots.waitingBackground;
+    let settled = false;
+    const settle = (result: ClamavSlotResult) => {
+      if (settled) return;
+      settled = true;
+      signal?.removeEventListener("abort", onAbort);
+      resolve(result);
+    };
+    const entry = (result: ClamavSlotResult) => settle(result);
+    // Um scan CANCELADO enquanto espera sai da fila: sem isto, ele consumia uma
+    // vaga para a devolver logo a seguir ("acorda para morrer"), atrasando quem
+    // lá estava.
+    const onAbort = () => {
+      const index = queue.indexOf(entry);
+      if (index >= 0) queue.splice(index, 1);
+      settle("aborted");
+    };
+    queue.push(entry);
+    if (signal) signal.addEventListener("abort", onAbort, { once: true });
+  });
 }
 
+/**
+ * Liberta a vaga e escolhe QUEM a recebe.
+ *
+ * ORDEM DE PRIORIDADE (o P0 SCANNER_RUNTIME_ZERO_PROGRESS):
+ *   1. scans do utilizador em espera, por ordem de chegada;
+ *   2. análises de background em espera, por ordem de chegada;
+ *   3. ninguém -> a vaga fica livre (`active` decrementa).
+ *
+ * O job ATIVO nunca é interrompido: a vaga só é decidida quando ele termina.
+ * Isso é deliberado — matar um clamscan saudável a meio para preempção pagaria
+ * ~981 MB outra vez e podia deixar a base da app a ser escrita por cima de um
+ * processo vivo.
+ */
 function releaseClamavSlot(): void {
-  const next = globalClamavSlots.waiting.shift();
+  const next =
+    globalClamavSlots.waitingUser.shift() ?? globalClamavSlots.waitingBackground.shift();
   if (next) {
     // `active` mantem-se: a vaga passa de mãos em mãos, nunca há um instante
     // em que o limite possa ser excedido.
@@ -846,6 +1064,28 @@ function releaseClamavSlot(): void {
     return;
   }
   globalClamavSlots.active = Math.max(0, globalClamavSlots.active - 1);
+}
+
+/**
+ * Fotografia read-only do semáforo. Existe para TELEMETRIA e para os testes
+ * poderem afirmar a fila sem espiar estado interno por outra via.
+ */
+export function clamavSlotStats(): {
+  active: number;
+  waitingUser: number;
+  waitingBackground: number;
+  poisoned: number;
+  droppedBackground: number;
+  maxQueuedBackground: number;
+} {
+  return {
+    active: globalClamavSlots.active,
+    waitingUser: globalClamavSlots.waitingUser.length,
+    waitingBackground: globalClamavSlots.waitingBackground.length,
+    poisoned: globalClamavSlots.poisoned,
+    droppedBackground: globalClamavSlots.droppedBackground,
+    maxQueuedBackground: MAX_QUEUED_BACKGROUND_JOBS,
+  };
 }
 
 /**
@@ -858,13 +1098,25 @@ function releaseClamavSlot(): void {
  */
 function poisonClamavSlot(): void {
   globalClamavSlots.poisoned++;
-  while (globalClamavSlots.waiting.length > 0) {
-    globalClamavSlots.waiting.shift()!("poisoned");
+  // AS DUAS filas. Com o semáforo partido em duas, esquecer uma deixava metade
+  // dos waiters presos para sempre — ninguém lhes daria vaga nem recusa.
+  while (globalClamavSlots.waitingUser.length > 0) {
+    globalClamavSlots.waitingUser.shift()!("poisoned");
+  }
+  while (globalClamavSlots.waitingBackground.length > 0) {
+    globalClamavSlots.waitingBackground.shift()!("poisoned");
   }
 }
 
-/** A prova de morte chegou (`close` do filho): a vaga volta à circulação. */
-function releasePoisonedClamavSlot(): void {
+/**
+ * A prova de morte chegou (`close` do filho): a vaga volta à circulação.
+ *
+ * Exportado como SEAM DE TESTE: o `close` do filho é o único produtor desta
+ * chamada em produção (spawner). Um mock que queira emular o `close` do
+ * spawner (morte tardia de um clamscan cuja vaga foi envenenada) usa-o para
+ * provar que a vaga volta — mesmo contrato que o scan.
+ */
+export function releasePoisonedClamavSlot(): void {
   globalClamavSlots.poisoned = Math.max(0, globalClamavSlots.poisoned - 1);
   releaseClamavSlot();
 }
@@ -1780,8 +2032,21 @@ export function createSpawnClamav(hooks: ClamavProcessHooks = {}): ClamavSpawnFn
   // identidade — a identidade é a que `captureReady` traz.
   const spawnedAtMs = Date.now();
   const expected = expectedIdentityFor(file, args, spawnedAtMs);
-  const child = spawnFn(file, args, { windowsHide: request.windowsHide, stdio: ["ignore", "pipe", "pipe"] });
+  scanPerfLog("CLAMSCAN_SPAWN_CALL_BEGIN", request.scanId, `argCount=${args.length} argvChars=${argvChars(args)}`);
+  let child: ChildProcess;
+  try {
+    child = spawnFn(file, args, { windowsHide: request.windowsHide, stdio: ["ignore", "pipe", "pipe"] });
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException)?.code ?? "unknown";
+    scanPerfLog("CLAMSCAN_SPAWN_CALL_THROW", request.scanId, `code=${String(code)}`);
+    throw error;
+  }
+  scanPerfLog("CHILD_SPAWN_RETURN", request.scanId, `pid=${child.pid ?? "unknown"}`);
+  child.once("spawn", () => {
+    scanPerfLog("CHILD_SPAWN_EVENT", request.scanId, `pid=${child.pid ?? "unknown"}`);
+  });
   trackClamavPid(child.pid);
+  scanPerfLog("CLAMSCAN_PID", request.scanId, `pid=${child.pid ?? "unknown"} executable=${path.basename(file)}`);
 
   /**
    * A IDENTIDADE REAL do filho, capturada do SO (A2).
@@ -1833,6 +2098,12 @@ export function createSpawnClamav(hooks: ClamavProcessHooks = {}): ClamavSpawnFn
     resolveOutcome = resolve;
   });
 
+  // Diagnostic counters (only active under CYBERSAFE_DEBUG_SCAN=1).
+  let firstStdoutLogged = false;
+  let firstStderrLogged = false;
+  let firstResultLogged = false;
+  let onProgressCalls = 0;
+
   const finish = (code: number | null) => {
     if (settled) return;
     settled = true;
@@ -1849,6 +2120,11 @@ export function createSpawnClamav(hooks: ClamavProcessHooks = {}): ClamavSpawnFn
       killed,
       ...(deathUnconfirmed ? { deathUnconfirmed: true } : {}),
     });
+    scanPerfLog(
+      "CLAMAV_CHILD_TERMINAL",
+      request.scanId,
+      `pid=${child.pid ?? "unknown"} code=${code} killed=${killed} deathUnconfirmed=${deathUnconfirmed} onProgressCalls=${onProgressCalls} elapsedMs=${Date.now() - spawnedAtMs}`,
+    );
   };
 
   // Descodificar POR CHUNK corrompe o texto: um caractere multibyte partido
@@ -1864,11 +2140,19 @@ export function createSpawnClamav(hooks: ClamavProcessHooks = {}): ClamavSpawnFn
     if (decodersEnded) return;
     decodersEnded = true;
     stderr += stderrDecoder.end();
-    if (stdout.length < MAX_CAPTURED_OUTPUT) stdout += stdoutDecoder.end();
+    const stdoutTail = stdoutDecoder.end();
+    if (stdout.length < MAX_CAPTURED_OUTPUT) stdout += stdoutTail;
+    // O último resultado pode chegar sem newline. `close` confirma que não
+    // haverá outro chunk, por isso esta cauda pode finalmente ser contada.
+    if (request.onProgress) progressoClamav(request.onProgress, stdoutTail, true);
   };
 
   child.stderr?.on("data", (chunk) => {
     stderr += stderrDecoder.write(chunk as Buffer);
+    if (!firstStderrLogged) {
+      firstStderrLogged = true;
+      scanPerfLog("STDERR_FIRST_CHUNK", request.scanId, `pid=${child.pid ?? "unknown"} bytes=${chunk.length}`);
+    }
   });
   // O stdout é ACUMULADO, não descartado. Descartá-lo era o que tornava
   // impossível saber se o clamscan tinha detectado alguma coisa: a linha
@@ -1877,8 +2161,67 @@ export function createSpawnClamav(hooks: ClamavProcessHooks = {}): ClamavSpawnFn
   // a falar. O tecto existe para que um output patológico não coma a RAM — o
   // P0 desta bridge.
   child.stdout?.on("data", (chunk) => {
-    if (stdout.length < MAX_CAPTURED_OUTPUT) stdout += stdoutDecoder.write(chunk as Buffer);
+    if (!firstStdoutLogged) {
+      firstStdoutLogged = true;
+      scanPerfLog("STDOUT_FIRST_CHUNK", request.scanId, `pid=${child.pid ?? "unknown"} bytes=${chunk.length}`);
+    }
+    const decoded = stdoutDecoder.write(chunk as Buffer);
+    if (stdout.length < MAX_CAPTURED_OUTPUT) stdout += decoded;
+    if (request.onProgress) progressoClamav(request.onProgress, decoded);
   });
+
+  /**
+   * CONTAGEM DE FICHEIROS JÁ ANALISADOS, a partir do stdout do clamscan.
+   *
+   * O clamscan escreve UMA LINHA por ficheiro que termina de varrer:
+   * `<caminho>: OK` quando está limpo, `<caminho>: <assinatura> FOUND` quando
+   * não está. A linha existe = o ficheiro foi avaliado. E' a MESMA evidencia
+   * que `parseClamavOutput` usa para dar `clean`, aqui só para contar — e é por
+   * isso que o número é honesto: nunca é um temporizador, nunca é uma
+   * interpolação de "deve estar quase", é o que o motor disse.
+   *
+   * O bloco `SCAN SUMMARY` (e o `STDERR`/`ERROR` que o antecede) NAO contam:
+   * `Scanned files: 4` e `Infected files: 1` não são ficheiros avaliados um a
+   * um, e contá-los inventaria trabalho.
+   *
+   * O resto de uma linha fica em `progressoPendente` entre chunks: partir uma
+   * linha ao meio contaria meio ficheiro e depois outro.
+   */
+  let progressoPendente = "";
+  let progressoContados = 0;
+  const progressoClamav = (onProgress: (n: number) => void, chunk: string, final = false) => {
+    const texto = progressoPendente + chunk;
+    const linhas = texto.split("\n");
+    // Antes de `close`, a última linha pode continuar a crescer no chunk
+    // seguinte. No fecho já não haverá outro chunk: consome-se também a cauda.
+    progressoPendente = final ? "" : (linhas.pop() ?? "");
+    for (const raw of linhas) {
+      const linha = raw.trim();
+      if (linha === "") continue;
+      if (/^-+\s*(SCAN SUMMARY|SCAN STATISTICS)/i.test(linha)) return;
+      // `ERROR` e `WARNING` sao do stderr do clamscan, nunca ficheiros
+      // avaliados com sucesso.
+      if (/^(ERROR|WARNING)/i.test(linha)) continue;
+      const isCleanResult = /:\s*OK\s*$/i.test(linha);
+      const isDetectedResult = /\s+FOUND\s*$/i.test(linha);
+      if (isCleanResult || isDetectedResult) {
+        progressoContados++;
+        if (!firstResultLogged) {
+          firstResultLogged = true;
+          scanPerfLog(
+            "STDOUT_FIRST_COMPLETE_RESULT",
+            request.scanId,
+            `pid=${child.pid ?? "unknown"} kind=${isDetectedResult ? "found" : "ok"} count=1 chars=${linha.length}`,
+          );
+        }
+        onProgressCalls++;
+        if (onProgressCalls === 1) {
+          scanPerfLog("ON_PROGRESS_FIRST", request.scanId, `pid=${child.pid ?? "unknown"} count=${progressoContados}`);
+        }
+        onProgress(progressoContados);
+      }
+    }
+  };
 
   // CODEX (2026-10-03), achado 1: `error` NÃO É PROVA DE MORTE.
   //
@@ -1892,6 +2235,8 @@ export function createSpawnClamav(hooks: ClamavProcessHooks = {}): ClamavSpawnFn
   // é o `close` — ou, na falta dele, o temporizador de tolerância, que marca
   // `deathUnconfirmed` e deixa a vaga e a lease presas.
   child.on("error", (err: Error) => {
+    const code = (err as NodeJS.ErrnoException)?.code ?? "unknown";
+    scanPerfLog("CHILD_ERROR_EVENT", request.scanId, `pid=${child.pid ?? "unknown"} code=${String(code)}`);
     stderr += err.message;
     if (child.pid === undefined) {
       finish(null);
@@ -1904,7 +2249,11 @@ export function createSpawnClamav(hooks: ClamavProcessHooks = {}): ClamavSpawnFn
   // `close` só dispara quando o processo morreu DE FACTO — nunca no momento
   // em que pedimos para o matar. É isto que impede o cap de libertar a vaga
   // enquanto o filho ainda detém ~1 GB.
-  child.on("close", (code) => {
+  child.on("exit", (code, signal) => {
+    scanPerfLog("CHILD_EXIT", request.scanId, `pid=${child.pid ?? "unknown"} code=${code} signal=${signal ?? "none"}`);
+  });
+  child.on("close", (code, signal) => {
+    scanPerfLog("CHILD_CLOSE", request.scanId, `pid=${child.pid ?? "unknown"} code=${code} signal=${signal ?? "none"}`);
     // `close` é o fim do pipe: a cauda de uma sequência multibyte decide-se aqui.
     flushDecoders();
     // O SO acabou de confirmar a morte. A lease da base é libertada AQUI, e não
@@ -2055,7 +2404,24 @@ export interface ClamavProbeFacts {
   maxSignatureAgeMs?: number;
 }
 
-const DB_FILE_PATTERN = /\.(cvd|cld|cuv|cud)$/i;
+/**
+ * Ficheiros que o libclamav carrega como base de assinaturas.
+ *
+ * MEDIDO (2026-10-22): uma pasta com uma única `.ndb` nossa é carregada pelo
+ * `clamscan --database=<pasta>` (`Known viruses: 1`) e deteta o marcador. A
+ * versão anterior só reconhecia arquivos `.cvd/.cld/.cuv/.cud`, portanto essa
+ * pasta era classificada `empty`; o bridge caía para a base da app e ficava
+ * `active` — a reportar cobertura de uma base que o chamador NÃO pediu e que o
+ * scan não usou. `datadir` é documentado como prioridade máxima; ignorá-lo em
+ * silêncio era a mesma classe de mentira que o resto deste ficheiro evita.
+ */
+const DB_FILE_PATTERN = /\.(cvd|cld|cuv|cud|ndb|hdb|hsb|ldb|cdb|sdb|mdb|msb)$/i;
+
+/**
+ * Arquivos oficiais assinados. Uma base só com assinaturas locais (`.ndb`, …)
+ * faz o motor ANALISAR, mas não é a cobertura de produção — é `degraded`.
+ */
+const DB_ARCHIVE_PATTERN = /\.(cvd|cld|cuv|cud)$/i;
 
 /** Definições com mais de 7 dias estão mortas na prática (o ClamAV actualiza daily). */
 export const SIGNATURE_MAX_AGE_MS = 7 * 24 * 60 * 60 * 1000;
@@ -2152,6 +2518,7 @@ function classifyWithCandidates(facts: ClamavProbeFacts): { available: boolean; 
   // envelhecidos. `ready` com zero ficheiros é tratado como `empty` — active
   // exige assinaturas, sempre.
   const count = chosen.signatureFiles.filter(isSignatureFile).length;
+  const archives = chosen.signatureFiles.filter((name) => DB_ARCHIVE_PATTERN.test(name)).length;
   if (count === 0) {
     const tried = candidates.map((c) => c.dir).join(", ");
     return {
@@ -2159,6 +2526,18 @@ function classifyWithCandidates(facts: ClamavProbeFacts): { available: boolean; 
       health: {
         status: "degraded",
         detail: `ClamAV instalado mas sem base de assinaturas — ${chosen.dir} não tem ficheiros .cvd/.cld (verificados: ${tried}); corre freshclam`,
+      },
+    };
+  }
+  if (archives === 0) {
+    // Motor UTILIZÁVEL (carrega e analisa), cobertura NÃO oficial. Devolver
+    // `active` aqui seria chamar cobertura de produção a um punhado de
+    // assinaturas locais — o mesmo erro que `active` sem `.cvd` já evitava.
+    return {
+      available: true,
+      health: {
+        status: "degraded",
+        detail: `ClamAV carrega ${count} assinatura(s) local(is) em ${chosen.dir}, sem base oficial (.cvd/.cld) — o motor analisa, a cobertura é limitada; corre freshclam`,
       },
     };
   }
@@ -2213,6 +2592,15 @@ export function classifyClamavHealth(facts: ClamavProbeFacts): { available: bool
     };
   }
   const dbs = facts.dbFiles.filter((entry) => DB_FILE_PATTERN.test(entry));
+  if (dbs.length > 0 && !dbs.some((entry) => DB_ARCHIVE_PATTERN.test(entry))) {
+    return {
+      available: true,
+      health: {
+        status: "degraded",
+        detail: `ClamAV carrega ${dbs.length} assinatura(s) local(is) em ${facts.dbDir}, sem base oficial (.cvd/.cld) — o motor analisa, a cobertura é limitada; corre freshclam`,
+      },
+    };
+  }
   if (dbs.length === 0) {
     return {
       available: false,
@@ -2226,6 +2614,198 @@ export function classifyClamavHealth(facts: ClamavProbeFacts): { available: bool
     available: true,
     health: { status: "active", detail: `ClamAV binary available (${dbs.length} signature database file(s))` },
   };
+}
+
+/**
+ * PROVA POSITIVA DE CARGA (TP-PAP-ENGINES-RECOVERY-AND-PACKAGING-20261027, rev 2).
+ *
+ * A sonda nunca publica `active` por existência+mtime de `.cvd/.cld`: um
+ * ficheiro truncado com mtime recente é exactamente a classe de falso-positivo
+ * que o `active` sem prova deixava passar. A única fonte de `active` passa a
+ * ser uma operação benigna e controlada em que o `clamscan` confirma ter
+ * carregado a base e varrido a fixture com evidência COERENTE.
+ *
+ * Rev 2 — confirmação ESTRUTURAL (revisão Codex 2026-10-27, HOLD): a prova só é
+ * válida com saída consistente e completa:
+ *  - exit code EXACTAMENTE 0 e SEM `error` (timeout/spawn/lease/modo);
+ *  - stdout com o resumo de um scan real: cabeçalho `SCAN SUMMARY`, resumo
+ *    completo (`Known viruses > 0`, `Scanned files >= 1`, `Infected files: 0`);
+ *  - stderr sem marcadores de carga falhada (`ERROR`/`LibClamAV Error`/
+ *    `damaged`/`Broken or not a CVD`/`Can't load`); avisos `WARNING` não anulam.
+ * Contagens válidas com exit 2, timeout, stderr danificado, resumo partido ou
+ * relato contraditório NUNCA confirmam carga.
+ *
+ * `--version` (ou qualquer número impresso na versão) NUNCA prova carga — só o
+ * resumo de um scan com a base pedida o faz.
+ */
+
+/** Resultado da corrida controlada de carga. */
+export interface ClamavLoadProof {
+  /** stdout do `clamscan`; null se o processo não arrancou. */
+  stdout: string | null;
+  /** stderr; null se o processo não arrancou. */
+  stderr: string | null;
+  /** exit code; null se o processo não arrancou. */
+  exitCode: number | null;
+  /** erro de spawn/timeout/lease/modo; ausente quando o processo correu. */
+  error?: string;
+}
+
+/** Seam de teste: executa `clamscan <args>` e devolve a saída. Nunca definido em produção. */
+export type ClamavLoadRun = (
+  file: string,
+  args: string[],
+) => Promise<{ stdout: string; stderr: string; code: number | null }>;
+
+/**
+ * Timeout da prova de carga.
+ *
+ * MEDIDO (2026-10-27, base real autorizada com 3 628 193 assinaturas,
+ * `freshclam-validation/database`): carga completa + scan da fixture = ~6,3 s
+ * (exit 0). 30 s é o tecto com margem >4× para máquinas lentas.
+ */
+export const CLAMAV_LOAD_PROBE_TIMEOUT_MS = 30_000;
+
+/** ENV que liga o modo SO-SOMENTE-LEITURA do serviço (dev-windows-readonly). */
+export const CLAMAV_READONLY_MODE_ENV = "CYBERSAFE_DEV_WINDOWS_READONLY";
+/** ENV que liga a sessão de FIXTURE do serviço (dev-fixture-gate). */
+export const CLAMAV_FIXTURE_MODE_ENV = "CYBERSAFE_REALDEV_FIXTURE_SCAN";
+
+/**
+ * Default FAIL-CLOSED da prova de carga, derivado do ambiente.
+ *
+ * O serviço liga os dois modos dev por ENV (`=== "1"`), e a bridge é criada no
+ * `engine.ts` SEM opção de modos (só `acquireDatabaseLease`). Sem esta derivação,
+ * num run de leitura ou fixture o probe continuava a spawnar um clamscan e a
+ * escrever uma fixture em tmpdir — fora da superfície que esses modos fecham.
+ * Com qualquer um dos flags ligados, a prova fica DESLIGADA por defeito (o
+ * motor degrada com a razão honesta); `loadProofEnabled` explícito continua a
+ * mandar (seam de teste).
+ */
+export function clamavLoadProofDefaultEnabled(env: NodeJS.ProcessEnv = process.env): boolean {
+  return env[CLAMAV_READONLY_MODE_ENV] !== "1" && env[CLAMAV_FIXTURE_MODE_ENV] !== "1";
+}
+
+/**
+ * Órçamento do `dispose()` para aguardar a morte dos filhos da prova.
+ *
+ * O grace interno do spawner é 2 s — o `outcome` de um filho REAL resolve-se
+ * sempre em ≤ 2 s após o `killTree()` (morte confirmada ou `deathUnconfirmed`).
+ * Este órçamento existe para um handle que nunca emita `close`: o shutdown não
+ * pode ficar preso para sempre à espera de algo que não prova (os handles já
+ * foram `killTree()`; a vaga/lease presas são o estado honesto).
+ */
+export const CLAMAV_DISPOSE_BUDGET_MS = 5_000;
+
+/** Texto benigno fixo da fixture usada na prova de carga (nunca malware). */
+export const CLAMAV_LOAD_PROBE_FIXTURE =
+  "CyberSafe positive-load probe fixture — ficheiro benigno de teste.\n";
+
+/** Marcadores de carga falhada no stderr — anulam a prova mesmo com stdout válido. */
+const CLAMAV_LOAD_FAILURE_STDERR =
+  /\bERROR\b|LibClamAV Error|damaged|Broken or not a CVD|Can't load|Failed to load|parse error|FATAL/i;
+
+/** Nº de assinaturas que o `clamscan` confirma ter carregado (null = linha ausente). */
+export function parseClamavKnownViruses(output: string): number | null {
+  const match = /Known viruses:\s*(\d+)/i.exec(output ?? "");
+  return match ? Number(match[1]) : null;
+}
+
+/** Resumo de scan estruturado; null quando alguma linha obrigatória falta. */
+export interface ClamavScanSummaryParts {
+  knownViruses: number;
+  scannedFiles: number;
+  infectedFiles: number;
+}
+
+/** Lê o resumo do scan. Todas as linhas têm de existir; sem elas não há resumo. */
+export function parseClamavScanSummary(output: string): ClamavScanSummaryParts | null {
+  const known = parseClamavKnownViruses(output);
+  const scanned = /Scanned files:\s*(\d+)/i.exec(output ?? "")?.[1];
+  const infected = /Infected files:\s*(\d+)/i.exec(output ?? "")?.[1];
+  if (known === null || scanned === undefined || infected === undefined) return null;
+  return { knownViruses: known, scannedFiles: Number(scanned), infectedFiles: Number(infected) };
+}
+
+/**
+ * Carga COMPROVADA — evidência coerente e completa:
+ *  1. sem `error` (timeout/spawn/lease/modo) e exit code EXACTAMENTE 0;
+ *  2. stdout com o cabeçalho `SCAN SUMMARY` e resumo completo;
+ *  3. `Known viruses > 0` (a base foi carregada);
+ *  4. `Scanned files >= 1` (a fixture foi efectivamente analisada);
+ *  5. `Infected files: 0` (fixture benigna, zero infecções);
+ *  6. stderr sem marcadores de carga falhada.
+ * Qualquer contradição (exit 2 com contagens válidas, stderr danificado,
+ * resumo partido, timeout disfarçado de `error`) devolve false.
+ */
+export function clamavLoadConfirmed(proof: ClamavLoadProof): boolean {
+  if (!proof) return false;
+  if (proof.error !== undefined) return false;
+  if (proof.exitCode !== 0) return false;
+  if (!proof.stdout) return false;
+  if (!/SCAN SUMMARY/i.test(proof.stdout)) return false;
+  const summary = parseClamavScanSummary(proof.stdout);
+  if (!summary) return false;
+  if (summary.knownViruses <= 0) return false;
+  if (summary.scannedFiles < 1) return false;
+  if (summary.infectedFiles !== 0) return false;
+  if (CLAMAV_LOAD_FAILURE_STDERR.test(proof.stderr ?? "")) return false;
+  return true;
+}
+
+/**
+ * Aplica a prova à classificação: só mantém `active` com carga comprovada;
+ * caso contrário degrada com a razão honesta. Estados que já não eram
+ * `active` (ausente/vazio/expirado/sem base) nunca mudam.
+ */
+export function applyClamavLoadProof(
+  outcome: { available: boolean; health: EngineSubsystemHealth },
+  chosen: ClamavDbCandidate | null,
+  proof: ClamavLoadProof,
+): { available: boolean; health: EngineSubsystemHealth } {
+  if (outcome.health.status !== "active" || !chosen) return outcome;
+  if (clamavLoadConfirmed(proof)) return outcome;
+  const why = proof.error
+    ? `a prova de carga falhou (${proof.error})`
+    : "a prova de carga não produziu evidência coerente (exit≠0, resumo incompleto, infrações ou stderr de erro)";
+  return {
+    available: false,
+    health: {
+      status: "degraded",
+      detail: `Base presente em ${chosen.dir} mas ${why} — não se publica active sem carga comprovada; corra freshclam`,
+    },
+  };
+}
+
+/**
+ * Runner PURO da prova de carga (testes herméticos): escreve a fixture benigna
+ * no tmpdir, corre o `run` injectado com `--database=<dir> <fixture>` e remove
+ * a fixture. NUNCA faz spawn em produção — a bridge usa `runLoadProof`, que
+ * passa pelo spawner real com lease, `liveHandles`, deadline e morte
+ * confirmada. Qualquer excepção vira uma prova com `error`, nunca confirma.
+ */
+export async function probeClamavLoad(
+  file: string,
+  databaseDir: string,
+  run: ClamavLoadRun,
+): Promise<ClamavLoadProof> {
+  const fixturePath = path.join(
+    os.tmpdir(),
+    `cybersafe-clamav-load-probe-${randomBytes(8).toString("hex")}.txt`,
+  );
+  try {
+    await writeFile(fixturePath, CLAMAV_LOAD_PROBE_FIXTURE, "utf8");
+    const res = await run(file, ["--database", databaseDir, fixturePath]);
+    return { stdout: res.stdout, stderr: res.stderr, exitCode: res.code };
+  } catch (err: any) {
+    return { stdout: null, stderr: null, exitCode: null, error: String(err?.message ?? err) };
+  } finally {
+    try {
+      await rm(fixturePath, { force: true });
+    } catch {
+      /* best effort */
+    }
+  }
 }
 
 function firstLine(value: unknown): string {
@@ -2273,9 +2853,219 @@ export async function probeDatabaseDir(dir: string, source: ClamavDbSource): Pro
   };
 }
 
+/* ────────────────────────────────────────────────────────────────────────────
+ * DIST-CLAMAV13OUT — ONDE ESTÁ O MOTOR, SEM DEPENDER DO PATH.
+ *
+ * MEDIDO nesta máquina (2026-10-13, read-only): o ClamAV 1.5.2 está instalado
+ * por Chocolatey. O `clamscan` que o PATH resolve é
+ * `C:\ProgramData\chocolatey\bin\clamscan.exe` — um SHIM de 38 912 B que só
+ * arranca o binário verdadeiro (`…\lib\clamav\tools\clamav-1.5.2.win.x64\clamscan.exe`,
+ * 271 872 B, com `libclamav.dll` de 32 MB ao lado). A resolução era
+ * UNICAMENTE `where clamscan` (PATH do PROCESSO).
+ *
+ * Consequência medida: `where` devolve o que o PATH do processo tiver no
+ * momento do arranque. Em DEV isso inclui `…\chocolatey\bin` (herdado do
+ * shell/Explorer); num arranque com um PATH mais estreito — o caso da
+ * distribuição instalada, que NÃO traz ClamAV nenhum no pacote — o motor fica
+ * invisível mesmo estando instalado. A resolução passa a olhar também para as
+ * raízes de instalação conhecidas, por ordem de autoridade:
+ *
+ *   1. `CYBERSAFE_CLAMSCAN_PATH` — pin explícito de operador/deploy;
+ *   2. o PATH do processo (o comportamento antigo, inalterado em DEV);
+ *   3. raízes conhecidas: Chocolatey, `Program Files\ClamAV`, Scoop, WinGet,
+ *      `%LOCALAPPDATA%\Programs\ClamAV` (Windows) e os directórios fixos UNIX.
+ *
+ * TUDO read-only: só `existsSync`. Nada aqui lança um processo, varre um
+ * ficheiro pessoal, toca na rede ou instala o que seja. E nada aqui fabrica
+ * `active`: encontrar o binário não é ter base de assinaturas, e a
+ * classificação continua a exigir `.cvd`/`.cld` válidos (ver
+ * `classifyClamavHealth`).
+ * ────────────────────────────────────────────────────────────────────────── */
+
+/** Pin explícito do binário `clamscan` (valor: caminho absoluto). */
+export const CLAMAV_BINARY_ENV = "CYBERSAFE_CLAMSCAN_PATH";
+
+/** De onde veio um candidato a binário. A ordem abaixo É a precedência. */
+export type ClamavBinarySource =
+  | "explicit"
+  | "path"
+  | "chocolatey"
+  | "program-files"
+  | "scoop"
+  | "winget"
+  | "user-programs"
+  | "unix";
+
+/** Um caminho candidato a `clamscan`, ainda por verificar no disco. */
+export interface ClamavBinaryCandidate {
+  path: string;
+  source: ClamavBinarySource;
+}
+
+/** Nome do executável do motor, por plataforma. */
+export function clamavBinaryName(platform: NodeJS.Platform = process.platform): string {
+  return platform === "win32" ? "clamscan.exe" : "clamscan";
+}
+
+function splitPathList(value: string, platform: NodeJS.Platform): string[] {
+  const sep = platform === "win32" ? ";" : ":";
+  return value
+    .split(sep)
+    .map((dir) => dir.trim().replace(/^"|"$/g, ""))
+    .filter(Boolean);
+}
+
+/**
+ * Candidatos a binário, por ordem de autoridade. PURO: não toca no disco.
+ *
+ * O `env` e a `platform` são parâmetros (e não `process.*` lidos por dentro)
+ * para que o teste possa medir uma máquina com PATH limpo e uma raiz de
+ * fixture isolada — sem depender do que esta máquina tem instalado.
+ */
+export function clamavBinaryCandidates(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform,
+): ClamavBinaryCandidate[] {
+  const name = clamavBinaryName(platform);
+  const found: ClamavBinaryCandidate[] = [];
+  const push = (path: string | undefined, source: ClamavBinarySource) => {
+    if (path && path.trim()) found.push({ path, source });
+  };
+
+  push(env[CLAMAV_BINARY_ENV]?.trim(), "explicit");
+  for (const dir of splitPathList(env.PATH ?? "", platform)) push(path.join(dir, name), "path");
+
+  if (platform === "win32") {
+    const choco = env.ChocolateyInstall?.trim();
+    const programData = env.ProgramData?.trim();
+    const programFiles = env.ProgramFiles?.trim();
+    const programFilesX86 = env["ProgramFiles(x86)"]?.trim();
+    const localAppData = env.LOCALAPPDATA?.trim();
+    const userProfile = env.USERPROFILE?.trim();
+    const scoop = env.SCOOP?.trim();
+    push(choco && path.join(choco, "bin", name), "chocolatey");
+    push(programData && path.join(programData, "chocolatey", "bin", name), "chocolatey");
+    push(programFiles && path.join(programFiles, "ClamAV", name), "program-files");
+    push(programFilesX86 && path.join(programFilesX86, "ClamAV", name), "program-files");
+    push(scoop && path.join(scoop, "apps", "clamav", "current", name), "scoop");
+    push(userProfile && path.join(userProfile, "scoop", "apps", "clamav", "current", name), "scoop");
+    push(localAppData && path.join(localAppData, "Microsoft", "WinGet", "Links", name), "winget");
+    push(localAppData && path.join(localAppData, "Programs", "ClamAV", name), "user-programs");
+  } else {
+    for (const dir of ["/usr/bin", "/usr/local/bin", "/opt/homebrew/bin", "/snap/bin"]) {
+      push(path.join(dir, name), "unix");
+    }
+  }
+
+  // Dedupe pelo caminho (case-insensitive no Windows) mantendo a PRIMEIRA
+  // ocorrência — que é a de maior autoridade.
+  const seen = new Set<string>();
+  return found.filter((entry) => {
+    const key = platform === "win32" ? entry.path.toLowerCase() : entry.path;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * O primeiro candidato que EXISTE no disco. `null` quando nenhum existe —
+ * nunca inventa um caminho por conveniência.
+ */
+export function firstExistingClamavBinary(
+  candidates: readonly ClamavBinaryCandidate[],
+  exists: (path: string) => boolean,
+): ClamavBinaryCandidate | null {
+  for (const candidate of candidates) {
+    try {
+      if (exists(candidate.path)) return candidate;
+    } catch {
+      /* uma sondagem que rebenta não é existência */
+    }
+  }
+  return null;
+}
+
+/**
+ * O ficheiro que o motor LANÇA.
+ *
+ * Contrato: um binário RESOLVIDO é lançado pelo caminho absoluto (é o que
+ * torna útil encontrar uma instalação fora do PATH); sem resolução, o nome
+ * simples e o PATH continuam a decidir — o comportamento antigo, que em DEV
+ * é o caminho normal.
+ */
+export function clamavSpawnFile(
+  binaryPath: string | null,
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return binaryPath ?? clamavBinaryName(platform);
+}
+
+export interface ClamavBinaryDiagnosis {
+  platform: NodeJS.Platform;
+  /** Caminho escolhido (null = nenhum candidato existe). */
+  resolved: string | null;
+  resolvedSource: ClamavBinarySource | null;
+  /** TODOS os candidatos, com o resultado real do disco em cada um. */
+  candidates: Array<ClamavBinaryCandidate & { exists: boolean }>;
+}
+
+/**
+ * DIAGNÓSTICO read-only: "qual ClamAV é que a app está a ver".
+ *
+ * Só `existsSync`. Não lança o binário, não varre ficheiros pessoais, não toca
+ * na rede. Existe para responder à pergunta que o estado actual não respondia
+ * ("está instalado mas não sabes qual") sem acrescentar nenhuma afirmação que
+ * o disco não suporte.
+ */
+export function diagnoseClamavBinary(
+  options: {
+    env?: NodeJS.ProcessEnv;
+    platform?: NodeJS.Platform;
+    exists?: (path: string) => boolean;
+  } = {},
+): ClamavBinaryDiagnosis {
+  const env = options.env ?? process.env;
+  const platform = options.platform ?? process.platform;
+  const exists = options.exists ?? (existsSync as (path: string) => boolean);
+  const candidates = clamavBinaryCandidates(env, platform).map((entry) => ({
+    ...entry,
+    exists: (() => {
+      try {
+        return exists(entry.path);
+      } catch {
+        return false;
+      }
+    })(),
+  }));
+  const chosen = candidates.find((entry) => entry.exists) ?? null;
+  return {
+    platform,
+    resolved: chosen?.path ?? null,
+    resolvedSource: chosen?.source ?? null,
+    candidates,
+  };
+}
+
 export class ClamavBridge {
   private _health: EngineSubsystemHealth = { status: "unavailable", detail: "Not checked" };
+  /**
+   * A saúde do ULTIMO probe: binario + base presentes + frescura das
+   * definicoes. E a autoridade sobre a BASE; `_health` e o que a UI ve agora.
+   *
+   * Existe por causa da revisao do fix de recuperacao: um batch limpo prova
+   * que o SCANNER correu — nao prova que a base esta fresca. Sem esta
+   * separacao, um batch limpo pousado numa base expirada (aged > 7 dias,
+   * `_hasSignatures` continua true e o scan e permitido) devolvia o motor a
+   * `active` com as definicoes velhas — a recuperacao desfazia o aviso do
+   * probe. A recuperacao do scanner so e permitida quando o ultimo probe
+   * disse `active`; ambos sao atualizados no probe (e no `afterSwap` do
+   * freshclam, que forca o probe), nunca por scan.
+   */
+  private _databaseHealth: EngineSubsystemHealth | null = null;
   private probePromise: Promise<boolean> | null = null;
+  /** Prova EM CURSO (single-flight: até `force` se junta à em curso). */
+  private probeInFlight: Promise<boolean> | null = null;
   private _dbDir: string | null = null;
   /** Há assinaturas num directório sondado — mesmo que velhas. */
   private _hasSignatures = false;
@@ -2286,7 +3076,21 @@ export class ClamavBridge {
   /** Depois de `dispose` o bridge recusa novos scans em vez de fazer spawn. */
   private disposed = false;
 
-  constructor(private readonly options: ClamavBridgeOptions = {}) {}
+  /**
+   * Fail-closed derivado do ambiente: em modo readonly/fixture (por ENV) a
+   * prova de carga NÃO faz spawn nem escreve fixture, mesmo sem opção explícita
+   * — é o que fecha a fronteira do serviço real (`engine.ts` constrói a bridge
+   * só com `acquireDatabaseLease`). `loadProofEnabled` explícito continua a
+   * mandar (seam de teste).
+   */
+  private readonly loadProofEnabled: boolean;
+
+  /** Cancelamento da ESPERA PELA VAGA da prova em curso (dispose aborta). */
+  private probeSlotAbort: AbortController | null = null;
+
+  constructor(private readonly options: ClamavBridgeOptions = {}) {
+    this.loadProofEnabled = options.loadProofEnabled ?? clamavLoadProofDefaultEnabled();
+  }
 
   get health(): EngineSubsystemHealth {
     return this._health;
@@ -2309,24 +3113,45 @@ export class ClamavBridge {
    * Chocolatey, é o SHIM de ~38 KB que arranca o clamscan verdadeiro. O
    * directório do shim é o mesmo, por isso serve perfeitamente para a
    * exclusão por caminho.
+   *
+   * DIST-CLAMAV13OUT: `where` é o PRIMEIRO passo do PATH (preserva o
+   * comportamento de DEV), mas deixou de ser o ÚNICO. Se ele não devolver nada
+   * — o caso de uma instalação que não está no PATH do processo, que é o normal
+   * numa máquina onde o utilizador instalou o ClamAV e a app foi lançada com
+   * outro PATH — procura-se nas raízes de instalação conhecidas
+   * (`clamavBinaryCandidates`). Um resultado de `where` que já não exista no
+   * disco não é aceite: cai para as raízes em vez de apontar para um fantasma.
+   *
+   * DIST-CLAMAV13OUT (integração do bundle, 2026-10-13) — DEFEITO CORRIGIDO:
+   * o `where` corria ANTES de se olhar para o pin, por isso numa máquina com
+   * um ClamAV no PATH (o caso comum, e o desta máquina de desenvolvimento) o
+   * motor EMPACOTADO era silenciosamente ignorado: o `diagnoseClamavBinary`
+   * dizia `resolvedSource: "explicit"` e o bridge usava o do PATH. A
+   * precedência que `clamavBinaryCandidates` documenta (pin → PATH → raízes)
+   * é a única válida, e é aqui que tem de ser cumprida: um pin explícito é uma
+   * decisão do operador/deploy e não pode perder para o que calhar no PATH.
    */
   private async resolveBinaryPath(): Promise<string | null> {
+    // 1. Pin explícito (autoridade máxima). Sem ficheiro no disco, não serve —
+    //    um pin fantasma não é aceite; segue-se para o PATH.
+    const pinned = process.env[CLAMAV_BINARY_ENV]?.trim();
+    if (pinned && existsSync(pinned)) return pinned;
+
+    // 2. PATH do processo. `where` no Windows mantém o comportamento de DEV.
     if (process.platform === "win32") {
       try {
         const { stdout } = await execFileAsync("where", ["clamscan"], { timeout: 5_000, windowsHide: true });
         const first = stdout.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
-        if (first) return first;
+        if (first && existsSync(first)) return first;
       } catch {
-        /* seguimos para o fallback */
+        /* seguimos para as raízes conhecidas */
       }
     }
-    const envPath = process.env.PATH ?? "";
-    for (const dir of envPath.split(process.platform === "win32" ? ";" : ":")) {
-      if (!dir) continue;
-      const candidate = path.join(dir, process.platform === "win32" ? "clamscan.exe" : "clamscan");
-      if (existsSync(candidate)) return candidate;
-    }
-    return null;
+    const chosen = firstExistingClamavBinary(
+      clamavBinaryCandidates(process.env, process.platform),
+      existsSync,
+    );
+    return chosen?.path ?? null;
   }
 
   /** Limite de clamscans simultâneos em vigor (1 = o default global). */
@@ -2361,7 +3186,18 @@ export class ClamavBridge {
    */
   async dispose(): Promise<void> {
     this.disposed = true;
+    // Cancela a ESPERA PELA VAGA da prova em curso: sem isto, um probe à
+    // espera de vaga mantinha um timer de até 30 s vivo após o shutdown.
+    this.probeSlotAbort?.abort();
+    this.probeSlotAbort = null;
     const handles = [...this.liveHandles];
+    this.liveHandles.clear();
+    if (handles.length === 0) {
+      // Nada para matar, nada para esperar: NENHUM timer é armado. (HOLD
+      // CODEX REV4: o `setTimeout` do órçamento ficava armado mesmo com zero
+      // filhos e mantinha o processo vivo ~5 s após o dispose.)
+      return;
+    }
     for (const handle of handles) {
       try {
         handle.killTree();
@@ -2370,9 +3206,24 @@ export class ClamavBridge {
       }
     }
     // Espera pelo fim real: `dispose` que devolve antes de o processo morrer
-    // é um `dispose` que não cumpriu o contrato.
-    await Promise.allSettled(handles.map((handle) => handle.outcome));
-    this.liveHandles.clear();
+    // é um `dispose` que não cumpriu o contrato. Com ÓRÇAMENTO: um handle que
+    // nunca emita `close` (patológico) não pode prender o shutdown para sempre
+    // — os handles já foram `killTree()`; a vaga/lease ficam presas, honesto.
+    const budgetMs = this.options.disposeBudgetMs ?? CLAMAV_DISPOSE_BUDGET_MS;
+    let budgetTimer: NodeJS.Timeout | null = null;
+    const budget = new Promise<void>((resolve) => {
+      budgetTimer = setTimeout(resolve, budgetMs);
+    });
+    try {
+      await Promise.race([Promise.allSettled(handles.map((handle) => handle.outcome)), budget]);
+    } finally {
+      // LIMPA SEMPRE o timer: quando o outcome vence primeiro, o `setTimeout`
+      // continua armado e segura o processo — exactamente o sintoma medido.
+      if (budgetTimer) {
+        clearTimeout(budgetTimer);
+        budgetTimer = null;
+      }
+    }
   }
 
   /**
@@ -2380,16 +3231,31 @@ export class ClamavBridge {
    * cache; `force=true` re-executa o probe (ex.: depois de correr freshclam).
    */
   async isAvailable(force = false): Promise<boolean> {
+    // SINGLE-FLIGHT: qualquer chamada (mesmo `force`) junta-se à prova em
+    // curso. Sem isto, duas `force` concorrentes (health-check + após swap)
+    // arrancavam duas provas e dois clamscans de ~1 GB.
+    if (this.probeInFlight) return this.probeInFlight;
     if (this.probePromise && !force) return this.probePromise;
-    this.probePromise = this.probe();
-    return this.probePromise;
+    const run = this.probe();
+    this.probeInFlight = run;
+    this.probePromise = run;
+    return run.finally(() => {
+      if (this.probeInFlight === run) this.probeInFlight = null;
+    });
   }
 
   private async probe(): Promise<boolean> {
+    // A resolução vem PRIMEIRO: a sonda de versão tem de correr sobre o
+    // binário que vamos usar a sério. Correr `clamscan --version` pelo nome
+    // dava `unavailable` a uma instalação que existe fora do PATH — e era
+    // isso que tornava "está instalado" indistinguível de "não está".
+    const resolved = await this.resolveBinaryPath();
     let versionOutput: string | null = null;
     let versionError: string | undefined;
     try {
-      versionOutput = (await execFileAsync("clamscan", ["--version"], { timeout: 5_000, windowsHide: true })).stdout;
+      versionOutput = (
+        await execFileAsync(clamavSpawnFile(resolved), ["--version"], { timeout: 5_000, windowsHide: true })
+      ).stdout;
     } catch (err: any) {
       versionError = err?.message;
     }
@@ -2397,7 +3263,10 @@ export class ClamavBridge {
       // Onde está o clamscan? O serviço usa isto para EXCLUIR o binário de
       // scan: o motor não pode ser analisado por si próprio, e o caminho
       // identifica-o mesmo que o nome não esteja em nenhuma lista.
-      this._binaryPath = await this.resolveBinaryPath();
+      //
+      // Só se publica o caminho quando o binário RESOLVIDO respondeu: uma
+      // sonda bem-sucedida pelo NOME não prova qual dos candidatos é o motor.
+      this._binaryPath = resolved;
     }
 
     let candidates: ClamavDbCandidate[] | undefined;
@@ -2416,8 +3285,223 @@ export class ClamavBridge {
     const chosen = candidates ? selectDatabaseCandidate(candidates) : null;
     this._dbDir = chosen?.dir ?? null;
     this._hasSignatures = chosen?.state === "ready";
-    this._health = outcome.health;
-    return outcome.available;
+
+    // PROVA POSITIVA DE CARGA: `active` nunca por existência+mtime. Quando a
+    // classificação diz `active`, exige-se uma corrida benigna e controlada em
+    // que o clamscan confirma ter carregado a base escolhida; sem confirmação
+    // o motor fica `degraded` com a razão honesta.
+    let decided: { available: boolean; health: EngineSubsystemHealth } = outcome;
+    if (decided.health.status === "active" && chosen) {
+      // Modo readonly/fixture (por opção OU por ENV — fail-closed): sem spawn
+      // e sem fixture — degradado honesto.
+      const proof =
+        this.loadProofEnabled === false
+          ? { stdout: null, stderr: null, exitCode: null, error: "prova de carga desativada neste modo (readonly/fixture)" }
+          : await this.runLoadProof(chosen);
+      decided = applyClamavLoadProof(decided, chosen, proof);
+    }
+    // POST017: timeout/lease/cancel da prova não tornam as definições velhas.
+    // Guardar a frescura separadamente permite recuperar SÓ após batch positivo;
+    // `decided` continua a expor a falha até haver essa prova de execução.
+    this._databaseHealth = outcome.health;
+    this._health = decided.health;
+    return decided.available;
+  }
+
+  /**
+   * PROVA DE CARGA COM A VIDA DO BRIDGE — o mesmo caminho dos scans:
+   *
+   *  - LEASE da base (`acquireDatabaseLease`): exclusão com a troca FreshClam.
+   *    Recusada (update pendente/activo/shutdown) → SEM spawn, prova com
+   *    `error` honesto. A lease é libertada no `finally`, ou pelo `close` do
+   *    filho quando a morte ficou não confirmada (mesmo contrato do scan).
+   *  - Spawn pelo MESMO spawner (`options.spawn ?? spawnClamav`): o filho
+   *    entra em `liveHandles` e é registado (`trackClamavPid`) — o `dispose`
+   *    mata-o, não fica uma prova a correr durante o shutdown.
+   *  - DEADLINE imposto pela bridge (como nos scans): o timer chama
+   *    `killTree()` e quem decide é o `outcome`, que só resolve com `close` —
+   *    morte CONFIRMADA pelo SO. `deathUnconfirmed` envenena a vaga e a prova
+   *    falha; nunca se afirma desligamento sem prova.
+   *  - Re-verifica `disposed` depois do último `await` antes do spawn.
+   *  - Nunca lança: qualquer falha vira uma prova com `error`.
+   *
+   * O seam `probeRun` (chamado na rev 1 via `probeClamavLoad`) deixou de ser
+   * usado aqui de propósito: a prova real tem de passar pelo mesmo ciclo de
+   * vida dos scans. `probeClamavLoad` ficou como runner puro dos testes.
+   */
+  private async runLoadProof(chosen: ClamavDbCandidate): Promise<ClamavLoadProof> {
+    // ── VAGA (POSSE) PRIMEIRO — o mesmo semáforo dos scans. ──
+    //
+    // HOLD CODEX (REV4): sem `acquireClamavSlot`, a prova podia correr
+    // CONCORRENTE com um scan (2 clamscans contra o cap de 1) e, pior, o
+    // `deathUnconfirmed` envenenava a vaga SEM nunca a ter adquirido — daí
+    // para a frente TODOS os scans respondiam "indisponível". A prova agora
+    // adquire a vaga como qualquer job (background, espera com limite do
+    // probe), e a vaga só é libertada/envenenada QUEM A POSSUI.
+    const probeTimeoutMs = this.options.probeTimeoutMs ?? CLAMAV_LOAD_PROBE_TIMEOUT_MS;
+    // Cancelamento da ESPERA pela vaga: um controlador próprio cujo timer se
+    // limpa assim que a vaga decide (o `AbortSignal.timeout` deixava um timer
+    // de 30 s armado a segurar o processo depois de uma prova de 6 s).
+    const slotAbort = new AbortController();
+    this.probeSlotAbort = slotAbort;
+    const slotWaitTimer = setTimeout(() => slotAbort.abort(), probeTimeoutMs);
+    let slot: ClamavSlotResult;
+    try {
+      slot = await acquireClamavSlot(this.concurrencyLimit, "background", slotAbort.signal);
+    } finally {
+      clearTimeout(slotWaitTimer);
+      if (this.probeSlotAbort === slotAbort) this.probeSlotAbort = null;
+    }
+    if (slot === "poisoned") {
+      // Há um clamscan vivo cuja morte ninguém confirmou: não admitimos outro
+      // (2 GB em voo). Honesto: prova sem spawn, motor degradado.
+      return { stdout: null, stderr: null, exitCode: null, error: "prova recusada: vaga envenenada" };
+    }
+    if (slot === "overloaded") {
+      return {
+        stdout: null,
+        stderr: null,
+        exitCode: null,
+        error: "prova recusada: fila de background cheia",
+      };
+    }
+    if (slot === "aborted") {
+      return {
+        stdout: null,
+        stderr: null,
+        exitCode: null,
+        error: `prova cancelada: sem vaga dentro de ${probeTimeoutMs} ms`,
+      };
+    }
+    // `granted`: a vaga é NOSSA até ao `finally` decidir o contrário. Nunca se
+    // liberta/envenena sem esta posse (HOLD CODEX).
+    let slotHeld = true;
+
+    const recusa = (pedido: ClamDatabaseLeaseHandle | ClamDatabaseLeaseRefusal | null) =>
+      pedido !== null && (pedido as ClamDatabaseLeaseRefusal).refused === true;
+
+    // Tupla do contrato da lease — recolhida DENTRO do mesmo try/finally da
+    // vaga: qualquer recusa liberta a vaga AGORA adquirida (posse), nunca fica
+    // uma de fora (HOLD CODEX REV4: retornos antecipados perdiam a vaga).
+    const leaseBox: { lease: ClamDatabaseLeaseHandle | null } = { lease: null };
+    let handle: ClamavSpawnHandle | null = null;
+    let deadline: NodeJS.Timeout | null = null;
+    let fixturePath: string | null = null;
+    let deathUnconfirmed = false;
+    try {
+      // LEASE — mesmo contrato do scan: nenhum clamscan com a base enquanto o
+      // freshclam a está a trocar.
+      let pedido: ClamDatabaseLeaseHandle | ClamDatabaseLeaseRefusal | null = null;
+      try {
+        pedido = this.options.acquireDatabaseLease?.("load-proof") ?? null;
+      } catch (err: any) {
+        return { stdout: null, stderr: null, exitCode: null, error: `lease falhou (${String(err?.message ?? err)})` };
+      }
+      if (recusa(pedido)) {
+        return {
+          stdout: null,
+          stderr: null,
+          exitCode: null,
+          error: `lease recusada (${(pedido as ClamDatabaseLeaseRefusal).reason})`,
+        };
+      }
+      leaseBox.lease =
+        this.options.acquireDatabaseLease && pedido !== null ? (pedido as ClamDatabaseLeaseHandle) : null;
+
+      if (this.disposed) {
+        return { stdout: null, stderr: null, exitCode: null, error: "bridge descartado (shutdown)" };
+      }
+
+      fixturePath = path.join(
+        os.tmpdir(),
+        `cybersafe-clamav-load-probe-${randomBytes(8).toString("hex")}.txt`,
+      );
+      await writeFile(fixturePath, CLAMAV_LOAD_PROBE_FIXTURE, "utf8");
+
+      // Re-verificação depois do último `await` antes do spawn (janela dispose).
+      if (this.disposed) {
+        return { stdout: null, stderr: null, exitCode: null, error: "bridge descartado (shutdown)" };
+      }
+
+      const spawnFn = this.options.spawn ?? spawnClamav;
+      handle = spawnFn(clamavSpawnFile(this._binaryPath), ["--database", chosen.dir, fixturePath], {
+        timeoutMs: probeTimeoutMs,
+        windowsHide: true,
+        scanId: "load-proof",
+      });
+      if (!handle) {
+        return { stdout: null, stderr: null, exitCode: null, error: "prova de carga sem handle de spawn" };
+      }
+      this.liveHandles.add(handle);
+      if (typeof handle.pid === "number") trackClamavPid(handle.pid);
+
+      // Deadline da bridge: mata e ESPERA pelo outcome (morte real).
+      let timedOut = false;
+      deadline = setTimeout(() => {
+        timedOut = true;
+        scanPerfLog("LOAD_PROOF_TIMEOUT", "load-proof", `origin=load-proof pid=${handle?.pid ?? "unknown"} budgetMs=${probeTimeoutMs} termination=requested`);
+        handle?.killTree();
+      }, probeTimeoutMs);
+      // TP-VM016-CLAM-REAL — o deadline é um KILLER DE FALLBACK, não trabalho:
+      // não pode segurar o event loop. Sem isto, quando o filho nunca confirma a
+      // morte o `await handle.outcome` não resolve, o `finally` (que limpa o
+      // timer) nunca corre, e o processo sobrevive `probeTimeoutMs` DEPOIS de
+      // `dispose()` ter devolvido. Sem `unref` o timer é a única coisa viva.
+      deadline.unref();
+
+      const outcome = await handle.outcome;
+      if (deadline) {
+        clearTimeout(deadline);
+        deadline = null;
+      }
+
+      const proof: ClamavLoadProof = {
+        stdout: outcome.stdout,
+        stderr: outcome.stderr,
+        exitCode: outcome.code,
+      };
+      if (timedOut) proof.error = `timeout (carga > ${probeTimeoutMs} ms)`;
+      if (this.disposed) proof.error = "bridge descartado (shutdown)";
+      // Morte NÃO confirmada pelo SO: o clamscan pode continuar vivo com a
+      // base aberta. A prova NUNCA confirma e a vaga é envenenada (nenhum
+      // clamscan novo) — tratado no `finally`. Não se afirma desligamento nem
+      // carga sem a prova do SO. A vaga envenenada É NOSSA: adquirimo-la acima.
+      if (outcome.deathUnconfirmed === true) {
+        deathUnconfirmed = true;
+        proof.error = "morte não confirmada pelo SO (prova de carga)";
+      }
+      return proof;
+    } catch (err: any) {
+      return { stdout: null, stderr: null, exitCode: null, error: String(err?.message ?? err) };
+    } finally {
+      if (deadline) clearTimeout(deadline);
+      if (handle) {
+        if (typeof handle.pid === "number") untrackClamavPid(handle.pid);
+        this.liveHandles.delete(handle);
+      }
+      // A VAGA decide-se PRIMEIRO, antes de QUALQUER `await` do finally
+      // (mesma regra do scan — CODEX): com o `await rm(...)` à frente, um
+      // `close` tardio do filho podia entregar/libertar a vaga enquanto o
+      // nosso finally ainda não tinha decidido. Só quem POSSUI toca na vaga.
+      if (slotHeld) {
+        if (deathUnconfirmed) poisonClamavSlot();
+        else releaseClamavSlot();
+        slotHeld = false;
+      }
+      if (fixturePath) await rm(fixturePath, { force: true }).catch(() => undefined);
+      // Morte não confirmada → a lease NÃO se liberta sem prova do SO
+      // (spawner de produção tem sempre o gancho; sem ele, a lease fica presa
+      // = estado honesto).
+      if (deathUnconfirmed) {
+        if (leaseBox.lease) {
+          if (handle && typeof handle.onDeathConfirmed === "function") {
+            handle.onDeathConfirmed(() => leaseBox.lease!.release());
+          }
+        }
+      } else if (leaseBox.lease) {
+        leaseBox.lease.release();
+      }
+    }
   }
 
   /**
@@ -2464,9 +3548,29 @@ export class ClamavBridge {
    * O `clamconf` pode listar mais do que um (avisa quando `freshclam.conf` e
    * `clamd.conf` divergem). Ler só a primeira linha descartava bases válidas.
    */
+  /**
+   * O `clamconf` do MESMO directório do binário resolvido, quando existe.
+   *
+   * O `clamconf` vive ao lado do `clamscan` (medido: os dois em
+   * `…\lib\clamav\tools\clamav-1.5.2.win.x64\`). Se o binário foi encontrado
+   * fora do PATH, o `clamconf` também não estará lá — e sem isto a base que o
+   * `clamconf` reporta ficaria invisível. Sem binário resolvido (ou sem o
+   * irmão instalado) cai no nome simples: o comportamento antigo.
+   */
+  private clamconfBinary(): string {
+    if (this._binaryPath) {
+      const sibling = path.join(
+        path.dirname(this._binaryPath),
+        process.platform === "win32" ? "clamconf.exe" : "clamconf",
+      );
+      if (existsSync(sibling)) return sibling;
+    }
+    return "clamconf";
+  }
+
   private async clamconfDatabaseDirs(): Promise<string[]> {
     try {
-      const { stdout } = await execFileAsync("clamconf", ["-n"], { timeout: 8_000, windowsHide: true });
+      const { stdout } = await execFileAsync(this.clamconfBinary(), ["-n"], { timeout: 8_000, windowsHide: true });
       const dirs: string[] = [];
       for (const entry of stdout.split(/\r?\n/)) {
         if (!/^\s*Database directory:/i.test(entry)) continue;
@@ -2524,7 +3628,21 @@ export class ClamavBridge {
    * detecção ao ficheiro certo em vez de dizer "o batch estava infectado".
    */
   async scanFiles(filePaths: string[], options: ClamavScanOptions = {}): Promise<ClamavBatchOutcome> {
-    return this.runScan(filePaths, options);
+    const startedAt = Date.now();
+    scanPerfLog("BATCH_PROMISE_BEGIN", options.scanId, `files=${filePaths.length}`);
+    try {
+      const batch = await this.runScan(filePaths, options);
+      scanPerfLog(
+        "BATCH_PROMISE_RESOLVE",
+        options.scanId,
+        `files=${batch.files.length} status=${batch.status.status} elapsedMs=${Date.now() - startedAt}`,
+      );
+      return batch;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code ?? "unknown";
+      scanPerfLog("BATCH_PROMISE_REJECT", options.scanId, `code=${String(code)}`);
+      throw error;
+    }
   }
 
   /**
@@ -2567,12 +3685,30 @@ export class ClamavBridge {
     //
     // Recusado = `unavailable` e NÃO há fila: o utilizador vê "motor
     // indisponível, tenta dentro de instantes", que é a verdade.
-    const pedido = this.options.acquireDatabaseLease?.() ?? null;
+    scanPerfLog(
+      "DB_LEASE_ACQUIRE_BEGIN",
+      options.scanId,
+      `configured=${Boolean(this.options.acquireDatabaseLease)}`,
+    );
+    let pedido: ClamDatabaseLeaseHandle | ClamDatabaseLeaseRefusal | null;
+    try {
+      pedido = this.options.acquireDatabaseLease?.(options.scanId) ?? null;
+    } catch (error) {
+      const code = (error as NodeJS.ErrnoException)?.code ?? "unknown";
+      scanPerfLog("DB_LEASE_ACQUIRE_THROW", options.scanId, `code=${String(code)}`);
+      throw error;
+    }
     // A recusa pode vir como `null` (compatibilidade) ou com a CAUSA. A causa é
     // o que permite dizer a verdade ao utilizador — ver `descreverRecusaDaBase`.
     const recusa = pedido !== null && (pedido as ClamDatabaseLeaseRefusal).refused === true;
     const dbLease = recusa ? null : (pedido as ClamDatabaseLeaseHandle | null);
     const dbLeaseDenied = this.options.acquireDatabaseLease ? dbLease === null : false;
+    scanPerfLog(
+      "DB_LEASE_ACQUIRE_END",
+      options.scanId,
+      `result=${dbLeaseDenied ? "denied" : this.options.acquireDatabaseLease ? "granted" : "not-configured"}` +
+        (recusa ? ` reason=${(pedido as ClamDatabaseLeaseRefusal).reason}` : ""),
+    );
     if (dbLeaseDenied) {
       return unavailable(descreverRecusaDaBase(recusa ? (pedido as ClamDatabaseLeaseRefusal).reason : null));
     }
@@ -2589,7 +3725,10 @@ export class ClamavBridge {
     } finally {
       // Só liberta aqui se o corpo NAO a adiou. Com `deathUnconfirmed` a
       // adiou, e quem a liberta passa a ser o `close` do filho.
-      if (!leaseBox.deferred) leaseBox.lease?.release();
+      if (!leaseBox.deferred && leaseBox.lease) {
+        leaseBox.lease.release();
+        scanPerfLog("DB_LEASE_RELEASE", options.scanId, "reason=batch-finally");
+      }
     }
   }
 
@@ -2626,6 +3765,7 @@ export class ClamavBridge {
   ): Promise<ClamavBatchOutcome> {
     // `leaseBox` e a caixa que o `runScan` le no `finally`: este corpo escreve
     // `deferred` quando decide que a lease so se liberta com prova de morte.
+    const batchStart = Date.now();
 
     await this.isAvailable();
     if (!this._hasSignatures) {
@@ -2645,25 +3785,111 @@ export class ClamavBridge {
     // indistinguível de um exit 2 sem motivo — que era como o CyberSafe
     // chegou a dizer "não conseguiu carregar a base" com a base carregada.
     const args: string[] = [];
+    // Sem esta flag, um ficheiro acima dos limites internos pode sair com
+    // `: OK` e ser publicado como limpo. Com ela, o ClamAV nomeia o limite
+    // (`Heuristics.Limits.Exceeded.*`) e o parser trata-o como lacuna.
+    args.push("--alert-exceeds-max=yes");
     if (datadir) args.push(`--database=${datadir}`);
-    args.push(...filePaths);
+
+    // Os caminhos vão no argv SÓ enquanto couberem. Acima do orçamento passam
+    // para um ficheiro de lista (`--file-list=`), que o ClamAV 1.5 aceita e
+    // que não tem tecto: é isto que impede o `spawn ENAMETOOLONG` que
+    // matava o batch de um Quick Scan inteiro (ver MAX_CLAMSCAN_ARGV_CHARS).
+    // A DECISÃO argv-vs-file-list é síncrona e não toca no disco — pode ser
+    // tomada aqui. A ESCRITA da lista não: ver o `try` mais abaixo.
+    let listFile: string | null = null;
+    const argvComCaminhos = [...args, ...filePaths];
+    const usarFileList = argvChars(argvComCaminhos) > MAX_CLAMSCAN_ARGV_CHARS;
 
     const spawnFn = this.options.spawn ?? spawnClamav;
     // O deadline é um ORÇAMENTO POR FICHEIRO, não um tecto para o batch. Um
     // tecto fixo de 10 s mataria um batch de 20 ficheiros que é perfeitamente
     // legítimo — e mataria o clamscan a meio, que é a pior forma de falhar.
-    const perFileTimeout = this.options.scanTimeoutMs ?? DEFAULT_SCAN_TIMEOUT_MS;
-    const timeoutMs = Math.min(MAX_BATCH_TIMEOUT_MS, perFileTimeout * Math.max(1, filePaths.length));
+    //
+    // ORÇAMENTO DEFAULT (2026-10-16) — o clamscan real paga DOIS custos:
+    // um custo FIXO de arranque + carga da base (MEDIDO, controlo 2×: ~7,2 s)
+    // e um custo POR FICHEIRO (MEDIDO: ~4,9 s por um benigno de 32 MB).
+    // Com o default antigo (10 s × N), um scan de 1 ficheiro de 32 MB custava
+    // ~11,7 s e ERA morto — demonstrado no bridge real: 10 s → timeout
+    // (degraded, killed), 20 s → clean (exit 0), mesmo ficheiro e base.
+    // O default passa a cobrir o custo fixo:
+    //   default = STARTUP + N × PER_FILE, cap 600 s;
+    // um override EXPLÍCITO (options.scanTimeoutMs) mantém o contrato antigo
+    //   total = N × override,
+    // para que os chamadores que fixam orçamento (testes de 60 ms incluídos)
+    // não vejam a semântica mudar.
+    const overrideDeOrcamento = this.options.scanTimeoutMs;
+    const fileCount = Math.max(1, filePaths.length);
+    const timeoutMs =
+      overrideDeOrcamento !== undefined
+        ? Math.min(MAX_BATCH_TIMEOUT_MS, overrideDeOrcamento * fileCount)
+        : Math.min(MAX_BATCH_TIMEOUT_MS, DEFAULT_SCAN_STARTUP_MS + DEFAULT_SCAN_TIMEOUT_MS * fileCount);
 
     // O CAP. Uma vaga por clamscan vivo, transversal a todos os chamadores.
     // Sem isto, cada ~6 s de carga de base (~981 MB) somava a um clamscan
     // anterior ainda a terminar.
-    const slot = await acquireClamavSlot(this.concurrencyLimit);
+    // ── PRIORIDADE ──
+    //
+    // MEDIDO (2026-10-07, Quick Scan real ea56fe6a): a vaga global tinha
+    // `active=1 waiting=79` e o batch de 730 candidatos do scan do utilizador
+    // ficou ~40 s à espera sem nunca arrancar, atrás de ~80 análises unitárias
+    // de background (`scanId=n/a`, `count=1 strategy=argv`).
+    //
+    // A classe NÃO é inventada aqui: é a impressão digital medida. Um scan do
+    // utilizador traz um `scanId` (é o ScanManager que o gera); as análises
+    // automáticas de ficheiro/processo passam por `analysis.ts` e chegam sem
+    // `scanId` nenhum. `options.priority` existe para um chamador futuro que
+    // precise de o dizer explicitamente, mas o default não depende de ninguém
+    // se lembrar: quem não traz scanId é background.
+    const priority: ClamavJobPriority =
+      options.priority ?? (options.scanId ? "user" : "background");
+    const slotStartedAt = Date.now();
+    scanPerfLog(
+      "CLAMAV_SLOT_ACQUIRE_BEGIN",
+      options.scanId,
+      `priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
+    );
+    // HEARTBEAT DA ESPERA PELA VAGA. A vaga é GLOBAL (1) e partilhada com o
+    // monitor de ficheiros, o monitor de processos e o dashboard: se outro
+    // chamador a tiver, este batch espera sem limite nenhum. Sem este batimento
+    // a espera é indistinguivel de um spawn que nunca escreve — e e' essa a
+    // diferenca entre "outro clamscan tem a vaga" e "o clamscan arrancou mudo".
+    let slotHeartbeat: NodeJS.Timeout | null = null;
+    if (globalClamavSlots.poisoned === 0 && globalClamavSlots.active >= this.concurrencyLimit) {
+      slotHeartbeat = setInterval(() => {
+        scanPerfLog(
+          "CLAMAV_SLOT_WAIT",
+          options.scanId,
+          `waitedMs=${Date.now() - slotStartedAt} priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
+        );
+      }, 5000);
+    }
+    const slot = await acquireClamavSlot(this.concurrencyLimit, priority, options.signal);
+    if (slotHeartbeat) clearInterval(slotHeartbeat);
+    scanPerfLog(
+      "CLAMAV_SLOT_ACQUIRE_END",
+      options.scanId,
+      `result=${slot} priority=${priority} elapsedMs=${Date.now() - slotStartedAt} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} droppedBackground=${globalClamavSlots.droppedBackground}`,
+    );
     // Vaga envenenada: há um clamscan vivo cuja morte ninguém confirmou. Não
     // admitimos outro — seria 2 GB em voo. E não fingimos que o ficheiro está
     // limpo: `unavailable` é a verdade, e o utilizador vê "motor indisponível".
-    if (slot !== "granted") {
+    if (slot === "poisoned") {
       return unavailable(POISONED_SCAN_DETAIL);
+    }
+    // Fila de background cheia: recusa HONESTA e contabilizada. O ficheiro fica
+    // `error`/`unavailable` (nunca "limpo"), e diz-se porquê.
+    if (slot === "overloaded") {
+      scanPerfLog(
+        "CLAMAV_SLOT_OVERLOADED",
+        options.scanId,
+        `priority=${priority} dropped=${globalClamavSlots.droppedBackground} waitingBackground=${globalClamavSlots.waitingBackground.length} limit=${MAX_QUEUED_BACKGROUND_JOBS}`,
+      );
+      return unavailable(OVERLOADED_SCAN_DETAIL);
+    }
+    // Cancelado enquanto esperava: saiu da fila sem consumir a vaga.
+    if (slot === "aborted") {
+      return unavailable("Scan ClamAV cancelado enquanto aguardava vaga");
     }
     let handle: ClamavSpawnHandle | null = null;
     let onAbort: (() => void) | null = null;
@@ -2681,7 +3907,89 @@ export class ClamavBridge {
         return unavailable("Scan ClamAV cancelado enquanto aguardava vaga");
       }
 
-      handle = spawnFn("clamscan", args, { timeoutMs, windowsHide: true });
+      // ── A LISTA TEMPORÁRIA NASCE AQUI, DENTRO DO `try` ──
+      //
+      // CODEX (2026-10-07, finding MEDIUM): criada ANTES do `try`, um `return`
+      // antecipado do semáforo (`poisoned` / `overloaded` / `aborted`) saía sem
+      // passar pelo `finally` — e deixava em disco uma lista com os CAMINHOS DO
+      // UTILIZADOR, o oposto exacto da promessa escrita nesse `finally`.
+      //
+      // O NOME TEM DE SER ÚNICO (finding HIGH do mesmo review): `pid + Date.now()`
+      // colidia para dois batches preparados no mesmo milissegundo, porque a
+      // preparação corre FORA da vaga. Contador monotónico + sufixo aleatório
+      // fecham a colisão dentro do processo e entre processos.
+      if (usarFileList) {
+        listFile = path.join(
+          os.tmpdir(),
+          `cybersafe-clamav-batch-${process.pid}-${++batchListSeq}-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 6)}.txt`,
+        );
+        scanPerfLog("FILE_LIST_CREATE_BEGIN", options.scanId, `entries=${filePaths.length}`);
+        const fileListContents = filePaths.join("\n") + "\n";
+        await writeFile(listFile, fileListContents, "utf-8");
+        scanPerfLog(
+          "FILE_LIST_CREATED",
+          options.scanId,
+          `path=${path.basename(listFile)} entries=${filePaths.length} bytes=${Buffer.byteLength(fileListContents, "utf-8")}`,
+        );
+        args.push(`--file-list=${listFile}`);
+      } else {
+        args.push(...filePaths);
+      }
+
+      // ── RE-VERIFICAR DEPOIS DO ÚLTIMO `await` QUE ANTECEDE O SPAWN ──
+      //
+      // CODEX (2026-10-07, finding HIGH do re-review): o teste lá em cima corre
+      // ANTES do `await writeFile`. Um `dispose()` ou um `abort()` que chegue
+      // DURANTE essa escrita passava ao lado dele e o clamscan nascia na mesma
+      // — ~1 GB de processo que ninguém pediu, que é exactamente a classe de P0
+      // que este trabalho existe para fechar. A janela é NOVA: antes de a lista
+      // nascer dentro do `try`, nenhum `await` estava entre a verificação e o
+      // spawn. Nada corre entre esta linha e o `spawnFn`.
+      if (this.disposed) return unavailable("ClamAV encerrado (bridge descartado)");
+      if (options.signal?.aborted) {
+        return unavailable("Scan ClamAV cancelado antes de arrancar");
+      }
+
+      scanPerfLog(
+        "CLAMAV_BATCH_COUNT",
+        options.scanId,
+        `count=${filePaths.length} strategy=${listFile ? "file-list" : "argv"} file-list-path=${listFile ? path.basename(listFile) : "n/a"}`,
+      );
+
+      // `spawn()` pode LANÇAR de forma SÍNCRONA — é o que faz quando a command
+      // line é demasiado longa (ENAMETOOLONG), e nesse caso não existe filho a
+      // quem ligar `child.on("error")`. A excepção subia até ao `prefetchClamav`,
+      // que a tratava como "sem prefetch" e devolvia TODOS os ficheiros ao
+      // clamscan individual: a cascata de ~981 MB por ficheiro. Aqui a falha
+      // fica no scan que a sofreu, sob a forma honesta: `unavailable`.
+      scanPerfLog(
+        "CLAMSCAN_SPAWN_BEGIN",
+        options.scanId,
+        `argCount=${args.length} argvChars=${argvChars(args)} strategy=${listFile ? "file-list" : "argv"}`,
+      );
+      try {
+        // O binário RESOLVIDO é lançado pelo caminho absoluto: é o que faz uma
+        // instalação fora do PATH ser utilizável. Sem resolução, o nome simples
+        // mantém o comportamento antigo (o PATH decide).
+        handle = spawnFn(clamavSpawnFile(this._binaryPath), args, {
+          timeoutMs,
+          windowsHide: true,
+          onProgress: options.onProgress,
+          scanId: options.scanId,
+        });
+        scanPerfLog("CLAMSCAN_SPAWN_RETURN", options.scanId, `pid=${handle?.pid ?? "unknown"}`);
+      } catch (err) {
+        const code = (err as NodeJS.ErrnoException)?.code;
+        scanPerfLog("CLAMSCAN_SPAWN_THROW", options.scanId, `code=${String(code ?? "unknown")}`);
+        const detail =
+          `clamscan não arrancou: ${code || (err as Error)?.message || "erro desconhecido"}`;
+        this._health = { status: "unavailable", detail };
+        return unavailable(detail);
+      }
+      if (!handle) {
+        scanPerfLog("CLAMSCAN_SPAWN_NO_HANDLE", options.scanId);
+        return unavailable("clamscan não arrancou: sem handle");
+      }
       this.liveHandles.add(handle);
       if (typeof handle.pid === "number") trackClamavPid(handle.pid);
 
@@ -2692,6 +4000,7 @@ export class ClamavBridge {
       // impor: é o deadline dele que mata, e é o outcome dele que resolve.
       deadline = setTimeout(() => {
         timedOut = true;
+        scanPerfLog("CLAMAV_BATCH_TIMEOUT", options.scanId, `origin=${priority === "user" ? "batch-user" : "batch-background"} pid=${handle?.pid ?? "unknown"} budgetMs=${timeoutMs} files=${filePaths.length} active=${globalClamavSlots.active} poisoned=${globalClamavSlots.poisoned} termination=requested`);
         handle?.killTree();
       }, timeoutMs);
 
@@ -2700,7 +4009,33 @@ export class ClamavBridge {
         options.signal.addEventListener("abort", onAbort, { once: true });
       }
 
-      const outcome = await handle.outcome;
+      // HEARTBEAT DO FILHO. Depois do spawn, a unica prova de vida e' o stdout
+      // do clamscan (a base leva ~5,8 s a carregar). Se o filho arranca e fica
+      // mudo, sem isto so se ve' `CLAMSCAN_PID` e depois silencio: nao se
+      // distingue "a carregar a base" de "encravado".
+      const childStartedAt = Date.now();
+      const childHeartbeat = setInterval(() => {
+        scanPerfLog(
+          "CLAMAV_CHILD_WAIT",
+          options.scanId,
+          `pid=${handle?.pid ?? "unknown"} waitedMs=${Date.now() - childStartedAt}`,
+        );
+      }, 10000);
+      let outcome: ClamavSpawnOutcome;
+      try {
+        outcome = await handle.outcome;
+        scanPerfLog(
+          "CLAMAV_CHILD_OUTCOME_RESOLVE",
+          options.scanId,
+          `pid=${handle.pid ?? "unknown"} code=${outcome.code} elapsedMs=${Date.now() - batchStart} timedOut=${timedOut} killed=${outcome.killed === true} deathUnconfirmed=${outcome.deathUnconfirmed === true}`,
+        );
+      } catch (error) {
+        const code = (error as NodeJS.ErrnoException)?.code ?? "unknown";
+        scanPerfLog("CLAMAV_CHILD_OUTCOME_REJECT", options.scanId, `pid=${handle.pid ?? "unknown"} code=${String(code)}`);
+        throw error;
+      } finally {
+        clearInterval(childHeartbeat);
+      }
       lastOutcome = outcome;
 
       // Um clamscan que não arranca não é deteção nem motor activo: dizemos
@@ -2729,7 +4064,34 @@ export class ClamavBridge {
       // ficheiro. Marcar o motor degradado por causa de um ficheiro seria
       // apanhar o motor de mentira — e era pegajoso, porque `_health` só se
       // recalcula no probe.
-      if (batch.status.status !== "active") this._health = batch.status;
+      //
+      // RECUPERAÇÃO (2026-10-16) — o outro lado da mesma moeda. MEDIDO
+      // (determinístico, sem carga): um batch limpo e COMPROVADAMENTE
+      // carregado (todos os ficheiros com veredicto clean/detected e exit
+      // válido) deixava `_health` preso em `degraded` até ao próximo probe —
+      // o motor dizia-se degradado logo depois de analisar 3/3 ficheiros com
+      // a base carregada. Só evidência POSITIVA recupera:
+      //  - `batch.status === "active"` sozinho NÃO basta ("N de M sem
+      //    veredicto", ex.: start-up 3221225794, não é prova de nada);
+      //  - timeouts/aborts têm batch não-active e continuam a degradar;
+      //  - exit válido = 0 (tudo limpo) ou 1 com deteção atribuída (FOUND);
+      //  - o ÚLTIMO PROBE tem de ter dito `active` — um batch limpo prova que
+      //    o scanner correu, não que a base está fresca. Sem isto, uma base
+      //    expirada (> 7 dias) recuperaria para `active` por ter analisado
+      //    ficheiros (revisão 2026-10-16); a saúde da base é do probe, que o
+      //    `afterSwap` do freshclam reexecuta.
+      const todosComVeredictoPositivo =
+        batch.files.length > 0 &&
+        batch.files.every((f) => f.verdict === "clean" || f.verdict === "detected");
+      const exitValido = outcome.code === 0 || (batch.detected && outcome.code === 1);
+      if (batch.status.status !== "active") {
+        this._health = batch.status;
+      } else if (this._databaseHealth?.status === "active" && todosComVeredictoPositivo && exitValido) {
+        this._health = batch.status;
+        // A disponibilidade cacheada não pode continuar false após recuperação.
+        // Não substituir uma prova concorrente nem ressuscitar após dispose.
+        if (!this.disposed && !this.probeInFlight) this.probePromise = Promise.resolve(true);
+      }
 
       // A18 — morte NÃO CONFIRMADA é `unavailable`, nunca `degraded`.
       //
@@ -2753,11 +4115,20 @@ export class ClamavBridge {
       return batch;
     } finally {
       if (deadline) clearTimeout(deadline);
-      if (options.signal && onAbort) options.signal.removeEventListener("abort", onAbort);
-      if (handle) {
-        untrackClamavPid(handle.pid);
-        this.liveHandles.delete(handle);
-      }
+
+      // ── A VAGA DECIDE-SE PRIMEIRO, ANTES DE QUALQUER `await` ──
+      //
+      // CODEX (2026-10-07, finding HIGH): com o `await rm(...)` à frente disto
+      // havia uma janela real — o grace resolve o outcome, a limpeza do
+      // ficheiro suspende o `finally`, e nesse intervalo o `close` do filho
+      // corre `releasePoisonedClamavSlot()`, que liberta/transfere a vaga com
+      // `poisoned` ainda a 0; o `finally` retoma e ENVENENA uma vaga já
+      // entregue. Daí para a frente TODOS os scans respondem "indisponível"
+      // até reiniciar o serviço. Era o mesmo "motor indisponível para sempre"
+      // que o comentário do `close` dizia estar fechado: a ordem
+      // microtarefa/macrotarefa que o justificava deixou de valer quando
+      // apareceu um `await` no meio.
+      //
       // A vaga SÓ volta se a morte estiver confirmada. `deathUnconfirmed`
       // significa que pedimos para matar, a tolerância passou e nem o
       // `taskkill` nem o SO confirmaram: o processo pode estar vivo com ~1 GB.
@@ -2765,6 +4136,28 @@ export class ClamavBridge {
       // congelar — reintroduzido pela rede de segurança do `killTree`.
       if (lastOutcome?.deathUnconfirmed === true) poisonClamavSlot();
       else releaseClamavSlot();
+
+      // SÓ DEPOIS a limpeza. A lista tem de sair de disco: é uma lista dos
+      // ficheiros do utilizador, e o tmpdir do serviço não é o sítio para a
+      // deixar.
+      if (listFile) {
+        await rm(listFile, { force: true }).catch((err: unknown) => {
+          // Best effort continua a ser best effort: não falhar o scan por causa
+          // disto. Mas deixar em SILÊNCIO uma lista com caminhos do utilizador
+          // em disco era a única parte desta limpeza que ainda não era
+          // diagnostícável (CODEX, nota do re-review). Passa a ter linha.
+          scanPerfLog(
+            "FILE_LIST_REMOVE_FAILED",
+            options.scanId,
+            `path=${path.basename(listFile as string)} err=${String((err as Error)?.message ?? err)}`,
+          );
+        });
+      }
+      if (options.signal && onAbort) options.signal.removeEventListener("abort", onAbort);
+      if (handle) {
+        untrackClamavPid(handle.pid);
+        this.liveHandles.delete(handle);
+      }
 
       // CODEX: a lease da base sofre do MESMO problema da vaga, e pela MESMA
       // razao. `deathUnconfirmed` nao e "o scan acabou": e "ninguem provou que
@@ -2782,7 +4175,10 @@ export class ClamavBridge {
         // aqui sobrescreveria o mecanismo do spawner e a lease ficaria presa
         // para sempre. É um registo, e por isso o gancho continua a correr.
         if (handle && typeof handle.onDeathConfirmed === "function") {
-          handle.onDeathConfirmed(() => lease.release());
+          handle.onDeathConfirmed(() => {
+            scanPerfLog("DB_LEASE_RELEASE", options.scanId, "reason=child-death-confirmed");
+            lease.release();
+          });
         } else {
           // CODEX (2026-10-03): este `else` é a mentira que o resto do bloco
           // existe para não contar. Sem gancho de prova de morte, libertar a
