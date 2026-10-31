@@ -141,6 +141,14 @@ export function verifyBuiltRenderer({ distDir, version, allowCommitUnknown = tru
   for (const file of files) {
     const text = fs.readFileSync(file, "utf8");
     for (const match of text.matchAll(pattern)) {
+      // O renderer contém o fallback explícito de desenvolvimento
+      // (`desconhecida/desenvolvimento/desconhecido`) no mesmo bundle. Não é
+      // uma segunda build: é o ramo que corre fora do Vite. Contá-lo como
+      // identidade faria qualquer build de produção falhar sem haver mistura
+      // real de versões.
+      if (match[1] === "desconhecida" && match[2] === "desenvolvimento" && match[3] === "desconhecido") {
+        continue;
+      }
       const key = `${match[1]}|${match[2]}|${match[3]}`;
       if (!seen.has(key)) {
         seen.set(key, { version: match[1], buildId: match[2], commit: match[3], files: [] });

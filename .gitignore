@@ -34,6 +34,9 @@ vendor/.archives/
 .freebuff/
 Users/
 
+# Manifesto derivado do source-freeze (a aprovação vive fora do repo)
+scripts/source-freeze.approved.json
+
 # Logs e lixo de sistema
 *.log
 *.tmp
