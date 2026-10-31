@@ -131,11 +131,16 @@ describe("manifesto da aplicação empacotada", () => {
     // dizem agora o mesmo que a implementação; nenhum recurso foi retirado.
     assert.equal(
       m.build.extraResources.length,
-      3,
-      "scan-engine.exe + ClamAV + licenças: o número tem de vir do contrato, não de uma contagem permissiva",
+      4,
+      "scan-engine.exe + YARA clássico + ClamAV + licenças: o número tem de vir do contrato, não de uma contagem permissiva",
     );
     assert.equal(m.build.extraResources[0].to, "scan-engine.exe");
     assert.equal(path.basename(m.build.extraResources[0].from), "scan-engine.exe");
+    const yaraEntry = m.build.extraResources.find((entry) => entry.to === "yara");
+    assert.ok(yaraEntry, "os binários do YARA clássico têm de ser publicados em resources/yara");
+    assert.ok(path.isAbsolute(yaraEntry.from), "o `from` do YARA tem de ser absoluto: o staging vive fora do repo");
+    assert.equal(path.basename(yaraEntry.from), "yara");
+    assert.equal(path.basename(path.dirname(yaraEntry.from)), "vendor");
     const clamavEntry = m.build.extraResources.find((entry) => entry.to === "clamav");
     assert.ok(clamavEntry, "o bundle ClamAV tem de ser publicado em resources/clamav");
     assert.ok(path.isAbsolute(clamavEntry.from), "a árvore de staging vive fora do repo: o `from` tem de ser absoluto");
@@ -179,6 +184,9 @@ describe("pré-verificação dos inputs", () => {
       assert.ok(checks.some((check) => check.id.startsWith(`workspace:${pkg}/`)), `${pkg} tem de ser verificado`);
     }
     assert.ok(checks.some((check) => check.id === "binario:scan-engine.exe"));
+    for (const id of ["binario:yara64.exe", "binario:yarac64.exe", "licenca:yara/COPYING.txt"]) {
+      assert.ok(checks.some((check) => check.id === id), `${id} tem de ser verificado antes do build`);
+    }
     assert.ok(checks.some((check) => check.id === "icone:icon.ico"));
     for (const check of checks) {
       assert.ok(check.fix && check.fix.trim().length > 0, `"${check.id}" tem de dizer como se corrige`);

@@ -124,6 +124,12 @@ const PREFLIGHT = [
   // Bundle ClamAV: existe ⇒ o pacote leva motor. Sem ele, `resources/clamav`
   // não é publicado e o pin do desktop fica sem efeito (falha FECHADA: o
   // serviço cai no PATH, como antes).
+  // Motor YARA clássico: sem estes binários o serviço fica sem análise por
+  // regras. O payload 0.1.9 provou que `resources/yara` é o caminho procurado
+  // por `resolveYaraClassicBinaries()`; o pipeline tem de o publicar.
+  { id: "binario:yara64.exe", path: path.join(root, "vendor", "yara", "yara64.exe"), fix: "repor vendor/yara (YARA 4.6.0 oficial + VENDOR.json)" },
+  { id: "binario:yarac64.exe", path: path.join(root, "vendor", "yara", "yarac64.exe"), fix: "repor vendor/yara (YARA 4.6.0 oficial + VENDOR.json)" },
+  { id: "licenca:yara/COPYING.txt", path: path.join(root, "vendor", "yara", "COPYING.txt"), fix: "repor vendor/yara/COPYING.txt (BSD-3-Clause do upstream)" },
   { id: "bundle-clamav:VENDOR.json", path: vendorManifestPath, fix: VENDOR_FIX },
   { id: "bundle-clamav:clamscan.exe", path: path.join(vendorClamavDir, "clamscan.exe"), fix: VENDOR_FIX },
   { id: "licencas:THIRD-PARTY-NOTICES.txt", path: path.join(licensesDir, "THIRD-PARTY-NOTICES.txt"), fix: "repor os assets de licenças revistos e o respectivo manifesto" },
@@ -577,6 +583,10 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
       // exactamente onde o pin `CYBERSAFE_CLAMSCAN_PATH` do main.ts o procura.
       extraResources: [
         { from: scanEngine, to: "scan-engine.exe" },
+        // YARA clássico oficial: `resolveYaraClassicBinaries()` procura
+        // `resources/yara` no artefacto empacotado. Sem esta entrada, o build
+        // sai com o motor indisponível e nenhum aviso no setup.
+        { from: path.join(root, "vendor", "yara"), to: "yara" },
         { from: clamavDir, to: "clamav" },
         { from: licensesFrom, to: "licenses" },
       ],
