@@ -46,5 +46,12 @@ if(MINGW)
   target_link_options(scan-engine PRIVATE -static-libgcc -static-libstdc++)
 endif()
 
-# Default output dir for single-config generators (Ninja / Make)
-set_target_properties(scan-engine PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin")
+# Default output dir for single-config generators (Ninja / Make).
+# O gerador Visual Studio (multi-config) escrevia `bin/Release/scan-engine.exe`,
+# mas o contrato de packaging procura `build/Release/scan-engine.exe`
+# (preflight, extraResources e source-freeze). A propriedade por configuração
+# fixa o Release no caminho do contrato sem mudar Debug.
+set_target_properties(scan-engine PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/bin"
+  RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release"
+)
