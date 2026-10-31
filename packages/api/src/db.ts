@@ -4,6 +4,7 @@ import path from 'path';
 
 import os from 'os';
 import { validarArranqueApi } from './dev-isolation.js';
+import { sampleEventsAllowed, SAMPLE_EVENTS_ENV } from './sample-events.js';
 
 // ── SQLite Database Setup ──
 
@@ -310,10 +311,24 @@ export const prisma = {
   }
 };
 
-// Seed initial data if DB is empty
-const eventCount = db.prepare('SELECT COUNT(*) as c FROM threat_events').get() as {c: number};
-if (eventCount.c === 0) {
-  prisma.threatEvent.createMany({
+// ── SAMPLE EVENTS (AUD-001) ──
+// O arranque NUNCA escreve eventos de amostra. Antes, uma tabela vazia era
+// preenchida com duas ameaças fictícias em qualquer ambiente (incluindo
+// produção), e os endpoints /api/events, /api/events/stats e /api/dashboard
+// serviam-nas como se fossem deteções reais. Isso é um problema de integridade
+// de dados, não uma conveniência de demonstração.
+//
+// A amostra continua possível para testes/capturas locais, mas só por pedido
+// explícito e nunca em produção. Nada é apagado: bases existentes mantêm os
+// seus eventos; este módulo apenas deixa de inventar.
+export { SAMPLE_EVENTS_ENV, sampleEventsAllowed };
+
+/** Insere a amostra de desenvolvimento. Só corre com opt-in explícito. */
+export async function seedSampleThreatEvents(env: NodeJS.ProcessEnv = process.env): Promise<number> {
+  if (!sampleEventsAllowed(env)) return 0;
+  const eventCount = db.prepare('SELECT COUNT(*) as c FROM threat_events').get() as { c: number };
+  if (eventCount.c > 0) return 0;
+  await prisma.threatEvent.createMany({
     data: [
       {
         source: "dashboard",
@@ -335,4 +350,5 @@ if (eventCount.c === 0) {
       }
     ]
   });
+  return 2;
 }
