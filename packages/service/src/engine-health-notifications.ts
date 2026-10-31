@@ -12,8 +12,12 @@
  * da janela de arrefecimento.
  *
  * Regras:
- *  - só uma transição real (antes disponível → agora indisponível) anuncia;
- *  - a MESMA fingerprint não repete dentro de `cooldownMs`;
+ *  - anuncia uma transição real (disponível → indisponível) OU uma mudança de
+ *    motivo/estado enquanto o motor continua indisponível (ex.: degraded →
+ *    unavailable): uma degradação mais grave não fica escondida à espera de
+ *    uma recuperação que pode não acontecer;
+ *  - a MESMA fingerprint não repete dentro de `cooldownMs`, nem volta a
+ *    anunciar-se enquanto o estado não mudar;
  *  - voltar a estar disponível nunca gera notificação de indisponibilidade.
  */
 export interface EngineHealthSnapshot {
@@ -41,10 +45,13 @@ export function shouldPublishEngineUnavailable(
   cooldownMs: number = ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS,
 ): boolean {
   if (next.available) return false;
-  if (!previous || previous.available !== true) return false;
+  // Arranque sem leitura prévia: não se anuncia uma queda que não foi observada.
+  if (!previous) return false;
   const key = engineUnavailableKey(next);
-  if (lastPublished && lastPublished.key === key && Number.isFinite(lastPublished.at) && now - lastPublished.at < cooldownMs) {
-    return false;
-  }
-  return true;
+  const last = lastPublished;
+  if (last && last.key === key && Number.isFinite(last.at) && now - last.at < cooldownMs) return false;
+  // Transição real (disponível → indisponível).
+  if (previous.available) return true;
+  // Continua indisponível, mas por um motivo/estado DIFERENTE: mudança relevante.
+  return engineUnavailableKey(previous) !== key;
 }

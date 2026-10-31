@@ -25,6 +25,8 @@ test('R7: a mesma fingerprint volta a anunciar depois da janela', () => {
 });
 
 test('R7: uma indisponibilidade DIFERENTE após recuperação não é ocultada pela janela', () => {
+  // Regressão do requisito: o cooldown é por motivo, não global.
+
   const notice = { key: engineUnavailableKey(off('degraded')), at: agora - 1000 };
   assert.equal(shouldPublishEngineUnavailable(on(), off('unavailable'), agora, notice), true);
 });
@@ -34,8 +36,22 @@ test('R7: motores distintos têm fingerprints distintas', () => {
   assert.equal(shouldPublishEngineUnavailable(on('Native'), off('degraded', 'Native'), agora, notice), true);
 });
 
-test('R7: já indisponível não gera uma segunda notificação', () => {
-  assert.equal(shouldPublishEngineUnavailable(off(), off('unavailable'), agora, undefined), false);
+test('R7: a MESMA indisponibilidade repetida não volta a notificar', () => {
+  assert.equal(shouldPublishEngineUnavailable(off(), off('degraded'), agora, undefined), false);
+});
+
+test('R7: mudança de estado sem recovery (degraded→unavailable) é anunciada', () => {
+  assert.equal(shouldPublishEngineUnavailable(off('degraded'), off('unavailable'), agora, undefined), true);
+});
+
+test('R7: a mudança sem recovery respeita a janela da MESMA fingerprint', () => {
+  const notice = { key: engineUnavailableKey(off('unavailable')), at: agora - 1000 };
+  assert.equal(shouldPublishEngineUnavailable(off('degraded'), off('unavailable'), agora, notice), false);
+});
+
+test('R7: indisponível com o mesmo estado não repete mesmo depois da janela', () => {
+  const notice = { key: engineUnavailableKey(off()), at: agora - (ENGINE_UNAVAILABLE_NOTIFY_COOLDOWN_MS + 1) };
+  assert.equal(shouldPublishEngineUnavailable(off(), off(), agora, notice), false);
 });
 
 test('R7: voltar a estar disponível nunca anuncia indisponibilidade', () => {
