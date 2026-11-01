@@ -289,6 +289,9 @@ export function validarFronteiraWindowsReadOnly(deps: FronteiraDeps): DecisaoFro
  * política de leitura.
  */
 export const CANAIS_PERMITIDOS: ReadonlySet<string> = new Set([
+  // Estado das definicoes de seguranca: leitura sem efeito, e e justamente na
+  // lane read-only que a pagina precisa de mostrar o que ja foi tentado.
+  "service:get-definitions-status",
   // Ponte local do próprio processo: estado de ligação, sem RPC.
   "service:get-connection-state",
   // Janela própria (cosmético) e saída segura.

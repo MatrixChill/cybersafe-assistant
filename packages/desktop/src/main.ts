@@ -1522,6 +1522,9 @@ function registerIpc(
   serviceRequest("service:run-restricted-analysis", (_event, filePath: string) =>
     client.request("analysis.restricted", { path: filePath }));
   serviceRequest("service:update-definitions", () => client.request("definitions.update", undefined));
+  // Leitura do estado por fonte (ClamAV / YARA / HashDB). Pass-through fino: a
+  // contagem, a idade e o backoff vivem no servico — o renderer nao os inferir.
+  serviceRequest("service:get-definitions-status", () => client.request("definitions.status", undefined));
   // ── Opt-in de retoma ao arrancar ──────────────────────────────────────────
   // Pass-through fino e validado: a decisão de gravar e a confirmação em disco
   // vivem no serviço. O renderer não escreve ficheiros nem infere estado — e um

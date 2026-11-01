@@ -89,6 +89,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
   allowPublisher: (publisher: string) => invoke("service:allow-publisher", publisher),
   runRestrictedAnalysis: (filePath: string) => invoke("service:run-restricted-analysis", filePath),
   updateDefinitions: () => invoke("service:update-definitions"),
+  getDefinitionsStatus: () => invoke("service:get-definitions-status"),
   // Opt-in de retoma ao arrancar: passagem sem lógica própria. A preferência é
   // lida e escrita pelo serviço, que é quem confirma o que está em disco.
   getProtectionIntent: () => invoke("service:get-protection-intent"),
