@@ -199,10 +199,36 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   resumo nunca era escrito — é isso que o registo congelado das 10:27 às 10:39 mostrava. Medido: o
   mesmo ficheiro isolado não termina em 150 s antes do `dispose()` (`exit=124`); com `dispose()`
   (já existia em `src/engine.ts:2432`, commit `596fbee`) sai com resumo — **4 testes / 3 PASS /
-  1 FAIL** (`logs/th-single-dispose.log`). **Retirada**: a suspeita de fuga de diretórios
-  `qa3-recursive-*` não se confirma — não há nenhum `qa3-*` na árvore nem em `%TEMP%`, e o
-  `t.after` do ficheiro limpa; nada foi «corrigido» por causa dela. A falha `this.threats`
-  (atual 4, esperado 1) **mantém-se por explicar** e a re-medição da suíte completa está em curso.
+  1 FAIL** (`logs/th-single-dispose.log`). **Duas retificações nesta linha, ambas minhas:**
+  (a) a asserção `this.threats` «mantém-se por explicar» já foi explicada e corrigida em `39f096d`
+  — `ensureOfflineCoverage` repõe em memória as assinaturas embutidas em falta, portanto a base de
+  teste é **aditiva** (1 da fixture + 3 embutidas = 4) e a expectativa `size === 1` estava errada;
+  medido depois: 4 testes / 4 PASS / exit 0 (`logs/th-single-expect-fix.log`).
+  (b) **a retirada «a suspeita de fuga de diretórios `qa3-recursive-*` não se confirma» estava
+  errada e é retirada.** Estava correta às 10:59 (nada existia), mas a suíte completa das 11:14
+  deixou **8** diretórios `packages/service/test/qa3-recursive-*` na árvore de origem. Causa: em
+  `qa3-recursive-failures.test.js` o `mkdtemp` acontece **antes** de `controlledManager()`, e o
+  `t.after` só é registado **depois** — um throw dentro de `controlledManager` deixava o diretório
+  para trás. Corrigido em `2eadccb` (o sandbox VM não conhecia duas dependências reais do
+  `scan-manager`: `./fixture-pin.js` e `@cybersafe/core`); medido isolado, **6 testes / 6 PASS /
+  exit 0 e zero diretórios criados por essa run** (`logs/qa3-core-fix.log`). Os 8 + 4 órfãos foram
+  removidos **um a um por nome explícito**, nunca com `git clean` nem com wildcard de árvore.
+- Suíte `service` com total, pela primeira vez: **931 testes / 873 PASS / 58 FAIL / 0 SKIP** no
+  HEAD `39f096d` (`logs/service-full-39f096d.log`). A distribuição tem **uma causa dominante e é de
+  produto**: `KILL_TERMINATION_DISABLED = true` (`packages/service/src/engine.ts:748`, delta
+  `f1-kill-disable-20261026`) faz `killProcess` devolver `failed` para qualquer PID antes de
+  qualquer consulta. `process-kill.test.js` 42/12/**30 FAIL** e `kill-budget.test.js` 6/1/**5 FAIL**
+  reproduzem os dois isoladamente e de forma determinística; no `kill-budget` a prova é literal —
+  «o taskkill tem de correr, correu 0». Consequência documental: **a terminação de processos não
+  é uma funcionalidade ativa nesta construção**, e o README dizia «Motores, serviço, API e Gestor
+  de Tarefas: Funcionais». Essa linha está agora separada em três — listar/monitorizar (7/7
+  medidos), terminar processo (NÃO FUNCIONAL, com a referência exata ao delta) e a garantia de que
+  a interface não finge sucesso: `TaskManagerPage.tsx:579` mostra a mensagem do serviço com
+  `ok: o.success`, e a pregação de sucesso em `processActions.ts:606` só aceita
+  `killed`/`already-exited`. **Reativar o delta é decisão do proprietário** (a janela
+  revalidação→`taskkill` não é atómica; o delta existe precisamente para não a fingir segura) e
+  nenhuma asserção de teste foi afrouxada para esconder isto. Restam 23 falhas: `p1-3-prefetch-isolation`
+  7, `qa3-recursive` 5 (já corrigidas em `2eadccb`, total ainda não re-medido) e 11 por classificar.
 - Estado do `ci` no `main`: **VERDE, medido**. A run `41300363725` (SHA `596fbee`,
   2026-11-01T11:06Z, `conclusion: success`) passou em **todos os nove passos**, incluindo
   `Vendor YARA e manifesto de packaging` e `Suíte do desktop`. Nada nisto significa que o
