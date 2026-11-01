@@ -47,6 +47,7 @@ function fixture(t) {
   };
   put("package.json", "{}\n");
   put("package-lock.json", "{}\n");
+  put("product-version.json", '{"version":"0.1.11","channel":"internal","codename":"fixture"}\n');
   put("scripts/a.mjs", "export const a = 1;\n");
   put("packages/core/src/index.ts", "export const b = 2;\n");
   put("packages/native-engine/build/Release/scan-engine.exe", "MZ\n");

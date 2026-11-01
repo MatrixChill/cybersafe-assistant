@@ -904,3 +904,56 @@ que estavam em causa, e o comentário no ficheiro diz de onde veio.
 falsa confiança (o primeiro foi o `scanner-dashboard-visibility`, hoje `todo` com
 a razão escrita). O 1 TODO do recount continua a ser esse, e os 5 SKIP continuam
 a ser os do artefacto que ainda não há — `#13`.
+
+## `product-version.json` entra no congelamento (fecha a task #17)
+
+`scripts/source-freeze.mjs` congelava `package.json`, `package-lock.json`, `scripts`,
+`packages` e `assets`. A **identidade da versão** do instalador vive noutro sítio —
+`product-version.json` na raiz, que é «a ÚNICA fonte» segundo o cabeçalho do próprio
+`scripts/app-version.mjs`, e que `package-windows.mjs` e `stage-renderer.mjs` leem.
+Resultado: um `--verify` verde não dizia nada sobre a versão que vai no `.exe`. Uma
+aprovação de freeze que não cobre a versão aprova um binário cuja identidade ninguém
+aprovou.
+
+Passou a `ROOTS_REQUIRED` **e** a `FILE_ROOTS` — não só é obrigatório como tem de ser
+ficheiro: uma pasta ou um link com esse nome continua a ser recusado. Falha fechada:
+sem o ficheiro, o congelamento não nasce.
+
+`scripts/app-version.mjs` corre-se na mesma sem qualquer mudança de output:
+`versão do produto 0.1.11-internal.pap-r7.20261031 (pap-r7) — fonte product-version.json`.
+
+**Efeito colateral que tinha de ser medido:** os fixtures de teste do freeze descreviam
+uma árvore sem esse ficheiro, por isso 27 de 40 casos passaram a falhar com
+`required-missing`. Não afrouxei o gate — acrescentei `product-version.json` aos dois
+fixtures (`source-freeze.test.mjs`, `source-freeze-assets.test.mjs`) e os 40 voltaram a
+passar. É a mesma classe das fixtures de ClamAV que só tinham `main.cvd`.
+
+## Frescura por fonte: seis testes que estavam certos e deixaram de estar
+
+`test/clamav-frescura-componente.test.js` **não está na lista do `npm test`** do
+`service`, por isso envelheceu em silêncio — exatamente o custo medido no ponto 3.
+Corria pela primeira vez no `test:full` e deu 6 falhas. Cada uma é contrato, não
+produto, e foi tratada com a asserção a manter-se:
+
+- As idades «fresco» eram `now - HOUR`. Desde que o feed de hashes passou a cadência de
+  **45 minutos** (a janela oficial do `get_recent` do MalwareBazaar), uma hora já não é
+  fresco para essa fonte. O `FRESCO` do fixture passou a 10 minutos — dentro das três
+  cadências (hashes 45 min, YARA 6 h, ClamAV 24 h) — com o motivo escrito no ficheiro.
+- O stub de `updateHashFeed` devolvia `undefined`. A função real passou a devolver
+  `{alterou, novos, total, rejeitados, lacunaCobertura}`, e `hashesUpdated` é `alterou`;
+  sem a forma nova, `force` não provava os três componentes. O stub devolve agora a forma real.
+- «falha volta a tentar no ciclo seguinte» colidia com o backoff por fonte: o segundo
+  `checkAndUpdate` imediato cai dentro da janela de recusa. Os dois factos ficaram
+  assentes no teste, e ambos assertados: **dentro da janela não se repica no fornecedor**
+  e, depois de expirar a recusa (o fixture move `falhas.clamav.nextAllowedAtMs`), a fonte
+  sem prova **tenta outra vez**. Não congelei a exigência; acrescentei-lhe a outra metade.
+
+Resultado isolado: `clamav-frescura-componente` **8/8 PASS**.
+
+## `test:full` no `service` e no `native-windows`
+
+Ambos os pacotes tinham um `npm test` com listas explícitas de ficheiros (96 de 147 no
+`service`, 18 de 28 no `native-windows`). Acrescentei `test:full`, que corre a pasta
+inteira com o mesmo `--test-concurrency=1` (o resultado depende do modo de execução e
+isso está dito na tabela). Primeiro uso medido: `native-windows` **246 testes / 246 PASS /
+0 FAIL / `exit 0`**, e foi o `service test:full` que apanhou as seis falhas acima.

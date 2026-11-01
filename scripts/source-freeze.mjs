@@ -62,11 +62,16 @@ const EXCLUDED_DIRS = new Set([
 ]);
 const EXCLUDED_FILES = [/\.log$/i, /\.tmp$/i, /\.tsbuildinfo$/i];
 const RETRYABLE = new Set(["EBUSY", "EPERM", "EACCES", "EMFILE", "ENFILE"]);
-const ROOTS_REQUIRED = ["package.json", "package-lock.json", "scripts", "packages", "assets"];
+/* `product-version.json` é a fonte única da versão que vai no instalador
+   (`app-version.mjs`, `package-windows.mjs` e `stage-renderer.mjs` leem-na).
+   Fora do conjunto congelado, um `--verify` verde não dizia nada sobre a versão
+   distribuída — a aprovação tem de a cobrir, ou o congelamento aprova um binário
+   cuja identidade ninguém aprovou. */
+const ROOTS_REQUIRED = ["package.json", "package-lock.json", "product-version.json", "scripts", "packages", "assets"];
 const ROOTS_OPTIONAL = [/^tsconfig(\..+)?\.json$/i, /^vite\.config\..+$/i, /^\.npmrc$/i];
 const ROOTS_EXTRA = ["packages/native-engine/build/Release/scan-engine.exe", "vendor/clamav/VENDOR.json"];
 /** Roots que têm de ser FICHEIROS: um link/pasta com esse nome nunca é fonte válida. */
-const FILE_ROOTS = new Set(["package.json", "package-lock.json", ...ROOTS_EXTRA]);
+const FILE_ROOTS = new Set(["package.json", "package-lock.json", "product-version.json", ...ROOTS_EXTRA]);
 const isFileRoot = (rel) => FILE_ROOTS.has(rel) || ROOTS_OPTIONAL.some((re) => re.test(path.posix.basename(rel)));
 const SAMPLE_LIMIT = 20;
 
