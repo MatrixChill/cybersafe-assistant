@@ -1085,3 +1085,28 @@ Dentro de `npm run test:scripts`, que sobe para **392 testes / 386 PASS / 0 FAIL
 5 SKIP / 1 TODO**. O que fica por provar continua a ser um só: a aceitação por
 `validateManifest` com a chave real do proprietário (#14) e o transporte contra uma
 release existente ( hoje `404` porque não há release nenhuma).
+
+## `api` tinha 33 ficheiros de teste e a tabela publicava um
+
+O ponto 3 do pedido era a cobertura **efetiva**, incluindo o que o comando padrão não
+seleciona. A tabela tinha uma linha «`api` (ficheiro do guard) 32 PASS / 0 FAIL» — ou
+seja, uma única fichero medida de um pacote com 33. `npm test` do `api` lista 25
+entradas explícitas; **8 ficheiros não eram selecionados por comando nenhum**:
+`ag36-ai-runtime`, `ag36-parent-config`, `auth-session-restart`, `dev-parent-shutdown`,
+`file-scan-archive-contract`, `health-payload`, `r7-sample-events`, `upload-limits`.
+
+Acrescentei `npm run test:full` ao pacote e medi os dois âmbitos, serializados
+(`logs/api-suite-20261101.log`):
+
+- `npm test` → **426 testes / 61 suítes / 426 PASS / 0 FAIL** (`exit 0`)
+- `test:full` → **456 / 65 suítes / 456 PASS / 0 FAIL** (`exit 0`)
+
+Resultado honesto: os 30 testes que faltavam **passam todos** — não havia falha
+escondida, havia sub-representação publicada. Os dois ficheiros com nome de contrato
+de segurança (`upload-limits`, `auth-session-restart`) correm agora em comando, não
+por acaso: o primeiro monta um `express` efémero e mede o limite de upload real; o
+segundo cobre a reinício de sessão.
+
+Esta é a última adição de âmbito de testes desta linha: o `api` era o único pacote com
+ficheiros fora de qualquer comando. Fecho aqui o ponto 3 e passo ao mecanismo de
+aprovação do congelamento, que é o que trava o instalador.

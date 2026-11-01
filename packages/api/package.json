@@ -7,6 +7,7 @@
     "dev": "tsx watch src/index.ts",
     "build": "tsc -p tsconfig.json",
     "test": "npm run build && node --import tsx --test test/lifecycle.test.js test/ai-policy.test.js test/ai-classify.test.js test/auth-role.test.js test/auth-role-production.test.js test/auth-jwt-secret.test.js test/auth-api-guard.test.js test/email-validation.test.js test/provision-admin.test.js test/rotate-jwt-secret.test.js test/verify-account-migration.test.js test/matrix-guard.test.js test/r6-matrix-boundaries.test.js test/r6-l8-request-shape.test.js test/r6-l10-normalizacao.test.js test/r6-l12-logout.test.js test/process-intelligence.test.js test/process-consent.test.js test/process-consent-r2.test.js test/recovery-process-validation.test.js test/recovery-process-chat.test.js test/preview-api-cors.test.js test/dist-auth13-inputs.test.js test/dev-isolation.test.js test/matrix-origin-contract.test.js",
+    "test:full": "npm run build && node --import tsx --test --test-concurrency=1 \"test/*.test.js\"",
     "start": "node dist/index.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate": "prisma migrate dev",
