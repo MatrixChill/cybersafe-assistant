@@ -988,3 +988,33 @@ com `vendor/yara/COPYING.txt`, `VENDOR.json`, `vcruntime140.dll`, `yara64.exe` e
 Consequência direta para a task #13: a aprovação tem de nomear **este** digest. A
 folha está em `release-prep/FONTE-CONGELAMENTO-APROVACAO.md` (fora do repo, porque
 um ficheiro de aprovação dentro da árvore entraria no digest que aprova).
+
+## Gate da base de assinaturas: provado com o updater real, não com duplos
+
+Faltava ao requisito «não ler uma base a meio durante uma análise» a prova com as
+duas peças verdadeiras. `scripts`- e `service`-teste do `ClamDatabaseGate` cobriam o
+gate isolado; `checkAndUpdate` nunca tinha corrido contra um gate real.
+
+`packages/service/test/clamav-gate-scan-em-curso.test.js` (4 casos, **4/4 PASS**)
+afirma agora:
+
+1. com uma lease de scan activa, `checkAndUpdate(true)` **não faz nascer o
+   freshclam** (`spawnCalls === 0`), devolve `clamUpdated:false`, e o
+   `clamav/main.cvd` fica **byte-a-byte** como estava;
+2. a causa da recusa vem no resultado (`ClamAV: … scans ClamAV activos …`) — um
+   painel que mostra uma causa inventada é pior do que um painel calado;
+3. a posse de um update **fecha a admissão** de scans novos (`update-pending` /
+   `update-active`) e devolvê-la reabre;
+4. libertada a lease, o mesmo ciclo escreve: a recusa é uma **janela**, não um
+   congelamento.
+
+Facto do código que a escrita deste ficheiro revelou e que vale registar: o estado
+do gate **não vive na instância**, vive num ambito à escala do módulo
+(`src/clam-database-gate.ts:207`). Em produção é o invariante certo (um serviço, um
+processo, um gate). Num ficheiro de testes, quatro instâncias são quatro vistas do
+mesmo estado — a primeira versão deste ficheiro tinha um gate por caso e os casos
+2-4 falhavam em grupo e passavam isolados, que é a assinatura exata dessa partilha.
+Segundo facto: `reset()` **não** é «limpar para o próximo caso»; é o encerramento
+(acorda a drenagem como «não drenada» e fecha a admissão), por isso usá-lo como
+isolamento estragou os quatro casos. O isolamento correto é cada caso devolver o
+que pediu, dentro do próprio corpo, e um gate por ficheiro, como no serviço.
