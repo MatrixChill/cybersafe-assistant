@@ -7,10 +7,12 @@ import { after, describe, it } from "node:test";
 
 import {
   RAIZ_REPO,
+    CAMPOS_CONFIANÇA,
     confiança,
     dePublicaParaFingerprint,
     foraDoRepo,
     gerar,
+    validarConfiança,
 } from "../release-key-setup.mjs";
 import {
   buildSignedManifest,
@@ -73,15 +75,56 @@ describe("geração e configuração da chave de publicação", () => {
     assert.notEqual(segundo.fingerprint, primeiro.fingerprint, "--force gera um par novo, e isso invalida o que foi assinado antes");
   });
 
-  it("o bloco de pin é desligado por omissão e transporta a pública", async () => {
+  it("o bloco de pin tem os campos que o cliente lê, e vem desligado", async () => {
     const dir = await diretório();
     const par = gerar(dir);
     const pública = await fs.readFile(par.público, "utf8");
     const config = confiança(pública, par.fingerprint);
     assert.equal(config.enabled, false, "gerar a chave não liga o atualizador: isso é decisão e precisa release existente");
-    assert.equal(config.algorithm, "ed25519");
     assert.equal(config.publicKeyPem, pública);
-    assert.equal(config.fingerprint, par.fingerprint);
+    assert.equal(config.pinnedKeyFingerprint, par.fingerprint);
+    assert.deepEqual(validarConfiança(config), [], `bloco impresso pela ferramenta não validaria no cliente: ${JSON.stringify(validarConfiança(config))}`);
+
+    // A lista de campos não é minha: é o que `production.ts` lê do JSON. Foi
+    // exatamente aqui que a ferramenta errou uma primeira vez — emitia
+    // `{fingerprint, algorithm}` enquanto o cliente pede `pinnedKeyFingerprint`,
+    // e o resultado era um `release-trust.json` colado à letra mas `unconfigured`.
+    const origem = await fs.readFile(
+      path.join(RAIZ_REPO, "packages", "desktop", "src", "updater", "production.ts"), "utf8");
+    // `trust.json` aparece no import `from './release-trust.json'` e não é um
+    // campo lido; o resto são todos acessos reais do objeto.
+    const lidos = [...new Set([...origem.matchAll(/\btrust\.([A-Za-z_][A-Za-z0-9_]*)/g)]
+      .map((m) => m[1]).filter((campo) => campo !== "json"))];
+    assert.ok(lidos.length >= 4, `produção.ts deveria ler vários campos do ficheiro, li ${lidos.length}`);
+    for (const campo of lidos) {
+      assert.ok(campo in config, `o cliente lê trust.${campo} e o bloco emitido não o tem`);
+    }
+    assert.deepEqual(CAMPOS_CONFIANÇA.slice().sort(), lidos.slice().sort(),
+      "CAMPOS_CONFIANÇA divergiu do que production.ts lê — a lista tem de ser reancorada no consumidor");
+  });
+
+  it("recusa blocos que o cliente chumaria, em vez de os imprimir", async () => {
+    const pem = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAxQ\n-----END PUBLIC KEY-----\n";
+    const base = {
+      enabled: false, publicKeyPem: pem, pinnedKeyFingerprint: "a".repeat(64),
+      publisherLabel: "CyberSafe", reason: "x",
+    };
+    assert.deepEqual(validarConfiança({ ...base, feedManifestUrl: "https://github.com/o/e/releases/latest/download/update-manifest.json" }), []);
+    assert.ok(validarConfiança({ ...base, feedManifestUrl: "" }).length > 0, "feed vazio é configured-out, não é omissão");
+    assert.ok(validarConfiança({ ...base, feedManifestUrl: "http://github.com/o/e/releases/latest/download/m.json" })
+      .some((p) => /https/.test(p)), "feed não-https tem de ser nomeado");
+    assert.ok(validarConfiança({ ...base, feedManifestUrl: "https://github.com/o/e/releases/download/v1/outro-ficheiro.exe" })
+      .some((p) => /download de release/.test(p)), "URL de release que não é um manifesto tem de ser recusado");
+    assert.ok(validarConfiança({ ...base, feedManifestUrl: "https://exemplo.com/m.json" })
+      .some((p) => /github\.com/.test(p)), "origem fora de github.com não é canal de confiança do cliente");
+    assert.ok(validarConfiança({ ...base, pinnedKeyFingerprint: "abc" })
+      .some((p) => /64 hex/.test(p)));
+    assert.ok(validarConfiança({ ...base, publicKeyPem: "nada" })
+      .some((p) => /SPKI/.test(p)));
+    assert.ok(validarConfiança({ ...base, publisherLabel: "  " })
+      .some((p) => /publisherLabel/.test(p)), "sem editor o config fica unconfigured — a ferramenta diz porquê");
+    assert.throws(() => confiança(pem, "abc"), /bloco incompleto/,
+      "a ferramenta não imprime um bloco que o cliente chumaria");
   });
 
   it("um manifesto assinado com esta chave é verificado pela pública correspondente", async () => {
