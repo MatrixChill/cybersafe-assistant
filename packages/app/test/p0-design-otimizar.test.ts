@@ -235,11 +235,14 @@ describe("P0 — a página ficou mais curta, e o que é raro saiu da frente", ()
 });
 
 describe("P0 — desenho novo, os mesmos efeitos", () => {
-  test("a página só chama as três operações que já existiam", () => {
+  test("a página só chama as quatro operações aprovadas", () => {
     const chamadas = [...pagina.matchAll(/window\.electronAPI\.(\w+)\(/g)].map((m) => m[1]);
     assert.deepEqual(
       [...new Set(chamadas)].sort(),
-      ["getWindowsHealth", "startScan", "updateDefinitions"],
+      // `getDefinitionsStatus` entrou em 2026-11-01 com a prioridade das definições:
+      // o resultado de `updateDefinitions()` por si só não confirma o estado por fonte,
+      // e a página passou a ler o estado do serviço em vez de o inferir do pedido.
+      ["getDefinitionsStatus", "getWindowsHealth", "startScan", "updateDefinitions"],
       "o redesign mudou o que a página pede ao serviço",
     );
   });

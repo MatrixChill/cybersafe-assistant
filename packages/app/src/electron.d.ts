@@ -3,6 +3,7 @@ import type {
   AppUpdateBridge,
   ConnectionSnapshot,
   DefinitionsUpdateResult,
+  DefinitionsStatus,
   PcState,
   ProtectionIntentState,
   ProtectionOptInResult,
@@ -86,6 +87,7 @@ export interface ElectronAPI {
   allowPublisher: (publisher: string) => Promise<{ success: boolean }>;
   runRestrictedAnalysis: (filePath: string) => Promise<AnalysisResult | null>;
   updateDefinitions: () => Promise<DefinitionsUpdateResult>;
+  getDefinitionsStatus: () => Promise<DefinitionsStatus | null>;
   /** Preferencia de retoma ao arrancar. Le o que o servico confirma em disco. */
   getProtectionIntent: () => Promise<ProtectionIntentState>;
   /** Unica forma de escrever a preferencia. `guardado:false` = nao foi guardada. */

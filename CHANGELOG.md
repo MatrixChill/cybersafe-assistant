@@ -784,3 +784,54 @@ os opt-in/AV, portanto não estavam a depender dessa forma).
 **Medido depois de tudo:** `core` 1104 / 1069 PASS / **4 FAIL** / 30 SKIP / 1 TODO
 (mesmo baseline) e `service` `npm test` 967 / 925 PASS / **42 FAIL** (mesmo
 baseline, +5 testes novos a passar). Os `updater-*` a três dão 36/36.
+
+## Estado por fonte no interface — o requisito 5 da prioridade das definições
+
+O serviço passou a responder `definitions.status`; faltava quem o mostrasse. Em
+`packages/app`:
+
+- **`src/lib/definitionsStatusPresentation.ts` (novo)** — os cinco estados do
+  serviço chegam distintos (`Atualizado`, `Desatualizado`, `Degradado`,
+  `Indisponível`, `Nunca verificado`) e não são colapsados numa cor. O
+  `ultimoErro` **não é ecoado**: é categorizado («chave de acesso não
+  configurada», «limite de pedidos do fornecedor», «sem ligação ao fornecedor»,
+  …) porque um erro de transporte pode conter URL, caminho ou chave — a mesma
+  regra que `definitionUpdateResult.ts:30` já aplicava. `itensCarregados ===
+  null` mostra «contagem não medida», nunca `0`.
+- **`OtimizarPage.tsx`** — uma secção «Definições de segurança» lê o estado ao
+  montar (uma leitura, não um snapshot repetido; `definitions.status` está em
+  `INDEPENDENT_READ_METHODS`) e o cartão `update` volta a perguntar o estado
+  depois do clique em vez de o deduzir do resultado do pedido. Sem leitura, a
+  secção diz «o serviço não devolveu o estado por fonte» — não mostra uma lista
+  vazia como se fosse boa notícia.
+- **Chip de «Nunca verificado» é neutro, não verde.** A ausência de leitura não
+  escala a severidade agregada (`nunca_verificado: "ok"` em `SEVERIDADES`), mas
+  também não é sucesso: o chip segue o rótulo, não a agregação.
+
+Dois resguardos de revisão tocados, ambos registados em vez de afrouxados:
+
+- `p0-design-otimizar.test.ts` contava as operações que a página pede ao serviço
+  a partir do código-fonte. A quarta (`getDefinitionsStatus`) entrou com data e
+  justificação na lista; a página continua presa a um conjunto exato. (Detalhe
+  que o resguardo apanhou por mim: um comentário meu continha a forma literal
+  `window.electronAPI.X(...)` e o rácio contou-a como chamada — o teste falhou
+  por culpa do comentário, não do código.)
+- `r6-l1-otimizar-visual.test.ts` limitava o monoespaçado a 4 elementos, que era
+  o proxy de «só o título e os cabeçalhos de grupo». Com um quarto grupo o número
+  sobe; a regra passou a dizer-se estruturalmente (nenhum elemento com mono fora
+  de `h1`/`h2`) **e** manteve-se o teto. É mais apertada do que era, não menos.
+
+**Medido:** `@cybersafe/app` `npm test` 2857 / **2857 PASS** / 0 FAIL (baseline era
+2849/2849; +8 testes novos a passar, incluindo a asserção de que a renderização
+sem ponte não afirma nada sobre as bases). `tsc -b` sem erros. `eslint` sobre os
+ficheiros tocados devolve 2 erros, ambos **pré-existentes nesta linha**:
+`ProcessSnapshot` não usado em `electron.d.ts:14` e `react-refresh/only-export-components`
+em `desfechoVerificacaoDisco` (`OtimizarPage.tsx`, já exportado no `HEAD`). O
+ficheiro novo não acrescenta nenhum.
+
+**Lacuna que fica dita, não disfarçada:** a secção não se atualiza sozinha com o
+tempo — uma leitura por montagem e uma por operação manual. Um estado que passou
+de `actualizado` para `desactualizado` por envelhecimento só se vê ao reentrar na
+página ou após «Atualizar definições». Não há «Verificar agora» por fonte: o
+`definitions.update` do serviço é um ciclo único e recorre as três fontes;
+botões separados exigiriam um pedido seletivo que o contrato ainda não tem.

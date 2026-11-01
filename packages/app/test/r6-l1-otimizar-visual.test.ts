@@ -155,8 +155,22 @@ describe("R6 — legibilidade: corpo de pessoa, não de terminal", () => {
     const comMono = [...htmlInicial.matchAll(/class="([^"]*)"/g)]
       .map((m) => m[1].split(/\s+/))
       .filter((lista) => lista.includes("font-mono")).length;
-    assert.ok(comMono <= 4, `demasiado monoespaçado no ecrã: ${comMono} elementos`);
+    /* O limite numérico era o proxy de «só título e cabeçalhos de grupo». Em
+       2026-11-01 entrou o grupo «Definições de segurança», um cabeçalho de grupo
+       como os outros três. A regra passa a dizer-se estruturalmente, e por isso fica
+       mais apertada: nenhum elemento com mono fora de h1/h2, além do teto. */
+    const monoForaDeCabecalho = [...htmlInicial.matchAll(/<(h1|h2|h3|p|span|div|button)\b[^>]*class="([^"]*)"/g)]
+      .filter((m) => m[1] !== "h1" && m[1] !== "h2" && m[2].split(/\s+/).includes("font-mono")).length;
+    assert.equal(monoForaDeCabecalho, 0, "monoespaçado usado fora de um cabeçalho de grupo");
+    assert.ok(comMono <= 5, `demasiado monoespaçado no ecrã: ${comMono} elementos`);
     assert.equal(/<p class="[^"]*font-mono/.test(htmlInicial), false, "parágrafo de leitura em mono");
+  });
+
+  test("sem leitura do serviço, a secção das definições não afirma nada", () => {
+    // A renderização inicial corre efeitos nenhuns: é o caso «sem leitura».
+    assert.match(htmlInicial, /Definições de segurança/);
+    assert.match(htmlInicial, /O serviço não devolveu o estado por fonte/);
+    assert.equal(htmlInicial.includes("última tentativa"), false, "linhas por fonte inventadas sem leitura");
   });
 
   test("nada de 12px como corpo de leitura", () => {
