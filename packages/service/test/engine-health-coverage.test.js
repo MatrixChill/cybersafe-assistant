@@ -1,10 +1,12 @@
 import { test, describe } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fsp from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { ProtectionEngineService } from "../dist/engine.js";
+import { YARA_PIN } from "../dist/updater.js";
 import { YaraEngine } from "@cybersafe/core";
 
 /**
@@ -127,13 +129,25 @@ describe("W1 — o coverage atravessa o named-pipe", () => {
       "rule update_source_crypto { condition: filesize > 3 }",
       "rule update_source_ransomware { condition: filesize > 4 }",
     ];
+    const NOMES = [
+      "MALW_Eicar.yar",
+      "packer_compiler_signatures.yar",
+      "crypto_signatures.yar",
+      "RANSOM_MS17-010_Wannacrypt.yar",
+    ];
+    // Desde a decisão D4 o updater recusa conteúdo cujo SHA-256 não bata com o
+    // pin revisto. Este fixture serve regras sintéticas, por isso pinia o que ele
+    // próprio serve — nomes, repo e classes vêm do pin de produção e só o digest
+    // é recomputado. As asserções em baixo não mudam: continua a exigir reload em
+    // memória, contagem do corpus e exclusão das referências.
+    engine.updater.yaraPin = YARA_PIN.map((pino) => ({
+      ...pino,
+      sha256: createHash("sha256")
+        .update(sourceRules[NOMES.indexOf(pino.id)] ?? "", "utf8")
+        .digest("hex"),
+    }));
     engine.updater.downloadText = async (url) => {
-      const sourceIndex = [
-        "MALW_Eicar.yar",
-        "packer_compiler_signatures.yar",
-        "crypto_signatures.yar",
-        "RANSOM_MS17-010_Wannacrypt.yar",
-      ].findIndex((name) => url.endsWith(name));
+      const sourceIndex = NOMES.findIndex((name) => url.endsWith(name));
       assert.notEqual(sourceIndex, -1, `fonte YARA inesperada: ${url}`);
       return sourceRules[sourceIndex];
     };
