@@ -39,6 +39,8 @@ Var CSFontTitle
 Var CSFontHeading
 Var CSMode
 Var CSDesktopShortcut
+Var CSStartMenuShortcut
+Var CSStartMenu
 Var CSInstalledVersion
 Var CSInstalledDir
 Var CSDirEdit
@@ -89,6 +91,8 @@ Var CSSpaceState
   Call CS_Measure
   System::Call 'user32::MoveWindow(p $CSBg, i 0, i 0, i $CSW, i $CSH, i 1)'
   ${NSD_SetStretchedImage} $CSBg "$PLUGINSDIR\${BMPNAME}" $CSBgImage
+  ; SetStretchedImage deixa o bitmap no topo; empurra-o para tras dos controlos.
+  System::Call 'user32::SetWindowPos(p $CSBg, p 1, i 0, i 0, i 0, i 0, i 0x13)'
 !macroend
 
 ; Posiciona em percentagem da area util, para alinhar com o bitmap esticado
@@ -138,6 +142,16 @@ Var CSSpaceState
       Delete "$newDesktopLink"
       System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
     ${EndIf}
+  ${EndIf}
+  ${If} $CSStartMenuShortcut == "0"
+    ${If} ${FileExists} "$newStartMenuLink"
+      Delete "$newStartMenuLink"
+      System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+    ${EndIf}
+    ; Apenas remove a pasta do produto se estiver vazia.
+    !ifdef MENU_FILENAME
+      RMDir "$SMPROGRAMS\${MENU_FILENAME}"
+    !endif
   ${EndIf}
 !macroend
 
@@ -259,6 +273,14 @@ Var CSSpaceState
     SendMessage $0 ${BM_CLICK} 0 0
   FunctionEnd
 
+  Function CS_ShowLicense
+    ${If} ${FileExists} "$PLUGINSDIR\THIRD-PARTY-NOTICES.txt"
+      ExecShell "open" "$PLUGINSDIR\THIRD-PARTY-NOTICES.txt"
+    ${Else}
+      MessageBox MB_ICONEXCLAMATION|MB_OK "As licencas de terceiros nao estao disponiveis neste instalador."
+    ${EndIf}
+  FunctionEnd
+
   Function CS_ChooseUninstall
     ${If} $CSInstalledDir == ""
       Return
@@ -276,10 +298,14 @@ Var CSSpaceState
 
     StrCpy $CSMode "install"
     StrCpy $CSDesktopShortcut "1"
+    StrCpy $CSStartMenuShortcut "1"
     Call CS_Detect
 
     !insertmacro MUI_HEADER_TEXT "$(CS_WelcomeHeader)" ""
     !insertmacro CS_BeginPage "page-welcome.bmp"
+    ; Mostra o documento real de licencas, incluido no instalador. Nao ha texto
+    ; de licenca inventado nem um link remoto.
+    File "/oname=THIRD-PARTY-NOTICES.txt" "${PROJECT_DIR}\assets\licenses\THIRD-PARTY-NOTICES.txt"
     Call CS_CreateFonts
 
     ${NSD_CreateLabel} 0 0 1u 1u "$(CS_WelcomeTitle)"
@@ -332,6 +358,11 @@ Var CSSpaceState
     ${If} $CSInstalledDir == ""
       EnableWindow $R9 0
     ${EndIf}
+
+    ${NSD_CreateButton} 0 0 1u 1u "$(CS_LicenseBtn)"
+    Pop $R9
+    !insertmacro CS_Place $R9 64 75 24 8
+    ${NSD_OnClick} $R9 CS_ShowLicense
 
     ; A pagina tem os seus proprios botoes de accao; o Next/Back do wizard
     ; ficam ocultos apenas aqui e sao repostos ao sair.
@@ -546,9 +577,14 @@ Var CSSpaceState
     !insertmacro CS_Place $CSDesktop 39 40 57 6
     ${NSD_SetState} $CSDesktop ${BST_CHECKED}
 
+    ${NSD_CreateCheckbox} 0 0 1u 1u "$(CS_StartMenuShortcut)"
+    Pop $CSStartMenu
+    !insertmacro CS_Place $CSStartMenu 39 46 57 5
+    ${NSD_SetState} $CSStartMenu ${BST_CHECKED}
+
     ${NSD_CreateLabel} 0 0 1u 1u ""
     Pop $CSRepairNote
-    !insertmacro CS_Place $CSRepairNote 39 49 57 8
+    !insertmacro CS_Place $CSRepairNote 39 53 57 7
     !insertmacro CS_CardColors $CSRepairNote
     ${If} $CSMode == "repair"
       ${NSD_SetText} $CSRepairNote "$(CS_RepairModeNote)"
@@ -593,6 +629,13 @@ Var CSSpaceState
       StrCpy $CSDesktopShortcut "1"
     ${Else}
       StrCpy $CSDesktopShortcut "0"
+    ${EndIf}
+
+    ${NSD_GetState} $CSStartMenu $R0
+    ${If} $R0 == ${BST_CHECKED}
+      StrCpy $CSStartMenuShortcut "1"
+    ${Else}
+      StrCpy $CSStartMenuShortcut "0"
     ${EndIf}
 
     Call CS_FreeResources

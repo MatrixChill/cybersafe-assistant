@@ -71,27 +71,32 @@ function stagingDirs() {
 }
 
 describe("manifesto da aplicação empacotada", () => {
-  it("uses stock assisted NSIS without custom scripts/hooks and preserves installation contracts", () => {
+  it("wires the custom assisted NSIS and preserves installation contracts", () => {
     const m = manifest();
     const n = m.build.nsis;
-    assert.equal(n.include, undefined);
+    assert.equal(n.include, path.join(DESKTOP_DIR, "build", "installer", "cybersafe-installer.nsh"));
     assert.equal(n.script, undefined);
-    assert.equal(Object.keys(n).some(key => /custom|hook/i.test(key)), false);
     assert.equal(n.oneClick, false);
     assert.equal(n.perMachine, false);
     assert.equal(n.deleteAppDataOnUninstall, false);
     assert.equal(n.createDesktopShortcut, true);
     assert.equal(n.createStartMenuShortcut, true);
     assert.equal(n.runAfterFinish, true);
-    assert.equal(n.language, undefined, 'do not force language as part of the stock correction');
-    assert.equal(m.build.appId, 'com.cybersafe.assistant');
+    assert.equal(n.language, undefined, "the custom language file owns the visible strings");
+    assert.equal(m.build.appId, "com.cybersafe.assistant");
     assert.equal(m.version, readProductVersion({ root: REPO_ROOT }).version);
-    assert.equal(m.build.win.icon, path.join(DESKTOP_DIR, 'src', 'assets', 'icon.ico'));
-    assert.equal(n.installerSidebar, path.join(DESKTOP_DIR, 'build', 'installer', 'installerSidebar.bmp'));
-    assert.equal(n.uninstallerSidebar, path.join(DESKTOP_DIR, 'build', 'installer', 'uninstallerSidebar.bmp'));
+    assert.equal(m.build.win.icon, path.join(DESKTOP_DIR, "src", "assets", "icon.ico"));
+    assert.equal(n.installerSidebar, path.join(DESKTOP_DIR, "build", "installer", "installerSidebar.bmp"));
+    assert.equal(n.uninstallerSidebar, path.join(DESKTOP_DIR, "build", "installer", "uninstallerSidebar.bmp"));
     const raw = desktopManifest.build.nsis;
-    assert.equal(raw.include, undefined, 'direct electron-builder use must also remain stock');
-    assert.equal(raw.script, undefined);
+    assert.equal(raw.include, "installer/cybersafe-installer.nsh", "direct electron-builder use must use the same custom surface");
+    assert.equal(raw.script, undefined, "the stock electron-builder script remains the engine");
+    const nshPath = path.join(DESKTOP_DIR, "build", "installer", "cybersafe-installer.nsh");
+    assert.ok(fs.existsSync(nshPath), "o include do NSIS tem de existir no pacote");
+    const nsh = fs.readFileSync(nshPath, "utf8");
+    assert.match(nsh, /!macro customWelcomePage/, "o ecra de boas-vindas e o ponto de entrada do setup");
+    assert.match(nsh, /CS_ShowLicense/, "as licencas reais tem de estar acessiveis no setup");
+    assert.match(nsh, /CSStartMenuShortcut/, "o atalho do menu iniciar tem de ser uma escolha explicita");
   });
 
   it("leva productName: sem ele o userData cai em %APPDATA%\\@cybersafe\\desktop", () => {
