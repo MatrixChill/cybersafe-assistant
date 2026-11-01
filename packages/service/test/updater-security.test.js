@@ -88,6 +88,10 @@ test("falha de rename da base de hashes preserva os bytes antigos e remove o sta
   });
   const updater = new DefinitionUpdater(defs, {
     hashFeedRequest: fakeRequest({ chunks: [payload] }),
+    // Chave sintética: desde 2026-11-01 o caminho de alto nível recusa-se antes
+    // da rede sem `Auth-Key`, e este teste quer provar a ESCRITA, não a recusa
+    // (a recusa tem teste próprio em `updater-hashfeed.test.js`).
+    hashAuthKey: "0123456789abcdef0123456789abcdef",
     renameHashes: async () => {
       throw new Error("rename falhou");
     },
@@ -127,14 +131,17 @@ test("base de hashes é escrita por staging+rename e não deixa .tmp", async () 
   });
   const updater = new DefinitionUpdater(defs, {
     hashFeedRequest: fakeRequest({ chunks: [payload] }),
+    hashAuthKey: "0123456789abcdef0123456789abcdef",
   });
 
-  await updater["updateHashFeed"]();
+  const resultado = await updater["updateHashFeed"]();
 
   const file = path.join(defs, "hashes", "default.json");
   const records = JSON.parse(fs.readFileSync(file, "utf8"));
   assert.equal(records.length, 1);
   assert.equal(records[0].sha256, hash);
+  assert.equal(resultado.alterou, true, "hash novo em disco é uma alteração real");
+  assert.equal(records[0].severity, "high", "a severidade deixou de «critical» automática");
   const leftovers = fs.readdirSync(path.dirname(file)).filter((name) => name.endsWith(".tmp"));
   assert.deepEqual(leftovers, [], "staging .tmp não pode sobreviver ao rename");
 });
