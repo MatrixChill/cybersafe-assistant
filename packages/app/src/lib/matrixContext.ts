@@ -25,14 +25,39 @@ import { cpuUsageForNarrative } from "@/lib/cpuUsage";
 const readNumber = (value: number | null | undefined): number | null =>
   typeof value === "number" && Number.isFinite(value) ? value : null;
 
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+/**
+ * Contagem por janela sobre a lista retida pelo App (limitada a 500 eventos).
+ * Datas inválidas e futuras não entram; sem amostras utilizáveis não há linha.
+ * O rótulo diz "retained feed" para não passar uma amostra por histórico total.
+ */
+function retainedThreatTrend(threats: ThreatEvent[], now: number): string | null {
+  let recent = 0;
+  let previous = 0;
+  for (const threat of threats) {
+    const at = Date.parse(threat.createdAt);
+    if (!Number.isFinite(at) || at > now) continue;
+    if (at >= now - DAY_MS) recent += 1;
+    else if (at >= now - 2 * DAY_MS) previous += 1;
+  }
+  if (recent === 0 && previous === 0) return null;
+  const delta = recent - previous;
+  const trend = delta > 0 ? `up (+${delta})` : delta < 0 ? `down (${delta})` : "stable";
+  return `Threats in retained feed: last 24h ${recent}, previous 24h ${previous}, trend ${trend}`;
+}
+
 export interface MatrixContextInput {
   protection: ProtectionState | null;
   hardware: HardwareSnapshot | null;
   pcState: PcState | null;
   threats: ThreatEvent[];
+  /** Relógio injectável para a janela de 24h; ausente = agora. */
+  now?: number;
 }
 
-export function buildMatrixContext({ protection, hardware, pcState, threats }: MatrixContextInput): string {
+export function buildMatrixContext({ protection, hardware, pcState, threats, now }: MatrixContextInput): string {
+  const referenceNow = typeof now === "number" && Number.isFinite(now) ? now : Date.now();
   const parts: string[] = [];
   if (protection) {
     parts.push(`Protection score: ${Math.max(0, 100 - protection.stats.riskScore)}`);
@@ -96,5 +121,7 @@ export function buildMatrixContext({ protection, hardware, pcState, threats }: M
     parts.push(`PC findings (count): ${Array.isArray(pcState.findings) ? pcState.findings.length : 0}`);
   }
   parts.push(`Active threats: ${threats.length}`);
+  const retainedTrend = retainedThreatTrend(threats, referenceNow);
+  if (retainedTrend) parts.push(retainedTrend);
   return parts.join("\n");
 }
