@@ -223,3 +223,11 @@ Os números Core 1064 PASS / 4 FAIL / 30 SKIP / 1 TODO pertencem ao log antigo, 
 - Instalador: `CyberSafe Assistant-0.1.11-internal.pap-r7.20261031-candidate-20261101-201659-9e22feb1-setup.exe`, 278 623 050 B, sha256 `e558f35bd25c559b13fef994262398cb86be1d745de6cec2ad3b3d5027340164`.
 - Composição: seed read-only verificada (4 ficheiros, 175 916 377 B, 1.5.4); bundle ClamAV 47 ficheiros/139 225 801 B com `clamscan.exe` igual ao vendor; `scan-engine.exe` 324 096 B igual ao build; YARA 4.6.0 com VCRUNTIME app-local; 13 licenças ClamAV + licença YARA + 11 entradas de licenças na pasta `licenses`; `app.asar` com 2890 entradas e zero source maps.
 - Limitações conhecidas mantidas: 11 testes Service de identidade do percurso legado; `KILL_TERMINATION_DISABLED` continua ativo. Não houve Release, tag, alteração à `main` ou ao Defender.
+
+## Sessão de estabilização pós-R7 (2026-11-01)
+- R7 foi instalada e usada no PC pessoal do proprietário. Esta sessão não repetiu auditoria geral nem executou testes destrutivos/EICAR nesse PC.
+- `887e2b5` ClamAV: a prova de carga esperava a vaga global 30 s e convertia ocupação em falha, produzindo ACTIVE/DEGRADED alternado. Passa a adiar com `deferred`, preservar a última prova válida com `busy`, esperar só 5 s pela vaga e revalidar quando o scan a liberta. Core: 62 PASS, 7 SKIP, 0 FAIL nos ficheiros dirigidos.
+- `a2e8cd4` tempo real: Downloads passam a fila alta; recuperação passa de 64 caminhos/3 tentativas/30 s para 128/5/120 s, com backoff até 5 s. Fila continua limitada a 64. 18 PASS, 0 FAIL.
+- `bccab63` Gestor de Tarefas: o serviço nomeia sessão, arranque, encerramento, modo leitura, operação crítica, tempo real, scan e atualização, em vez de uma frase única. Gate P1-1: 41/41. Família de identidade mantém 10 FAIL conhecidos.
+- `12b4c8b` Painel: a lista curta colapsa `scan.progress` por `scanId` e mantém a versão mais recente; histórico intacto. 2 PASS; typecheck da app verde.
+- Não houve validação na aplicação instalada, varrimento de 800 ficheiros, EICAR, quarentena, WFP, MATRIX, Otimizar, atualizações ou nova candidata.

@@ -35,3 +35,9 @@ origin/main intocada: 21fefa69
 - DONE H2: candidata NSIS interna construida (exit 0) e validada; sha256 e558f35b...40164.
 - DONE: manifesto congelado registado (1802 ficheiros, digest 9eb69e88...b323).
 - NEXT: ensaio na VM com R7-VM-TEST-PLAN.md; reconciliar os 11 contratos numa candidata posterior.
+- DONE: ClamAV deixa de degradar por ocupação; revalida no fim do scan.
+- DONE: fila de tempo real prioriza Downloads e recupera com backoff/orçamento maior.
+- DONE: Gestor de Tarefas recebe causas específicas; Painel colapsa progresso do mesmo scan.
+- PENDING: medir o Scanner instalado com CYBERSAFE_DEBUG_SCAN=1 (nativo medido em ~12 ms; 830 s não é o spawn nativo).
+- PENDING: inconclusivos (22 cobertura + 1 falha de motor), quarentena automática na UI, MATRIX contextual, layout do Otimizar, atualizações, WFP opcional.
+- NEXT: nova aprovação de freeze e candidata; não reutilizar o manifesto anterior.
