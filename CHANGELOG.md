@@ -289,6 +289,17 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
 - Estado do `ci` no `main` atualizado: run `41302290721` no SHA `9b7e823`, `conclusion: success`.
   A workflow continua a **não** correr a suíte `service` (corre a do desktop), por isso o verde do
   `ci` não cobre nenhuma das linhas acima.
+- **Dois factos de âmbito que a suíte do pacote escondia**, medidos em `8653f39`:
+  (i) o script `test` de `packages/service` **não corre a pasta `test/`** — lista 96 entradas de 147
+  ficheiros, pelo que 20 das 66 falhas da pasta completa nunca aparecem no número que o `npm test`
+  devolve; (ii) **não há motor nativo construído nesta linha** — `packages/native-engine/build` não
+  existe, `npm run build:native` nunca foi corrido no worktree, e os `scan-engine.exe` em disco são
+  artefactos de outras linhas (`freebuff2-packaging-p0-20261024`, `pap-autonomous-core-*-20261029`).
+  Logo, os 4 `rc22-native-regressao` são `NOT RUN` travestido de `FAIL`, e §13 ponto 14
+  (verificar dependências nativas do instalador) fica por poder cumprir até haver decisão de build.
+  Os 5 SKIP têm motivo declarado no código (ambiente sem ClamAV/clamscan real, bundle não
+  vendorizado, symlink indisponível no host, provider fora da lane); não afirmo quais os 5 que
+  dispararam nesta corrida, porque o reporter não o imprime.
 - **GitHub Releases: zero, medido.** `gh api repos/MatrixChill/cybersafe-assistant/releases` → `[]`;
   `releases/latest` → `404 Not Found`; `git ls-remote --tags origin` → nenhuma `refs/tags/*`. Não
   existe **nenhum** artefacto publicado (nem R6 nem R7), o repositório é público (`isPrivate:
