@@ -27,7 +27,12 @@ const VENDOR = path.join(REPO_ROOT, "vendor", "yara");
 function tempCopy() {
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), "cybersafe-yara-vendor-"));
   fs.cpSync(VENDOR, dir, { recursive: true });
-  return dir;
+  // `os.tmpdir()` no runner do GitHub vem em forma 8.3 (`C:\Users\RUNNER~1\...`).
+  // O portão de contenção do vendor recusa qualquer caminho cujo realpath não
+  // coincida com o caminho pedido — comportamento correto e *fail-closed*, que a
+  // fixture tem de respeitar: entrega-se o caminho canónico, não se afrouxa o
+  // portão. Em Linux/macOS e nesta máquina o realpath é o próprio caminho.
+  return fs.realpathSync.native(dir);
 }
 
 describe("vendor/yara — integridade medida", () => {
