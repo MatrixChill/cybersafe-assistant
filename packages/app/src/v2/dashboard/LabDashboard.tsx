@@ -1,4 +1,4 @@
-import { securityEventPresentation } from "@/lib/securityEventPresentation";
+import { activityEventsForDisplay, securityEventPresentation } from "@/lib/securityEventPresentation";
 /** Presentation structure from Design Lab src/SecurityPages.tsx Dashboard.
  * No service access or demo imports: the container supplies measured contracts.
  */
@@ -112,11 +112,7 @@ export default function LabDashboard(
       ? "sem_ligacao"
       : (p.eventsReadPhase ?? "a_consultar");
   const events =
-    eventPhase === "pronto"
-      ? [...(p.events ?? [])]
-          .sort((a, b) => b.sequence - a.sequence)
-          .slice(0, 3)
-      : [];
+    eventPhase === "pronto" ? activityEventsForDisplay(p.events ?? [], 3) : [];
   const selected = engines.find((e) => e.key === engine);
   const active = engines.filter((e) => e.state === "ACTIVE").length;
   const states = Object.fromEntries(

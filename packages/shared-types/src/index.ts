@@ -504,6 +504,8 @@ export interface SecurityEvent<T = unknown> {
   severity: Severity;
   summary: string;
   data: T;
+  /** Correlaciona eventos do mesmo scan; o serviço já o publica no topo. */
+  scanId?: string;
 }
 
 export interface ProtectionState {

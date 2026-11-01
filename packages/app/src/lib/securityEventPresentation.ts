@@ -1,4 +1,29 @@
 import type { SecurityEvent } from "@cybersafe/shared-types";
+
+/**
+ * Atividade do Painel: a mesma analise publica um `scan.progress` por
+ * atualizacao de estado. O historico guarda-os todos (auditoria), mas a lista
+ * curta nao pode gastar as suas 3 linhas no mesmo scan. Mantem-se a versao
+ * mais recente por `scanId`; eventos de tipos diferentes nao sao tocados.
+ */
+export function activityEventsForDisplay(events: readonly SecurityEvent[], limit = 3): SecurityEvent[] {
+  const ordered = [...events].sort((a, b) => b.sequence - a.sequence);
+  const seenScans = new Set<string>();
+  const visible: SecurityEvent[] = [];
+  for (const event of ordered) {
+    if (event.type === "scan.progress") {
+      const data = event.data as { id?: unknown } | undefined;
+      const key = typeof event.scanId === "string" && event.scanId.length > 0
+        ? event.scanId
+        : typeof data?.id === "string" && data.id.length > 0 ? data.id : event.id;
+      if (seenScans.has(key)) continue;
+      seenScans.add(key);
+    }
+    visible.push(event);
+    if (visible.length >= limit) break;
+  }
+  return visible;
+}
 export type ProcessEventProvenance = "observed" | "requested" | "confirmed" | "unknown" | "other";
 /** Presentation only. Historical summaries and event payloads are never rewritten. */
 export function securityEventPresentation(event: Pick<SecurityEvent,"type"|"summary"> & Partial<Pick<SecurityEvent,"data">>): {
