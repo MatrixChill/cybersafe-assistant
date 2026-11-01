@@ -364,6 +364,31 @@
 }
 .row-item:first-child { border-top: 0; }
 .row-item:hover { background: var(--hover-tint); }
+/* As linhas de definicoes tem DOIS filhos (conteudo + chip), nao tres:
+   sem esta grelha propria o conteudo caia na coluna de 2.25rem e era
+   esmagado verticalmente. A coluna do texto e a unica flexivel. */
+.optimize-source-row {
+  grid-template-columns: minmax(0, 1fr) auto;
+}
+.optimize-source-row > .state-chip {
+  justify-self: end;
+  align-self: start;
+  max-width: 100%;
+}
+.optimize-source-row .row-title,
+.optimize-source-row .row-note {
+  min-width: 0;
+  overflow-wrap: break-word;
+  word-break: normal;
+}
+@media (max-width: 720px) {
+  .optimize-source-row {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .optimize-source-row > .state-chip {
+    justify-self: start;
+  }
+}
 /* Em estreito a ação desce para a sua própria linha — nunca corta. */
 @media (max-width: 720px) {
   .row-item { grid-template-columns: 2.25rem minmax(0, 1fr); }

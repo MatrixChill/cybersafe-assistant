@@ -85,6 +85,7 @@ import { NativeEngineBridge } from "./native-engine-bridge.js";
 import { RealtimeFileQueue } from "./realtime-file-queue.js";
 import { RealtimeRecovery, type SaturationStage } from "./realtime-recovery.js";
 import { canAutoQuarantine, loadQuarantinePolicy, saveQuarantinePolicy, type QuarantinePolicy } from "./quarantine-policy.js";
+import { hasReparseFreePath, isProtectedQuarantinePath } from "./quarantine-path-policy.js";
 import { isTransientFsError, TRANSIENT_SCAN_ERROR_WINDOW_MS } from "./scan-error.js";
 import { DefinitionUpdater, agendadorDefinicoesDeveArrancar, recuperacaoYaraPermitida } from "./updater.js";
 import { ClamDatabaseGate } from "./clam-database-gate.js";
@@ -2339,6 +2340,13 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
   private async requestQuarantine(analysis: AnalysisResult, authorization: "manual" | "automatic"): Promise<boolean> {
     const evidence = {artifactPath:analysis.artifactPath,fileName:analysis.fileName,sha256:analysis.sha256,authorization};
+    const caminhoPermitido = !isProtectedQuarantinePath(analysis.artifactPath, { baseDir: this.baseDir, execPath: process.execPath })
+      && await hasReparseFreePath(analysis.artifactPath);
+    if (!caminhoPermitido) {
+      this.eventBus.publish("quarantine.failed", "high", `Isolamento recusado por caminho protegido: ${analysis.fileName}`, {...evidence, reason:"protected-path"});
+      void this.logHistory({type:"quarantine.failed",...evidence,reason:"protected-path",timestamp:new Date().toISOString()});
+      return false;
+    }
     this.eventBus.publish("quarantine.requested", "high", `Quarentena solicitada: ${analysis.fileName}`, evidence);
     try {
       const entry = await this.quarantine.quarantine(analysis);

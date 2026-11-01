@@ -16,7 +16,6 @@ import {
   type RealtimeProtectionInfo,
 } from "@/lib/protectionHealth"
 import ProtectionDetails from "@/components/ProtectionDetails"
-import { EngineGrid } from "@/components/visual/EngineGrid"
 import { formatGb } from "@/lib/diskDisplay"
 import { cpuUsageDisplay } from "@/lib/cpuUsage"
 import { ramUsageDisplay } from "@/lib/ramUsageDisplay";
@@ -629,29 +628,6 @@ export default function OtimizarPage({
         </div>
       </section>
 
-      {/* ═══ MOTORES E DEFINIÇÕES ═══
-          Os quatro motores sempre presentes, com o estado que o serviço
-          reportou. É informação diferente das verificações desta página:
-          aqui não se mede o PC, lê-se o que os motores de análise dizem de si.
-          Sem ligação confirmada, o próprio EngineGrid recusa pintar estado. */}
-      <section className="space-y-2" data-optimize-engines>
-        <div className="px-0.5">
-          <div className="flex flex-wrap items-baseline gap-x-3 gap-y-1">
-            <h2 className="text-sm font-mono font-bold uppercase tracking-wider text-foreground">Definições e motores</h2>
-            <span className="row-meta">Estado reportado pelo serviço</span>
-          </div>
-          <p className="row-meta mt-1 max-w-[92ch]">
-            YARA, HashDB e ClamAV são motores distintos. Um motor indisponível não é o mesmo que uma definição desatualizada.
-          </p>
-        </div>
-        <EngineGrid engine={protecao.motores} conexao={protecao.servicoLigado} />
-        <p className="row-meta">
-          {protecao.motores?.definitionsUpdatedAt && Number.isFinite(Date.parse(protecao.motores.definitionsUpdatedAt))
-            ? `Última atualização de definições reportada: ${new Date(protecao.motores.definitionsUpdatedAt).toLocaleString("pt-PT")}.`
-            : "O serviço não reportou a data da última atualização de definições nesta leitura."}
-        </p>
-      </section>
-
       {/* ═══ AS TRÊS LISTAS ═══
           Cada secção diz o que as linhas dela SÃO e conta-as. O título não é um
           veredicto: «manutenção recomendada» nunca aparece debaixo de um título
@@ -717,6 +693,11 @@ export default function OtimizarPage({
             {fontesDefinicoes === null ? "sem leitura" : `${fontesDefinicoes.length} fonte(s)`}
           </span>
         </div>
+        <p className="row-meta -mt-2 mb-3">
+          {protecao.motores?.definitionsUpdatedAt && Number.isFinite(Date.parse(protecao.motores.definitionsUpdatedAt))
+            ? `Última atualização de definições reportada: ${new Date(protecao.motores.definitionsUpdatedAt).toLocaleString("pt-PT")}.`
+            : "O serviço não reportou a data da última atualização de definições nesta leitura."}
+        </p>
         {fontesDefinicoes === null ? (
           <div className="stat-card flex items-start gap-3 p-4">
             <span className="icon-tile" aria-hidden>
@@ -732,7 +713,7 @@ export default function OtimizarPage({
           <div className="stat-card overflow-hidden">
             <div className="row-list">
               {fontesDefinicoes.map((fonte) => (
-                <div key={fonte.fonte} className="row-item">
+                <div key={fonte.fonte} className="row-item optimize-source-row">
                   <div className="min-w-0 flex-1">
                     <p className="row-title">{fonte.nome}</p>
                     <p className="row-note">

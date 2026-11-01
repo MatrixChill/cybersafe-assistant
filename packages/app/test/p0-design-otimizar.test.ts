@@ -159,12 +159,14 @@ describe("P0 — zero não é resultado", () => {
   });
 });
 
-describe("P0 — motores e definições têm secção própria", () => {
-  test("os quatro motores são mostrados e a ausência de data não é inventada", () => {
-    assert.match(html, /Definições e motores/);
-    for (const nome of ["YARA", "Base de assinaturas", "ClamAV", "Motor nativo"]) assert.ok(html.includes(nome), nome);
+describe("P0 — a secção original de definições não está comprimida", () => {
+  test("as linhas de fonte usam a grelha de duas colunas e não a grelha de três", () => {
+    assert.match(pagina, /className="row-item optimize-source-row"/);
+    const bloco = /\.optimize-source-row\s*\{([\s\S]*?)\}/.exec(css)?.[1] ?? "";
+    assert.match(bloco, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+    assert.match(css, /@media \(max-width: 720px\)[\s\S]*?\.optimize-source-row/);
+    assert.match(html, /Definições de segurança/);
     assert.match(html, /O serviço não reportou a data da última atualização de definições nesta leitura/);
-    assert.equal(/pendente de atualização/i.test(html), false);
   });
 });
 
