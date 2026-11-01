@@ -214,3 +214,12 @@ Os números Core 1064 PASS / 4 FAIL / 30 SKIP / 1 TODO pertencem ao log antigo, 
 - Pré-check do empacotamento: 1 problema — apenas o registo externo de autorização ausente. Bundle ClamAV, YARE, Native e workspaces verificados.
 - Versão canónica: `0.1.11-internal.pap-r7.20261031` (não alterada; 0.2.0 exige decisão do proprietário).
 - Nenhum NSIS produzido, nenhuma Release, `main` intocada.
+
+## Candidata NSIS R7 interna (autorizada)
+- HEAD autorizado: `9802d0441ed614e0985907dec1da94c1af1c5f28`; digest `9eb69e8890d3952e63f6c9067964b38efefc1e7e02c4f05bcc5a17a24ba9b323`; 1802 entradas.
+- Aprovação: `Caio Amorim`, `2026-11-01T20:14:36.579Z`, registada fora do repositório.
+- `source-freeze --write` exit 0; `--verify` exit 0 ("árvore conforme"); `--check --candidate` exit 0.
+- Falha real no primeiro build: `node-gyp` ausente em `node_modules` (o `package.json` fixa 12.1.0 e o lock tem a entrada). Corrigido com `npm install --no-save --package-lock=false node-gyp@12.1.0`; `package.json`/lock intactos, HEAD e digest inalterados. Segundo build exit 0.
+- Instalador: `CyberSafe Assistant-0.1.11-internal.pap-r7.20261031-candidate-20261101-201659-9e22feb1-setup.exe`, 278 623 050 B, sha256 `e558f35bd25c559b13fef994262398cb86be1d745de6cec2ad3b3d5027340164`.
+- Composição: seed read-only verificada (4 ficheiros, 175 916 377 B, 1.5.4); bundle ClamAV 47 ficheiros/139 225 801 B com `clamscan.exe` igual ao vendor; `scan-engine.exe` 324 096 B igual ao build; YARA 4.6.0 com VCRUNTIME app-local; 13 licenças ClamAV + licença YARA + 11 entradas de licenças na pasta `licenses`; `app.asar` com 2890 entradas e zero source maps.
+- Limitações conhecidas mantidas: 11 testes Service de identidade do percurso legado; `KILL_TERMINATION_DISABLED` continua ativo. Não houve Release, tag, alteração à `main` ou ao Defender.

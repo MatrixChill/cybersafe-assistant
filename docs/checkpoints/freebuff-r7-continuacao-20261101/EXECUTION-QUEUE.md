@@ -32,3 +32,6 @@ origin/main intocada: 21fefa69
 - MEASURED D3: service delimitado 1290 testes / 1274 PASS / 11 FAIL / 5 SKIP; os 11 sao a familia de identidade dentro de killProcess, recusada globalmente.
 - BLOCKED H1: falta apenas o registo externo de autorizacao (humano). Versao 0.2.0 e Ed25519 de producao tambem sao humanos.
 - NEXT (se houver nova sessao): decidir com o proprietario se a familia de identidade deve ser adaptada ao contrato de recusa ou se o kill legado sera reativado com prova de identidade.
+- DONE H2: candidata NSIS interna construida (exit 0) e validada; sha256 e558f35b...40164.
+- DONE: manifesto congelado registado (1802 ficheiros, digest 9eb69e88...b323).
+- NEXT: ensaio na VM com R7-VM-TEST-PLAN.md; reconciliar os 11 contratos numa candidata posterior.
