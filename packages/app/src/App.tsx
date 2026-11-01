@@ -841,7 +841,7 @@ function AuthenticatedApp() {
   function renderPage() {
     switch (page) {
       case "dashboard":
-        return <DashboardPage dashboard={dashboard} isLoading={isLoading} hardware={hardware} pcState={pcState} onScan={handleScan} onOpenScanner={openScanner} onOpenPC={()=>setPage("pccenter")} events={events} eventsReadPhase={eventsObservation.generation===connectionGeneration.current?eventsObservation.phase:"a_consultar"} realtime={realtimeInfo} onSetProtection={handleSetProtection} onPauseProtection={handlePauseProtection} protectionPending={protectionPending} protectionError={protectionActionError} onDismissProtectionError={() => setProtectionActionError(null)} serviceConnected={serviceConnected} serviceGeneration={connectionGeneration.current} />;
+        return <DashboardPage dashboard={dashboard} isLoading={isLoading} hardware={hardware} pcState={pcState} onScan={handleScan} onOpenScanner={openScanner} onOpenHistory={()=>setPage("threats")} onOpenPC={()=>setPage("pccenter")} events={events} eventsReadPhase={eventsObservation.generation===connectionGeneration.current?eventsObservation.phase:"a_consultar"} realtime={realtimeInfo} onSetProtection={handleSetProtection} onPauseProtection={handlePauseProtection} protectionPending={protectionPending} protectionError={protectionActionError} onDismissProtectionError={() => setProtectionActionError(null)} serviceConnected={serviceConnected} serviceGeneration={connectionGeneration.current} />;
       case "pccenter":
         // O estado de ligação é lido aqui, no commit do render — não dentro de um `useMemo`
         // sobre um ref. Em produção o prop é `null` e o PC Center não emite atributos.

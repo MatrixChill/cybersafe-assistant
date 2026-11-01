@@ -54,6 +54,7 @@ export interface DashboardProps {
   pcState?: PcState | null;
   onScan?: (type: string, targetPath?: string) => void;
   onOpenScanner?: () => void;
+  onOpenHistory?: () => void;
   onOpenPC?: () => void;
   realtime?: RealtimeProtectionInfo;
   onSetProtection?: (enabled: boolean) => void;
@@ -305,6 +306,12 @@ export default function LabDashboard(
             <button className="text-link" onClick={p.onOpenScanner}>
               Consultar resultados
               <ArrowUpRight size={14} />
+            </button>
+          )}
+          {p.onOpenHistory && (
+            <button className="text-link" onClick={p.onOpenHistory}>
+              Ver histórico completo
+              <ArrowRight size={14} />
             </button>
           )}
         </Panel>

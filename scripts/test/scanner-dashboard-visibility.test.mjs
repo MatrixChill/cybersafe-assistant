@@ -49,7 +49,11 @@ describe("Dashboard — o ecrã actual declara que é leitura, não histórico",
   });
 
   it("o dashboard limita a visibilidade, mas não introduz paginação nem filtro arbitrário", () => {
-    assert.ok(dashboard.includes(".slice(0, 3)"), "o dashboard mantém um limite de visibilidade");
+    assert.match(
+      dashboard,
+      /activityEventsForDisplay\(p\.events \?\? \[\], 3\)/,
+      "o dashboard mantém um limite explícito de visibilidade",
+    );
     for (const [onde, fonte] of [["LabDashboard", dashboard], ["EngineGrid", engineGrid]]) {
       assert.ok(
         !/pageSize|nextCursor|Carregar mais/.test(fonte),
@@ -58,15 +62,16 @@ describe("Dashboard — o ecrã actual declara que é leitura, não histórico",
     }
   });
 
-  it(
-    "o dashboard aponta para onde está o histórico completo",
-    { todo: "afordância perdida na refactorização v2; a shell navega por Page, não por <a>. Decisão do proprietário (task #15)." },
-    () => {
-      assert.match(
-        dashboard,
-        /histórico completo|ver (?:todo )?o histórico|Ameaças<\/a>/,
-        "tem de existir um pointer do ecrã actual para o histórico completo",
-      );
-    },
-  );
+  it("o dashboard aponta para onde está o histórico completo", () => {
+    assert.match(
+      dashboard,
+      /Ver histórico completo/,
+      "tem de existir um pointer do ecrã actual para o histórico completo",
+    );
+    assert.match(
+      dashboard,
+      /onOpenHistory/,
+      "o pointer tem de usar a navegação real da shell, não um link morto",
+    );
+  });
 });
