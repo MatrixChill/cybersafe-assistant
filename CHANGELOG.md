@@ -163,7 +163,14 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   configurado enquanto `enabled` for `false` — *fail-closed*, sem chave inventada. **A verificação
   automática de atualizações não pode ser considerada confiável fim-a-fim.** Nunca se gera uma chave
   de produção fictícia.
-- Construção do instalador R7, *tag*, *release* e sincronização com o `origin`: **PENDENTES**.
+- Sincronização com o `origin`: **FEITA** — `main` em `1ad632a` (fast-forward a partir de
+  `212cb64`, sem `--force`), confirmado por `git ls-remote` em 2026-11-01T10:45Z. A primeira run da
+  workflow `ci` falhou **antes de correr qualquer teste**: `npm ci` devolveu EUSAGE porque o npm do
+  runner exige entradas `@emnapi/core`/`@emnapi/runtime` que o `package-lock.json` publicado não
+  tem, enquanto o npm que gerou o lock (11.6.2 / node 24.13.0) as aceita — neste commit,
+  `npm install --package-lock-only` não produz diff e `npm ci --dry-run` sai 0. O `ci.yml` fixa
+  agora esse npm; **é uma hipótese testada pela própria workflow que altera**, e a run seguinte
+  decide-a. Construção do instalador R7, *tag* e *release*: **PENDENTES**.
 
 ## Estado das suítes medido em 2026-11-01
 

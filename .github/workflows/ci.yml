@@ -22,6 +22,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
+          # O `package-lock.json` é validado por este npm: `npm ci` é estrito com
+          # as arestas opcionais `@emnapi/core`/`@emnapi/runtime` e falha com
+          # EUSAGE noutro menor (medido na run 41298854964, 2026-11-01). Fixar o
+          # npm é o que torna a instalação reproduzível; mudar aqui obriga a
+          # regenerar o lock com o mesmo npm.
+          npm-version: "11.6.2"
           cache: npm
 
       - name: Instalar dependências (sem scripts nativos)
