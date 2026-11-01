@@ -648,3 +648,9 @@ Correcções, ambas em fixture:
 
 Os 7 SKIP que ficam são os casos que exigem *ainda mais* ambiente (base ClamAV oficial ausente,
 symlink real, etc.) e não foram contados como PASS em lado nenhum.
+
+### Ressalva ao número «54»: a contagem depende do modo de execução
+
+Re-corri a pasta completa do `service` depois das correções de `4f6a0c9` e obtive **1282 / 1220 PASS / 57 FAIL**, não 54. Não foi regressão: os três a mais são `dev-canary` (2 falhas a **exactamente ~10 s**, o `timeoutMs = 10_000`) e `p0-rpc-queue` (1). Cada um deles passa isolado — `dev-canary` 2/2 e `p0-rpc-queue` 3/3 em três corridas seguidas. O que muda é a concorrência: 147 ficheiros em paralelo estouram orçamentos de tempo, e o `npm test` do pacote, que corre com `--test-concurrency=1`, deu **962 testes / 920 PASS / 42 FAIL**, o mesmo 42 do baseline anterior às mudanças (logo: sem regressão, e com +31 testes novos de feed de hashes a passar).
+
+Publicar «54» sem dizer que a contagem depende do modo de execução foi um erro meu, e fica corrigido aqui e no `README.md`. A classificação por assinatura das causas mantém-se válida: 49 portão de terminação + 5 `inconclusive` contra `safe`; o que não é estável é o total, e dizê-lo é melhor do que fingir que é.
