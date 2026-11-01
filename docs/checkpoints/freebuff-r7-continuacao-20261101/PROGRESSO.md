@@ -56,3 +56,27 @@ Os números Core 1064 PASS / 4 FAIL / 30 SKIP / 1 TODO pertencem ao log antigo, 
 - Estado final: dois testes modificados + PROGRESSO.md e preservation.json novos; logs locais presentes e ignorados pelo Git. Nenhum push.
 - Worktree histórico continua limpo. Qoder continua em 2e3f311, README/CHANGELOG e nove documentos WIP preservados; hashes comparados sem mudança após as edições.
 - Próxima ação no novo projeto Freebuff: concluir commit da Fase 1 quando o adaptador permitir escrita Git; depois reproduzir as nove falhas p1-1 e prosseguir pelos agrupamentos Service. Não executar suítes completas nem build de distribuição antes dos gates previstos.
+
+## Continuação — Fase 1 fechada e primeiro conjunto Service
+- Fase 1 commitada com permissões normais em **b42f497d191b9b6928c8e32665daf03e65ecd196**. Só os quatro ficheiros da fase; árvore limpa após commit. Não foi necessária elevação. Core não reexecutado; hashes dos dois testes iguais aos da entrega anterior.
+- Fase 2: nove falhas históricas p1-1 reproduzidas isoladamente: filtro YARA/reference/conflito = 0 PASS/8 FAIL; warning isolado = 0 PASS/1 FAIL. Todas recusadas por pin antes da asserção/seam pretendido; não foi contaminação do gate nesta reprodução.
+- Correção: pins das fixtures pelo seam yaraPin já existente, revision fixa, SHA-256 dos bytes servidos e classes explícitas. Pins/configuração/código de produção intactos; compilador e motor YARA clássicos reais, transporte simulado e sem rede.
+
+| Caso original | Classificação e prova após correção |
+|---|---|
+| :531 publicação falhada | Fixture; rename atingido uma vez, erro simulado e corpus anterior intacto, sem temporários |
+| :568 rollback reload | Fixture; candidato carregado e detetado, falha simulada, duas recargas, bytes anteriores restaurados, motor disponível, só marcador anterior detetado |
+| :618 rollback irrecuperável | Fixture; duas recargas, disco restaurado, motor indisponível/error e match recusado |
+| :664 publicação completa | Fixture; novo corpus e canary publicados sem temporários |
+| :700 agregação | Fixture; test/production incluídas, reference excluída |
+| :745 warnings | Fixture; slow-scan reportado como warning, não erro |
+| :788 módulos | Fixture; módulo inválido recusado e fonte compatível publicada |
+| :835 reference | Fixture; referência fora do merge, sem conflito artificial |
+| :882 conflito | Fixture; production conflituosa recusada, fonte anterior aceite preservada e manifesto coerente |
+
+- Nove dirigidos após correção: **9 PASS/0 FAIL/0 SKIP/0 TODO**, exit 0, service-p11-nine-green.log.
+- Regressão: `node --test --test-concurrency=1 packages/service/test/p1-1-clam-db-gate.test.js packages/service/test/yara-pin-verificado.test.js` → **46 PASS/0 FAIL/0 SKIP/0 TODO**, exit 0, service-p11-regression.log. Nenhuma suíte completa executada.
+- Dependências dos quatro workspaces necessárias ao Service instaladas por lock, ignore-scripts; builds shared-types/core/native-windows/service sequenciais exit 0. Lock/manifests não alterados.
+- SHA-256 logs: RED oito 6b176e2157c6128ad8db19c61596e92bc3adde71b74641b46c66d632693b4702; RED warning dbd5aea38e233f620fdb6d5ce3d39acc0c5326914bf0fd7a70f4d846d4d72e26; GREEN nove 284c4f08b79bb95811d4da6a1015aa93ba9637f550cad659004e92e60f81e01b; regressão 9470b056eb2a2a62e67c80af504e97c97d26c15493651d27ac4785c1712e95b8.
+- Descoberta concreta: lista yaraPin vazia mantém disco e não descarrega, mas runCheckAndUpdate anuncia yaraUpdated=true. Inconsistência de estado/contrato; não prova execução insegura nem bloqueio do instalador. Próximo conjunto: teste dirigido e correção fail-closed, em commit separado.
+- Limites: não prova eficácia antimalware nem instalação R7; outras famílias Service continuam por classificar. ClamAV real/freshclam não executados nem bases pessoais alteradas. Sem push/Release/serviços Windows/freeze.
