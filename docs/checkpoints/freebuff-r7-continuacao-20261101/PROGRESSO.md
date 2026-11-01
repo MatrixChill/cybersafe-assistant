@@ -202,3 +202,15 @@ Os números Core 1064 PASS / 4 FAIL / 30 SKIP / 1 TODO pertencem ao log antigo, 
 - Atualizador da aplicação (aceitação, controlador, timeouts, verdade das definições): 63 PASS/0 FAIL. Não cobre o canal real assinado: a chave de produção continua a depender do proprietário.
 - YARA (update, download, regras): 10 PASS/0 FAIL, incluindo rollback.
 - Contrato do bundle ClamAV (`dist-clamav-vendor`): 33 PASS/0 FAIL.
+
+## Regressão Service delimitada (medição real, não certificação total)
+- Comando: `node --test --test-concurrency=1` sobre 80 ficheiros de `packages/service/test/*.test.js`, excluindo apenas `process-kill.test.js` e `kill-budget.test.js`.
+- Resultado: **1290 testes, 1274 PASS, 11 FAIL, 5 SKIP**, exit 1 (service-bounded.log).
+- Os 11 FAIL são todos da mesma família: identidade/revalidação pré-kill dentro de `killProcess` (PID reutilizado, CreationDate, R1/R2). A guarda `KILL_TERMINATION_DISABLED` (engine.ts:4073) devolve `failed` antes dessas verificações, portanto nenhum deles chega ao caminho que testam. Não são regressões desta sessão e não foram convertidos em PASS artificialmente.
+- Isolamento P0 (que falhava no run anterior) passa 7/7 após alinhar o contrato do teste. `process-kill`/`kill-budget` continuam deliberadamente por alinhar, com a justificação registada (D6).
+- SKIP = 5, mantidos como skip declarados; nenhuma falha foi escondida.
+
+## Estado final desta ronda
+- Pré-check do empacotamento: 1 problema — apenas o registo externo de autorização ausente. Bundle ClamAV, YARE, Native e workspaces verificados.
+- Versão canónica: `0.1.11-internal.pap-r7.20261031` (não alterada; 0.2.0 exige decisão do proprietário).
+- Nenhum NSIS produzido, nenhuma Release, `main` intocada.

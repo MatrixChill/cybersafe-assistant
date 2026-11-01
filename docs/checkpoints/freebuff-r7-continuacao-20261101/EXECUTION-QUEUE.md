@@ -29,3 +29,6 @@ origin/main intocada: 21fefa69
 - DONE F2: atualizador da aplicacao 63 PASS (chave real continua pendente).
 - DONE E2: exclusoes ponta a ponta 34 PASS.
 - DONE D2: isolamento P0 corrigido (7 PASS); YARA rollback 10 PASS; contrato do bundle 33 PASS.
+- MEASURED D3: service delimitado 1290 testes / 1274 PASS / 11 FAIL / 5 SKIP; os 11 sao a familia de identidade dentro de killProcess, recusada globalmente.
+- BLOCKED H1: falta apenas o registo externo de autorizacao (humano). Versao 0.2.0 e Ed25519 de producao tambem sao humanos.
+- NEXT (se houver nova sessao): decidir com o proprietario se a familia de identidade deve ser adaptada ao contrato de recusa ou se o kill legado sera reativado com prova de identidade.
