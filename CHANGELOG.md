@@ -1110,3 +1110,60 @@ segundo cobre a reinício de sessão.
 Esta é a última adição de âmbito de testes desta linha: o `api` era o único pacote com
 ficheiros fora de qualquer comando. Fecho aqui o ponto 3 e passo ao mecanismo de
 aprovação do congelamento, que é o que trava o instalador.
+
+## Mecanismo de aprovadores do `source-freeze`: a identidade sai do código
+
+**O problema.** `scripts/source-freeze.mjs:45` fixava `export const APPROVER =
+"Codex Lead"` e comparava `approval.approvedBy !== APPROVER`. O Codex deixou de
+participar no projeto. Com o nome errado embebido, o gate do instalador não podia
+ser satisfeito por quem tem autoridade real — e as duas saídas fáceis eram piores
+do que o problema: aceitar qualquer nome (o gate passa a não afirmar nada) ou
+acrescentar uma flag de bypass (o mesmo, com interruptor).
+
+**A alteração formal.** A identidade passa a vir de um **registo de aprovadores
+fora da raiz do repo**, apontado por `CYBERSAFE_APPROVERS_FILE`:
+
+```
+{ "schema": 1,
+  "owners":      ["<nome do proprietário>"],
+  "integrators": [{ "name": "<nome>", "authorizedBy": "<dono que autorizou>" }] }
+```
+
+Regras, todas com **falha fechada**:
+
+- sem variável, sem ficheiro, ficheiro ilegível, schema errado, listas em falta,
+  nomes vazios/controlados, duplicados, ou `owners` e `integrators` ambos vazios →
+  `approver-registry-missing`/`approver-registry-invalid` no **carregamento**, não
+  em tempo de comparação;
+- o registo não pode estar dentro da raiz que aprova (mesma razão do ficheiro de
+  aprovação: entraria no digest que supostamente autoriza);
+- `approvedBy` tem de ser um `owner`, **ou** um `integrator` cujo `authorizedBy`
+  seja um `owner` declarado no mesmo registo — um integrador não se auto-nomeia;
+- `"Codex Lead"` **não é aceite por herança**: se alguém quiser essa identidade,
+  tem de a declarar no registo;
+- não há flag de bypass e o pipeline continua sem correr `--write` sozinho.
+
+**Onde a verificação acontece.** `verifySourceFreeze` — que é a função que o
+`package-windows.mjs:53` usa no gate pré-compilação — passa a ler o registo outra
+vez e a validar o `approvedBy` **embebido no manifesto**. Editar o
+`source-freeze.approved.json` à mão para outro nome falha portanto no build, não só
+no `--write`. E a ordem é a da severidade: sem registo, o erro de configuração é
+nomeado **antes** de `manifest-missing`, para que um problema de config não se
+disfarce de aprovação em falta.
+
+**Testes.** `scripts/test/source-freeze-approvers.test.mjs` (novo) cobre os seis
+pontos acima com árvore de fixture real, incluindo o caso «manifesto editado →
+recusado» e o contraste «identidade certa → verde». Os dois ficheiros de teste do
+freeze passaram a usar um registo de fixture escrito **fora** da raiz (senão o
+próprio fixture violaria a regra que se quer testar) e as asserções de identidade
+foram reancoradas nesse registo, não eliminadas. O `7h-packaging-check` passou a
+aceitar os dois motivos nomeados (`approver-registry-missing` ou `manifest-missing`)
+com a ordem verificada — invariante «nunca é verde e nomeia o motivo» intacto.
+
+**Medido:** `npm run test:scripts` → **398 testes / 392 PASS / 0 FAIL / 5 SKIP /
+1 TODO**. Os 5 SKIP continuam a ser os do artefacto que ainda não existe, e o 1
+TODO é o ponteiro do dashboard (#15).
+
+O que isto destrava: a tua aprovação passa a ser expressável sem tocar em código.
+O que não muda: a integridade (digest por ficheiro, `--verify` byte a byte, links
+recusados, recursos obrigatórios) e o facto de eu não escrever a aprovação por ti.

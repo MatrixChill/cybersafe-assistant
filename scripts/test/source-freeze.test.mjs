@@ -24,8 +24,9 @@ import * as path from "node:path";
 import * as url from "node:url";
 
 import {
-  APPROVER,
+  APPROVERS_ENV,
   buildManifest,
+  carregarRegistoAprovadores,
   digestEntries,
   validateApproval,
   validateEntryPath,
@@ -34,7 +35,20 @@ import {
 import { runFreezeGatedPipeline } from "../package-windows.mjs";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
-const APPROVAL = { approvedBy: APPROVER, candidateId: "cand25-test", approvedAt: "2026-10-25T00:00:00.000Z" };
+/*
+ * Registo de aprovadores de fixture, escrito FORA da raiz do repo — a própria
+ * regra diz que o registo não pode viver dentro do que aprova, por isso um
+ * fixture dentro de `test/` seria o caso que o gate tem de recusar.
+ */
+const APROVADOR = "Proprietária do CyberSafe (fixture)";
+const INTEGRADOR = "Integrador autorizado (fixture)";
+const REGISTO_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cs-approvers-"));
+const REGISTO = path.join(REGISTO_DIR, "approvers.json");
+fs.writeFileSync(REGISTO, `${JSON.stringify({ schema: 1, owners: [APROVADOR], integrators: [{ name: INTEGRADOR, authorizedBy: APROVADOR }] }, null, 2)}\n`, "utf8");
+process.env[APPROVERS_ENV] = REGISTO;
+process.on("exit", () => fs.rmSync(REGISTO_DIR, { recursive: true, force: true }));
+const REGISTO_FIXTURE = carregarRegistoAprovadores().registry;
+const APPROVAL = { approvedBy: APROVADOR, candidateId: "cand25-test", approvedAt: "2026-10-25T00:00:00.000Z" };
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cs-freeze-"));
@@ -246,15 +260,15 @@ describe("source-freeze (manifesto aprovado, fail-closed)", () => {
   });
 
   it("--write sem approval autorizado é recusado", () => {
-    assert.ok(validateApproval({ approvedBy: "outro", candidateId: "x", approvedAt: APPROVAL.approvedAt }).length > 0);
-    assert.ok(validateApproval({ approvedBy: APPROVER, candidateId: "", approvedAt: APPROVAL.approvedAt }).length > 0);
-    assert.ok(validateApproval({ approvedBy: APPROVER, candidateId: "x", approvedAt: "nao-e-data" }).length > 0);
-    assert.deepEqual(validateApproval(APPROVAL), []);
+    assert.ok(validateApproval({ approvedBy: "outro", candidateId: "x", approvedAt: APPROVAL.approvedAt }, { registry: REGISTO_FIXTURE }).length > 0);
+    assert.ok(validateApproval({ approvedBy: APROVADOR, candidateId: "", approvedAt: APPROVAL.approvedAt }, { registry: REGISTO_FIXTURE }).length > 0);
+    assert.ok(validateApproval({ approvedBy: APROVADOR, candidateId: "x", approvedAt: "nao-e-data" }, { registry: REGISTO_FIXTURE }).length > 0);
+    assert.deepEqual(validateApproval(APPROVAL, { registry: REGISTO_FIXTURE }), []);
   });
 
   it("approval dentro da raiz é recusado (não há auto-aprovação)", (t) => {
     const { root } = fixture(t);
-    const problems = validateApproval(APPROVAL, { root, approvalPath: path.join(root, "approval.json") });
+    const problems = validateApproval(APPROVAL, { root, approvalPath: path.join(root, "approval.json"), registry: REGISTO_FIXTURE });
     assert.ok(problems.some((problem) => problem.detail === "approval dentro da raiz"));
   });
 

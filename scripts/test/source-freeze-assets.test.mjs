@@ -24,7 +24,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
-  APPROVER,
+  APPROVERS_ENV,
   FreezeError,
   buildManifest,
   digestEntries,
@@ -33,7 +33,14 @@ import {
 } from "../source-freeze.mjs";
 import { runFreezeGatedPipeline } from "../package-windows.mjs";
 
-const APPROVAL = { approvedBy: APPROVER, candidateId: "lane-freeze-assets-fixture", approvedAt: "2026-10-25T00:00:00.000Z" };
+const APROVADOR = "Proprietária do CyberSafe (fixture)";
+const REGISTO_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cs-approvers-assets-"));
+const REGISTO = path.join(REGISTO_DIR, "approvers.json");
+fs.writeFileSync(REGISTO, `${JSON.stringify({ schema: 1, owners: [APROVADOR], integrators: [] }, null, 2)}\n`, "utf8");
+process.env[APPROVERS_ENV] = REGISTO;
+process.on("exit", () => fs.rmSync(REGISTO_DIR, { recursive: true, force: true }));
+
+const APPROVAL = { approvedBy: APROVADOR, candidateId: "lane-freeze-assets-fixture", approvedAt: "2026-10-25T00:00:00.000Z" };
 const NOTICES = "assets/licenses/THIRD-PARTY-NOTICES.txt";
 const PROVENANCE = "assets/licenses/PROVENANCE.json";
 
