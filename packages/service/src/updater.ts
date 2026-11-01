@@ -161,20 +161,33 @@ interface UpdateMeta {
 // meses: o update reportava uma falha permanente e o corpus nunca teve
 // ransomware. Trocada por uma fonte real do mesmo repositório, com 17 regras
 // e compilação verificada contra o motor de regras.
-const YARA_SOURCES: Array<{ url: string; ruleClass: YaraRuleClass }> = [
-  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Eicar.yar", ruleClass: "test" },
-  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/packers/packer_compiler_signatures.yar", ruleClass: "reference" },
-  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/crypto/crypto_signatures.yar", ruleClass: "reference" },
-  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/RANSOM_MS17-010_Wannacrypt.yar", ruleClass: "production" },
+/* yara:pinned-sources:inicio */
+/* Mantido por `scripts/yara-pin.mjs`. Rever = correr `--write`, o que é um
+   commit: nada entra no corpus sem um humano ter aprovado o diff. */
+export const YARA_PIN: Array<{ id: string; repo: string; file: string; revision: string; sha256: string; ruleClass: YaraRuleClass }> = [
+  { id: "MALW_Eicar.yar", repo: "Yara-Rules/rules", file: "malware/MALW_Eicar.yar", revision: "1edbe8e0ddc32dc47b76e370beb51db16c07f487", sha256: "1ba3175cebe28fc5d4d25c1caf604beda152766db268a3f159e4bf61c2eddf54", ruleClass: "test" },
+  { id: "packer_compiler_signatures.yar", repo: "Yara-Rules/rules", file: "packers/packer_compiler_signatures.yar", revision: "0de1aee46db299e2af7c24d597df0679cc834fcd", sha256: "5c60ed67663f1077cb8987c541ce2e18235d25a2f1aec1f986e10ddb92abe5a8", ruleClass: "reference" },
+  { id: "crypto_signatures.yar", repo: "Yara-Rules/rules", file: "crypto/crypto_signatures.yar", revision: "05500412959fb42710c64afa4c41c00b75991422", sha256: "886ffb7bff349189b4cfe6d7d702040f504d036fb02e66e2233e6554a9346145", ruleClass: "reference" },
+  { id: "RANSOM_MS17-010_Wannacrypt.yar", repo: "Yara-Rules/rules", file: "malware/RANSOM_MS17-010_Wannacrypt.yar", revision: "15a21a2eee9409cb20dbb2d4044c392522a9457e", sha256: "af98f947ff400fe76f0d2f919749fba5f278d7a6d19c0f34de6eeddd44e52f91", ruleClass: "production" },
 ];
+/* yara:pinned-sources:fim */
 
-/** Nome da fonte sem URL nem caminho: o que pode aparecer num estado ou manifesto. */
-function sourceName(url: string): string {
-  try {
-    return path.posix.basename(new URL(url).pathname);
-  } catch {
-    return "unknown-source";
-  }
+/**
+ * URL imutável da fonte: o `revision` é um commit, não uma branch. Buscar por
+ * `master` era o que o pedido recusava — aceitava-se o que a branch publicasse
+ * desde que compilasse, e compilar não é revisar.
+ */
+function urlDaFonte(pino: (typeof YARA_PIN)[number]): string {
+  return `https://raw.githubusercontent.com/${pino.repo}/${pino.revision}/${pino.file}`;
+}
+
+/** Pin malformado não é «fonte em falha», é configuração errada: recusa-se antes de tocar na rede. */
+export function pinoInvalido(pino: { revision: string; sha256: string; file: string; repo: string }): string | null {
+  if (!/^[0-9a-f]{40}$/.test(pino.revision)) return "revision não é um commit SHA-1 de 40 hex";
+  if (!/^[0-9a-f]{64}$/.test(pino.sha256)) return "sha256 não é um digest de 64 hex";
+  if (!pino.repo || !/^[\w.-]+\/[\w.-]+$/.test(pino.repo)) return "repo fora da forma <dono>/<projeto>";
+  if (!pino.file || pino.file.startsWith("/") || pino.file.includes("..")) return "caminho da fonte fora do repositório";
+  return null;
 }
 
 /**
@@ -441,6 +454,8 @@ export class DefinitionUpdater {
    * faz a coordenação ser real e não duas autoridades concordando por sorte.
    */
   readonly gate: ClamDatabaseGate;
+  /** Fontes pinadas desta instância (ver `YARA_PIN`). */
+  private readonly yaraPin: typeof YARA_PIN;
   /** Como o `freshclam` é criado. Ver a nota no construtor. */
   private readonly spawnFreshclam: typeof spawn;
   private readonly renameYaraRules: typeof fsPromises.rename;
@@ -469,6 +484,12 @@ export class DefinitionUpdater {
       afterDefinitionsUpdated?: (result: UpdateResult) => Promise<void> | void;
       gate?: ClamDatabaseGate;
       /**
+       * Lista de fontes pinadas. Por omissão é o bloco revisto em código
+       * (`YARA_PIN`); injectável só para os testes poderem exercer o caminho de
+       * recusa por digesto — o produto nunca a passa.
+       */
+      yaraPin?: typeof YARA_PIN;
+      /**
        * Seam de teste: como o `freshclam` é criado. A produção nunca injecta
        * nada; é `spawn` do `node:child_process`.
        *
@@ -496,6 +517,7 @@ export class DefinitionUpdater {
     this.hashesPath = path.join(definitionsDir, "hashes", "default.json");
     this.metaPath = path.join(definitionsDir, ".update-meta.json");
     this.gate = options.gate ?? new ClamDatabaseGate();
+    this.yaraPin = options.yaraPin ?? YARA_PIN;
     this.spawnFreshclam = options.spawnFreshclam ?? spawn;
     this.renameYaraRules = options.renameYaraRules ?? fsPromises.rename;
     this.renameHashes = options.renameHashes ?? fsPromises.rename;
@@ -737,6 +759,12 @@ export class DefinitionUpdater {
   // ── Private: YARA ──────────────────────────────────────────────────────────
 
   private async updateYaraRules(): Promise<{ errors: string[]; warnings: string[] }> {
+    if (this.yaraPin.length === 0) {
+      // Lista de pin vazia é ficheiro de revisão por preencher, não «nenhuma fonte
+      // falhou». Ir à rede sem pin seria exatamente o comportamento que foi
+      // recusado na decisão D4.
+      return { errors: ["YARA: nenhuma fonte pinada para rever; corpus anterior preservado."], warnings: [] };
+    }
     await fsPromises.mkdir(path.dirname(this.yaraPath), { recursive: true });
 
     const validSources: string[] = [];
@@ -745,12 +773,28 @@ export class DefinitionUpdater {
     const sourceErrors: string[] = [];
     const sourceWarnings: string[] = [];
     let lastError: Error | null = null;
-    for (const descriptor of YARA_SOURCES) {
-      const url = descriptor.url;
-      const name = sourceName(url);
+    for (const descriptor of this.yaraPin) {
+      const url = urlDaFonte(descriptor);
+      const name = descriptor.id;
+      const problemaDoPin = pinoInvalido(descriptor);
+      if (problemaDoPin) {
+        // Configuração errada nunca é «fonte que falhou na rede»: não se vai à
+        // rede com um commit ou digest ilegível.
+        sourceErrors.push(`${name}: pin inválido (${problemaDoPin})`);
+        rejected.push({ name, reason: "pin-invalid" });
+        lastError = new Error(`YARA pin inválido (${name}).`);
+        continue;
+      }
       try {
         const content = await this.downloadText(url);
         const source = new URL(url).pathname;
+        // Integridade antes de sintaxe: o conteúdo do commit pinado tem de ser o
+        // conteúdo revisto. Um `raw.githubusercontent.com` que sirva outra coisa
+        // (ou um espelho intermédio) é recusado aqui, não compilado e aceite.
+        const digesto = createHash("sha256").update(content, "utf8").digest("hex");
+        if (digesto !== descriptor.sha256) {
+          throw new Error(`Conteúdo não corresponde ao pin revisto (${name}); corpus anterior preservado.`);
+        }
         // Validação: regras YARA devem conter "rule " e compilar com o YARA
         // clássico oficial (yarac). Só escrevemos no disco o que compila.
         if (!content.includes("rule ") || content.includes("<!DOCTYPE html>")) {
