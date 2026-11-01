@@ -194,9 +194,13 @@ describe("P0 isolamento de runtime â€” ProtectionEngineService", () => {
       for (let i = 0; i < 50 && !line; i++) {
         await new Promise((r) => setTimeout(r, 40));
         const raw = await fs.readFile(ourLog, "utf-8").catch(() => "");
-        line = raw.split(/\r?\n/).filter((e) => e.includes("PID=41112")).pop() ?? "";
+        line = raw.split(/\r?\n/).filter((e) => e.includes("PID=41112") || e.includes('"pid":41112')).pop() ?? "";
       }
-      assert.ok(line, `o kill tem de ficar registado em ${ourLog}`);
+      // A terminacao legada esta recusada globalmente (KILL_TERMINATION_DISABLED):
+            // o registo honesto deste pedido e `process.termination.refused`, com o
+            // pid em JSON. O que este teste prova continua a ser o ISOLAMENTO: a
+            // linha existe no tmpdir e o home real fica intocado.
+            assert.ok(line, `a recusa do kill tem de ficar registada em ${ourLog}`);
       await assertRealHomeUntouched();
     } finally {
       await disposeQuietly(engine);

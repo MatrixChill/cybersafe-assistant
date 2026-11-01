@@ -26,3 +26,6 @@ origin/main intocada: 21fefa69
 - DONE C2: quarentena em lote (selecao, confirmacao, resultado por ficheiro, nao tentados contados). 106 PASS, typecheck 0.
 - BLOCKED H1: resta apenas o registo externo de autorizacao (decisao humana).
 - NEXT: atualizador da aplicacao com chaves efemeras; exclusoes ponta a ponta; falha de isolamento P0.
+- DONE F2: atualizador da aplicacao 63 PASS (chave real continua pendente).
+- DONE E2: exclusoes ponta a ponta 34 PASS.
+- DONE D2: isolamento P0 corrigido (7 PASS); YARA rollback 10 PASS; contrato do bundle 33 PASS.

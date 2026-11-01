@@ -195,3 +195,10 @@ Os números Core 1064 PASS / 4 FAIL / 30 SKIP / 1 TODO pertencem ao log antigo, 
 - Lógica pura em `packages/app/src/lib/quarantineBatch.ts`: o resumo conta confirmados, confirmados-com-aviso, recusados, sem-confirmação e NÃO TENTADOS. Uma quebra de comunicação interrompe o lote e os restantes ficam como não tentados; nunca são contados como feitos. O estado do lote é o do pior desfecho.
 - Não executa ficheiros restaurados, não substitui destinos e não inventa sucesso: cada resultado vem da resposta do serviço por ficheiro.
 - Verificação: `tsc -b` do App exit 0; 106 PASS/0 FAIL/0 SKIP/0 TODO na família de quarentena da UI (quarantine-batch-green.log), incluindo os 5 novos casos.
+
+## Regressões fechadas e verificações desta ronda
+- Isolamento P0: um caso falhava desde a correção de auditoria da terminação. Causa real: o teste procurava `PID=41112`, formato que a recusa global já não escreve. O produto estava correto; o contrato do teste estava desatualizado. Passa a aceitar o `pid` em JSON e mantém intacta a asserção de isolamento (registo no tmpdir, home real intocado). 7 PASS/0 FAIL.
+- Exclusões ponta a ponta (análise/exclusão/inacessíveis/persistência): 34 PASS/0 FAIL/0 SKIP/0 TODO.
+- Atualizador da aplicação (aceitação, controlador, timeouts, verdade das definições): 63 PASS/0 FAIL. Não cobre o canal real assinado: a chave de produção continua a depender do proprietário.
+- YARA (update, download, regras): 10 PASS/0 FAIL, incluindo rollback.
+- Contrato do bundle ClamAV (`dist-clamav-vendor`): 33 PASS/0 FAIL.
