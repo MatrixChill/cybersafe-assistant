@@ -5,6 +5,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ClamavBridge, clamavSlotStats } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * P0 STARVATION — BACKPRESSURE na fila de background.
@@ -46,7 +47,9 @@ async function makeFakeReadyDefinitions(root) {
 function makeGatedSpawner() {
   const state = { spawned: 0, live: 0, peak: 0, pids: [] };
   const releases = new Map();
-  const spawn = (_file, args, _request) => {
+  const spawn = (_file, args, request) => {
+    // A prova passa pela bridge e pela vaga global, mas não é um job retido.
+    if (isLoadProof(request)) return makeLoadProofHandle();
     state.spawned++;
     state.live++;
     state.peak = Math.max(state.peak, state.live);
@@ -101,6 +104,8 @@ beforeEach(async () => {
     scanTimeoutMs: 5_000,
   });
   fired.length = 0;
+  assert.equal(await bridge.isAvailable(), true, "a prova de carga conclui antes de medir a fila");
+  assert.equal(gate.state.spawned, 0, "a prova de carga não é um job do portão");
 });
 
 afterEach(async () => {

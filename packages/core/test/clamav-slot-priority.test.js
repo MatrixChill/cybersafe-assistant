@@ -1,11 +1,12 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
-import { readdirSync } from "node:fs";
+import { syncBuiltinESMExports } from "node:module";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { ClamavBridge, clamavSlotStats } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * P0 SCANNER_RUNTIME_ZERO_PROGRESS — STARVATION DA VAGA GLOBAL DO CLAMAV.
@@ -59,7 +60,9 @@ function makeGatedSpawner() {
   const state = { spawned: 0, live: 0, peak: 0, order: [] };
   const releases = new Map();
 
-  const spawn = (_file, args, _request) => {
+  const spawn = (_file, args, request) => {
+    // A prova exerce o semáforo real, mas não é um scan preso no portão.
+    if (isLoadProof(request)) return makeLoadProofHandle();
     state.spawned++;
     state.live++;
     state.peak = Math.max(state.peak, state.live);
@@ -127,6 +130,8 @@ beforeEach(async () => {
     scanTimeoutMs: 5_000,
   });
   fired.length = 0;
+  assert.equal(await bridge.isAvailable(), true, "a prova de carga conclui antes de medir a fila");
+  assert.equal(gate.state.spawned, 0, "a prova de carga não é um job do portão");
 });
 
 afterEach(async () => {
@@ -156,16 +161,15 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
 
     // 80 jobs de background à espera da vaga (o cenário medido: waiting=79/80).
     for (let i = 1; i <= 80; i++) fired.push(bridge.scanFiles([target(i)], {}));
-    // O enqueue é síncrono — só microtarefas (`isAvailable` memoizado + push na
-    // fila) — por isso uma volta de macrotarefa é folgada para a fila estar
-    // completa. Nada aqui depende de I/O.
-    await sleep(20);
+    await waitFor(() => clamavSlotStats().waitingBackground === 80, {
+      label: "80 análises de background na fila",
+    });
 
     // 1 scan do UTILIZADOR: tem scanId, como o Quick Scan real.
     fired.push(
       bridge.scanFiles([target(900), manualTarget], { scanId: "ea56fe6a-3639-40e9-9d85-f8d82a884a48" }),
     );
-    await sleep(20);
+    await waitFor(() => clamavSlotStats().waitingUser === 1, { label: "utilizador na fila" });
 
     assert.equal(gate.state.spawned, 1, "só pode existir 1 clamscan vivo (MAX_CLAMSCAN=1)");
 
@@ -215,10 +219,13 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
     const ac = new AbortController();
     const cancelled = bridge.scanFiles([target(900)], { scanId: "cancel-me", signal: ac.signal });
     const background = bridge.scanFiles([target(1)], {});
-    await sleep(20);
+    fired.push(cancelled, background);
+    await waitFor(() => clamavSlotStats().waitingUser === 1 && clamavSlotStats().waitingBackground === 1, {
+      label: "ambas as classes na fila antes do aborto",
+    });
 
     ac.abort();
-    await sleep(20);
+    await waitFor(() => clamavSlotStats().waitingUser === 0, { label: "cancelado removido da fila" });
 
     gate.release(gate.state.order[0].pid);
     await waitFor(() => gate.state.spawned === 2, { label: "vaga seguinte" });
@@ -243,6 +250,7 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
     // shutdown tem de os acordar: uma promessa que nunca resolve é a mesma
     // classe de falha silenciosa que deixou o Quick Scan em 0/800.
     const queued = [1, 2, 3].map((i) => bridge.scanFiles([target(i)], {}));
+    fired.push(...queued);
     await waitFor(() => clamavSlotStats().waitingBackground === queued.length, {
       label: "fila de background com os jobs à espera",
     });
@@ -269,53 +277,41 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
     );
   });
 
-  it("um cancelamento que chega DURANTE a escrita da lista não deixa nascer o clamscan", async () => {
-    // ── A JANELA ──
-    // Entre a verificação `this.disposed || signal.aborted` (topo do `try`) e o
-    // `spawnFn` existe um `await writeFile(...)`. Um aborto que caia NESSE
-    // intervalo passava ao lado da verificação e o clamscan nascia na mesma:
-    // ~1 GB de processo que ninguém pediu — a mesma classe de P0 que isto veio
-    // fechar. (CODEX, finding HIGH do re-review: a janela é nova, nasceu de a
-    // lista passar a ser criada dentro do `try`.)
-    //
-    // O teste tem de cair aí DENTRO, por isso: (a) a lista é grande de
-    // propósito — a escrita é o que dá largura à janela (medido: ~27 ms para
-    // ~22 MB nesta máquina); (b) o aborto dispara no instante em que a lista
-    // aparece em disco, e não num timer às cegas.
-    const deep = "x".repeat(300);
-    const many = Array.from({ length: 60_000 }, (_, i) => path.join(tmp, deep, `big-${i}.txt`));
-    const prefixo = `cybersafe-clamav-batch-${process.pid}-`;
-    const antes = new Set(readdirSync(os.tmpdir()).filter((e) => e.startsWith(prefixo)));
-
-    const ac = new AbortController();
-    const job = bridge.scanFiles(many, { signal: ac.signal });
-
-    let apareceu = false;
-    const prazo = Date.now() + 10_000;
-    while (Date.now() < prazo) {
-      if (readdirSync(os.tmpdir()).some((e) => e.startsWith(prefixo) && !antes.has(e))) {
-        apareceu = true;
-        break;
+  it("um cancelamento que chega DURANTE a escrita da lista não deixa nascer o clamscan", async (t) => {
+    // Interceta só a conclusão da escrita: os bytes e o cleanup são reais.
+    // O portão evita depender da velocidade do disco ou de uma lista de 22 MB.
+    const many = Array.from({ length: 200 }, (_, i) => target(i));
+    const prefix = `cybersafe-clamav-batch-${process.pid}-`;
+    const originalWriteFile = fs.writeFile;
+    let releaseWrite;
+    const writing = new Promise((resolve) => { releaseWrite = resolve; });
+    let listFile;
+    const writeMock = t.mock.method(fs, "writeFile", async (file, ...args) => {
+      await originalWriteFile(file, ...args);
+      if (path.basename(String(file)).startsWith(prefix)) {
+        listFile = String(file);
+        await writing;
       }
-      await new Promise((resolve) => setImmediate(resolve));
+    });
+    syncBuiltinESMExports();
+    const ac = new AbortController();
+    try {
+      fired.push(bridge.scanFiles(many, { signal: ac.signal }));
+      await waitFor(() => Boolean(listFile), { label: "escrita da lista em curso" });
+      assert.equal(await fs.readFile(listFile, "utf8"), many.join("\n") + "\n");
+      ac.abort();
+      releaseWrite();
+      const res = await Promise.race([fired[0], sleep(5_000).then(() => null)]);
+      assert.ok(res, "o scan cancelado ficou pendurado no portão do subprocesso");
+      assert.equal(res.status.status, "unavailable", "cancelado = indisponível, nunca 'clean'");
+      assert.ok(res.files.every((file) => file.verdict === "error"), "nenhum ficheiro cancelado é limpo");
+      assert.equal(gate.state.spawned, 0, "o clamscan NÃO pode nascer depois do cancelamento");
+      await assert.rejects(fs.stat(listFile), { code: "ENOENT" }, "a lista tem de ser removida");
+    } finally {
+      releaseWrite();
+      writeMock.mock.restore();
+      syncBuiltinESMExports();
     }
-    assert.ok(
-      apareceu,
-      "a lista temporária nunca apareceu em disco: o teste não chegou a entrar na janela do writeFile",
-    );
-    ac.abort();
-
-    // Corrida contra o relógio: sem a verificação pós-escrita o filho nasce e o
-    // PORTÃO nunca o liberta, logo `job` nunca resolveria — a falha tem de ser
-    // um teste vermelho legível, não uma suite pendurada.
-    const res = await Promise.race([job, sleep(5_000).then(() => null)]);
-    assert.ok(res, "o scan cancelado ficou pendurado (o clamscan nasceu e ficou preso no portão)");
-    assert.equal(res.status.status, "unavailable", "cancelado = indisponível, nunca 'clean'");
-    assert.equal(
-      gate.state.spawned,
-      0,
-      "o clamscan NÃO pode nascer depois do cancelamento (reenvio) — a verificação tem de vir DEPOIS do último await que antecede o spawn",
-    );
   });
 
   it("uma vaga ENVENENADA acorda as DUAS filas (ninguém fica preso à espera)", async () => {
@@ -324,7 +320,10 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
 
     const user = bridge.scanFiles([target(900)], { scanId: "u-que-espera" });
     const background = bridge.scanFiles([target(1)], {});
-    await sleep(20);
+    fired.push(user, background);
+    await waitFor(() => clamavSlotStats().waitingUser === 1 && clamavSlotStats().waitingBackground === 1, {
+      label: "ambas as classes na fila antes da morte não confirmada",
+    });
 
     // Morte NÃO confirmada: é isto que envenena a vaga no `finally` da bridge.
     gate.release(gate.state.order[0].pid, {
