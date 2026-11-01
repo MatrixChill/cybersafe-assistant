@@ -41,6 +41,9 @@ jobs:
       - name: Assinatura de release (unitário + segurança do workflow)
         run: node --test scripts/test/release-signing.test.mjs scripts/test/release-workflow-security.test.mjs
 
+      - name: Definições — pin YARA, aprovadores do freeze e cadeia de release
+        run: node --test scripts/test/yara-pin.test.mjs scripts/test/release-key-setup.test.mjs scripts/test/release-chain.test.mjs scripts/test/source-freeze-approvers.test.mjs packages/service/test/yara-pin-verificado.test.js
+
       - name: Vendor YARA e manifesto de packaging
         run: node --test scripts/test/7h-yara-vendor.test.mjs scripts/test/7h-packaging-manifest.test.mjs
 

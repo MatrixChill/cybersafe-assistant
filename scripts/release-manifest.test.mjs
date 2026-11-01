@@ -47,12 +47,13 @@ test("canal estável recusa versão com pré-release (a armadilha medida em #16)
     () => construirManifesto({ ...BASE, ficheiro, version: "0.1.11-internal.pap-r7.20261031" }),
     /pré-liberta.*stable/i,
   );
-  // O mesmo interno é legítimo no canal interno: a guarda é sobre a afirmação,
-  // não sobre a string.
-  const interno = await construirManifesto({
-    ...BASE, ficheiro, version: "0.1.11-internal.pap-r7.20261031", channel: "internal",
-  });
-  assert.equal(interno.channel, "internal");
+  // O outro canal não existe no cliente: `UpdateChannel = "stable"`
+  // (`packages/desktop/src/updater/types.ts:16`) e o assinador recusa o resto.
+  // Produzir `internal` seria emitir um manifesto que ninguém consegue assinar.
+  await assert.rejects(
+    () => construirManifesto({ ...BASE, ficheiro, channel: "internal" }),
+    /canal inválido/,
+  );
 });
 
 test("sem assinatura no produto: o produtor não inventa canal de confiança", async (t) => {

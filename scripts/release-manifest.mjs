@@ -28,7 +28,12 @@ import { sha256Ficheiro } from "./release-checksums.mjs";
 
 const SCHEMA = "cybersafe.release-manifest/1";
 const VERSÃO = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-const CANAIS = ["stable", "beta", "internal"];
+/* O único canal que o cliente sabe ler. `packages/desktop/src/updater/types.ts:16`
+   é `UpdateChannel = "stable"` e `release-signing.mjs:68` recusa outro — emitir
+   `beta`/`internal` seria produzir um manifesto que o assinador ou o cliente
+   chumbam. Uma candidata interna não tem manifesto: o atualizador está
+   desligado (decisão D2) e não há nada a prometer a quem ainda não tem release. */
+const CANAIS = ["stable"];
 
 /** O contrato do cliente (`packages/desktop/src/updater/types.ts:120`). */
 export async function construirManifesto(opções) {
