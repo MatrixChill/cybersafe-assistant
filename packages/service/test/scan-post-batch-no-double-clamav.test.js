@@ -56,6 +56,7 @@ import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
 import AdmZip from "adm-zip";
+import { writeFileSync } from "node:fs";
 
 import { ProtectionEngineService } from "../dist/engine.js";
 import { ScanManager } from "../dist/scan-manager.js";
@@ -63,6 +64,7 @@ import { ScanManager } from "../dist/scan-manager.js";
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 const criados = [];
+const motores = [];
 
 async function mkTmp(prefix) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), prefix));
@@ -71,6 +73,7 @@ async function mkTmp(prefix) {
 }
 
 after(async () => {
+  await Promise.all(motores.map(engine => engine.dispose()));
   for (const dir of criados) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -131,10 +134,15 @@ function injectClamav(engine, { verdicts = new Map(), defaultVerdict = "clean" }
 function novoMotor(baseDir) {
   // NUNCA `init()`: o contrato destes testes é o prefetch e o scanArtifact, não
   // o arranque de watcher/ETW/WFP.
-  return new ProtectionEngineService(baseDir);
+  const engine = new ProtectionEngineService(baseDir);
+  const corpus = path.join(baseDir, 'benign-fixture.yar');
+  writeFileSync(corpus, 'rule BatchBenign { condition: false }');
+  engine.yara.rulesPath = corpus;
+  motores.push(engine);
+  return engine;
 }
 
-async function escrever(dir, nomes, conteudo = "conteudo benigno") {
+async function escrever(dir, nomes, conteudo = "Texto controlado de teste R7.") {
   const paths = [];
   for (const nome of nomes) {
     const p = path.join(dir, nome);

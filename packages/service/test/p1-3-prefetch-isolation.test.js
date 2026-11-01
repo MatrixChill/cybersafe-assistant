@@ -78,6 +78,9 @@ import { ProtectionEngineService } from "../dist/engine.js";
 
 const TMP = await fs.mkdtemp(path.join(os.tmpdir(), "cs-p13-"));
 const MUTACAO = process.env.CS_P13_MUTACAO ?? "";
+const YARA_FIXTURE = path.join(TMP, 'fixture.yar');
+await fs.writeFile(YARA_FIXTURE, 'rule PrefetchBenign { condition: false }');
+const motores = [];
 
 /**
  * Bridge com um PLANO por ordem de entrada.
@@ -226,7 +229,12 @@ function degradarParaMapGlobal(engine) {
 
 function novoMotor(bridge) {
   const engine = new ProtectionEngineService(TMP);
-  engine.clamav = bridge;
+  // O analyzer reteve a referência do construtor. Injetar a mesma ponte nos
+  // dois consumidores, sem substituir análise, scoring ou isolamento.
+  Object.assign(engine.clamav, bridge);
+  engine.yara.rulesPath = YARA_FIXTURE;
+  engine.vt.isEnabled = () => false;
+  motores.push(engine);
   aplicarMutacao(engine);
   return engine;
 }
@@ -294,6 +302,7 @@ describe("P1-3 — o prefetch de um scan não pode vazar para outro", () => {
   });
 
   after(async () => {
+    await Promise.all(motores.map(engine => engine.dispose()));
     await fs.rm(TMP, { recursive: true, force: true }).catch(() => {});
   });
 
