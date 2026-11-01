@@ -763,7 +763,7 @@ export class DefinitionUpdater {
       // Lista de pin vazia é ficheiro de revisão por preencher, não «nenhuma fonte
       // falhou». Ir à rede sem pin seria exatamente o comportamento que foi
       // recusado na decisão D4.
-      return { errors: ["YARA: nenhuma fonte pinada para rever; corpus anterior preservado."], warnings: [] };
+      throw new Error("YARA: nenhuma fonte pinada para rever; corpus anterior preservado.");
     }
     await fsPromises.mkdir(path.dirname(this.yaraPath), { recursive: true });
 

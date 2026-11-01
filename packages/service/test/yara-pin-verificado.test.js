@@ -87,11 +87,40 @@ describe("fonte pinada por commit e digesto", () => {
 
   it("sem nenhuma fonte pinada não se escreve nem se descarrega", async () => {
     const { dir, corpus, anterior, updater, pedidos } = await cenário([]);
+    let reloads = 0;
+    updater.afterDefinitionsUpdated = () => { reloads += 1; };
     try {
       const resultado = await updater.checkAndUpdate(true);
+      assert.equal(resultado.yaraUpdated, false, "sem candidato não houve atualização YARA");
+      assert.equal(reloads, 0, "sem alterações não se pede recarregamento dos motores");
+      const estado = updater.estadoDasFontes().find((fonte) => fonte.fonte === "yara");
+      assert.equal(estado.ultimaBemSucedidaAtMs, null, "a recusa não renova a frescura da fonte");
+      assert.equal(estado.tentativasConsecutivas, 1, "a configuração inválida conta como falha");
+      assert.equal(estado.emBackoff, true, "a falha respeita o backoff");
       assert.equal(pedidos.length, 0, "lista de pin vazia é erro de configuração, não licença para descarregar o que estiver na branch");
       assert.equal(await fs.readFile(corpus, "utf8"), anterior);
       assert.ok(resultado.errors.some((e) => /nenhuma fonte pinada/i.test(e)), JSON.stringify(resultado.errors));
+    } finally { await fs.rm(dir, { recursive: true, force: true }); }
+  });
+
+  it("recuperação com lista de pins vazia não anuncia corpus recuperado", async (t) => {
+    // Abre só o modo normal desta fixture; sem rede porque downloadText é local.
+    const saved = {};
+    for (const key of ["CYBERSAFE_DEV_WINDOWS_READONLY", "CYBERSAFE_REALDEV_FIXTURE_SCAN"]) {
+      saved[key] = process.env[key];
+      delete process.env[key];
+    }
+    t.after(() => {
+      for (const [key, value] of Object.entries(saved)) {
+        if (value === undefined) delete process.env[key];
+        else process.env[key] = value;
+      }
+    });
+    const { dir, corpus, anterior, updater, pedidos } = await cenário([]);
+    try {
+      assert.equal(await updater.refreshYaraCorpus(), false, "não existe candidato recuperado");
+      assert.equal(pedidos.length, 0);
+      assert.equal(await fs.readFile(corpus, "utf8"), anterior);
     } finally { await fs.rm(dir, { recursive: true, force: true }); }
   });
 
