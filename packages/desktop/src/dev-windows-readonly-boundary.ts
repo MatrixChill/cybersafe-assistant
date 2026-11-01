@@ -311,6 +311,8 @@ export const CANAIS_PERMITIDOS: ReadonlySet<string> = new Set([
   "service:get-processes",
   "service:get-connections",
   "service:get-quarantine",
+  // A politica de quarentena e uma leitura sem efeito; a escrita fica negada.
+  "service:get-quarantine-policy",
   "service:get-hardware",
   "service:get-windows-health",
   "service:get-pcstate",
@@ -327,6 +329,7 @@ export const CANAIS_PERMITIDOS: ReadonlySet<string> = new Set([
  */
 export const CANAIS_NEGADOS: ReadonlySet<string> = new Set([
   "service:update-exclusions",
+  "service:set-quarantine-policy",
   "service:set-protection",
   "service:pause-protection",
   "service:set-protection-intent",

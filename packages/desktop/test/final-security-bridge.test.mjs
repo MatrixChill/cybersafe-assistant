@@ -5,10 +5,10 @@ import {ProtectionEngineService} from '../../service/dist/engine.js';import {Nat
 import {ServiceClient} from '../src/service-client.ts';import {createSecurityNotifications} from '../src/security-notifications.ts';import {createNativeNotificationDelivery} from '../src/notification-delivery.ts';
 const wait=async predicate=>{const deadline=Date.now()+2000;while(!predicate()){if(Date.now()>deadline)throw Error('isolated bridge deadline');await new Promise(r=>setTimeout(r,5));}};
 for(const mode of ['confirmed','failed','notifications-off'])test('real authenticated pipe bridges '+mode+' to history and mock native Notification',async t=>{
- const dir=await fs.mkdtemp(path.join(os.tmpdir(),'cybersafe-final-bridge-'));const file=path.join(dir,'fixture.txt');await fs.writeFile(file,'Benign isolated fixture');
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'cybersafe-final-bridge-'));const targetDir=await fs.mkdtemp(path.join(os.tmpdir(),'cybersafe-final-target-'));const file=path.join(targetDir,'fixture.txt');await fs.writeFile(file,'Benign isolated fixture');
  const oldToken=process.env.CYBERSAFE_PIPE_TOKEN;const token=randomBytes(32).toString('hex');process.env.CYBERSAFE_PIPE_TOKEN=token;const engine=new ProtectionEngineService(dir);if(oldToken===undefined)delete process.env.CYBERSAFE_PIPE_TOKEN;else process.env.CYBERSAFE_PIPE_TOKEN=oldToken;
  const pipe=process.platform==='win32'?'\\\\.\\pipe\\cybersafe-final-'+randomBytes(8).toString('hex'):path.join(dir,'test.sock');const client=new ServiceClient(pipe,token);
- t.after(async()=>{client.disconnect();await engine.dispose();await fs.rm(dir,{recursive:true,force:true});});
+ t.after(async()=>{client.disconnect();await engine.dispose();await fs.rm(dir,{recursive:true,force:true});await fs.rm(targetDir,{recursive:true,force:true});});
  const stored=[];engine.eventsLog.write=async value=>{stored.push(JSON.parse(value));await fs.appendFile(path.join(dir,'history.jsonl'),value+'\n');};engine.logHistory=async()=>{};engine.actionsLog.write=async()=>{};engine.vt.isEnabled=()=>false;
  engine.bindEventBus();await engine.quarantine.init();t.mock.method(NativeEngineBridge,'scan',async()=>({ok:false,result:null}));
  const sha=createHash('sha256').update(await fs.readFile(file)).digest('hex');engine.analyzer.analyze=async()=>({artifactPath:file,fileName:'fixture.txt',size:22,sha256:sha,verdict:'malicious',severity:'critical',riskScore:100,confidence:0.99,rulesTriggered:['known_bad_hash'],factors:[],recommendedAction:'quarantined',scanTimestamp:new Date().toISOString()});
