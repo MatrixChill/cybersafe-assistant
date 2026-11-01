@@ -687,3 +687,35 @@ Ainda **não** medido neste percurso: a preservação da base anterior quando o 
 da descarga (requisito 1, pontos 4 e 5) e a recuperação de saúde depois dessa falha. O
 `ClamDatabaseGate` (`updater.ts:362-420`) foi desenhado para isso e tem testes com duplos, mas
 falta a variação com o fornecedor real a interromper-se. Task #19 fica em curso por essa razão.
+
+### Interrupção REAL de uma descarga: as bases antigas sobrevivem, e a saúde mentia
+
+Provoquei a falha que ainda não tinha provas (requisito 1, pontos 4 e 5): na base oficial já
+descarregada em `clamav-real-db/database`, removi o `daily.cvd` para forçar uma descarga nova, lancei
+o `freshclam` do produto e **matei o processo a meio** (SIGTERM aos 1,5 s). Script
+`logs/real-clamav-interrupt.mjs`, log `real-clamav-interrupt.log`.
+
+- **Preservação: cumpre-se.** Depois do kill não havia **nenhum** ficheiro parcial/temporário,
+  `daily.cvd` estava ausente (não meio-escrito) e `main.cvd` continuava em 89 072 577 bytes. A
+  atomicidade do próprio freshclam garante que uma descarga interrompida não corrompe a base que já
+  existia — era o ponto 4, agora medido no fornecedor real e não num duplo.
+- **Recuperação: cumpre-se.** Correr o freshclam até ao fim devolveu exit 0, o `daily.cvd` voltou, a
+  classificação voltou a contar 3 ficheiros de base e o scan benigno saiu limpo.
+- **O defeito que isto revelou:** nesse estado de base oficial **incompleta** (só `main.cvd`) o
+  produto respondia `available=true`, `health = active`, «2 signature database file(s)». Quase toda a
+  assinatura recente tinha desaparecido e o estado afirmava o contrário. É exatamente a confusão entre
+  «existem ficheiros .cvd» e «há cobertura» que o comentário de `classifyClamavHealth` jura evitar — a
+  regra parava em `dbs.length > 0 → active`.
+- **Correção:** sem `daily`/`nightly` → `degraded` com o nome do que falta, mantendo
+  `available=true` (o binário está lá e as bases que existem carregam-se). Não mudei contagem nem
+  varrimento; mudei o que se afirma. Teste novo `core/test/clamav-health-base-incompleta.test.js`, 4
+  casos (main sem daily → degradado; main+daily → active; `nightly` conta; local-only e vazio ficam
+  como estavam), escolhido automaticamente pelo `npm test -w @cybersafe/core`, que usa glob — ao
+  contrário do `service` e do `scripts/test`, que usam listas explícitas.
+- **Medido depois da mudança:** 19/19 no classificador e na recuperação; `rc22-motores-clamav` com
+  `CYBERSAFE_REAL_CLAMSCAN=1` continua **6/6**, exit 0. Nada na deteção mudou de comportamento.
+
+Limitação honesta desta variação: o kill foi no `freshclam`, portanto provei o efeito de uma
+interrupção na base; **não** provei o `ClamDatabaseGate` a serializar um scan em curso contra a
+escrita (esse caminho continua só com testes de duplos), e não auditei o ramo `candidates` de
+`classifyClamavHealth` — a correção foi feita no ramo `dbFiles`, que é o que a sonda real usa.

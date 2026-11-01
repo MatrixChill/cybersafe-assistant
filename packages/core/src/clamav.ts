@@ -2612,6 +2612,23 @@ export function classifyClamavHealth(facts: ClamavProbeFacts): { available: bool
       },
     };
   }
+  // Base oficial presente mas INCOMPLETA: provado em percurso real (2026-11-01)
+  // — um `freshclam` interrompido a meio deixa `main.cvd` intacto e `daily.cvd`
+  // ausente, sem ficheiro parcial, e a classificação antiga respondia `active`
+  // com «2 signature database file(s)». O binário está bom, as duas bases que
+  // existem carregam-se, e mesmo assim quase toda a assinatura recente falta.
+  // `active` aqui seria a mentira da classe que o comentário acima jura evitar:
+  // contagem de ficheiros não é cobertura. A sonda passa a dizer O QUE FALTA.
+  const temDiaria = dbs.some((entry) => /^(daily|nightly)[-.]/i.test(entry));
+  if (!temDiaria) {
+    return {
+      available: true,
+      health: {
+        status: "degraded",
+        detail: `ClamAV carrega ${dbs.length} base(s) oficial(is) em ${facts.dbDir}, mas falta a base diária (daily/nightly) — assinatura recente em falta até correr freshclam`,
+      },
+    };
+  }
   return {
     available: true,
     health: { status: "active", detail: `ClamAV binary available (${dbs.length} signature database file(s))` },
