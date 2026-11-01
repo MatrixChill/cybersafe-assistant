@@ -163,7 +163,12 @@ export type InconclusiveCause =
   | "engine-unavailable"
   | "engine-failed"
   | "no-verdict"
-  | "coverage-incomplete";
+  | "coverage-incomplete"
+  | "timeout"
+  | "invalid-output"
+  | "file-changed"
+  | "archive-incomplete"
+  | "cancelled";
 
 export interface InconclusiveCauseCount {
   reason: InconclusiveCause;
@@ -189,6 +194,11 @@ const INCONCLUSIVE_CAUSES: InconclusiveCause[] = [
   "engine-failed",
   "no-verdict",
   "coverage-incomplete",
+  "timeout",
+  "invalid-output",
+  "file-changed",
+  "archive-incomplete",
+  "cancelled",
 ];
 
 function asInconclusiveByReason(value: unknown): InconclusiveCauseCount[] | undefined {
@@ -1031,6 +1041,11 @@ const INCONCLUSIVE_CAUSE_LABEL: Record<InconclusiveCause, string> = {
   "engine-failed": "falha do motor",
   "no-verdict": "sem veredicto dos motores",
   "coverage-incomplete": "cobertura incompleta",
+  timeout: "tempo excedido",
+  "invalid-output": "resultado inválido",
+  "file-changed": "ficheiro alterado durante a análise",
+  "archive-incomplete": "arquivo não verificado completamente",
+  cancelled: "análise cancelada",
 };
 
 /**

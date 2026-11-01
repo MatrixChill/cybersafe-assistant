@@ -662,7 +662,12 @@ export type InconclusiveReason =
   | "engine-unavailable"
   | "engine-failed"
   | "no-verdict"
-  | "coverage-incomplete";
+  | "coverage-incomplete"
+  | "timeout"
+  | "invalid-output"
+  | "file-changed"
+  | "archive-incomplete"
+  | "cancelled";
 
 export interface InconclusiveReasonCount {
   reason: InconclusiveReason;

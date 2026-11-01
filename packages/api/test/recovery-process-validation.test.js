@@ -10,6 +10,10 @@ test('strict allowlist refuses private fields, invalid measurements and unbound 
 test('process context requires explicit consent before adding telemetry to chat',()=>{
   assert.throws(()=>processContextForChat({processIntelligence:payload()}));
   assert.throws(()=>processContextForChat({processIntelligence:payload(),processConsent:false}));
-  assert.match(processContextForChat({processIntelligence:payload(),processConsent:true}),/FACTO MEDIDO/);
+  const bloco = processContextForChat({processIntelligence:payload(),processConsent:true});
+  assert.match(bloco,/FACTO MEDIDO/);
+  assert.match(bloco,/MESMA instância/);
+  assert.match(bloco,/não há tendência suficiente/);
+  assert.match(bloco,/não inferir malware pelo consumo/);
   assert.equal(processContextForChat({}),null);
 });

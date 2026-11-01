@@ -63,7 +63,11 @@ export class ProcessContextRefusal extends Error {
 export function processContextBlock(body: unknown): string | null {
   if(!record(body) || body.processIntelligence===undefined) return null;
   if(!validateProcessIntelligencePayload(body.processIntelligence)) throw new ProcessContextRefusal('process_context_invalid');
-  return '[FACTO MEDIDO - PROCESS INTELLIGENCE]\n'+JSON.stringify(body.processIntelligence)+'\nDistinguir facto, hipótese, risco confirmado e informação insuficiente. Working Set não é memória privada. Não diagnosticar fugas nem executar ações. Não inferir segurança pelo consumo.';
+  return '[FACTO MEDIDO - PROCESS INTELLIGENCE]\n'+JSON.stringify(body.processIntelligence)
+    +'\nUsa os valores exatos de selectedProcess/trends e compara apenas a MESMA instância (pid + startedAt).'
+    +' Se trends tiver amostras, diz quantas e descreve a direção medida; se não tiver, diz explicitamente que não há tendência suficiente e não inventes uma.'
+    +' Distinguir facto, hipótese, risco confirmado e informação insuficiente. Working Set não é memória privada. Não diagnosticar fugas, não inferir malware pelo consumo e não executar ações.'
+    +' Se recomendar fechar um processo, explica o risco e nunca trates processos protegidos como termináveis.';
 }
 
 /**

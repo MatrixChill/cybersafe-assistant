@@ -254,7 +254,34 @@ export type InconclusiveReason =
   | "engine-unavailable"
   | "engine-failed"
   | "no-verdict"
-  | "coverage-incomplete";
+  | "coverage-incomplete"
+  | "timeout"
+  | "invalid-output"
+  | "file-changed"
+  | "archive-incomplete"
+  | "cancelled";
+
+/**
+ * Classifica apenas o que o resultado do motor permite afirmar. O `detail` é
+ * usado como evidência textual; quando não contém um sinal reconhecido, fica
+ * a causa genérica do `analysisState` — nunca se inventa um motor ou uma fase.
+ */
+export function classifyInconclusiveReason(
+  analysisState: string | undefined,
+  detail: string | undefined,
+): InconclusiveReason {
+  const text = (detail ?? "").toLowerCase();
+  if (text.includes("cancel")) return "cancelled";
+  if (text.includes("timeout") || text.includes("timed out") || text.includes("etimedout")) return "timeout";
+  if (text.includes("invalid") || text.includes("malformed") || text.includes("parse")) return "invalid-output";
+  if (text.includes("changed") || text.includes("alterad") || text.includes("substitut")) return "file-changed";
+  if (text.includes("archive") || text.includes("zip")) return "archive-incomplete";
+  if (text.includes("cobertura") || text.includes("coverage")) return "coverage-incomplete";
+  if (analysisState === "engine-unavailable") return "engine-unavailable";
+  if (analysisState === "failed") return "engine-failed";
+  if (analysisState === "inconclusive") return "coverage-incomplete";
+  return "no-verdict";
+}
 
 export interface InconclusiveReasonCount {
   reason: InconclusiveReason;
@@ -1220,14 +1247,17 @@ const heartbeat = setInterval(() => {
               // O motivo sai do que o motor devolveu, nunca de uma dedução.
               // `no-verdict` = resposta vazia/ausente; os restantes espelham o
               // `analysisState` do resultado que ficou por fechar.
-              const motivo: InconclusiveReason =
-                !Array.isArray(scanResults) || scanResults.length === 0
-                  ? "no-verdict"
-                  : scanResults.some((item) => item.analysisState === "engine-unavailable")
-                    ? "engine-unavailable"
-                    : scanResults.some((item) => item.analysisState === "failed")
-                      ? "engine-failed"
-                      : "coverage-incomplete";
+              const problema = Array.isArray(scanResults)
+                ? scanResults.find((item) => item.analysisState !== "completed")
+                : undefined;
+              const motivo: InconclusiveReason = !problema
+                ? "no-verdict"
+                : this.archiveCoverageGaps.has(id)
+                  ? "coverage-incomplete"
+                  : classifyInconclusiveReason(
+                    problema.analysisState,
+                    (problema as { detail?: string }).detail,
+                  );
               inconclusiveByReason = addInconclusiveReason(inconclusiveByReason,
                 this.archiveCoverageGaps.has(id) ? "coverage-incomplete" : motivo);
             }
