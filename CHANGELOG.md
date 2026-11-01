@@ -957,3 +957,34 @@ Ambos os pacotes tinham um `npm test` com listas explícitas de ficheiros (96 de
 inteira com o mesmo `--test-concurrency=1` (o resultado depende do modo de execução e
 isso está dito na tabela). Primeiro uso medido: `native-windows` **246 testes / 246 PASS /
 0 FAIL / `exit 0`**, e foi o `service test:full` que apanhou as seis falhas acima.
+
+## `vendor/yara` entra no congelamento — os executáveis do motor também são fonte
+
+Ao preparar a folha de aprovação do freeze vi uma assimetria que estava a passar:
+`git ls-files vendor` devolve **5 ficheiros**, todos em `vendor/yara`
+(`yara64.exe`, `yarac64.exe`, `vcruntime140.dll`, `COPYING.txt`, `VENDOR.json`) — ou
+seja, os clássicos do YARA 4.6.0 estão versionados neste repo, são o que o serviço
+usa para compilar regras, e **não estavam em nenhuma raiz congelada**. O
+`vendor/clamav` (133 MB) não está versionado e continua ancorado no SHA-256 do
+arquivo oficial que `vendor/clamav/VENDOR.json` regista; esse `VENDOR.json` já era
+`ROOTS_EXTRA`.
+
+Passar `vendor/yara` a `ROOTS_REQUIRED` fecha a diferença entre «aprovar o código
+que invoca o motor» e «aprovar o que é efetivamente invocado». Não é paranoia de
+inventário: o preflight do `package-windows.mjs` já exige presença desses ficheiros
+(`binario:yara64.exe`, `binario:yarac64.exe`, `licenca:yara/COPYING.txt`), mas
+presença não é integridade — sem digest, um `yara64.exe` trocado localmente passava
+por uma aprovação verde.
+
+Medido: os dois ficheiros de teste do freeze passaram a falhar `required-missing`
+com a nova raiz (descreviam uma árvore sem `vendor/yara`), foram completados com os
+cinco caminhos reais, e voltam a **40/40 PASS**. Na árvore verdadeira o
+`buildManifest({approval:null})` (que não escreve nada) devolve agora **1783
+entradas** e digest
+`f8ca9e1d47ffc0cba5a13a55edf05b086a90ff41e95976b84a61204497f3a800`,
+com `vendor/yara/COPYING.txt`, `VENDOR.json`, `vcruntime140.dll`, `yara64.exe` e
+`yarac64.exe` entre as entradas.
+
+Consequência direta para a task #13: a aprovação tem de nomear **este** digest. A
+folha está em `release-prep/FONTE-CONGELAMENTO-APROVACAO.md` (fora do repo, porque
+um ficheiro de aprovação dentro da árvore entraria no digest que aprova).

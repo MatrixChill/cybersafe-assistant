@@ -66,8 +66,14 @@ const RETRYABLE = new Set(["EBUSY", "EPERM", "EACCES", "EMFILE", "ENFILE"]);
    (`app-version.mjs`, `package-windows.mjs` e `stage-renderer.mjs` leem-na).
    Fora do conjunto congelado, um `--verify` verde não dizia nada sobre a versão
    distribuída — a aprovação tem de a cobrir, ou o congelamento aprova um binário
-   cuja identidade ninguém aprovou. */
-const ROOTS_REQUIRED = ["package.json", "package-lock.json", "product-version.json", "scripts", "packages", "assets"];
+   cuja identidade ninguém aprovou.
+   `vendor/yara` pelo mesmo motivo e com mais peso: os executáveis clássicos do
+   YARA (yara64/yarac64/vcruntime140 + COPYING.txt) estão versionados neste repo,
+   são usados pelo serviço para compilar regras e vão no pacote. Ficar de fora do
+   digest era aprovar o código que os invoca sem aprovar o que é invocado. O
+   `vendor/clamav` mantém-se por `VENDOR.json` (133 MB não versionados; a âncora
+   correta é o SHA-256 do arquivo oficial que esse registo guarda). */
+const ROOTS_REQUIRED = ["package.json", "package-lock.json", "product-version.json", "scripts", "packages", "assets", "vendor/yara"];
 const ROOTS_OPTIONAL = [/^tsconfig(\..+)?\.json$/i, /^vite\.config\..+$/i, /^\.npmrc$/i];
 const ROOTS_EXTRA = ["packages/native-engine/build/Release/scan-engine.exe", "vendor/clamav/VENDOR.json"];
 /** Roots que têm de ser FICHEIROS: um link/pasta com esse nome nunca é fonte válida. */

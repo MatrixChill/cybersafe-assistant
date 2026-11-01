@@ -52,6 +52,10 @@ function fixture(t) {
   put("packages/core/src/index.ts", "export const b = 2;\n");
   put("packages/native-engine/build/Release/scan-engine.exe", "MZ\n");
   put("vendor/clamav/VENDOR.json", "{}\n");
+  put("vendor/yara/VENDOR.json", '{"schema":1,"engine":"yara-classic","version":"4.6.0"}\n');
+  put("vendor/yara/yara64.exe", "MZ\n");
+  put("vendor/yara/yarac64.exe", "MZ\n");
+  put("vendor/yara/COPYING.txt", "BSD-3-Clause (fixture)\n");
   put("assets/branding/logo.svg", "<svg/>\n");
   put("assets/licenses/THIRD-PARTY-NOTICES.txt", "Avisos de terceiros (fixture).\n");
   put("assets/licenses/PROVENANCE.json", '{"schema":1,"obrigacaoPorResolver":{"bloqueador":false,"evidencia":["fixture"]}}\n');
