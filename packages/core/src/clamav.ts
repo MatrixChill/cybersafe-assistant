@@ -3100,6 +3100,8 @@ export class ClamavBridge {
    */
   private _databaseHealth: EngineSubsystemHealth | null = null;
   private probePromise: Promise<boolean> | null = null;
+  /** Revalidar falhas após 30 s; saúde confirmada após 5 min, sem polling próprio. */
+  private probeExpiresAt = 0;
   /** Prova EM CURSO (single-flight: até `force` se junta à em curso). */
   private probeInFlight: Promise<boolean> | null = null;
   private _dbDir: string | null = null;
@@ -3270,9 +3272,17 @@ export class ClamavBridge {
     // SINGLE-FLIGHT: qualquer chamada (mesmo `force`) junta-se à prova em
     // curso. Sem isto, duas `force` concorrentes (health-check + após swap)
     // arrancavam duas provas e dois clamscans de ~1 GB.
+    if (this.disposed) return false;
     if (this.probeInFlight) return this.probeInFlight;
-    if (this.probePromise && !force) return this.probePromise;
-    const run = this.probe();
+    if (this.probePromise && !force && Date.now() < this.probeExpiresAt) return this.probePromise;
+    const run = this.probe().then((available) => {
+      this.probeExpiresAt = Date.now() + (this._health.status === "active" ? 300_000 : 30_000);
+      return available;
+    }, (error) => {
+      // Uma rejeição inesperada também não pode ficar eternamente em cache.
+      this.probeExpiresAt = Date.now() + 30_000;
+      throw error;
+    });
     this.probeInFlight = run;
     this.probePromise = run;
     return run.finally(() => {
