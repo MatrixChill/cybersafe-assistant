@@ -1167,3 +1167,27 @@ TODO é o ponteiro do dashboard (#15).
 O que isto destrava: a tua aprovação passa a ser expressável sem tocar em código.
 O que não muda: a integridade (digest por ficheiro, `--verify` byte a byte, links
 recusados, recursos obrigatórios) e o facto de eu não escrever a aprovação por ti.
+
+## Ensaios de CLI do congelamento: o caminho `--write` também foi exercido
+
+Os testes cobriam `verifySourceFreeze` e a validação de identidade, mas não a
+linha de comandos que eu próprio alterei. Ensaio executado (em diretório
+temporário, **nada escrito no repo, nada committado**, identidade e
+`candidateId` marcados como `REHEARSAL` — não é aprovação de produto e não
+destrava build nenhum):
+
+- sem `CYBERSAFE_APPROVERS_FILE`: `approver-registry-missing`, `exit 1`, e
+  **nenhum manifesto é escrito** — a recusa não deixa artefacto para trás;
+- com registo de ensaio: `--write` produz 1788 ficheiros e
+  `2a28a8979966c3ff05b379585d7b29e404428f906de7c9678cee69d381833fb0`, o mesmo
+  digest que a verificação independente por `buildManifest` tinha dado — as duas
+  rotas concordam;
+- `--verify --json` no manifesto do ensaio: `ok: true`, `treeDigest` igual, e o
+  relatório mostra o registo usado (`owners:1, integrators:0`);
+- trocar o `approvedBy` dentro do `.json` para uma identidade fora do registo:
+  `DIVERGENTE — build bloqueado` / `approvedBy «Outra Identidade» não consta do
+  registo de aprovadores`.
+
+Registado porque é a diferença entre «a função está certa» e «o comando que o
+integrador vai correr está certo». Também confirma que o valor publicado na folha
+de aprovação (`2a28a897…`, 1788 entradas) é reproduzível por rota independente.
