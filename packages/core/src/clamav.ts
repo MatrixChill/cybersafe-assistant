@@ -740,6 +740,8 @@ export interface ClamavBridgeOptions {
   loadProofEnabled?: boolean;
   /** Timeout da PROVA DE CARGA (default: `CLAMAV_LOAD_PROBE_TIMEOUT_MS`). Testes injectam. */
   probeTimeoutMs?: number;
+  /** Espera máxima pela vaga antes de adiar a prova (default 5 s). */
+  probeSlotWaitMs?: number;
   /** Órçamento do `dispose()` à espera da morte dos filhos (default 5 s). Testes injectam. */
   disposeBudgetMs?: number;
   /**
@@ -2683,6 +2685,11 @@ export interface ClamavLoadProof {
   exitCode: number | null;
   /** erro de spawn/timeout/lease/modo; ausente quando o processo correu. */
   error?: string;
+  /**
+   * A prova NÃO correu por o motor estar ocupado (sem vaga no prazo de espera).
+   * Não é falha de carga: não pode degradar um estado já comprovado.
+   */
+  deferred?: boolean;
 }
 
 /** Seam de teste: executa `clamscan <args>` e devolve a saída. Nunca definido em produção. */
@@ -2699,6 +2706,15 @@ export type ClamavLoadRun = (
  * (exit 0). 30 s é o tecto com margem >4× para máquinas lentas.
  */
 export const CLAMAV_LOAD_PROBE_TIMEOUT_MS = 30_000;
+
+/**
+ * Espera máxima pela VAGA antes de adiar a prova. Distinta do deadline da
+ * prova: um scan longo pode ocupar a única vaga durante minutos, e esperar
+ * 30 s por ela só atrasa a saúde sem produzir evidência nenhuma. Cinco
+ * segundos cobrem a rotação normal entre scans; acima disso a prova é adiada
+ * e revalidada quando o scan libertar a vaga.
+ */
+export const CLAMAV_LOAD_PROBE_SLOT_WAIT_MS = 5_000;
 
 /** ENV que liga o modo SO-SOMENTE-LEITURA do serviço (dev-windows-readonly). */
 export const CLAMAV_READONLY_MODE_ENV = "CYBERSAFE_DEV_WINDOWS_READONLY";
@@ -2796,7 +2812,35 @@ export function applyClamavLoadProof(
   outcome: { available: boolean; health: EngineSubsystemHealth },
   chosen: ClamavDbCandidate | null,
   proof: ClamavLoadProof,
+  previous?: EngineSubsystemHealth,
 ): { available: boolean; health: EngineSubsystemHealth } {
+  // OCUPAÇÃO NÃO É FALHA. A prova ficou sem vaga porque o motor estava a
+  // analisar: não houve spawn nem evidência contra a base. Preservar um
+  // `active` já comprovado (marcado `busy`) evita o ciclo ACTIVE→DEGRADED→ACTIVE
+  // causado pela contenção da própria fila; sem confirmação anterior, o estado
+  // honesto é `unavailable`, nunca `active`.
+  if (proof.deferred === true) {
+    const why = proof.error ?? "motor ocupado";
+    if (previous?.status === "active") {
+      return {
+        available: true,
+        health: {
+          status: "active",
+          busy: true,
+          coverage: previous.coverage,
+          detail: `Motor ocupado: prova de carga adiada (${why}); mantém-se a última carga comprovada.`,
+        },
+      };
+    }
+    return {
+      available: false,
+      health: {
+        status: "unavailable",
+        busy: true,
+        detail: `Motor ocupado: prova de carga adiada (${why}); ainda sem carga comprovada.`,
+      },
+    };
+  }
   if (outcome.health.status !== "active" || !chosen) return outcome;
   if (clamavLoadConfirmed(proof)) return outcome;
   const why = proof.error
@@ -3104,6 +3148,8 @@ export class ClamavBridge {
   private probeExpiresAt = 0;
   /** Prova EM CURSO (single-flight: até `force` se junta à em curso). */
   private probeInFlight: Promise<boolean> | null = null;
+  /** Há uma prova adiada por ocupação à espera de revalidação. */
+  private probeDeferredPending = false;
   private _dbDir: string | null = null;
   /** Há assinaturas num directório sondado — mesmo que velhas. */
   private _hasSignatures = false;
@@ -3338,13 +3384,15 @@ export class ClamavBridge {
     // o motor fica `degraded` com a razão honesta.
     let decided: { available: boolean; health: EngineSubsystemHealth } = outcome;
     if (decided.health.status === "active" && chosen) {
+      const previous = this._health;
       // Modo readonly/fixture (por opção OU por ENV — fail-closed): sem spawn
       // e sem fixture — degradado honesto.
       const proof =
         this.loadProofEnabled === false
           ? { stdout: null, stderr: null, exitCode: null, error: "prova de carga desativada neste modo (readonly/fixture)" }
           : await this.runLoadProof(chosen);
-      decided = applyClamavLoadProof(decided, chosen, proof);
+      decided = applyClamavLoadProof(decided, chosen, proof, previous);
+      if (proof.deferred === true) this.probeDeferredPending = true;
     }
     // POST017: timeout/lease/cancel da prova não tornam as definições velhas.
     // Guardar a frescura separadamente permite recuperar SÓ após batch positivo;
@@ -3385,12 +3433,17 @@ export class ClamavBridge {
     // adquire a vaga como qualquer job (background, espera com limite do
     // probe), e a vaga só é libertada/envenenada QUEM A POSSUI.
     const probeTimeoutMs = this.options.probeTimeoutMs ?? CLAMAV_LOAD_PROBE_TIMEOUT_MS;
+    const slotWaitMs = this.options.probeSlotWaitMs ?? CLAMAV_LOAD_PROBE_SLOT_WAIT_MS;
     // Cancelamento da ESPERA pela vaga: um controlador próprio cujo timer se
     // limpa assim que a vaga decide (o `AbortSignal.timeout` deixava um timer
     // de 30 s armado a segurar o processo depois de uma prova de 6 s).
     const slotAbort = new AbortController();
     this.probeSlotAbort = slotAbort;
-    const slotWaitTimer = setTimeout(() => slotAbort.abort(), probeTimeoutMs);
+    let slotWaitExpired = false;
+    const slotWaitTimer = setTimeout(() => {
+      slotWaitExpired = true;
+      slotAbort.abort();
+    }, slotWaitMs);
     let slot: ClamavSlotResult;
     try {
       slot = await acquireClamavSlot(this.concurrencyLimit, "background", slotAbort.signal);
@@ -3412,11 +3465,20 @@ export class ClamavBridge {
       };
     }
     if (slot === "aborted") {
+      if (slotWaitExpired) {
+        return {
+          stdout: null,
+          stderr: null,
+          exitCode: null,
+          deferred: true,
+          error: `sem vaga dentro de ${slotWaitMs} ms`,
+        };
+      }
       return {
         stdout: null,
         stderr: null,
         exitCode: null,
-        error: `prova cancelada: sem vaga dentro de ${probeTimeoutMs} ms`,
+        error: "prova cancelada (shutdown)",
       };
     }
     // `granted`: a vaga é NOSSA até ao `finally` decidir o contrário. Nunca se
@@ -3805,7 +3867,25 @@ export class ClamavBridge {
         leaseBox.lease.release();
         scanPerfLog("DB_LEASE_RELEASE", options.scanId, "reason=batch-finally");
       }
+      this.scheduleDeferredProbeIfIdle();
     }
+  }
+
+  /**
+   * Revalida uma prova adiada assim que o scan libertou a vaga. Sem isto, a
+   * ocupação que adiou a prova continuava a ser o último facto conhecido até
+   * ao próximo freshclam. Se o batch já provou carga positiva, não há prova
+   * nova a fazer; se falhou, a revalidação é o que fecha o ciclo.
+   */
+  private scheduleDeferredProbeIfIdle(): void {
+    if (!this.probeDeferredPending) return;
+    this.probeDeferredPending = false;
+    if (this.disposed || this.probeInFlight) return;
+    if (this._health.status === "active" && this._health.busy !== true) return;
+    const timer = setTimeout(() => {
+      void this.isAvailable(true).catch(() => undefined);
+    }, 250);
+    timer.unref();
   }
 
   /**

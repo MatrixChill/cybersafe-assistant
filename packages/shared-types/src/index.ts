@@ -394,6 +394,12 @@ export interface EngineSubsystemHealth {
   status: EngineSubsystemStatus;
   detail?: string;
   /**
+   * Prova de carga adiada por o motor estar ocupado, sem falha observada.
+   * `status` mantém a última confirmação; `busy` impede que a ocupação seja
+   * lida como degradação. Ausente = sem prova adiada.
+   */
+  busy?: boolean;
+  /**
    * Cobertura do que está carregado. Ausente = motor antigo que não envia o
    * campo; o consumidor tem de o tratar como `unknown`, nunca como `normal`.
    */
