@@ -34,6 +34,32 @@ test("nightly conta como base diária (a fonte chama-lhe nightly em certas horas
   assert.equal(r.health.status, "active", JSON.stringify(r.health));
 });
 
+test("ramo candidates: incompleta também é degradada (a sonda do serviço usa este caminho)", () => {
+  const agora = Date.now();
+  const candidato = (signatureFiles) => ({
+    versionOutput: "ClamAV 1.5.4/28171/Tue Nov  1 14:30:54 2026",
+    dbDir: null,
+    dbFiles: null,
+    candidates: [
+      {
+        dir: "C:\\base",
+        source: "explicit",
+        state: "ready",
+        signatureFiles,
+        newestMtimeMs: agora,
+      },
+    ],
+    now: agora,
+  });
+  const semDiaria = classifyClamavHealth(candidato(["main.cvd", "bytecode.cvd"]));
+  assert.equal(semDiaria.available, true);
+  assert.equal(semDiaria.health.status, "degraded", JSON.stringify(semDiaria.health));
+  assert.match(semDiaria.health.detail, /falta a base diária/i);
+
+  const completa = classifyClamavHealth(candidato(["main.cvd", "daily.cld", "bytecode.cvd"]));
+  assert.equal(completa.health.status, "active", JSON.stringify(completa.health));
+});
+
 test("só base local continua degradado, e o vazio continua indisponível", () => {
   const local = classifyClamavHealth({ ...base, dbFiles: ["nossas-regras.ndb"] });
   assert.equal(local.health.status, "degraded");

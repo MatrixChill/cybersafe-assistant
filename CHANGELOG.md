@@ -719,3 +719,25 @@ Limitação honesta desta variação: o kill foi no `freshclam`, portanto provei
 interrupção na base; **não** provei o `ClamDatabaseGate` a serializar um scan em curso contra a
 escrita (esse caminho continua só com testes de duplos), e não auditei o ramo `candidates` de
 `classifyClamavHealth` — a correção foi feita no ramo `dbFiles`, que é o que a sonda real usa.
+
+### Ramos do classificador ClamAV: a mesma regra nos dois, e as fixtures que escondiam o estado
+
+A correção de `degraded` por base diária em falta foi feita no ramo `dbFiles`, que é o que a
+sonda real usa. Ao correr a suíte `core` inteira apareceram **9 FAIL em vez dos 4 conhecidos** — cinco
+deles provocados por mim, e vale a pena saber porquê em vez de os calar: as fixtures de
+`clamav-db.test.js` descreviam uma base **incompleta por acidente** (só `main.cvd`, ou
+`main.cvd`+`bytecode.cvd`), porque à data em que foram escritas o classificador não distinguia
+conjunto completo de conjunto parcial. Um exemplo que decidia entre dois caminhos de prioridade
+precisava mesmo era de uma base saudável.
+
+Regra aplicada com a seed empacotada debaixo do braço: `CLAMAV_SEED_FILES = ["main.cvd","daily.cld","bytecode.cvd"]`
+(`packages/service/src/clamav-seed.ts:15`), com pins de bytes e SHA-256 por ficheiro. Ou seja, o produto já
+define internamente «base completa» como os três; a minha regra não inventou um requisito novo —
+alinhámo-lo com o que o próprio pacote afirma. Corrigi as fixtures para o estado que cada teste
+queria descrever, e **não** afrouxei as asserções: o caso «active exige ficheiros .cvd/.cld» passou a
+separar as duas coisas que misturava (um arquivo oficial isolado é *reconhecido como oficial*, e
+`main` sem `daily` é *degradado por falta de diária*), que antes eram a mesma asserção.
+
+Depois disso: `core` = **1104 testes / 1069 PASS / 4 FAIL / 30 SKIP / 1 TODO** — os mesmos 4
+`clamav-slot-*` que já estavam documentados como «não avaliam hoje o que declaram», e mais cinco
+testes novos meus a passar. O ramo `candidates` recebeu a mesma regra, com caso próprio no ficheiro novo.

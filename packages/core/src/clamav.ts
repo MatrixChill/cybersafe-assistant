@@ -2553,6 +2553,21 @@ function classifyWithCandidates(facts: ClamavProbeFacts): { available: boolean; 
     };
   }
 
+  // Mesma regra do ramo `dbFiles`, pelo mesmo motivo medido: uma descarga de
+  // freshclam interrompida deixa `main.cvd` e perde o `daily.cvd`. `archives>0`
+  // com data fresca NÃO é cobertura — é a contagem de ficheiros a voltar a
+  // passar por saúde. Sem diária falta quase toda a assinatura recente.
+  const temDiaria = chosen.signatureFiles.some((name) => /^(daily|nightly)[-.]/i.test(name));
+  if (!temDiaria) {
+    return {
+      available: true,
+      health: {
+        status: "degraded",
+        detail: `ClamAV carrega ${count} assinatura(s) em ${chosen.dir}, mas falta a base diária (daily/nightly) — assinatura recente em falta até correr freshclam`,
+      },
+    };
+  }
+
   return {
     available: true,
     health: { status: "active", detail: `ClamAV binary available (${count} signature database file(s))` },
