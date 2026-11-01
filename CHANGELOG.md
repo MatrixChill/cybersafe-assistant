@@ -587,3 +587,33 @@ marcado como modificado por diferença de fim-de-linha (LF→CRLF do checkout, j
 deliberadamente não staged). O `--write` calcularia o digest contra essa árvore, portanto o
 candidato sairia com `dirty` git e o ponto 4 do pedido («a partir de commit limpo») não ficaria
 cumprido. Antes de aprovar convém resolver o EOL desse ficheiro, não ignorá-lo.
+
+### Motores reais: o que só corre com opt-in, e o que isso muda na atribuição
+
+A pergunta «os motores estão validados?» tinha uma resposta escondida no mesmo sítio que a
+cobertura: **três provas reais estão atrás de flags de ambiente que nenhum comando default ativa.**
+
+| Flag | Quem a usa | Estado quando ativada nesta linha |
+|---|---|---|
+| `CYBERSAFE_REAL_CLAMSCAN=1` | `core/test/rc22-motores-clamav`, `clamav-resource-cap`, `eicar-manual-opt-in`, `service/test/p1-3-prefetch-isolation`, `p1-4-cancel-before-controller` | `rc22-motores-clamav` **6/6 PASS** em 15,4 s (`clamav-real-optin.log`): o `clamscan.exe` vendorizado (ClamAV 1.5.4, `--version` = exit 0) carrega uma `.ndb` nossa e **deteta o marcador benigno**, deixando o ficheiro limpo; com a base oficial da app (14,8 s de init) também `active` e benigno limpo. **Sem EICAR escrito em disco** — a política está em `eicar-manual-opt-in.test.js` e existe porque o Defender do host bloqueia esses ficheiros. |
+| `CYBERSAFE_REALDEV_FIXTURE_SCAN=1` | 9 ficheiros (`clamav-load-proof-modes`, `dev-windows-readonly*`, `rc22-native-init-guard`, `rc22-engines-yara-recovery-guard`, `individual-process-termination`, etc.) | não exercitado nesta corrida — fica declarado como por medir, não como passou |
+| `CYBERSAFE_STAGING_E2E=1` | `scripts/test/staging-sqlite-runtime` | o próprio skip diz «define CYBERSAFE_STAGING_E2E=1 para correr (build de workspaces + npm install…)» — depende do build de distribuição, logo de #13 |
+
+**YARA clássico já corre de verdade sem flag**: `engine-integrity`, `yara-classic-engine` e
+`yara-engine-provenance` juntos dão **61 testes / 59 PASS / 0 FAIL / 2 SKIP**
+(`yara-real-tests.log`), e os 2 SKIP são os casos em que o antivírus do host nega leitura do alvo
+temporário — ambiente, não produto.
+
+**A consequência para a atribuição das 54 falhas, medida e não inferida.** Como
+`p1-3-prefetch-isolation` também lê `CYBERSAFE_REAL_CLAMSCAN`, usei-a como contra-experiência:
+com o motor ClamAV **real** ligado, `p1-3` + `p1-4` dão 18 testes / 15 PASS / **3 FAIL** — os mesmos
+três rodapés de sempre (`:345`, `:397`, `:445`) (`p13-p14-realclamscan.log`). Ou seja, **aquelas três
+falhas não são limitação do ambiente nem ausência de motor**: com o motor verdadeiro a responder, o
+veredicto continua `inconclusive` onde o teste espera `safe`. Ficam na classe da decisão #11
+(«basta a localização `%TEMP%` para um ficheiro benigno deixar de ser conclusivo?»), e a pergunta ao
+proprietário mantém-se exactamente como foi escrita.
+
+Para o peso da palavra «FINAL»: dos quatro motores, três têm agora prova de execução real nesta
+linha (nativo C++, YARA 4.6.0, ClamAV 1.5.4 — o último apenas via opt-in, que é por si um facto a
+corrigir: uma prova que só existe quando alguém se lembra de a activar não é uma prova de suíte).
+O quarto ponto em falta não é um motor: é o instalador, e esse depende de #13.

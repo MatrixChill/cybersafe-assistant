@@ -297,6 +297,18 @@ números seguintes vêm dos logs dessas execuções — diretório de trabalho
 | `native-windows` | **Dois âmbitos: `npm test` lista 18 de 28 ficheiros; a pasta `test/` completa = 246 testes / 21 suítes / 246 PASS / 0 FAIL** (`exit 0`) | `native-windows-full-after.log`. O mesmo padrão do `service`: a lista explícita esconde ficheiros. **Havia cá uma falha real e invisível ao comando do pacote**: `process-enumeration-boundary.test.js:47` asseria `/indisponível\|CIM\|zero registos/i` sobre o ramo de payload corrompido, mas o produto distingue três causas (`spawn` / `parse` / `empty`, `src/index.ts:741/755/797`) e a do JSON inválido é `parse` — «JSON parse: payload de processos não é JSON utilizável». O comportamento estava correcto (rejeitava, como o teste exige); a regex é que pertencia a outra fronteira. Fixei-a ao texto real do contrato, o que é **mais estrito** do que a disjunção anterior: misturar `parse` com `empty` passa a rebentar aqui. 6/6 no ficheiro isolado antes e depois. |
 | `native-engine` (JS) | 25 testes / 25 PASS / 0 FAIL | `npm run test:native` → `packages/native-engine/test/hash-vectors.test.js`. Vetores de SHA-256/entropia do motor C++; a prova de que o binário *funciona* está em `rc22-native-regressao` (suíte `service`), não aqui. |
 
+**Provas reais atrás de flags de ambiente — medido, não assumido.** Três verificações que usam os
+binários verdadeiros não são corridas por nenhum comando por omissão: `CYBERSAFE_REAL_CLAMSCAN`
+(5 ficheiros), `CYBERSAFE_REALDEV_FIXTURE_SCAN` (9 ficheiros) e `CYBERSAFE_STAGING_E2E` (1). Com
+`CYBERSAFE_REAL_CLAMSCAN=1`, `rc22-motores-clamav` dá **6/6 PASS** — o `clamscan.exe` vendorizado
+(ClamAV 1.5.4) carrega uma `.ndb` nossa e deteta o marcador benigno, deixando o ficheiro limpo, sem
+qualquer byte de EICAR em disco. YARA 4.6.0 já corre de verdade sem flag (`engine-integrity` +
+`yara-classic-engine` + `yara-engine-provenance`: 61 testes / 59 PASS / 2 SKIP de ambiente). O
+contra-experimento interessa à atribuição das falhas: `p1-3-prefetch-isolation` lê essa mesma flag,
+e com o motor ClamAV real ligado mantém **os mesmos 3 FAIL** — logo não são limitação do ambiente
+nem falta de motor, e a pergunta de produto (#11) mantém-se. Uma prova que só existe quando alguém
+lembra de a activar não é prova de suíte: ficar à espera de opt-in é uma decisão por tomar.
+
 **Workflow `ci` no `main`: VERDE, medida.** A run atual é `41302290721` (SHA `9b7e823`,
 2026-11-01T11:31Z, `conclusion: success`); a anterior, `41300363725` (SHA `596fbee`), tinha passado
 os nove passos — instalação de dependências, `build:all`, assinatura de release, vendor YARA e
