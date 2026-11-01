@@ -300,6 +300,21 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   Os 5 SKIP têm motivo declarado no código (ambiente sem ClamAV/clamscan real, bundle não
   vendorizado, symlink indisponível no host, provider fora da lane); não afirmo quais os 5 que
   dispararam nesta corrida, porque o reporter não o imprime.
+- **Retractação das duas asserções acima, medidas de novo em `42a2bfd`.** (a) «não há motor nativo
+  construído nesta linha» **deixou de ser verdade**: `npm run build:native` foi corrido neste
+  worktree a partir do código desta linha (`native-build.log`) e o `scan-engine.exe` produzido é
+  exercitado sem mocks — `rc22-native-regressao` + `rc22-native-init-guard` passam **11/11**
+  isolados. Os 5 `rc22` que falhavam eram de facto `NOT RUN`; deixaram de o ser. O reverso também é
+  verdade e fica declarado: `packages/native-engine/build/` está em `.gitignore:9`, portanto um
+  checkout limpo desta linha volta a ter essas 9 falhas. (b) «não afirmo quais os 5 que dispararam»
+  **está ultrapassado** — os 5 são legíveis no log (`﹣ … # motivo`) e batem certo com o código:
+  `session14-engine-native.test.js` 4 (`:60`, `:79`, `:103` «invocação real ainda não confirmada
+  (degraded)», `:121` «binário presente não permite testar estado unavailable via bridge») e
+  `fecho14-clamav.test.js:148` («Caso 7: clean via spawn mock — NÃO TESTÁVEL sem DB real»). Os 4 do
+  `session14` **não são limite do host, são desenho do teste**: lêem `checkAvailability()` antes de
+  qualquer invocação e o contrato só autoriza `active` depois de uma invocação comprovada, por isso
+  o gate lê `degraded` e salta. (c) As 66 falhas desta linha baixaram para **54**, com reconciliação
+  ficheiro a ficheiro na secção final.
 - **GitHub Releases: zero, medido.** `gh api repos/MatrixChill/cybersafe-assistant/releases` → `[]`;
   `releases/latest` → `404 Not Found`; `git ls-remote --tags origin` → nenhuma `refs/tags/*`. Não
   existe **nenhum** artefacto publicado (nem R6 nem R7), o repositório é público (`isPrivate:
@@ -355,3 +370,91 @@ Os ficheiros que estavam modificados na árvore de trabalho por outro agente (te
 linha a linha e **entram neste commit**; `yara-classic.ts` ganhou diagnóstico do `yara64` nos três
 lançamentos de erro sem alterar o comportamento *fail-closed*. A suíte `service` não chegou a dar
 um resumo neste HEAD — ver a linha `service` da tabela acima: é **INCOMPLETA**, não PASS.
+
+---
+
+## Motor nativo, cancelamento e cobertura re-medidos em `42a2bfd` (2026-11-01)
+
+Três pontos do pedido do proprietário, cada um com a sua medição. **Nada aqui afirma que a R7 está
+pronta**: instalador, atualização end-to-end e os portões humanos continuam pendentes.
+
+### 1. O motor C++ foi compilado a partir desta linha e funciona
+
+`npm run build:native` corrido neste worktree (`native-build.log`, `exit=0`) com CMake + MSVC a
+partir de `packages/native-engine/CMakeLists.txt`. Produto: `build/Release/scan-engine.exe`,
+324 096 bytes, SHA-256 `db92fe819dd44818d269cdfb13ed432ffc1b026c3a43b41d407e29b37d5588ed`.
+**Nenhum executável de outra worktree foi reutilizado** — a árvore `build/` não existia antes desta
+corrida (`.gitignore:9`, portanto também não chega por clone).
+
+Funcionamento real, sem mocks, dois níveis:
+
+- **Suíte**: `rc22-native-regressao` + `rc22-native-init-guard` **11/11 PASS** isolados
+  (`native-after-build.log`). Cobrem fixture benigna com SHA-256 exacto, `double_extension` com
+  score 20 e `level=safe`, ficheiro inexistente → `failure: "output"` e nunca `safe`, e a transição
+  de `degraded` para `active` **só** depois de uma invocação comprovada.
+- **Binário directamente no terminal**: `--version` → `cybersafe-scan-engine 0.1.0 (C++17)`; um `.txt`
+  benigno → `file_size=22`, `entropy=3.6069`, `level=safe`; `notepad.exe` → `valid_pe=true`,
+  `is_64=true`, `machine=34404` (0x8664), `sections=8`, `entropy=6.2092`, `level=safe`; ficheiro
+  ausente → `level=error` com `reasons=["file_not_found"]`. O SHA-256 que o motor devolve para o
+  `notepad.exe` (`468ffe12…577e`) **coincide byte a byte com `certutil -hashfile … SHA256`** — a
+  prova de hash não depende da palavra do próprio motor.
+
+Duas observações honestas, não corrigidas aqui. (i) O `--version` do C++ imprime `0.1.0`, fixo em
+`src/main.cpp:11`, enquanto a identidade do produto vive em `product-version.json`
+(`0.1.11-internal.pap-r7.20261031`): o binário não sabe a versão do produto, e isso aparece no
+diagnóstico do instalador. (ii) O motor devolve `exit=0` também no caso `level:"error"`; a ponte não
+usa o código de saída — decide pelo JSON — por isso não é um defeito observável, mas é uma
+superfície frágil.
+
+### 2. As três falhas de cancelamento eram um contrato mal lido nos testes, não defeito do produto
+
+`scan-cancel-observability` falhava 3. O código está certo: `engine.ts:5002-5011` devolve
+`{ success: desfecho === "cancelado" }`, e o comentário declara que o ACK confirma apenas um
+cancelamento aceite. O `scanManager.cancelScan` devolve `"cancelado"` **só quando há uma nova
+cancelação em curso**; para um `id` desconhecido ou um payload sem `id` devolve recusa. Os testes
+esperavam `success: true` nesses dois casos — ou seja, afirmavam que o serviço confirmava algo que
+não aconteceu. **Estava aposentado**; a asserção antiga passou a `{ success: false }` e os três
+casos que precisavam de um scan real passaram a usar `iniciarScan(t)` em vez de `servoDeVerdade(t)`
+(com o `id` correcto). Medido: **16/16 PASS** (`cancel-after-fix.log`), e as 3 falhas saíram da
+suíte completa.
+
+Distinção pedida: **nenhuma das três era limitação do ambiente** — eram contrato mal especificado
+no fixture, com o produto a responder correctamente. Não houve mudança de comportamento de produto,
+apenas de teste, e o comportamento que elas protegiam (não prometer cancelamento que não aconteceu)
+fica agora asserido em vez de contradito.
+
+### 3. Cobertura efetiva: os dois âmbitos, os 54 atribuídos e os 5 SKIP nomeados
+
+Âmbito: `packages/service/package.json` lista **96 entradas**, a pasta `test/` tem **147 ficheiros**.
+`npm test` não é a suíte. Os dois números coexistem: `npm test` = 46 FAIL; pasta completa em
+`42a2bfd` = **1282 testes / 159 suítes / 1223 PASS / 54 FAIL / 5 SKIP** em 249 s, `node_exit=1`
+(`service-full-nativenox.log`).
+
+A queda 66 → 54 está reconciliada **ficheiro a ficheiro e por assinatura de asserção**, com 54
+rodapés `test at test\…` a bater com os 54 `fail` do reporter:
+
+| Causa | n | Distribuição |
+|---|---|---|
+| Portão de terminação (`KILL_TERMINATION_DISABLED = true`, `engine.ts:748`; `killProcess` retorna `failed` em `:3995` antes de qualquer consulta) | **49** | `process-kill` 30, `tp-f1-r1-identity` 10, `kill-budget` 5, `kill-blocked-log` 2, `p0-runtime-isolation` 1, `tp-f1-process-recovery` 1 |
+| `inconclusive` vs `safe` em ficheiro benigno | **5** | `p1-3-prefetch-isolation` 3 (`:345`, `:397`, `:445`), `recovery-security-pipeline:26` 1, `scan-post-batch-no-double-clamav:148` 1 |
+
+Dentro dos 49 há três assinaturas observáveis, não uma hipótese: 38 blocos com `actual`
+`'failed'`/`false`/`undefined`/`''` contra estados que só a terminação produz (`protected`, `killed`,
+`already-exited`, `alias-stub`, `reused`, `timeout`, `access-denied`), 10 blocos de contagem
+(`0 !== 1`, `0 !== 4` — nenhuma query CIM, nenhuma tentativa) e 1 bloco com a mensagem literal do
+portão (`tp-f1-r1-identity:297`). **Isto é funcionalidade desligada no produto, não instabilidade do
+host** — a decisão de a reactivar é do proprietário (§23, task em aberto).
+
+Os 12 que saíram entre `8653f39` e `42a2bfd` têm uma causa lida no código, não uma coincidência:
+`engine.ts:3151` — `if (!nativeCompleted && analysis.verdict === "safe") analysis.verdict =
+"inconclusive"`. Sem binário nativo, **nenhum veredicto benigno pode ser conclusivo**; com o motor
+compilado, 4 casos de `p1-3-prefetch-isolation` (`:300`, `:323`, `:466`, `:494`) e os 5 `rc22`
+voltaram a poder afirmar o que afirmam. Verifiquei se seria flutuação: `p1-3-prefetch-isolation`
+isolado, três corridas seguidas, dá **sempre 8 PASS / 3 FAIL** nos mesmos três rodapés. As que saíram
+saíram por causa; as que ficaram (agora com a regra extra `scan_inconclusive`, porque o ficheiro
+perdeu o dono do prefetch e cai em `scanFile`) são o ponto de produto em aberto: um `.txt` em
+`%TEMP%` não é reportado como analisado-conclusivo.
+
+**Caveat que não retiro: `packages/native-engine/build/` é gitignored. Um checkout limpo desta
+linha reproduz as 9 falhas dependentes do binário.** O 54 pressupõe o motor compilado, e é por isso
+que o §13 ponto 14 (dependências nativas do instalador) precisa do build de distribuição, não deste.
