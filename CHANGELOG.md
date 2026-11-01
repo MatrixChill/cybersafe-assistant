@@ -868,3 +868,39 @@ Sem a decisão `#14` (chave pública de publicação) um `.txt` continua a ser
 tão confiável quanto o canal que o entrega; e o `#13` (assinante do
 source-freeze) continua a ser o único bloqueio do instalador que estaria nesta
 lista.
+
+## `npm run test:scripts` — e uma falha que existia por ninguém correr o ficheiro
+
+O ponto 3 do pedido era a cobertura efetiva, incluindo os testes que o comando
+padrão não seleciona. Isso estava **descrito** na tabela do README; faltava o
+comando. A raiz tinha `test:native`, `test:build-order` e `test:dev-isolation`, e
+`test:dev-isolation` lista **dois** ficheiros específicos — não a pasta. Entrei
+com `node --test --test-concurrency=1 "scripts/test/*.test.mjs" "scripts/*.test.mjs"`
+(o glob é citado pelo próprio Node: este runtime não aceita um diretório como
+argumento de `--test`, e aspas são precisas porque o `cmd` do npm não expande).
+
+- Só `scripts/test/`: 240 / 234 PASS / **0 FAIL** / 5 SKIP / 1 TODO — 6,7 s.
+- Com os 8 `scripts/*.test.mjs` co-localizados: 383 / **377 PASS** / 0 FAIL /
+  5 SKIP / 1 TODO — 10,8 s, `exit 0`. Logs: `scripts-test-baseline.log` e
+  `test-scripts-runner.log`.
+
+**Os +143 testes trouxeram uma falha, e ela é minha para contar.**
+`scripts/dev-isolated-boot-contract.test.mjs:441` afirmava que o gate do API
+*aceitaria* a porta 4000 («tem a recusa comentada»), e que por isso o piso tinha
+de ser seguro apenas pelo runner. Não era premissa inventada — estava certa na
+altura em que foi escrita. `3a95692` (2026-10-30) passou a recusa para o gate
+(`packages/api/src/dev-isolation.ts:201`), e como **nenhum comando corria o
+ficheiro**, a asserção envelheceu em silêncio até eu ligar o runner. Falhou
+igual isolada (`20 testes → 19 pass / 1 fail`), o que exclui contenção: era
+contrato envelhecido, não ambiente nem defeito de produto.
+
+Não apaguei nem afrouxei: o caso passou a chamar-se «a porta 4000 é recusada nas
+duas camadas» e assere **as duas** — `plano.portSupported === false` **e**
+`validarArranqueApi` a lançar `CYBERSAFE_ISOLAMENTO_RECUSADO` com 4000 na
+mensagem, «por si, não por herança do runner». É o invariante mais forte dos dois
+que estavam em causa, e o comentário no ficheiro diz de onde veio.
+
+É o segundo caso nesta linha em que «o teste existe mas não é selecionado» produz
+falsa confiança (o primeiro foi o `scanner-dashboard-visibility`, hoje `todo` com
+a razão escrita). O 1 TODO do recount continua a ser esse, e os 5 SKIP continuam
+a ser os do artefacto que ainda não há — `#13`.

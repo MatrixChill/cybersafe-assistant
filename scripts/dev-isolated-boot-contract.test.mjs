@@ -438,17 +438,25 @@ describe("consumidores reais do ambiente do plano (dev-isolation do desktop e do
     }
   });
 
-  it("o gate do API aceitaria 4000: é o RUNNER que tem de segurar o piso", async (t) => {
-    // Medido, não inferido — `packages/api/src/dev-isolation.ts` tem a recusa de 4000
-    // comentada («permitido em runner isolado controlado»). Se alguém mover a decisão
-    // do runner para «confiar no gate», este caso é o que mostra o que se perde.
+  it("a porta 4000 é recusada nas duas camadas: runner e gate do API", async (t) => {
+    /* Este caso afirmava o oposto — que o gate do API ACEITARIA 4000 («tem a
+       recusa comentada») e e que o piso teria de ser seguro apenas pelo runner. Não era
+       uma premissa inventada: estava certa na altura. `3a95692` (2026-10-30)
+       acrescentou a recusa ao gate (`packages/api/src/dev-isolation.ts:201`), e
+       como NENHUM script do `package.json` corria este ficheiro, a asserção
+       envelheceu sem ninguém a ver — é exatamente o custo de uma suite fora do
+       comando padrão. O invariante agora dito é o mais forte dos dois: recusam
+       as duas camadas, cada uma por si. */
     const apiIso = await importarRelativo(t, "../packages/api/src/dev-isolation.ts");
     if (!apiIso) return;
     const raiz = raizReal(t);
     const plano = buildPlan({ env: { ...BASE_ENV, CYBERSAFE_DEV_RUN_ROOT: raiz, CYBERSAFE_API_PORT: "4000" }, dryRun: true, deps: depsReais });
     assert.equal(plano.portSupported, false, "o runner tem de marcar 4000 como não suportada");
     for (const d of plano.dirsToCreate ?? []) fs.mkdirSync(d, { recursive: true });
-    const r = apiIso.validarArranqueApi({ entrypoint: fileURLToPath(new URL("../packages/api/src/index.ts", import.meta.url)), env: plano.isolationEnv });
-    assert.equal(r.porta, 4000, "se o gate passou a recusar 4000, atualizar este caso — a assunção deixou de ser necessária");
+    assert.throws(
+      () => apiIso.validarArranqueApi({ entrypoint: fileURLToPath(new URL("../packages/api/src/index.ts", import.meta.url)), env: plano.isolationEnv }),
+      (erro) => erro.code === "CYBERSAFE_ISOLAMENTO_RECUSADO" && /4000/.test(erro.message),
+      "o gate tem de recusar 4000 por si, não por herança do runner",
+    );
   });
 });
