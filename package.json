@@ -16,6 +16,7 @@
     "build:native": "cmake -S packages/native-engine -B packages/native-engine/build && cmake --build packages/native-engine/build --config Release",
     "test:native": "node --test packages/native-engine/test/hash-vectors.test.js",
     "test:build-order": "node --test scripts/build-all-ordered.test.mjs",
+    "test:release-checksums": "node --test scripts/release-checksums.test.mjs",
     "test:dev-isolation": "node --test scripts/desktop-dev-profile-paths.test.mjs scripts/dev-cached-exception.test.mjs",
     "lint": "npm run lint --workspaces",
     "typecheck": "npm run typecheck --workspaces",

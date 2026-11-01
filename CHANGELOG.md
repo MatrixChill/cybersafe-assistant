@@ -835,3 +835,36 @@ de `actualizado` para `desactualizado` por envelhecimento só se vê ao reentrar
 página ou após «Atualizar definições». Não há «Verificar agora» por fonte: o
 `definitions.update` do serviço é um ciclo único e recorre as três fontes;
 botões separados exigiriam um pedido seletivo que o contrato ainda não tem.
+
+## `scripts/release-checksums.mjs` — a peça que faltava ao ponto 7
+
+Não existia nenhuma ferramenta de somas no repo: `scripts/_sha256.mjs` soma
+**strings**, não ficheiros, e não é usado por ninguém. Para uma release com
+instalador, a pergunta de quem descarrega é «este ficheiro é o que vocês
+afirmam?», e isso exige duas coisas que `certutil` à mão não dá: ordem e formato
+reprodutíveis, e um modo de **verificação** que diga o que falhou.
+
+- Formato `sha256sum -c` (`<hex>  <nome>`), ordenado por nome, sempre o mesmo
+  `corpo` para o mesmo conteúdo (asserado com dois runs).
+- Hash em **fluxo** (`createReadStream`): um instalador de >100 MB não é lido
+  todo para a RAM.
+- `--check` distingue `ok` / `divergente` / `em_falta` / `formato` / `inseguro`,
+  e **chumba ficheiros presentes no diretório que não estão listados** — o caso
+  em que uma peça extra entra na release sem que ninguém dê por isso.
+- Um nome com travessia (`../…`) no ficheiro de somas é recusado como `inseguro`
+  em vez de ser seguido: o `.txt` pode vir de outro sítio, e ler fora do
+  diretório por causa dele não é verificação, é o ataque.
+- Linha ilegível é erro, não linha ignorada; diretório vazio não produz um
+  `SHA256SUMS.txt` de zero ficheiros disfarçado de sucesso.
+
+**Medido:** `npm run test:release-checksums` 7/7 PASS. Contra um binário real
+desta linha (`scan-engine.exe`, 324 096 bytes) a ferramenta e o `certutil` do
+Windows dão o mesmo SHA-256 — `db92fe819dd44818d269cdfb13ed432ffc1b026c3a43b41d407e29b37d5588ed`
+— e o `--check` sobre o ficheiro que ela própria escreveu devolve `OK` com
+`exit=0`.
+
+O que isto **não** resolve sozinho: as somas são integridade, não autenticidade.
+Sem a decisão `#14` (chave pública de publicação) um `.txt` continua a ser
+tão confiável quanto o canal que o entrega; e o `#13` (assinante do
+source-freeze) continua a ser o único bloqueio do instalador que estaria nesta
+lista.
