@@ -184,3 +184,14 @@ Os números Core 1064 PASS / 4 FAIL / 30 SKIP / 1 TODO pertencem ao log antigo, 
 ## Pré-check do instalador (verificação, não artefacto)
 - `node scripts/package-windows.mjs --check` → exit 1 com 5 problemas: falta `vendor/clamav/clamscan.exe`, a fonte correspondente do bundle e `vendor/clamav/VENDOR.json`; e `CYBERSAFE_APPROVERS_FILE` não está definida, pelo que o registo externo não está configurado.
 - Isto é pré-verificação, não instalador. Nenhum NSIS foi produzido e nenhum bundle de terceiros foi descarregado nesta sessão. O snapshot definitivo depende do proprietário.
+
+## Bundle ClamAV regenerado pela via oficial (bloqueador técnico removido)
+- `node scripts/vendor-clamav.mjs` correu de ponta a ponta: chave Talos confirmada (5BADCA26…836771), ZIP oficial 225774978 B com sha256 fixado, assinatura `VALIDSIG` de Talos, fonte GPLv2 §3 descarregada e assinada. Resultado: 45 ficheiros, 132.7 MiB, 13 licenças, ClamAV 1.5.4, fonte correspondente incluída.
+- `node scripts/package-windows.mjs --check` passou de 5 problemas para **1** — e o restante é o registo externo de autorização, que é decisão humana. O bundle é verificado byte a byte pelo próprio pipeline.
+- `vendor/clamav/` está no .gitignore: é input de build local, não conteúdo do repositório.
+
+## Quarentena em lote (lacuna real fechada)
+- A página só tinha restauro/eliminação de UMA entrada; não existia seleção múltipla. Implementado: seleção por linha, barra com contagem, confirmação explícita do lote, execução sequencial com uma chamada por ficheiro e resumo honesto por desfecho.
+- Lógica pura em `packages/app/src/lib/quarantineBatch.ts`: o resumo conta confirmados, confirmados-com-aviso, recusados, sem-confirmação e NÃO TENTADOS. Uma quebra de comunicação interrompe o lote e os restantes ficam como não tentados; nunca são contados como feitos. O estado do lote é o do pior desfecho.
+- Não executa ficheiros restaurados, não substitui destinos e não inventa sucesso: cada resultado vem da resposta do serviço por ficheiro.
+- Verificação: `tsc -b` do App exit 0; 106 PASS/0 FAIL/0 SKIP/0 TODO na família de quarentena da UI (quarantine-batch-green.log), incluindo os 5 novos casos.

@@ -20,3 +20,9 @@ origin/main intocada: 21fefa69
 
 ## NEEDS_HUMAN_VALIDATION
 - E1 exclusoes: 9+9+8 PASS; falta clique real na janela Electron
+
+## Atualizacao desta sessao
+- DONE H2: bundle ClamAV oficial regenerado (45 ficheiros, 132.7 MiB, GPG Talos, fonte incluida). Pre-check 5 -> 1.
+- DONE C2: quarentena em lote (selecao, confirmacao, resultado por ficheiro, nao tentados contados). 106 PASS, typecheck 0.
+- BLOCKED H1: resta apenas o registo externo de autorizacao (decisao humana).
+- NEXT: atualizador da aplicacao com chaves efemeras; exclusoes ponta a ponta; falha de isolamento P0.

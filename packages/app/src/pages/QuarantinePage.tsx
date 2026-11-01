@@ -3,6 +3,7 @@ import type { QuarantineEntry } from "@cybersafe/shared-types";
 import { AlertCircle, Archive, RotateCcw, Trash2, ChevronDown, ChevronRight, CheckCircle2, Loader2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { quarantinePolicyLabel, type QuarantinePolicyTone } from "@/lib/quarantineDisplay";
+import { decidirResumoLote, decidirTipoResumoLote, textoResumoLote } from "@/lib/quarantineBatch";
 
 /**
  * O que a LEITURA da lista confirmou, dito por quem a foi buscar ao serviço.
@@ -298,6 +299,10 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
   const [bandeira, setBandeira] = useState<BandeiraResultado | null>(null);
   /** Recarga pedida pela própria página (botão «Atualizar»), em curso ou não. */
   const [aRecarregar, setARecarregar] = useState(false);
+  const [selecionados, setSelecionados] = useState<Set<string>>(() => new Set());
+  const [lote, setLote] = useState<{ acao: "restore" | "delete" } | null>(null);
+  const [aLote, setALote] = useState(false);
+  const [resumoLote, setResumoLote] = useState<{ tipo: TipoBandeira; texto: string } | null>(null);
   const [recuperada, setRecuperada] = useState(false);
   const leituraAnteriorRef = useRef<EstadoLeituraQuarentena | undefined>(undefined);
 
@@ -327,6 +332,59 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
     [entries],
   );
 
+  // Selecao podada: um id que saiu da lista nao pode ser contado como recusa.
+  useEffect(() => {
+    setSelecionados((antes) => {
+      if (antes.size === 0) return antes;
+      const vivos = new Set(entries.map((x) => x.id));
+      const agora = new Set([...antes].filter((id) => vivos.has(id)));
+      return agora.size === antes.size ? antes : agora;
+    });
+  }, [entries]);
+
+  const alternarSelecao = (id: string) => {
+    setSelecionados((antes) => {
+      const agora = new Set(antes);
+      if (agora.has(id)) agora.delete(id);
+      else agora.add(id);
+      return agora;
+    });
+  };
+
+  // Uma chamada por ficheiro: o resultado e o do servico, nao uma impressao do
+  // lote. Uma quebra de comunicacao interrompe e conta os restantes como nao
+  // tentados, em vez de repetir as cegas sobre um servico que nao responde.
+  const runLote = async (acao: "restore" | "delete") => {
+    const alvos = sorted.filter((x) => selecionados.has(x.id));
+    setLote(null);
+    setResumoLote(null);
+    const api = window.electronAPI;
+    if (!api) {
+      setResumoLote({ tipo: "sem_confirmacao", texto: "Sem ligacao ao servico de quarentena nesta janela; nada foi tentado." });
+      return;
+    }
+    if (alvos.length === 0) return;
+    setALote(true);
+    const resultados: { tipo: "confirmado" | "confirmado_com_aviso" | "recusado" | "sem_confirmacao" }[] = [];
+    try {
+      for (const x of alvos) {
+        try {
+          const r = acao === "restore" ? await api.restoreQuarantine(x.id) : await api.deleteQuarantine(x.id);
+          resultados.push(decideResultadoAcao(r));
+        } catch (err) {
+          console.warn("[Quarantine] lote interrompido: o servico nao confirmou", err);
+          resultados.push({ tipo: "sem_confirmacao" });
+          break;
+        }
+      }
+    } finally {
+      const resumo = decidirResumoLote(resultados, alvos.length);
+      setResumoLote({ tipo: decidirTipoResumoLote(resumo), texto: textoResumoLote(resumo, acao) });
+      setSelecionados(new Set());
+      setALote(false);
+      await onChanged();
+    }
+  };
   const run = async (entry: QuarantineEntry, action: "restore" | "delete") => {
     const api = window.electronAPI;
     setPending(null);
@@ -395,6 +453,14 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
   const ferramentas = (
     <div className="flex flex-wrap items-center justify-end gap-1.5">
       {chapas}
+      {selecionados.size > 0 && (
+        <>
+          <span className="row-meta">{selecionados.size} selecionado{selecionados.size === 1 ? "" : "s"}</span>
+          <button type="button" disabled={aLote || busyId !== null} onClick={() => { setBandeira(null); setResumoLote(null); setLote({ acao: "restore" }); }} className={BOTAO_NEUTRO}>Restaurar selecionados</button>
+          <button type="button" disabled={aLote || busyId !== null} onClick={() => { setBandeira(null); setResumoLote(null); setLote({ acao: "delete" }); }} className={BOTAO_DESTRUTIVO}>Eliminar selecionados</button>
+          <button type="button" disabled={aLote} onClick={() => setSelecionados(new Set())} className={BOTAO_NEUTRO}>Limpar selecao</button>
+        </>
+      )}
       <button
         type="button"
         onClick={() => void recarregar()}
@@ -507,6 +573,30 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
         <p role="status" className="row-meta">{lista.rotuloLista}</p>
       )}
 
+      {resumoLote && (
+        <div role={PAPEL_BANDEIRA[resumoLote.tipo]} data-tipo={resumoLote.tipo} className="flex flex-wrap items-start justify-between gap-3 rounded-lg border border-border p-2.5">
+          <p className="row-note min-w-0 flex-1">{resumoLote.texto}</p>
+          <button type="button" onClick={() => setResumoLote(null)} className={BOTAO_NEUTRO}>Fechar</button>
+        </div>
+      )}
+
+      {lote && (
+        <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/30 p-2.5">
+          <p role="alert" className="row-note min-w-0 flex-1 text-foreground">
+            {lote.acao === "delete"
+              ? "Eliminar permanentemente " + selecionados.size + (selecionados.size === 1 ? " ficheiro" : " ficheiros") + "? Esta acao e irreversivel."
+              : "Restaurar " + selecionados.size + (selecionados.size === 1 ? " ficheiro" : " ficheiros") + " para os locais originais?"}
+          </p>
+          <div className="flex shrink-0 items-center gap-1.5">
+            <button type="button" onClick={() => setLote(null)} className={BOTAO_NEUTRO}>Cancelar</button>
+            <button type="button" onClick={() => void runLote(lote.acao)} className={lote.acao === "delete" ? BOTAO_DESTRUTIVO : BOTAO_LIGADO}>{lote.acao === "delete" ? "Eliminar" : "Restaurar"}</button>
+          </div>
+        </div>
+      )}
+
+      {aLote && (
+        <p role="status" className="row-meta flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> A comunicar o lote ao servico, um ficheiro de cada vez...</p>
+      )}
       {lista.afirmaVazia ? (
         <div className="stat-card p-10 text-center">
           <span className="icon-tile mx-auto" aria-hidden>
@@ -560,6 +650,16 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
                   </div>
 
                   <div className="row-act flex shrink-0 flex-col items-end gap-1.5">
+                    <button
+                      type="button"
+                      disabled={aLote || busyId !== null}
+                      onClick={() => alternarSelecao(entry.id)}
+                      aria-pressed={selecionados.has(entry.id)}
+                      className={selecionados.has(entry.id) ? BOTAO_LIGADO : BOTAO_NEUTRO}
+                      aria-label={(selecionados.has(entry.id) ? "Retirar da selecao: " : "Selecionar para lote: ") + entry.fileName}
+                    >
+                      {selecionados.has(entry.id) ? "Selecionado" : "Selecionar"}
+                    </button>
                     <button
                       type="button"
                       onClick={() => setExpanded(expandido ? null : entry.id)}
