@@ -875,6 +875,8 @@ export interface FileScanResult {
   /** Optional for compatibility with older service responses. */
   nativeEngine?: NativeFileScanStatus;
   analysisState?: "completed" | "excluded" | "failed" | "engine-unavailable" | "inconclusive";
+  /** Código estruturado da lacuna; nunca inferido de `detail`. */
+  inconclusiveReason?: InconclusiveReason;
   detail?: string;
   fileName: string;
   size: number;

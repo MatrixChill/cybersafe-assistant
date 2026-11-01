@@ -288,6 +288,20 @@ export interface InconclusiveReasonCount {
   count: number;
 }
 
+/** Uma causa por ficheiro, escolhida por codigo e nao por texto. */
+const INCONCLUSIVE_PRIORITY: ReadonlyArray<InconclusiveReason> = [
+  "cancelled", "engine-unavailable", "timeout", "engine-failed",
+  "invalid-output", "file-changed", "archive-incomplete",
+  "coverage-incomplete", "no-verdict",
+];
+
+export function preferredInconclusiveReason(
+  reasons: ReadonlyArray<InconclusiveReason | undefined>,
+): InconclusiveReason | undefined {
+  const known = reasons.filter((r): r is InconclusiveReason => r !== undefined);
+  return INCONCLUSIVE_PRIORITY.find((reason) => known.includes(reason)) ?? known[0];
+}
+
 /**
  * Distribui o orçamento do quick scan por TODAS as raízes já recolhidas.
  *
@@ -1258,8 +1272,13 @@ const heartbeat = setInterval(() => {
                     problema.analysisState,
                     (problema as { detail?: string }).detail,
                   );
-              inconclusiveByReason = addInconclusiveReason(inconclusiveByReason,
-                this.archiveCoverageGaps.has(id) ? "coverage-incomplete" : motivo);
+              const structured = preferredInconclusiveReason(
+                Array.isArray(scanResults) ? scanResults.map((item) => item.inconclusiveReason) : [],
+              );
+              inconclusiveByReason = addInconclusiveReason(
+                inconclusiveByReason,
+                this.archiveCoverageGaps.has(id) ? "archive-incomplete" : structured ?? motivo,
+              );
             }
             this.archiveCoverageGaps.delete(id);
             analyzed++;

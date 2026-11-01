@@ -145,6 +145,30 @@ describe("Single file scan (custom type)", () => {
     await cleanup(tmpDir);
   });
 
+  it("uses the engine's structured reason instead of guessing from detail text", async () => {
+    const engine = createMockEngine();
+    engine.scanArtifact = async () => ({
+      highRiskCount: 0,
+      overallSeverity: "low",
+      results: [{
+        analysisState: "inconclusive",
+        inconclusiveReason: "timeout",
+        detail: "coverage incomplete",
+      }],
+    });
+    const mgr = new ScanManager(engine);
+    const target = path.join(tmpDir, "test-file.txt");
+
+    const id = await mgr.startScan("custom", target);
+    await new Promise((resolve) => setTimeout(resolve, 500));
+
+    const state = mgr.getScan(id);
+    assert.equal(state.filesInconclusive, 1);
+    assert.deepEqual(state.inconclusiveByReason, [{ reason: "timeout", count: 1 }]);
+
+    await cleanup(tmpDir);
+  });
+
   it("does not treat a missing result list as a conclusive scan", async () => {
     const engine = createMockEngine();
     engine.scanArtifact = async () => ({ highRiskCount: 0, overallSeverity: "safe" });

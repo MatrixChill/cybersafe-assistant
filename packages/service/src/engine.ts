@@ -2258,7 +2258,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       if (stat.isDirectory() || stat.isSymbolicLink()) return true;
       fingerprint = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
     } catch {
-      if (this.protectionState && !this.isShuttingDown && generation === this.protectionGeneration) this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.");
+      if (this.protectionState && !this.isShuttingDown && generation === this.protectionGeneration) this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.", "file-changed");
       return true;
     } finally {
       --this.fileObservationReads;
@@ -2332,8 +2332,12 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     });
   }
 
-  private publishInconclusiveFile(filePath: string, reason: string): ServiceResponseMap["scan.artifact"] {
-    const result = { fileName:path.basename(filePath),size:0,severity:"low" as const,confidence:0,rulesTriggered:[],riskScore:0,verdict:"inconclusive" as const,sha256:"",analysisState:"failed" as const,detail:reason };
+  private publishInconclusiveFile(
+    filePath: string,
+    reason: string,
+    inconclusiveReason: import("@cybersafe/shared-types").InconclusiveReason = "no-verdict",
+  ): ServiceResponseMap["scan.artifact"] {
+    const result = { fileName:path.basename(filePath),size:0,severity:"low" as const,confidence:0,rulesTriggered:[],riskScore:0,verdict:"inconclusive" as const,sha256:"",analysisState:"failed" as const,inconclusiveReason,detail:reason };
     this.eventBus.publish("artifact.analyzed", "low", reason, {...result,artifactPath:filePath,reason});
     return {results:[result],totalFiles:1,highRiskCount:0,overallSeverity:"low",rulesTriggered:[],riskScore:0};
   }
@@ -3103,10 +3107,10 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       let beforeFile: string;
       try {
         const stat = await fs.lstat(filePath);
-        if (!stat.isFile() || stat.isSymbolicLink()) return this.publishInconclusiveFile(filePath, "O alvo não é um ficheiro regular; análise não realizada.");
+        if (!stat.isFile() || stat.isSymbolicLink()) return this.publishInconclusiveFile(filePath, "O alvo não é um ficheiro regular; análise não realizada.", "no-verdict");
         beforeFile = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
       } catch {
-        return options?.backgroundSignal?.aborted ? null : this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.");
+        return options?.backgroundSignal?.aborted ? null : this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.", "file-changed");
       }
       const analysis = await this.analyzer.analyze(filePath, undefined, undefined, {
         signal: options?.backgroundSignal ?? this.signalForScan(options?.scanId),
@@ -3129,8 +3133,8 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       if (beforeFile !== undefined) {
         try {
           const stat = await fs.lstat(filePath);
-          if (beforeFile !== `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`) return this.publishInconclusiveFile(filePath, "Ficheiro alterado durante a análise; o resultado anterior não foi aplicado.");
-        } catch { return this.publishInconclusiveFile(filePath, "Ficheiro removido ou inacessível durante a análise."); }
+          if (beforeFile !== `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`) return this.publishInconclusiveFile(filePath, "Ficheiro alterado durante a análise; o resultado anterior não foi aplicado.", "file-changed");
+        } catch { return this.publishInconclusiveFile(filePath, "Ficheiro removido ou inacessível durante a análise.", "file-changed"); }
       }
 
       // Per-file coverage must come from this invocation, never cached health.
@@ -3212,6 +3216,19 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
         !nativeCompleted ? nativeFailure === "unavailable" ? "engine-unavailable"
           : nativeFailure === "cancelled" ? "inconclusive" : "failed"
         : upstreamIncomplete ? "inconclusive" : "completed";
+      // A causa e' um codigo desta invocacao. `coverageDetail` e' apenas texto.
+      const inconclusiveReason: import("@cybersafe/shared-types").InconclusiveReason | undefined =
+        !nativeCompleted
+          ? nativeFailure === "unavailable" ? "engine-unavailable"
+            : nativeFailure === "cancelled" ? "cancelled"
+            : nativeFailure === "timeout" ? "timeout"
+            : nativeFailure === "output" ? "invalid-output"
+            : "engine-failed"
+          : analysis.factors.some((factor) => factor.id === "scan-cancelled") ? "cancelled"
+          : analysis.factors.some((factor) => factor.id === "yara-timeout") ? "timeout"
+          : analysis.factors.some((factor) => ["clamav-inconclusive", "yara-inconclusive"].includes(factor.id)) ? "engine-failed"
+          : upstreamIncomplete ? "coverage-incomplete"
+          : undefined;
       const coverageDetail = nativeDetail ?? (upstreamIncomplete
         ? "Pelo menos um motor não conseguiu avaliar o ficheiro; a deteção disponível foi preservada, mas a cobertura é inconclusiva."
         : undefined);
@@ -3264,7 +3281,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
       }
 
-      this.eventBus.publish("artifact.analyzed", finalSeverity, `Analisado ${analysis.fileName}`, { ...analysis, vtResult, analysisState, nativeEngine, detail: coverageDetail });
+      this.eventBus.publish("artifact.analyzed", finalSeverity, `Analisado ${analysis.fileName}`, { ...analysis, vtResult, analysisState, inconclusiveReason, nativeEngine, detail: coverageDetail });
 
 
       // Log VT result to Action log (Workstream F: rotation + dedupe)
@@ -3282,6 +3299,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           riskScore: finalRiskScore,
           verdict: analysis.verdict,
           analysisState,
+          inconclusiveReason,
           nativeEngine,
           detail: coverageDetail,
           sha256: analysis.sha256,
@@ -3304,7 +3322,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       } else {
         console.error("Scan error:", err);
       }
-      return this.publishInconclusiveFile(filePath, "A análise falhou; não foi possível concluir um veredicto.");
+      return this.publishInconclusiveFile(filePath, "A análise falhou; não foi possível concluir um veredicto.", "engine-failed");
     }
   }
 

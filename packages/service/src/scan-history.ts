@@ -40,6 +40,11 @@ const INCONCLUSIVE_REASONS: ReadonlyArray<string> = [
   "engine-failed",
   "no-verdict",
   "coverage-incomplete",
+  "timeout",
+  "invalid-output",
+  "file-changed",
+  "archive-incomplete",
+  "cancelled",
 ];
 
 /** Teto de retenção a partir do env; valor inválido = default. */
