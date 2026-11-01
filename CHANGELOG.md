@@ -1058,3 +1058,30 @@ Fica por provar, e está dito em vez de escondido: a aceitação por
 `validateManifest` do cliente com uma assinatura real só é verificável com a chave
 da #14. O que este commit garante é que os **bytes medidos** do manifesto nascem do
 artefacto, não da mão de quem o escreve.
+
+## Cadeia de publicação provada de ponta a ponta (`scripts/test/release-chain.test.mjs`)
+
+Cada peça desta linha tinha testes próprios — o produtor de manifesto, as somas, a
+assinatura — mas **nenhum teste punha as três a falar entre si**: o
+`release-signing.test.mjs` assinava um manifesto escrito à mão pelo próprio teste.
+Se o produtor emitisse um campo que o canónico não espera, as suítes continuavam
+verdes e a falha aparecia no cliente, depois da descarga.
+
+3 casos, **3/3 PASS**, com chave ed25519 **efémera e de ensaio** (serve para provar
+o caminho do código; não é nem pode ser a chave pinada em
+`packages/desktop/src/updater/release-trust.json`, que é a decisão #14):
+
+- o manifesto saído do produtor é aceite por `buildSignedManifest` sem ajuste
+  manual, canónica, e `verifyCanonical` confirma; `file.sha256`/`sizeBytes`
+  sobrevivem à assinatura («a assinatura não pode reescrever a promessa») e
+  `requiresElevation` mantém-se booleano;
+- `gerarSomas`/`verificarSomas` e o manifesto dão o mesmo hash para o mesmo
+  ficheiro; trocar um byte do instalador passa `--check` a `divergente` **sem**
+  invalidar a assinatura do manifesto — que é exatamente a diferença entre
+  autenticar a *promessa* e autenticar a *descarga*, dita em asserção;
+- `notes` multilinha e `publishedAt` entram nos bytes canónicos.
+
+Dentro de `npm run test:scripts`, que sobe para **392 testes / 386 PASS / 0 FAIL /
+5 SKIP / 1 TODO**. O que fica por provar continua a ser um só: a aceitação por
+`validateManifest` com a chave real do proprietário (#14) e o transporte contra uma
+release existente ( hoje `404` porque não há release nenhuma).
