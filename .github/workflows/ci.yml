@@ -21,14 +21,15 @@ jobs:
 
       - uses: actions/setup-node@v4
         with:
+          # `npm-version` NÃO é entrada deste action: a run 41299179863 registou
+          # `Unexpected input(s) 'npm-version', valid inputs are [...]` e usou o
+          # npm que vem com o Node (11.19.1). O pin anterior nunca teve efeito, e
+          # por isso a "falsificação" da hipótese feita em 5658878 era inválida.
+          # A correção é outra: o `package-lock.json` foi regerado com npm 11.19.1
+          # (o npm do runner), que materializa as entradas aninhadas
+          # `@emnapi/core`/`@emnapi/runtime` da subárvore opcional
+          # `@tailwindcss/oxide-wasm32-wasi` que um npm mais antigo podava.
           node-version: "24"
-          # Fixado por reprodutibilidade, NÃO como correção: a hipótese de o
-          # EUSAGE do `npm ci` vir da versão do npm foi TESTADA e é FALSA — com
-          # este pin o passo falhou da mesma forma (run 41299179863) e numa
-          # árvore limpa sem `node_modules` o mesmo npm 11.6.2 resolve 778
-          # pacotes e sai 0. A causa do `Missing: @emnapi/core@1.11.3` no runner
-          # continua por identificar; ver CHANGELOG.
-          npm-version: "11.6.2"
           cache: npm
 
       - name: Instalar dependências (sem scripts nativos)

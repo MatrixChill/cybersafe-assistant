@@ -164,17 +164,28 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   automática de atualizações não pode ser considerada confiável fim-a-fim.** Nunca se gera uma chave
   de produção fictícia.
 - Sincronização com o `origin`: **FEITA** — `main` em `1ad632a` (fast-forward a partir de
-  `212cb64`, sem `--force`), confirmado por `git ls-remote` em 2026-11-01T10:45Z. A primeira run da
-  workflow `ci` falhou **antes de correr qualquer teste**: `npm ci` devolveu EUSAGE porque o npm do
-  runner exige entradas `@emnapi/core`/`@emnapi/runtime` que o `package-lock.json` publicado não
-  tem. **A primeira explicação dada estava errada e foi retirada**: fixar o npm em 11.6.2 (a versão
-  local) não mudou nada — a run `41299179863` falhou no mesmo passo com o mesmo texto — e numa
-  árvore limpa, sem `node_modules`, o mesmo npm resolve 778 pacotes e sai 0 (`npm ci --dry-run`),
-  ou seja, **o defeito não se reproduz nesta máquina e a causa continua por identificar**. Não há
-  `.npmrc` no repositório nem `omit` configurado. O pin de npm fica por reprodutibilidade, não
-  como correção, e diz isso mesmo no comentário do `ci.yml`. **Estado do `ci` no `main`: VERMELHO
-  no passo de instalação**, e nenhum passo de teste chegou a correr. Construção do instalador R7,
-  *tag* e *release*: **PENDENTES**.
+  `212cb64`, sem `--force`), confirmado por `git ls-remote` em 2026-11-01T10:45Z; entretanto
+  `89645c7` e `5658878` também já estão no `origin`. A primeira run da workflow `ci` falhou **antes
+  de correr qualquer teste**: `npm ci` devolveu EUSAGE com `Missing: @emnapi/core@1.11.3 from lock
+  file`, porque o `package-lock.json` publicado não tinha as entradas aninhadas
+  `@emnapi/core`/`@emnapi/runtime` da subárvore opcional `@tailwindcss/oxide-wasm32-wasi`.
+- **Duas explicações dadas estavam erradas e são retiradas.** (1) `89645c7` atribuiu o erro à
+  versão do npm e fixou `npm-version: "11.6.2"`. (2) `5658878` «refutou» essa hipótese dizendo que o
+  pin não mudou o resultado — e essa refutação **é inválida**: o log do passo `setup-node` da run
+  `41299179863` regista `##[warning]Unexpected input(s) 'npm-version', valid inputs are [...]` e
+  `npm: 11.19.1`. **`actions/setup-node@v4` não tem entrada `npm-version`; o pin nunca foi aplicado**,
+  pelo que a run comparava npm 11.19.1 contra npm 11.19.1 e não testava nada. A hipótese da versão
+  do npm continua viva.
+- Correção atual, ainda **não verificada em CI**: regerar o `package-lock.json` com o npm do runner
+  (`npx -y npm@11.19.1 install --package-lock-only`), que materializa as entradas aninhadas da
+  subárvore `wasm32` opcional que um npm mais antigo poda (+20/−19 linhas; ficheiro anterior
+  preservado em `…\logs\package-lock.pre-emnapi.json`). Validação local: `npm ci --dry-run
+  --ignore-scripts` passa com npm 11.19.1 **e** com o npm 11.6.2 desta máquina. O comentário do
+  `ci.yml` perde o `npm-version` inválido e passa a descrever os factos medidos. Duas ressalvas:
+  o runner pedia `@emnapi/core@1.11.3` e o lock regerado resolve `1.11.1`, e **a verificação real é
+  a run do GitHub, não os *dry-runs* locais**. **Estado do `ci` no `main`: VERMELHO no passo de
+  instalação** até essa run ser lida; nenhum passo de teste chegou a correr. Construção do
+  instalador R7, *tag* e *release*: **PENDENTES**.
 
 ## Estado das suítes medido em 2026-11-01
 
