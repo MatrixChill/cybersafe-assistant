@@ -21,7 +21,9 @@ import { fileURLToPath } from "node:url";
  */
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const read = (...parts: string[]) => fs.readFileSync(path.join(HERE, "..", "src", ...parts), "utf8");
+/** O checkout em Windows pode trazer CRLF; o contrato destes testes é o conteúdo, não o EOL. */
+const read = (...parts: string[]) =>
+  fs.readFileSync(path.join(HERE, "..", "src", ...parts), "utf8").replace(/\r\n/g, "\n");
 const shell = read("v2", "shell.css");
 const semComentarios = shell.replace(/\/\*[\s\S]*?\*\//g, "");
 const app = read("App.tsx");

@@ -179,7 +179,7 @@ describe("contrato service -> app: o summary do evento ja chega em PT-PT", () =>
     const appSrc = readFileSync(
       path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../src/App.tsx"),
       "utf8",
-    );
+    ).replace(/\r\n/g, "\n");
     assert.match(
       appSrc,
       /\{event\.summary\}/,

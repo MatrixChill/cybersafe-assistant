@@ -183,7 +183,11 @@ describe("join e derivacao — unidades puras", () => {
 });
 
 describe("TaskManagerPage — estabilidade de selecao e copy do botao", () => {
-  const page = readFileSync(new URL("../src/pages/TaskManagerPage.tsx", import.meta.url), "utf8");
+  /** O checkout em Windows pode trazer CRLF; o contrato deste teste é o conteúdo, não o EOL. */
+  const page = readFileSync(new URL("../src/pages/TaskManagerPage.tsx", import.meta.url), "utf8").replace(
+    /\r\n/g,
+    "\n",
+  );
 
   test("a linha expõe a acção, mas em modo de consulta: sem copy de terminação, guardas intactas", () => {
     // EXPECTATIVA ALTERADA A PROPÓSITO (PAP-P0, 2026-10-27). A versão anterior

@@ -31,7 +31,9 @@ import type { ModeloUsb, OrquestradorUsb } from "../src/lib/usbProtection";
 (globalThis as Record<string, unknown>).React = React;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const read = (...parts: string[]) => fs.readFileSync(path.join(HERE, "..", ...parts), "utf8");
+/** O checkout em Windows pode trazer CRLF; o contrato destes testes é o conteúdo, não o EOL. */
+const read = (...parts: string[]) =>
+  fs.readFileSync(path.join(HERE, "..", ...parts), "utf8").replace(/\r\n/g, "\n");
 const lf = (texto: string) => texto.replace(/\r\n/g, "\n");
 
 const lib = read("src", "lib", "usbProtection.ts");

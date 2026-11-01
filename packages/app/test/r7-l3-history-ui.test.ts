@@ -34,7 +34,9 @@ import { renderToStaticMarkup } from "react-dom/server";
 (globalThis as Record<string, unknown>).React = React;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
-const read = (...parts: string[]) => fs.readFileSync(path.join(HERE, "..", ...parts), "utf8");
+/** O checkout em Windows pode trazer CRLF; o contrato destes testes é o conteúdo, não o EOL. */
+const read = (...parts: string[]) =>
+  fs.readFileSync(path.join(HERE, "..", ...parts), "utf8").replace(/\r\n/g, "\n");
 /**
  * `Sidebar.tsx` e `FileScannerPage.tsx` estão em CRLF no working tree. Os regex
  * de várias linhas precisam de uma só forma de acabar linha, por isso o texto é
