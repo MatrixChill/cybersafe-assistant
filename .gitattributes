@@ -2,3 +2,12 @@
 # -text = sem conversao de fim de linha; o checkout escreve os bytes do blob
 # (LF) tal como estao no indice, inclusive em Windows com core.autocrlf=true.
 vendor/yara/COPYING.txt -text
+
+# Dados comparados byte a byte pelos testes: estes ficheiros tem o tamanho e o
+# sha256 afirmados em asserções (yara-coverage-contract E0) ou sao comparados ao
+# output de JSON.stringify(...,2) (hash-db-migration "conteudo ja normalizado").
+# Com core.autocrlf=true o checkout inchava-os (317→330, 20 CR por base), logo
+# a falha era da plataforma, nao do produto. Mesma regra do precedente acima.
+packages/core/test/fixtures/yara-eicar-only-real-corpus.yar -text
+definitions/hashes/default.json -text
+packages/service/definitions/hashes/default.json -text
