@@ -153,8 +153,15 @@ describe("Historio de Ameacas — gate real de armazenamento em this.threats", (
     // TypeScript desaparece na compilacao), por isso sao alcancaveis aqui. E o
     // mesmo objeto que o MalwareAnalyzer recebe, logo o resto do pipeline e real.
     await engine.signatures.load(dbPath);
-    assert.equal(engine.signatures.size, 1, "a base de teste tem de substituir a base embutida");
 
+    // NAO se afirma aqui `signatures.size === 1`. Quando a base carregada nao
+    // cobre o minimo offline, o produto repoe em memoria as assinaturas embutidas
+    // em falta (`ensureOfflineCoverage`) e preserva a base em disco — e o
+    // comportamento intencional, medido no log do teste: «sem cobertura offline
+    // completa (3 built-in em falta). Cobertura reposta em memoria». A base de
+    // teste e aditiva, nao substituta. O que importa — e a fixture ter entrado na
+    // base ativa — e provado em baixo pelo veredicto critical com known_bad_hash,
+    // que so a assinatura desta fixture pode produzir.
     const result = await engine.scanArtifact(filePath, "system-scanner");
 
     assert.equal(result.overallSeverity, "critical");
