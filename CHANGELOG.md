@@ -1018,3 +1018,43 @@ Segundo facto: `reset()` **não** é «limpar para o próximo caso»; é o encer
 (acorda a drenagem como «não drenada» e fecha a admissão), por isso usá-lo como
 isolamento estragou os quatro casos. O isolamento correto é cada caso devolver o
 que pediu, dentro do próprio corpo, e um gate por ficheiro, como no serviço.
+
+## `scripts/release-manifest.mjs` — o manifesto de atualização passa a ter produtor
+
+O updater **valida e consome** um `update-manifest.json` (contrato em
+`packages/desktop/src/updater/types.ts:120`: `schema`, `channel`, `version`,
+`publishedAt`, `notes`, `file{url,sha256,sizeBytes}`, `signature`, `publisher`,
+`requiresElevation`, `buildId`, `sourceCommit`, `compatibility`) e há 138 testes a
+provar que o recusa quando algo não bate. Não havia **nenhum** produtor no repo:
+`grep` por `update-manifest` nos scripts só encontrava o consumidor. Sem produtor,
+o manifesto é escrito à mão — e um `sizeBytes` copiado errado é apanhado no cliente
+como «ficheiro corrompido», depois de o utilizador descarregar o instalador todo.
+
+O que o script faz, e o que deliberadamente não faz:
+
+- `sha256` e `sizeBytes` **medidos no ficheiro real**, em fluxo (reaproveita
+  `sha256Ficheiro` de `release-checksums.mjs`, não é uma segunda implementação); o
+  teste compara as duas ferramentas sobre o mesmo ficheiro e exige igualdade.
+- `url` tem de ser HTTPS sem credenciais — a mesma regra do transporte do updater,
+  aplicada no momento em que se escreve o manifesto em vez de no momento em que já
+  é tarde.
+- **Recusa `channel:"stable"` com versão que tenha pré-release.** Isto é a armadilha
+  da decisão #16 transformada em código: medido que
+  `isUpgrade("0.1.11","0.1.11-internal.pap-r7.20261031") === true`, publicar a
+  string interna como estável daria um cliente que se acha atualizado contra algo
+  que nunca foi estável. No canal `internal` a mesma string passa — a guarda é sobre
+  a afirmação, não sobre o texto.
+- **Não assina.** O output não tem `signature`, e o script diz no stdout que falta a
+  chave do proprietário (#14) e qual o comando que assina depois
+  (`release-signing.mjs --sign-manifest`). Um produtor que inventasse uma chave
+  estaria a criar o canal de confiança que é reservado ao dono do produto.
+- Notas obrigatórias: texto ou caminho de ficheiro; vazio não produz manifesto.
+
+**Medido:** `node --test scripts/release-manifest.test.mjs` → 6/6 PASS. Dentro de
+`npm run test:scripts`, que sobe de 383 para **389 testes / 383 PASS / 0 FAIL /
+5 SKIP / 1 TODO** (11 s).
+
+Fica por provar, e está dito em vez de escondido: a aceitação por
+`validateManifest` do cliente com uma assinatura real só é verificável com a chave
+da #14. O que este commit garante é que os **bytes medidos** do manifesto nascem do
+artefacto, não da mão de quem o escreve.
