@@ -91,6 +91,24 @@ export const MALWAREBAZAAR_AUTH_KEY_ENV = "MALWAREBAZAAR_AUTH_KEY";
 
 type UpdateComponent = "yara" | "clamav" | "hashes";
 
+interface FonteFalha {
+  /** Tentativas falhadas CONSECUTIVAS; limpa-se no primeiro sucesso. */
+  count: number;
+  /** Epoch ms a partir do qual esta fonte pode ser tentada outra vez. */
+  nextAllowedAtMs: number;
+  /** Último erro observado, para o UI poder mostrar a tentativa e a causa. */
+  lastError?: string;
+  lastAttemptAtMs?: number;
+}
+
+/**
+ * Backoff por fonte. Base = a cadência da própria fonte; duplica a cada falha
+ * consecutiva até 6 h. Sem teto, um fornecedor em baixo seria attackado a cada
+ * tick para sempre; sem escalonar por fonte, uma falha do YARA esconderia a
+ * saúde dos hashes.
+ */
+export const FALHA_BACKOFF_TETO_MS = 6 * 60 * 60 * 1000;
+
 /**
  * `.update-meta.json`. O timestamp global mantém-se (compatibilidade), mas a
  * decisão de pular passa a ser POR COMPONENTE.
@@ -105,6 +123,12 @@ interface UpdateMeta {
   timestamp?: number;
   iso?: string;
   components?: Partial<Record<UpdateComponent, number>>;
+  /**
+   * Histórico de FALHAS por fonte, para o backoff ser por fonte e não global.
+   * Uma fonte que falha não pode arrastar as outras duas, e uma fonte em falha
+   * permanente não pode martelar o fornecedor a cada tick.
+   */
+  falhas?: Partial<Record<UpdateComponent, FonteFalha>>;
   /**
    * Prova da última VERIFICAÇÃO do feed de hashes (não da última escrita).
    * distinguir «verifiquei e não havia nada» de «escrevi coisas novas» é o que
@@ -500,6 +524,20 @@ export class DefinitionUpdater {
   private activeOperations = 0;
   get operationInProgress(): boolean { return this.activeOperations > 0; }
   async checkAndUpdate(force = false): Promise<UpdateResult> {
+    if (this.activeOperations > 0) {
+      // Dois ciclos em paralelo escreveriam sobre as MESMAS bases: o gate do
+      // ClamAV protege a LEITURA de uma escrita, não duas escritas uma contra a
+      // outra. Recusar com aviso explícito é mais honesto do que serializar em
+      // silêncio ou enfileirar pedidos que ninguém pediu.
+      return {
+        yaraUpdated: false,
+        clamUpdated: false,
+        hashesUpdated: false,
+        errors: [],
+        warnings: ["Já existe um ciclo de atualização de definições em curso; este pedido foi recusado para não escrever duas vezes sobre as mesmas bases."],
+        timestamp: new Date().toISOString(),
+      };
+    }
     ++this.activeOperations;
     try { return await this.runCheckAndUpdate(force); }
     finally { --this.activeOperations; }
@@ -541,12 +579,14 @@ export class DefinitionUpdater {
       try {
         const yaraResult = await this.updateYaraRules();
         result.yaraUpdated = true;
+        this.limparFalha("yara");
         updated.yara = true;
         result.errors.push(...yaraResult.errors.map((error) => `YARA source: ${error}`));
         result.warnings.push(...yaraResult.warnings.map((warning) => `YARA warning: ${warning}`));
         console.log("[Updater] Regras YARA atualizadas.");
       } catch (err: any) {
         result.errors.push(`YARA: ${err.message}`);
+        this.registarFalha("yara", err.message);
         const sourceErrors = err?.sourceErrors;
         if (Array.isArray(sourceErrors)) {
           result.errors.push(...sourceErrors.map((detail: string) => `YARA source: ${detail}`));
@@ -565,11 +605,13 @@ export class DefinitionUpdater {
       try {
         await this.updateClamAV();
         result.clamUpdated = true;
+        this.limparFalha("clamav");
         updated.clamav = true;
         console.log("[Updater] ClamAV atualizado via freshclam.");
       } catch (err: any) {
         // ClamAV não é obrigatório — freshclam pode não estar instalado
         result.errors.push(`ClamAV: ${err.message}`);
+        this.registarFalha("clamav", err.message);
         console.warn("[Updater] freshclam indisponível ou falhou:", err.message);
       }
     }
@@ -585,6 +627,7 @@ export class DefinitionUpdater {
         // repassar o feed a cada minuto). Uma tentativa sem alterações não é
         // «base atualizada», e o UI não pode recebê-la como tal.
         result.hashesUpdated = feed.alterou;
+        this.limparFalha("hashes");
         updated.hashes = true;
         if (feed.rejeitados > 0) {
           result.errors.push(`Hashes: ${feed.rejeitados} registos do feed rejeitados na validação.`);
@@ -599,6 +642,7 @@ export class DefinitionUpdater {
         );
       } catch (err: any) {
         result.errors.push(`Hashes: ${err.message}`);
+        this.registarFalha("hashes", err.message);
         console.warn("[Updater] Falha ao atualizar hashes:", err.message);
       }
     }
@@ -1451,6 +1495,33 @@ export class DefinitionUpdater {
    * YARA e ClamAV ficam nas 6 h; o feed de hashes obedece à janela de 60 min
    * que a própria fonte define (ver `HASH_FEED_INTERVAL_MS`).
    */
+  /**
+   * Regista uma falha desta fonte e calcula quando pode ser tentada de novo.
+   * Backoff = cadência da fonte × 2^(tentativas-1), com teto de 6 h.
+   */
+  private registarFalha(componente: UpdateComponent, erro: string): void {
+    const meta = this.readUpdateMeta();
+    const anterior = meta.falhas?.[componente];
+    const count = (anterior?.count ?? 0) + 1;
+    const base = this.intervaloDoComponente(componente);
+    const espera = Math.min(FALHA_BACKOFF_TETO_MS, base * 2 ** (count - 1));
+    const agora = Date.now();
+    const falhas = { ...(meta.falhas ?? {}) };
+    falhas[componente] = { count, nextAllowedAtMs: agora + espera, lastError: erro.slice(0, 400), lastAttemptAtMs: agora };
+    fs.mkdirSync(path.dirname(this.metaPath), { recursive: true });
+    fs.writeFileSync(this.metaPath, JSON.stringify({ ...meta, falhas }, null, 2), "utf-8");
+    console.warn(`[Updater] Falha registada em ${componente} (tentativa ${count}): nova tentativa não antes de ${Math.round(espera / 60000)} min.`);
+  }
+
+  /** Um sucesso limpa o histórico dessa fonte — o backoff é de FALHAS consecutivas. */
+  private limparFalha(componente: UpdateComponent): void {
+    const meta = this.readUpdateMeta();
+    if (!meta.falhas?.[componente]) return;
+    const falhas = { ...meta.falhas };
+    delete falhas[componente];
+    fs.writeFileSync(this.metaPath, JSON.stringify({ ...meta, falhas }, null, 2), "utf-8");
+  }
+
   private intervaloDoComponente(component: UpdateComponent): number {
     return component === "hashes" ? HASH_FEED_INTERVAL_MS : UPDATE_INTERVAL_MS;
   }
@@ -1458,6 +1529,13 @@ export class DefinitionUpdater {
   private componentStale(component: UpdateComponent): boolean {
     const meta = this.readUpdateMeta();
     const limite = this.intervaloDoComponente(component);
+    // Backoff em vigor: uma fonte em falha consecutiva NÃO é «velha» até o seu
+    // intervalo de recusa passar. Assim o scheduler continua a tentar as outras
+    // fontes na cadência normal em vez de repicar num fornecedor caído.
+    const recusa = meta.falhas?.[component];
+    if (recusa && Number.isFinite(recusa.nextAllowedAtMs) && Date.now() < recusa.nextAllowedAtMs) {
+      return false;
+    }
     const hasComponents = meta.components !== undefined && Object.keys(meta.components).length > 0;
     if (!hasComponents) {
       if (component === "clamav") return true;

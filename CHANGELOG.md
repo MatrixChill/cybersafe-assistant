@@ -741,3 +741,46 @@ separar as duas coisas que misturava (um arquivo oficial isolado é *reconhecido
 Depois disso: `core` = **1104 testes / 1069 PASS / 4 FAIL / 30 SKIP / 1 TODO** — os mesmos 4
 `clamav-slot-*` que já estavam documentados como «não avaliam hoje o que declaram», e mais cinco
 testes novos meus a passar. O ramo `candidates` recebeu a mesma regra, com caso próprio no ficheiro novo.
+
+### Recarregamento efetivo, backoff por fonte e um ciclo por vez
+
+Três coisas do requisito 4 e 6 que não existiam, agora com prova:
+
+- **Recarregamento da HashDB dentro do motor.** `engine.ts:660-664` recarrega o
+  `SignatureDatabase` quando `hashesUpdated`, e **nada o provava**: o core provava
+  que `load()` lê o disco, o updater provava que o ficheiro é escrito. Faltava o
+  meio — um hash novo podia estar em disco e nunca contar no processo. Novo
+  `service/test/updater-reload-engine.test.js` constrói um `ProtectionEngineService`
+  real, injeta o feed por duplo, corre `checkAndUpdate(true)` e afirma que
+  `servico.signatures.match(novoHash)` existe **sem reiniciar nada**; o segundo
+  caso afirma o inverso — sem alteração escrita não há recarga (`recargas === 0`),
+  para que a recarga não passe a ser um custo pago por nada. Rede: nenhuma (YARA e
+  freshclam recusados de caso pelo seam `spawnFreshclam`).
+- **Backoff por fonte, com teto.** Uma fonte que falha passa a guardar
+  `meta.falhas.<fonte> = {count, nextAllowedAtMs, lastError, lastAttemptAtMs}`,
+  com espera = cadência da própria fonte × 2^(tentativas−1), teto de 6 h
+  (`FALHA_BACKOFF_TETO_MS`). `componentStale` respeita essa janela, portanto
+  `clamscan`/GitHub em baixo deixam de ser repicados a cada tick — e, sendo o
+  histórico por fonte, **uma fonte em falha não esconde a saúde das outras** (o
+  teste afirma mesmo `componentStale("yara") === true` enquanto `hashes` está em
+  recusa). O primeiro sucesso limpa o histórico. É também o `lastError` que a UI
+  do requisito 5 precisa para mostrar «última tentativa e respetivo erro».
+- **Um ciclo de cada vez.** `activeOperations` contava mas não impedia: duas
+  chamadas a `checkAndUpdate` escreviam sobre as mesmas bases em paralelo (o gate
+  do ClamAV protege a LEITURA de uma escrita, não duas escritas). Agora o segundo
+  pedido é **recusado com aviso explícito**, sem enfileirar trabalho que ninguém
+  pediu.
+
+Efeito colateral que vale a pena registar: a recusa apanhou uma falha minha do
+passo anterior. `clamav-reprobe-after-update.test.js` caiu 3 vezes — não pela
+concorrência, mas porque a sua fixture escrevia **só `main.cvd`**, e a nova regra
+de completude a isso responde `degraded`. É a mesma classe de acidente das
+fixtures do `clamav-db`: completude foi exigida tarde, e metade dos fixtures de
+ClamAV no repo descrevem bases parciais sem querer (ficam listados por verificar:
+`clamav-seed`, `clamav-load-proof-modes/rev4/real.integration`,
+`clamav-positive-load-proof{,-lifecycle}` — os 6 correram **0 FAIL**, 24 SKIP são
+os opt-in/AV, portanto não estavam a depender dessa forma).
+
+**Medido depois de tudo:** `core` 1104 / 1069 PASS / **4 FAIL** / 30 SKIP / 1 TODO
+(mesmo baseline) e `service` `npm test` 967 / 925 PASS / **42 FAIL** (mesmo
+baseline, +5 testes novos a passar). Os `updater-*` a três dão 36/36.

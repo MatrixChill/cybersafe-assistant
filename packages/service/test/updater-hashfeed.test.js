@@ -357,3 +357,67 @@ describe("metadado: a prova de verificação sobrevive à escrita do ciclo", () 
   // novo contar na próxima deteção, por isso fica como tarefa explícita, não
   // como sucesso desta suite.
 });
+
+describe("backoff e concorrência por fonte (requisito 4)", () => {
+  const metaPath = (pasta) => path.join(ROOT, pasta, ".update-meta.json");
+
+  test("falha consecutiva escala o backoff e recusa a fonte sem parar as outras", async () => {
+    const pasta = "backoff";
+    const defs = path.join(ROOT, pasta);
+    const cabecalho = { chunks: [], corpos: [], pedidos: [], spawnError: "ECONNREFUSED" };
+    const updater = new DefinitionUpdater(defs, { hashFeedRequest: fakeRequest(cabecalho), hashAuthKey: KEY });
+    for (let i = 1; i <= 3; i += 1) {
+      await assert.rejects(() => updater["updateHashFeed"](), /ECONNREFUSED/);
+      updater["registarFalha"]("hashes", `tentativa ${i} falhou`);
+      const meta = JSON.parse(fs.readFileSync(metaPath(pasta), "utf8"));
+      assert.equal(meta.falhas.hashes.count, i, `contagem de tentativas ${i}`);
+      assert.ok(meta.falhas.hashes.nextAllowedAtMs > Date.now(), "ainda em recusa");
+    }
+    // Base=45min → 45, 90, 180 min. Escalonar por tentativas é o que impede o
+    // martelar do fornecedor; o teto existe para nunca crescer sem limite.
+    const meta = JSON.parse(fs.readFileSync(metaPath(pasta), "utf8"));
+    const esperaMin = Math.round((meta.falhas.hashes.nextAllowedAtMs - Date.now()) / 60000);
+    assert.ok(esperaMin > 150 && esperaMin <= 181, `3ª falha deve ~180 min, obtido ${esperaMin}`);
+    assert.equal(updater["componentStale"]("hashes"), false, "fonte em backoff não é re-tentada a cada tick");
+    assert.equal(updater["componentStale"]("yara"), true, "e o backoff de uma fonte não arrasta as outras");
+  });
+
+  test("um sucesso limpa o histórico dessa fonte", () => {
+    const pasta = "backoff-limpa";
+    const defs = path.join(ROOT, pasta);
+    fs.mkdirSync(path.join(defs, "hashes"), { recursive: true });
+    const updater = new DefinitionUpdater(defs, { hashFeedRequest: fakeRequest({ chunks: [], corpos: [], pedidos: [] }), hashAuthKey: KEY });
+    updater["registarFalha"]("hashes", "erro");
+    assert.ok(JSON.parse(fs.readFileSync(metaPath(pasta), "utf8")).falhas.hashes);
+    updater["limparFalha"]("hashes");
+    assert.equal(JSON.parse(fs.readFileSync(metaPath(pasta), "utf8")).falhas.hashes, undefined);
+    assert.equal(updater["componentStale"]("hashes"), true, "sem histórico, volta à cadência normal");
+  });
+
+  test("dois ciclos em paralelo: o segundo é recusado e não escreve", async () => {
+    const defs = path.join(ROOT, "concorrencia");
+    let libertar;
+    const bloqueio = new Promise((resolve) => { libertar = resolve; });
+    const cabecalho = { chunks: [payloadOk(["8".repeat(64)])], corpos: [], pedidos: [] };
+    const updater = new DefinitionUpdater(defs, {
+      hashFeedRequest: fakeRequest(cabecalho),
+      hashAuthKey: KEY,
+      // Seam do construtor, não um método adivinhado: `spawnFreshclam` existe
+      // precisamente para permitir um filho que não nasce, sem tocar no spawn real.
+      spawnFreshclam: () => {
+        throw new Error("freshclam indisponível neste teste");
+      },
+    });
+    updater["downloadText"] = async () => {
+      await bloqueio;
+      throw new Error("YARA desativado neste teste");
+    };
+    const primeiro = updater.checkAndUpdate(true);
+    const segundo = await updater.checkAndUpdate(true);
+    assert.equal(segundo.hashesUpdated, false);
+    assert.match(segundo.warnings.join(" "), /já existe um ciclo/i);
+    libertar();
+    await primeiro;
+    assert.ok(updater.operationInProgress === false, "o ciclo liberta a operação");
+  });
+});
