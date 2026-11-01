@@ -538,3 +538,52 @@ proprietário. Afirma factos lidos no código e no endpoint.
   partir dos **49 commits** desde `01dcfaf`, e a lista do que continua desligado. Não é documento
   publicado nem `docs/`; enquanto não houver instalador, um `RELEASE-NOTES.md` no repo seria
   uma promessa.
+
+### Item 4 ao limite do que se pode medir sem assinatura: pré-voo do `source-freeze`
+
+Regra lida no próprio pipeline, para não deixar ambiguidade: **não há flag de bypass** — o
+comentário em `scripts/package-windows.mjs:1237` diz «Não há flag de bypass nem re-pin silencioso»,
+e `runFreezeGatedPipeline` corre `gate("PRE")` **antes** de `stages.workspaces()`. O marcador
+`SOURCE-FREEZE-FAILED.json` (`markNotDeliverable`) só existe para a fase POS, depois do builder;
+não é uma janela para compilar sem aprovação. A única coisa que falta ao NSIS é, portanto, o registo
+de aprovação — e ele não é meu para escrever: `validateApproval` aceita um aprovador
+(`APPROVER = "Codex Lead"`), e medi com a função exportada que um registo com
+`approvedBy: "Qoder"` devolve `approval-invalid: approvedBy "Qoder" ≠ "Codex Lead"`. O cabeçalho de
+`source-freeze.mjs` é explícito: «--approval é um registo operacional, não uma assinatura
+criptográfica: a autoridade vem do **processo do integrador autorizado**, não do ficheiro».
+
+Mesmo assim o pré-voo foi medido com as funções exportadas do próprio script
+(`release-prep/freeze-readiness.mjs`, leitura apenas, nada escrito dentro do repositório):
+
+- **8 raízes cobertas, 1 769 entradas, digest `1064f33c8a46b6a37c2bcc2f272bb28fa912bd862d1691fc93691672c795e22b`**,
+  estável entre duas leituras da árvore — logo o gate não reprovaria por «ficheiro que muda durante
+  a leitura». Distribuição: `packages` 1 199, `assets` 480, `scripts` 86, `package.json`,
+  `package-lock.json`, `tsconfig.base.json`, `vendor` 1.
+- `buildManifest` **não lançou** `recursos obrigatórios ausentes`: os dois ficheiros de licença
+  exigidos mesmo em `--write` (`assets/licenses/THIRD-PARTY-NOTICES.txt`, `PROVENANCE.json`) estão
+  presentes.
+- `verifySourceFreeze` hoje devolve **exactamente um** problema: `manifest-missing` em
+  `scripts/source-freeze.approved.json`. Um registo de aprovação com `approvedBy` correcto e
+  `candidateId`/`approvedAt` preenchidos passa a validação (medi o exemplar com placeholders: zero
+  problemas). **Tudo o que separa o dia em que o NSIS corre é uma decisão de identidade, não uma
+  verificação técnica pendente.**
+
+**Dois factos de contracto que a medição revelou e que importam à release:**
+
+1. **`product-version.json` não está no conjunto congelado.** A política deste repositório declara
+   esse ficheiro como «fonte canónica da versão do produto», injetada no manifesto empacotado e no
+   renderer — e não aparece entre as 1 769 entradas do digest. Consequência concreta: duas builds a
+   partir do mesmo digest aprovado podem ter versões de produto diferentes. O freeze fecha o
+   conteúdo das fontes mas não fecha a identidade que o instalador publica. Recomendo adicionar o
+   ficheiro às raízes cobertas; **não o fiz**, porque isso muda o digest e invalida qualquer
+   aprovação já dada a este conjunto — é decisão do integrador/proprietário (task #17).
+2. **`README.md`, `CHANGELOG.md` e `product-version.json` não são cobertos** (raiz só
+   `package.json`, `package-lock.json`, `tsconfig.base.json`). Isto é útil: os meus commits de
+   documentação não invalidam uma aprovação. Mas `package.json` **é** coberto, por isso qualquer
+   mudança de dependência ou de script de workspace sim.
+
+Nota operacional para quem correr `--write`: a árvore de trabalho tem `definitions/yara/default.yar`
+marcado como modificado por diferença de fim-de-linha (LF→CRLF do checkout, já documentado e
+deliberadamente não staged). O `--write` calcularia o digest contra essa árvore, portanto o
+candidato sairia com `dirty` git e o ponto 4 do pedido («a partir de commit limpo») não ficaria
+cumprido. Antes de aprovar convém resolver o EOL desse ficheiro, não ignorá-lo.
