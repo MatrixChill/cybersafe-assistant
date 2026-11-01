@@ -176,15 +176,40 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   `npm: 11.19.1`. **`actions/setup-node@v4` não tem entrada `npm-version`; o pin nunca foi aplicado**,
   pelo que a run comparava npm 11.19.1 contra npm 11.19.1 e não testava nada. A hipótese da versão
   do npm continua viva.
-- Correção atual, ainda **não verificada em CI**: regerar o `package-lock.json` com o npm do runner
+- Correção do `package-lock.json`, **VERIFICADA EM CI**: regerado com o npm do runner
   (`npx -y npm@11.19.1 install --package-lock-only`), que materializa as entradas aninhadas da
-  subárvore `wasm32` opcional que um npm mais antigo poda (+20/−19 linhas; ficheiro anterior
-  preservado em `…\logs\package-lock.pre-emnapi.json`). Validação local: `npm ci --dry-run
-  --ignore-scripts` passa com npm 11.19.1 **e** com o npm 11.6.2 desta máquina. O comentário do
-  `ci.yml` perde o `npm-version` inválido e passa a descrever os factos medidos. Duas ressalvas:
-  o runner pedia `@emnapi/core@1.11.3` e o lock regerado resolve `1.11.1`, e **a verificação real é
-  a run do GitHub, não os *dry-runs* locais**. **Estado do `ci` no `main`: VERMELHO no passo de
-  instalação** até essa run ser lida; nenhum passo de teste chegou a correr. Construção do
+  subárvore `wasm32` opcional que um npm mais antigo poda (+20/−19; anterior preservado em
+  `…\logs\package-lock.pre-emnapi.json`). Na run `41299760421` (SHA `b4a7eee`) os passos
+  `Instalar dependências`, `Build dos workspaces` e `Assinatura de release` **correram e passaram**.
+  Portanto a afirmação anterior deste ficheiro — «estado do `ci`: VERMELHO no passo de instalação,
+  nenhum passo de teste chegou a correr» — está **retirada por medida**, e a ressalva sobre
+  `1.11.3` vs `1.11.1` deixou de ser relevante: `npm ci` instala o que o lock declara.
+- A mesma run falhou mais à frente, em `Vendor YARA e manifesto de packaging`: 6 testes com o mesmo
+  texto `caminho resolvido fora do vendor (link/junction num parent)`. Causa única e medida: no
+  runner, `os.tmpdir()` vem em forma 8.3 (`C:\Users\RUNNER~1\…`) e o portão de contenção
+  (`scripts/package-windows.mjs:1368`) recusa qualquer diretório cujo `realpath` não coincida
+  textualmente com o caminho pedido. **O portão não foi afrouxado** — é *fail-closed* e está
+  correto; a fixture é que passou a entregar o caminho canónico (`fs.realpathSync.native`) em
+  `3c54c5e`. Medido localmente: **19 PASS / 0 FAIL** (`logs/ci-vendor-fix-local.log`); em CI ainda
+  **não foi lido**. Limitação registada: um vendor alcançado por caminho em forma 8.3 é recusado,
+  o que pode bloquear o *packaging* nesse tipo de máquina.
+- Suíte `service`: o total em falta **tem causa identificada e não é lentidão**. Os quatro
+  `engine.init()` de `threat-history-storage.test.js` nunca eram dispostos; os temporizadores do
+  ciclo de assinaturas mantinham o event loop vivo, o processo do `node --test` nunca saía e o
+  resumo nunca era escrito — é isso que o registo congelado das 10:27 às 10:39 mostrava. Medido: o
+  mesmo ficheiro isolado não termina em 150 s antes do `dispose()` (`exit=124`); com `dispose()`
+  (já existia em `src/engine.ts:2432`, commit `596fbee`) sai com resumo — **4 testes / 3 PASS /
+  1 FAIL** (`logs/th-single-dispose.log`). **Retirada**: a suspeita de fuga de diretórios
+  `qa3-recursive-*` não se confirma — não há nenhum `qa3-*` na árvore nem em `%TEMP%`, e o
+  `t.after` do ficheiro limpa; nada foi «corrigido» por causa dela. A falha `this.threats`
+  (atual 4, esperado 1) **mantém-se por explicar** e a re-medição da suíte completa está em curso.
+- Estado do `ci` no `main`: **VERDE, medido**. A run `41300363725` (SHA `596fbee`,
+  2026-11-01T11:06Z, `conclusion: success`) passou em **todos os nove passos**, incluindo
+  `Vendor YARA e manifesto de packaging` e `Suíte do desktop`. Nada nisto significa que o
+  *packaging* esteja validado: o `ci.yml` não builda o native-engine, não provisiona ClamAV/YARA
+  nem mede o payload do instalador — esses portões continuam locais/Windows e **PENDENTES**.
+  O mesmo SHA verde está também confirmado na run `41300361007` (branch `pap/**`). O `ci` em
+  `39f096d` estava em curso no momento desta medição. Construção do
   instalador R7, *tag* e *release*: **PENDENTES**.
 
 ## Estado das suítes medido em 2026-11-01

@@ -283,6 +283,15 @@ números seguintes vêm dos logs dessas execuções — diretório de trabalho
 | `desktop` | 611 testes / 611 PASS / 0 FAIL | `test-desktop.log`. Nas execuções imediatas seguintes, 628 / 627 PASS / 1 FAIL; a falha era o portão `tsc --noEmit`, cuja linha em falta (o texto do código de erro `rate-limited`) entrou com `97469f1` — `tc3.log` já não regista erros |
 | `service` | **INCOMPLETA — sem total de testes** | `service-post-yara.log`, neste HEAD. A suíte não produziu resumo em ~25 min: o último resultado observável é `✖ critical (hash registado numa base de teste) entra em this.threats` e o log deixou de crescer entre 10:27 e 10:39, com delta de CPU 0 em 5 s nos processos `node` amostrados; o processo foi terminado. O FAIL é o mesmo já explicado acima (`threat-history-storage.test.js`); os `ENOENT` de «Recuperação do corpus YARA» já apareciam em `test-service.log` (08:54, antes das mudanças YARA), portanto **não são regressão deste commit**. O resto da suíte não foi medido a este estado, e o `npm test` do `service` corre ~95 ficheiros num único `node --test --test-concurrency=1` sem tempo-limite — em CI precisa de um teto de duração explícito |
 
+**Workflow `ci` no `main`: VERDE, medida.** A run `41300363725` (SHA `596fbee`,
+2026-11-01T11:06Z, `conclusion: success`) passou os nove passos — instalação de dependências,
+`build:all`, assinatura de release, vendor YARA e manifesto, YARA clássico e proveniência, e a
+suíte do desktop. Isso **não** é *packaging*: a workflow não compila o native-engine, não
+provisiona ClamAV/YARA nem mede o payload do instalador; esses portões são locais/Windows e
+continuam pendentes. Até há poucas horas esta workflow estava vermelha: o `npm ci` do runner
+exigia entradas `@emnapi/*` que o lock não tinha, e seis testes do vendor assumiam um `%TEMP%`
+canónico que o runner não providesse (forma 8.3).
+
 Nenhuma destas linhas significa «suíte aprovada», e a contagem agregada do repositório não é
 declarada como verde.
 
