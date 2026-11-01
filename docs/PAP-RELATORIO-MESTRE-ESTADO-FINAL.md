@@ -601,3 +601,11 @@ node scripts/package-windows.mjs --check --candidate --json
 ### A.6 Próximo passo
 
 Continuar a Fase 2 nas tarefas independentes da VM: confirmar o encaminhamento da política de quarentena até à UI, fechar os contratos do Gestor de Tarefas, melhorar as respostas MATRIX e instrumentar o Scanner por motor. Em paralelo, preparar capturas reais para a aprovação visual; não congelar, não integrar na `main` e não publicar sem essa aprovação.
+
+### A.7 MATRIX — contexto com tendência de 24 h
+
+- `buildMatrixContext` passou a comparar as últimas 24 h com as 24 h anteriores e a enviar uma linha `Threats in retained feed`.
+- A contagem usa apenas `createdAt` com data válida e não conta datas futuras; a lista do App é limitada a 500 eventos, por isso o rótulo diz “retained feed” e não histórico completo.
+- Sem amostras utilizáveis, a linha não aparece; o contexto não inventa uma tendência.
+- Teste dedicado: **16/16 PASS**; suíte da app: **2 873/2 873 PASS**; `typecheck` da app: **PASS**.
+- Ainda não há fornecedor real autorizado. Isto melhora o contexto factual; **não** prova a qualidade das respostas online.
