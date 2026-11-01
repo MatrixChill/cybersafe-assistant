@@ -43,6 +43,7 @@ const KNOWN_BAD_CONTENT = "CYBERSAFE-TEST-KNOWNBAD-ab12cd\n";
 const YARA_MARKER = "CYBERSAFE-YARA-PROBE-ALPHA";
 
 const tempDirs = [];
+const engines = [];
 
 async function makeTempDir(prefix) {
   // Dentro de \Temp\ a regra suspicious_location soma +15 ao score do canario
@@ -56,6 +57,9 @@ async function makeTempDir(prefix) {
 }
 
 after(async () => {
+  for (const engine of engines) {
+    await engine.dispose().catch(() => {});
+  }
   for (const dir of tempDirs) {
     await fs.rm(dir, { recursive: true, force: true }).catch(() => {});
   }
@@ -69,10 +73,15 @@ after(async () => {
  * `%USERPROFILE%\.cybersafe-service` — e sao quatro `init()` neste ficheiro,
  * cada um a semear definicoes e a tocar em history.jsonl/logs do home real.
  * Ver test/p0-runtime-isolation.test.js.
+ *
+ * O `dispose()` no `after()` não é cosmético: sem ele o `init()` deixa os
+ * temporizadores do ciclo de assinaturas ativos, o event loop nunca seca e o
+ * `node --test` não escreve o resumo — a suíte fica sem total mensurável.
  */
 async function createEngine() {
   const baseDir = await makeTempDir("engine");
   const engine = new ProtectionEngineService(baseDir);
+  engines.push(engine);
   const emitted = [];
   const origPublish = engine.eventBus.publish.bind(engine.eventBus);
   engine.eventBus.publish = (type, severity, summary, data) => {
