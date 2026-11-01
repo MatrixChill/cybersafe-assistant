@@ -40,8 +40,11 @@ export class RealtimeRecovery {
   private readonly setTimer: NonNullable<Options["setTimer"]>;
   private readonly clearTimer: NonNullable<Options["clearTimer"]>;
   constructor(options: Options = {}) {
-    this.maxPaths = options.maxPaths ?? 64; this.maxAttempts = options.maxAttempts ?? 3;
-    this.maxAgeMs = options.maxAgeMs ?? 30_000; this.delayMs = options.delayMs ?? 100;
+    // Orcamento para uma rajada real de downloads/instalacao: 128 caminhos,
+    // 5 tentativas e 2 min. Nao e cobertura certificada; e a diferenca entre
+    // desistir em 30 s e dar tempo a fila de 64 lugares a escoar.
+    this.maxPaths = options.maxPaths ?? 128; this.maxAttempts = options.maxAttempts ?? 5;
+    this.maxAgeMs = options.maxAgeMs ?? 120_000; this.delayMs = options.delayMs ?? 100;
     this.attemptTimeoutMs = options.attemptTimeoutMs ?? 2_000;
     for (const value of [this.maxPaths,this.maxAttempts,this.maxAgeMs,this.delayMs,this.attemptTimeoutMs]) {
       if (!Number.isSafeInteger(value) || value <= 0) throw new RangeError("Limite de recuperação inválido");
@@ -80,7 +83,12 @@ export class RealtimeRecovery {
   private schedule(): void {
     if(this.scheduled || this.busy || this.entries.size===0)return;
     this.scheduled=true;const epoch=this.epoch;
-    this.timer=this.setTimer(()=>{if(epoch!==this.epoch)return;this.scheduled=false;void this.attempt();},this.delayMs);
+    // BACKOFF: a tentativa anterior nao entrou porque a fila estava cheia.
+    // Repetir a 100 ms so gasta CPU e volta a encontrar a mesma fila. O atraso
+    // cresce ate 5 s, dando tempo ao unico worker para escoar.
+    const attempts=this.entries.values().next().value?.attempts ?? 0;
+    const delay=Math.min(this.delayMs*2**Math.min(attempts,6),5_000);
+    this.timer=this.setTimer(()=>{if(epoch!==this.epoch)return;this.scheduled=false;void this.attempt();},delay);
   }
   private async attempt(): Promise<void> {
     const next=this.entries.entries().next().value;if(!next || this.busy)return;

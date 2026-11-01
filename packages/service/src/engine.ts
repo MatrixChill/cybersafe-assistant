@@ -2252,9 +2252,16 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     const admission = this.realtimeQueue.enqueue(path.resolve(filePath).toLowerCase(), fingerprint, async () => {
       if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || signal.aborted) return;
       await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true });
-    });
+    }, this.realtimePriority(filePath));
     if (admission === "full") { this.reportRealtimeOverflow(filePath, "analysis", retry); return false; }
     return true;
+  }
+
+  /** Downloads primeiro: e onde o EICAR chega e onde a detecao tardia se nota. */
+  private realtimePriority(filePath: string): "high" | "normal" {
+    const home = process.env.USERPROFILE || os.homedir();
+    const downloads = path.resolve(home, "Downloads").toLowerCase() + path.sep;
+    return path.resolve(filePath).toLowerCase().startsWith(downloads) ? "high" : "normal";
   }
 
   private reportRealtimeOverflow(caminho = "", stage: SaturationStage = "analysis", retry = false): void {
