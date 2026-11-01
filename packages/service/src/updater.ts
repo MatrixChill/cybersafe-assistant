@@ -1496,6 +1496,66 @@ export class DefinitionUpdater {
    * que a própria fonte define (ver `HASH_FEED_INTERVAL_MS`).
    */
   /**
+   * Estado POR FONTE, para a UI poder dizer «actualizado / desactualizado /
+   * degradado / indisponível / nunca verificado» sem inventar nada.
+   *
+   * Porque é um método do updater e não do motor: o único registo de quando cada
+   * fonte foi tentada e conseguiu vive no `.update-meta.json` que o updater escreve.
+   * O motor acrescenta depois o que só ele sabe (contagem de assinaturas em
+   * memória, saúde do YARA e do ClamAV).
+   *
+   * Distinções que importam e antes não existiam:
+   *  - `nunca_verificado` ≠ `indisponivel`: a primeira nunca tentou, a segunda
+   *    tentou e o motor não está lá;
+   *  - `ultimaTentativa` ≠ `ultimaBemSucedida`: mostrar a tentativa como se fosse
+   *    sucesso é a mentira que o requisito 4 proíbe explicitamente;
+   *  - `proximaVerificacao` sai da cadência da fonte, EXCETO quando há backoff em
+   *    vigor — nesse caso é o fim da recusa, que é o que realmente vai acontecer.
+   */
+  estadoDasFontes(now = Date.now()): Array<{
+    fonte: UpdateComponent;
+    ultimaBemSucedidaAtMs: number | null;
+    ultimaTentativaAtMs: number | null;
+    ultimoErro: string | null;
+    tentativasConsecutivas: number;
+    proximaVerificacaoAtMs: number;
+    cadenciaMs: number;
+    nuncaVerificado: boolean;
+    emBackoff: boolean;
+  }> {
+    const meta = this.readUpdateMeta();
+    const hashesTentado = Number(meta.hashesCheckedAt ?? 0);
+    return (["clamav", "yara", "hashes"] as UpdateComponent[]).map((fonte) => {
+      const sucesso = Number(meta.components?.[fonte] ?? 0) || null;
+      const falha = meta.falhas?.[fonte];
+      const cadenciaMs = this.intervaloDoComponente(fonte);
+      const ultimaTentativa =
+        Number.isFinite(falha?.lastAttemptAtMs ?? 0) && (falha?.lastAttemptAtMs ?? 0) > 0
+          ? (falha as FonteFalha).lastAttemptAtMs as number
+          : fonte === "hashes" && hashesTentado > 0
+            ? hashesTentado
+            : sucesso;
+      const emBackoff = !!falha && Number.isFinite(falha.nextAllowedAtMs) && now < falha.nextAllowedAtMs;
+      return {
+        fonte,
+        ultimaBemSucedidaAtMs: sucesso,
+        ultimaTentativaAtMs: ultimaTentativa ?? null,
+        ultimoErro: falha?.lastError ?? null,
+        tentativasConsecutivas: falha?.count ?? 0,
+        proximaVerificacaoAtMs: emBackoff
+          ? (falha as FonteFalha).nextAllowedAtMs
+          : (sucesso ?? 0) + cadenciaMs,
+        cadenciaMs,
+        // Uma fonte só é «nunca verificada» se não houver NEM sucesso NEM
+        // tentativa registada — e, no caso dos hashes, a verificação conta mesmo
+        // sem alteração escrita, porque foi isso que aconteceu.
+        nuncaVerificado: sucesso === null && ultimaTentativa == null && !(fonte === "hashes" && hashesTentado > 0),
+        emBackoff,
+      };
+    });
+  }
+
+  /**
    * Regista uma falha desta fonte e calcula quando pode ser tentada de novo.
    * Backoff = cadência da fonte × 2^(tentativas-1), com teto de 6 h.
    */

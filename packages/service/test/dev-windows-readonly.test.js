@@ -331,7 +331,7 @@ describe("bootstrap: validação antes dos efeitos", () => {
 
 describe("allowlist cerrada", () => {
   it("as permitidas são um subconjunto do dispatch real, sem nomes inventados", () => {
-    assert.equal(METODOS_DO_SERVICO.size, 42, "o vocabulário do dispatch mudou");
+    assert.equal(METODOS_DO_SERVICO.size, 43, "o vocabulário do dispatch mudou");
     assert.equal(new Set(METODOS_DO_SERVICO).size, METODOS_DO_SERVICO.size);
     for (const m of LEITURAS_PERMITIDAS) assert.ok(METODOS_DO_SERVICO.has(m), `permitida fora do dispatch: ${m}`);
   });

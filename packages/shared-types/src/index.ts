@@ -922,6 +922,50 @@ export interface ProtectionOptInResult {
   motivo?: string;
 }
 
+/**
+ * Estado de UMA fonte de definições de segurança (ClamAV / YARA / HashDB).
+ *
+ * Os IDs são estáveis e a legenda PT-PT vive no renderer — mas a distinção entre
+ * os cinco estados é do serviço, porque só o serviço sabe se houve uma tentativa
+ * ou um sucesso. `nunca_verificado` não é `indisponivel`, e `degradado` (o motor
+ * analisa, a cobertura não é completa) não é `desactualizado` (a base é completa
+ * mas antiga). Colapsá-los seria a UI a inventar o que o serviço não mediu.
+ */
+export type DefinitionsSourceState =
+  | "actualizado"
+  | "desactualizado"
+  | "degradado"
+  | "indisponivel"
+  | "nunca_verificado";
+
+export interface DefinitionsSourceStatus {
+  fonte: "clamav" | "yara" | "hashes";
+  estado: DefinitionsSourceState;
+  /** Epoch ms do último SUCESSO; `null` se nunca houve um. */
+  ultimaBemSucedidaAtMs: number | null;
+  /** Epoch ms da última TENTATIVA (pode ter falhado). */
+  ultimaTentativaAtMs: number | null;
+  /** Último erro observado, com a causa; nunca uma falha inventada. */
+  ultimoErro: string | null;
+  /** Tentativas falhadas consecutivas; 0 com sucesso limpo. */
+  tentativasConsecutivas: number;
+  /** Quando a próxima verificação vai realmente acontecer (inclui backoff). */
+  proximaVerificacaoAtMs: number;
+  /** Cadência normal desta fonte, para a UI não a presumir igual para todas. */
+  cadenciaMs: number;
+  /** Versão/identificador da base, quando a fonte o publica (ex.: daily 28171). */
+  identificadorBase: string | null;
+  /** Quantidade efetivamente carregada, quando mensurável; `null` = não medido. */
+  itensCarregados: number | null;
+}
+
+export interface DefinitionsStatus {
+  fontes: DefinitionsSourceStatus[];
+  /** `true` enquanto um ciclo corre — a UI não pode oferecer um segundo. */
+  cicloEmCurso: boolean;
+  geradoEmMs: number;
+}
+
 export interface ServiceCommandMap {
   "protection.getState": undefined;
   "events.list": { limit?: number; cursor?: number } | undefined;
@@ -959,6 +1003,9 @@ export interface ServiceCommandMap {
   "trust.allowHash": { sha256: string };
   "trust.allowPublisher": { publisher: string };
   "definitions.update": { source?: string } | undefined;
+  // Leitura pura do estado por fonte — sem side-effect, sem rede, e por
+  // isso não entra na lista de trabalho novo proibido no encerramento.
+  "definitions.status": undefined;
   "analysis.restricted": { path: string };
   "hardware.snapshot": undefined;
   "windows.healthSnapshot": undefined;
@@ -1070,6 +1117,7 @@ export interface ServiceResponseMap {
   "trust.allowHash": { success: boolean };
   "trust.allowPublisher": { success: boolean };
   "definitions.update": { success: boolean; updatedAt: string };
+  "definitions.status": DefinitionsStatus;
   "analysis.restricted": AnalysisResult | null;
   "hardware.snapshot": HardwareSnapshot;
   "windows.healthSnapshot": WindowsHealthSnapshot;

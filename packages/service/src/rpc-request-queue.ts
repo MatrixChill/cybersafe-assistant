@@ -64,4 +64,8 @@ export class RpcRequestQueue {
 export const INDEPENDENT_READ_METHODS: ReadonlySet<string> = new Set([
   'protection.getState', 'events.list', 'threats.list', 'processes.list', 'connections.list',
   'quarantine.list', 'pcstate.get', 'hardware.snapshot', 'windows.healthSnapshot',
+  // Leitura barata e sem side-effect. Não entra na fila atrás de um
+  // `definitions.update` que pode estar à espera do freshclam: a página das
+  // definições tem de conseguir mostrar o estado mesmo durante uma atualização.
+  'definitions.status',
 ]);

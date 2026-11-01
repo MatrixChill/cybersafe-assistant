@@ -120,6 +120,9 @@ ProcessKillProtectionReason,
   ServiceCommandMap,
   ServiceResponseMap,
   ThreatEvent,
+  DefinitionsStatus,
+  DefinitionsSourceStatus,
+  DefinitionsSourceState,
 } from "@cybersafe/shared-types";
 import { hasDegradedProtections, ENGINE_DISPLAY_NAME, classifyProcessEnumerationError } from "@cybersafe/shared-types";
 import { RealtimeLossLedger } from "./realtime-loss.js";
@@ -3375,6 +3378,79 @@ if (processInfo.path) {
     return this.quarantine.delete(id);
   }
 
+  /**
+   * `definitions.status` — leitura do estado POR FONTE para a UI das definições.
+   *
+   * Sem side-effect e sem rede: é a memória do serviço + o `.update-meta.json`.
+   * O que importa aqui é a honestidade dos cinco estados: um motor que não está
+   * instalado não pode aparecer como «desactualizado» (sugeriria que bastava
+   * esperar), e uma base parcial não pode aparecer como «actualizada» porque a
+   * última tentativa correu. Por isso a saúde do motor tem precedência sobre a
+   * idade da base, e a idade só é mostrada quando a saúde confirma cobertura.
+   */
+  async definitionsStatus(): Promise<DefinitionsStatus> {
+    const agora = Date.now();
+    const brutas = this.updater.estadoDasFontes(agora);
+    const saudeClamav = this.clamav.health;
+    const saudeYara = this.yara.health;
+
+    let nomesDaBase: string[] = [];
+    try {
+      nomesDaBase = await fs.readdir(path.join(this.definitionsDir, "clamav"));
+    } catch {
+      nomesDaBase = [];
+    }
+    const diaria = nomesDaBase.find((n) => /^daily[-.]/i.test(n)) ?? null;
+
+    const fontes: DefinitionsSourceStatus[] = brutas.map((bruta) => {
+      const motor: "out" | "degradado" | "ok" =
+        bruta.fonte === "clamav"
+          ? saudeClamav.status === "active"
+            ? "ok"
+            : saudeClamav.status === "degraded"
+              ? "degradado"
+              : "out"
+          : bruta.fonte === "yara"
+            ? saudeYara.status === "error" || saudeYara.status === "unavailable"
+              ? "out"
+              : saudeYara.status !== "active"
+                ? "degradado"
+                : "ok"
+            : "ok";
+      let estado: DefinitionsSourceState;
+      if (motor === "out") {
+        estado = bruta.nuncaVerificado ? "nunca_verificado" : "indisponivel";
+      } else if (motor === "degradado" || bruta.emBackoff) {
+        estado = "degradado";
+      } else if (bruta.ultimaBemSucedidaAtMs === null) {
+        estado = "nunca_verificado";
+      } else {
+        estado =
+          agora - bruta.ultimaBemSucedidaAtMs > bruta.cadenciaMs ? "desactualizado" : "actualizado";
+      }
+      return {
+        fonte: bruta.fonte,
+        estado,
+        ultimaBemSucedidaAtMs: bruta.ultimaBemSucedidaAtMs,
+        ultimaTentativaAtMs: bruta.ultimaTentativaAtMs,
+        ultimoErro: bruta.ultimoErro,
+        tentativasConsecutivas: bruta.tentativasConsecutivas,
+        proximaVerificacaoAtMs: bruta.proximaVerificacaoAtMs,
+        cadenciaMs: bruta.cadenciaMs,
+        identificadorBase:
+          bruta.fonte === "clamav" ? diaria : bruta.fonte === "hashes" ? "hashes/default.json" : "yara/default.yar",
+        itensCarregados:
+          bruta.fonte === "hashes"
+            ? this.signatures.size
+            : bruta.fonte === "clamav"
+              ? nomesDaBase.filter((n) => /\.(cvd|cld)$/i.test(n)).length || null
+              : null,
+      };
+    });
+
+    return { fontes, cicloEmCurso: this.updater.operationInProgress, geradoEmMs: agora };
+  }
+
   async updateDefinitions() {
     // `""` é "nunca atualizado", não uma data. O contrato devolve null nesse caso.
     const anterior = this.definitionsUpdatedAt || null;
@@ -4956,6 +5032,10 @@ if (processInfo.path) {
         return this.allowPublisher((payload as { publisher: string }).publisher);
       case "definitions.update":
         return this.updateDefinitions();
+      // Leitura pura: não cria trabalho novo, não toca na rede, não precisa do
+      // gate de encerramento — é o que permite à UI mostrar os cinco estados.
+      case "definitions.status":
+        return this.definitionsStatus();
       case "analysis.restricted":
         return this.runRestrictedAnalysis((payload as { path: string }).path);
       case "hardware.snapshot":
