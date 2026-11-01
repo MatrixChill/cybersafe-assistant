@@ -159,6 +159,15 @@ describe("P0 — zero não é resultado", () => {
   });
 });
 
+describe("P0 — motores e definições têm secção própria", () => {
+  test("os quatro motores são mostrados e a ausência de data não é inventada", () => {
+    assert.match(html, /Definições e motores/);
+    for (const nome of ["YARA", "Base de assinaturas", "ClamAV", "Motor nativo"]) assert.ok(html.includes(nome), nome);
+    assert.match(html, /O serviço não reportou a data da última atualização de definições nesta leitura/);
+    assert.equal(/pendente de atualização/i.test(html), false);
+  });
+});
+
 describe("P0 — o resumo traz métricas reais e não as soma", () => {
   test("a proteção vem identificada, com a origem escrita ao lado do valor", () => {
     assert.match(html, /Estado global da proteção/);

@@ -1290,8 +1290,10 @@ const heartbeat = setInterval(() => {
 
       if (perfEnabled) {
         const elapsedMs = Date.now() - startTime;
+        const gatherMs = Math.max(0, startTime - gatherStart);
+        const overheadMs = Math.max(0, elapsedMs - engineMs);
         const perSec = elapsedMs > 0 ? Math.round((analyzed / (elapsedMs / 1000)) * 10) / 10 : 0;
-        console.log(`[ScanPerf] type=${type} files=${analyzed} excluded=${excluded} failed=${filesFailed} zip=${zipCount} elapsed=${Math.round(elapsedMs / 1000)}s engine=${Math.round(engineMs / 1000)}s avg=${analyzed > 0 ? Math.round(engineMs / analyzed) : 0}ms/file filesPerSec=${perSec}`);
+        console.log(`[ScanPerf] type=${type} files=${analyzed} excluded=${excluded} failed=${filesFailed} zip=${zipCount} elapsed=${Math.round(elapsedMs / 1000)}s gatherMs=${gatherMs} scanLoopMs=${elapsedMs} engine=${Math.round(engineMs / 1000)}s overheadMs=${overheadMs} avg=${analyzed > 0 ? Math.round(engineMs / analyzed) : 0}ms/file filesPerSec=${perSec}`);
       }
 
       const finalState = this.activeScans.get(id)!;
