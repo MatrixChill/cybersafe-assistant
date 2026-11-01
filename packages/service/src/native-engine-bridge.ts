@@ -82,6 +82,9 @@ export class NativeEngineBridge {
     // Check multiple potential locations for the binary
     const possiblePaths = [
       ...(resourcesPath ? [path.resolve(resourcesPath, "scan-engine.exe")] : []),
+      // ELECTRON_RUN_AS_NODE pode não expor resourcesPath no serviço filho.
+      // O executável anfitrião continua a ser o Electron da instalação.
+      path.resolve(path.dirname(process.execPath), "resources", "scan-engine.exe"),
       path.resolve(__dirname, "../../native-engine/build/Release/scan-engine.exe"),
       path.resolve(process.cwd(), 'packages/native-engine/build/Release/scan-engine.exe'),
       path.resolve(process.cwd(), 'packages/native-engine/build/scan-engine.exe'),

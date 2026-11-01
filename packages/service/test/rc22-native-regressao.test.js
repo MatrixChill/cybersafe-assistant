@@ -78,3 +78,30 @@ describe("RC22 regressao do motor nativo", () => {
     assert.equal(fs.existsSync(dir), false);
   });
 });
+
+it('serviço embutido encontra o Native junto do anfitrião, sem resourcesPath nem cwd da instalação', async () => {
+  const { fileURLToPath } = await import('node:url');
+  const root = fs.mkdtempSync(path.join(path.dirname(fileURLToPath(import.meta.url)), 'native-package-'));
+  const originalExecPath = process.execPath;
+  const resourcesDescriptor = Object.getOwnPropertyDescriptor(process, 'resourcesPath');
+  const source = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../native-engine/build/Release/scan-engine.exe');
+  const bundled = path.join(root, 'Instalação com espaços', 'resources', 'scan-engine.exe');
+  fs.mkdirSync(path.dirname(bundled), { recursive: true });
+  fs.copyFileSync(source, bundled);
+  const target = path.join(root, 'benigno.txt');
+  fs.writeFileSync(target, 'hello cybersafe');
+  try {
+    delete process.resourcesPath;
+    process.execPath = path.join(root, 'Instalação com espaços', 'CyberSafe Assistant.exe');
+    const result = await NativeEngineBridge.scan(target);
+    assert.equal(result.ok, true, result.error);
+    assert.equal(NativeEngineBridge.binaryPath, bundled, 'o motor empacotado tem prioridade sobre uma árvore DEV');
+    assert.equal(result.result.sha256, '50640c70d14d0d1f095134ba5a08d4bc6379ac0b93bcc33921f9a67ca59c5efd');
+    assert.equal(NativeEngineBridge.pendingChildren, 0);
+  } finally {
+    process.execPath = originalExecPath;
+    if (resourcesDescriptor) Object.defineProperty(process, 'resourcesPath', resourcesDescriptor);
+    else delete process.resourcesPath;
+    fs.rmSync(root, { recursive: true, force: true });
+  }
+});
