@@ -481,6 +481,24 @@ export interface EngineHealth {
   anyEngineDegraded?: boolean;
 }
 
+export type QuarantinePolicy = "warn" | "ask" | "automatic-high-confidence";
+
+export interface QuarantinePolicyState {
+  policy: QuarantinePolicy;
+}
+
+export interface QuarantinePolicyUpdate {
+  policy: QuarantinePolicy;
+  /** Obrigatorio e literal `true` apenas para `automatic-high-confidence`. */
+  consent?: boolean;
+}
+
+export interface QuarantinePolicyResult {
+  ok: boolean;
+  policy: QuarantinePolicy;
+  error?: string;
+}
+
 export interface ProtectionStats {
   riskScore: number;
   totalEvents: number;
@@ -493,7 +511,7 @@ export interface ProtectionStats {
    * de `protection-policy.json` (ausente/invalido = "warn"). Opcional por
    * compatibilidade: sem o campo a UI diz "desconhecido", nunca assume OFF.
    */
-  quarantinePolicy?: "warn" | "ask" | "automatic-high-confidence";
+  quarantinePolicy?: QuarantinePolicy;
 }
 
 export interface SecurityEvent<T = unknown> {
@@ -992,6 +1010,8 @@ export interface ServiceCommandMap {
   "processes.list": undefined;
   "connections.list": undefined;
   "quarantine.list": undefined;
+  "quarantine.policy.get": undefined;
+  "quarantine.policy.set": QuarantinePolicyUpdate;
   "events.clear": undefined;
   "scan.artifact": { path: string };
   "scan.fullSystem": undefined;
@@ -1116,6 +1136,8 @@ export interface ServiceResponseMap {
   "processes.list": ProcessListResult;
   "connections.list": ConnectionSnapshot[];
   "quarantine.list": QuarantineEntry[];
+  "quarantine.policy.get": QuarantinePolicyState;
+  "quarantine.policy.set": QuarantinePolicyResult;
   "events.clear": { success: boolean };
   "scan.artifact": FileScanResponse | null;
   "scan.fullSystem": { success: boolean };

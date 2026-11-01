@@ -14,6 +14,9 @@ import type {
   ProcessTerminationResult,
   ProcessSnapshot,
   QuarantineEntry,
+  QuarantinePolicyState,
+  QuarantinePolicyResult,
+  QuarantinePolicyUpdate,
   ScanHistoryPage,
   SecurityEvent,
   ThreatEvent,
@@ -71,6 +74,10 @@ export interface ElectronAPI {
   getProcesses: () => Promise<import("@cybersafe/shared-types").ProcessListResult>;
   getConnections: () => Promise<ConnectionSnapshot[]>;
   getQuarantineFiles: () => Promise<QuarantineEntry[]>;
+  /** Política efetiva lida do serviço; nunca inferida do renderer. */
+  getQuarantinePolicy: () => Promise<QuarantinePolicyState>;
+  /** `consent:true` é obrigatório para ativar `automatic-high-confidence`. */
+  setQuarantinePolicy: (payload: QuarantinePolicyUpdate) => Promise<QuarantinePolicyResult>;
   getExclusions: () => Promise<import("@cybersafe/shared-types").ExclusionConfig | null>;
   updateExclusions: (config: { rules: import("@cybersafe/shared-types").ExclusionRule[] }) => Promise<{ success: boolean; error?: string } | null>;
   clearThreatEvents: () => Promise<{ success: boolean }>;

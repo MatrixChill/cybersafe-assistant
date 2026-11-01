@@ -18,6 +18,7 @@ import { aboutIdentityLines, electronVersionFromUserAgent, formatBuildBadge, res
 import ExclusionsSection from "../components/ExclusionsSection";
 import { UpdatesSection } from "../components/updates/UpdatesSection";
 import { SurfaceHeroPreview } from "../components/visual/SurfaceHeroPreview";
+import type { QuarantinePolicy } from "@cybersafe/shared-types";
 
 /** Eixo 1 - identidade: cores, raio e letra. */
 const IDENTITY_OPTIONS: { id: AppIdentity; name: string; description: string; swatch: string[] }[] = [
@@ -117,6 +118,10 @@ export default function SettingsPage() {
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
+  const [quarantinePolicy, setQuarantinePolicy] = useState<QuarantinePolicy | null>(null);
+  const [quarantinePolicyBusy, setQuarantinePolicyBusy] = useState(false);
+  const [quarantinePolicyError, setQuarantinePolicyError] = useState<string | null>(null);
+  const [quarantineConsentOpen, setQuarantineConsentOpen] = useState(false);
   // Opt-in de retoma ao arrancar. Estado SEMPARA do "ligar a proteção agora":
   // é só a preferência de retomar no próximo arranque, e o único valor que a UI
   // mostra é o que o serviço confirmou em disco.
@@ -163,6 +168,43 @@ export default function SettingsPage() {
     setNotificationsEnabled(checked);
     if (window.electronAPI?.setNotificationsEnabled) {
       await window.electronAPI.setNotificationsEnabled(checked);
+    }
+  }
+
+  useEffect(() => {
+    if (!window.electronAPI?.getQuarantinePolicy) return;
+    window.electronAPI.getQuarantinePolicy()
+      .then((estado) => { if (estado?.policy) setQuarantinePolicy(estado.policy); })
+      .catch(() => setQuarantinePolicyError("Não foi possível ler a política de quarentena. Nada foi assumido como ativo."));
+  }, []);
+
+  async function aplicarPoliticaQuarentena(policy: QuarantinePolicy, consent: boolean) {
+    if (!window.electronAPI?.setQuarantinePolicy) {
+      setQuarantinePolicyError("A ponte local não expõe a política de quarentena. Nada foi alterado.");
+      return;
+    }
+    setQuarantinePolicyBusy(true);
+    setQuarantinePolicyError(null);
+    try {
+      const resultado = await window.electronAPI.setQuarantinePolicy({ policy, consent });
+      if (resultado?.ok) {
+        setQuarantinePolicy(resultado.policy);
+        setQuarantineConsentOpen(false);
+        return;
+      }
+      setQuarantinePolicyError(
+        resultado?.error === "consent_required"
+          ? "O serviço recusou ativar a quarentena automática sem consentimento explícito. Nada foi alterado."
+          : resultado?.error === "write_failed"
+            ? "O serviço não conseguiu gravar a preferência. A política anterior mantém-se."
+            : "O serviço não confirmou a alteração. A política anterior mantém-se.",
+      );
+      const relido = await window.electronAPI.getQuarantinePolicy?.().catch(() => undefined);
+      if (relido?.policy) setQuarantinePolicy(relido.policy);
+    } catch {
+      setQuarantinePolicyError("Sem ligação ao serviço. Nada foi alterado.");
+    } finally {
+      setQuarantinePolicyBusy(false);
     }
   }
 
@@ -594,6 +636,68 @@ export default function SettingsPage() {
         <p className="text-xs text-muted-foreground font-mono">
           Aplica de imediato e fica guardado para o próximo arranque. Se o desfoque pesar no teu computador,
           escolhe Reduzido ou Sólido.
+        </p>
+      </section>
+
+      {/* === QUARENTENA AUTOMÁTICA === */}
+      <section data-settings-quarantine-policy className="surface-elevated cyber-border rounded-xl p-6">
+        <div className="flex items-center gap-3 mb-4">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
+            <ShieldCheck className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="font-mono font-semibold text-foreground">Quarentena automática</h2>
+            <p className="text-xs text-muted-foreground">Isolar apenas ameaças confirmadas por critérios de elevada confiança.</p>
+          </div>
+        </div>
+        <div className="flex items-center justify-between gap-4 p-3 rounded-lg bg-secondary/50 border border-border">
+          <div className="min-w-0">
+            <p className="text-sm font-mono text-foreground">Isolar automaticamente ameaças confirmadas</p>
+            <p role="status" className="text-xs text-muted-foreground mt-0.5">
+              {quarantinePolicy === null ? "A ler a política efetiva do serviço…"
+                : quarantinePolicy === "automatic-high-confidence" ? "Ativa. Só atua com identidade confirmada e caminho permitido."
+                : "Desligada. As deteções continuam a pedir confirmação antes de isolar."}
+            </p>
+          </div>
+          <button type="button" role="switch" aria-label="Isolar automaticamente ameaças confirmadas"
+            aria-checked={quarantinePolicy === "automatic-high-confidence"}
+            disabled={quarantinePolicy === null || quarantinePolicyBusy}
+            onClick={() => quarantinePolicy === "automatic-high-confidence"
+              ? void aplicarPoliticaQuarentena("warn", false)
+              : setQuarantineConsentOpen(true)}
+            className={cn("relative w-11 h-6 shrink-0 rounded-full transition-colors disabled:opacity-50",
+              quarantinePolicy === "automatic-high-confidence" ? "bg-primary" : "bg-secondary")}>
+            <div className={cn("absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
+              quarantinePolicy === "automatic-high-confidence" ? "translate-x-5.5" : "translate-x-0.5")} />
+          </button>
+        </div>
+        <div className="mt-3 grid gap-2 sm:grid-cols-2">
+          <p className="text-xs text-muted-foreground font-mono">Severidade crítica e veredicto malicioso.</p>
+          <p className="text-xs text-muted-foreground font-mono">Confiança igual ou superior a 99%.</p>
+          <p className="text-xs text-muted-foreground font-mono">Exige a regra known_bad_hash.</p>
+          <p className="text-xs text-muted-foreground font-mono">Inconclusivos nunca são isolados automaticamente.</p>
+        </div>
+        {quarantineConsentOpen && quarantinePolicy !== "automatic-high-confidence" && (
+          <div role="alertdialog" aria-label="Confirmar quarentena automática" className="mt-4 rounded-lg border border-cyber-yellow/40 bg-cyber-yellow/10 p-4">
+            <p className="text-sm font-mono text-foreground">Ativar quarentena automática?</p>
+            <p className="text-xs text-muted-foreground mt-1 leading-relaxed">
+              Um ficheiro que cumpra todos os critérios será movido para a quarentena sem uma segunda pergunta.
+              Podes desativar a qualquer momento; os ficheiros já isolados não são apagados nem restaurados.
+            </p>
+            <div className="flex flex-wrap gap-2 mt-3">
+              <button type="button" disabled={quarantinePolicyBusy}
+                onClick={() => { void aplicarPoliticaQuarentena("automatic-high-confidence", true); }}
+                className="px-3 py-1.5 bg-primary text-primary-foreground font-mono text-xs rounded-lg disabled:opacity-50">
+                {quarantinePolicyBusy ? "A guardar…" : "Ativar com consentimento"}
+              </button>
+              <button type="button" disabled={quarantinePolicyBusy} onClick={() => setQuarantineConsentOpen(false)}
+                className="px-3 py-1.5 bg-secondary border border-border font-mono text-xs rounded-lg disabled:opacity-50">Cancelar</button>
+            </div>
+          </div>
+        )}
+        {quarantinePolicyError && <p role="status" className="text-xs text-cyber-yellow mt-3 font-mono">{quarantinePolicyError}</p>}
+        <p className="text-xs text-muted-foreground mt-4 font-mono">
+          A preferência fica em protection-policy.json e é relida no arranque. Cada isolamento automático aparece na atividade e no histórico; uma falha não é escondida.
         </p>
       </section>
 

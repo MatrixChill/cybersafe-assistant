@@ -1498,6 +1498,28 @@ function registerIpc(
   serviceRequest("service:get-processes", () => client.request("processes.list", undefined));
   serviceRequest("service:get-connections", () => client.request("connections.list", undefined));
   serviceRequest("service:get-quarantine", () => client.request("quarantine.list", undefined));
+  serviceRequest("service:get-quarantine-policy", () => client.request("quarantine.policy.get", undefined));
+  serviceRequest("service:set-quarantine-policy", (_event, payload: unknown) => {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+      throw new Error("Pedido de política de quarentena inválido.");
+    }
+    const entrada = payload as Record<string, unknown>;
+    const chaves = Object.keys(entrada);
+    if (chaves.some((chave) => chave !== "policy" && chave !== "consent")) {
+      throw new Error("Pedido de política de quarentena inválido: campo desconhecido.");
+    }
+    const policy = entrada.policy;
+    if (policy !== "warn" && policy !== "ask" && policy !== "automatic-high-confidence") {
+      throw new Error("Política de quarentena inválida.");
+    }
+    if (entrada.consent !== undefined && typeof entrada.consent !== "boolean") {
+      throw new Error("Consentimento inválido.");
+    }
+    if (policy === "automatic-high-confidence" && entrada.consent !== true) {
+      throw new Error("A quarentena automática exige consentimento explícito.");
+    }
+    return client.request("quarantine.policy.set", { policy, consent: entrada.consent });
+  });
   serviceRequest("service:clear-events", () => client.request("events.clear", undefined));
   serviceRequest("service:scan-artifact", (_event, filePath: string) => client.request("scan.artifact", { path: filePath }));
   serviceRequest("service:scan-full-system", () => client.request("scan.fullSystem", undefined));

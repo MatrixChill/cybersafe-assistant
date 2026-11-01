@@ -62,6 +62,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getProcesses: () => invoke("service:get-processes"),
   getConnections: () => invoke("service:get-connections"),
   getQuarantineFiles: () => invoke("service:get-quarantine"),
+  getQuarantinePolicy: () => invoke("service:get-quarantine-policy"),
+  setQuarantinePolicy: (payload: { policy: "warn" | "ask" | "automatic-high-confidence"; consent?: boolean }) =>
+    invoke("service:set-quarantine-policy", payload),
   clearThreatEvents: () => invoke("service:clear-events"),
   scanFile: (filePath: string) => invoke("service:scan-artifact", filePath),
   scanFullSystem: () => invoke("service:scan-full-system"),

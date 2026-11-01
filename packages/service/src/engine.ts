@@ -84,7 +84,7 @@ import { NativeWindowsWatcher,
 import { NativeEngineBridge } from "./native-engine-bridge.js";
 import { RealtimeFileQueue } from "./realtime-file-queue.js";
 import { RealtimeRecovery, type SaturationStage } from "./realtime-recovery.js";
-import { canAutoQuarantine, loadQuarantinePolicy, type QuarantinePolicy } from "./quarantine-policy.js";
+import { canAutoQuarantine, loadQuarantinePolicy, saveQuarantinePolicy, type QuarantinePolicy } from "./quarantine-policy.js";
 import { isTransientFsError, TRANSIENT_SCAN_ERROR_WINDOW_MS } from "./scan-error.js";
 import { DefinitionUpdater, agendadorDefinicoesDeveArrancar, recuperacaoYaraPermitida } from "./updater.js";
 import { ClamDatabaseGate } from "./clam-database-gate.js";
@@ -2615,6 +2615,23 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     }, 200);
   }
 
+  private async changeQuarantinePolicy(payload: { policy?: unknown; consent?: unknown }): Promise<{ ok: boolean; policy: QuarantinePolicy; error?: string }> {
+    const saved = await saveQuarantinePolicy(
+      path.join(this.baseDir, "protection-policy.json"),
+      payload?.policy,
+      payload?.consent,
+    );
+    if (!saved.ok) return saved;
+    this.quarantinePolicy = saved.policy;
+    void this.logHistory({
+      type: "quarantine.policy.changed",
+      policy: saved.policy,
+      authorization: saved.policy === "automatic-high-confidence" ? "user-consent" : "explicit",
+      timestamp: new Date().toISOString(),
+    });
+    return { ok: true, policy: saved.policy };
+  }
+
   getProtectionState(): ProtectionState {
     const status = this.clamav.health.status;
     const available = status === "active";
@@ -4968,6 +4985,10 @@ if (processInfo.path) {
         return this.connections;
       case "quarantine.list":
         return this.quarantine.list();
+      case "quarantine.policy.get":
+        return { policy: this.quarantinePolicy };
+      case "quarantine.policy.set":
+        return this.changeQuarantinePolicy(payload as { policy?: unknown; consent?: unknown });
       // ── Protecao USB (R8) ──
       // Leitura coalescida do estado e opt-in. Nenhum caminho/target vem do
       // renderer: o auto-scan usa o dispositivo que ESTE servico confirmou.
