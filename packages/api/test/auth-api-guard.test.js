@@ -228,7 +228,33 @@ describe("S3 — registo público não escolhe privilégios", () => {
 });
 
 describe("S3 — operações globais destrutivas exigem administrador", () => {
+  // A base de teste nasce sem eventos (AUD-001 removeu o seed fictício), por isso
+  // é a própria fixture a criar os registos que provam que nada foi apagado.
+  const seedEvents = async () => {
+    await prisma.threatEvent.createMany({
+      data: [
+        {
+          source: "fixture",
+          url: "https://fixture.invalid/a",
+          domain: "fixture.invalid",
+          severity: "high",
+          confidence: 1,
+          rulesTriggered: ["fixture-rule"],
+        },
+        {
+          source: "fixture",
+          url: "https://fixture.invalid/b",
+          domain: "fixture.invalid",
+          severity: "low",
+          confidence: 0.5,
+          rulesTriggered: ["fixture-rule"],
+        },
+      ],
+    });
+  };
+
   test("DELETE /api/events com utilizador normal → 403 e nada é apagado", async () => {
+    await seedEvents();
     const before = (await prisma.threatEvent.findMany()).length;
     assert.ok(before > 0, "fixture: tem de haver eventos para provar que nada foi apagado");
 
@@ -238,6 +264,9 @@ describe("S3 — operações globais destrutivas exigem administrador", () => {
   });
 
   test("DELETE /api/events com administrador → 200 e a lista fica vazia", async () => {
+    await seedEvents();
+    assert.ok((await prisma.threatEvent.findMany()).length > 0, "fixture: há eventos para apagar");
+
     // Promoção direta na DB isolada: o produto não tem endpoint de promoção.
     const db = new Database(dbPath);
     db.prepare("UPDATE users SET role = 'admin' WHERE id = ?").run(userId);
