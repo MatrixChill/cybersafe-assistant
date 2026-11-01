@@ -466,7 +466,18 @@ describe("ProtectionEngineService.init real (limites duplados)", () => {
       health: { status: "active", coverage: "unknown", detail: "duplo: o load é fingido, nada foi medido" },
       load: async () => { duplos.yaraLoad += 1; },
     };
-    servico.clamav = { ...(servico.clamav ?? {}), isAvailable: async () => { duplos.clamav += 1; return false; } };
+    // Mesma armadilha do YARA acima, mesma razão: o spread só copia propriedades
+    // PRÓPRIAS e `health` é um getter do protótipo de `ClamavBridge`, por isso
+    // perdia-se e o `init()` real rebentava em `this.clamav.health.status` ao
+    // registar `engine-init clamavMs=...` (dist/engine.js). O duplo declara então
+    // o health que corresponde ao que ele próprio simula: `isAvailable()` finge o
+    // clamscan AUSENTE, logo um motor indisponível. `"unavailable"` é um valor
+    // real de `EngineSubsystemStatus` (packages/shared-types/src/index.ts:366).
+    servico.clamav = {
+      ...(servico.clamav ?? {}),
+      health: { status: "unavailable", detail: "duplo: o clamscan é fingido como ausente" },
+      isAvailable: async () => { duplos.clamav += 1; return false; },
+    };
     servico.updater = { startScheduler: () => { duplos.updater += 1; } };
     servico.startPipeServer = async () => { duplos.pipe += 1; };
 

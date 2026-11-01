@@ -266,6 +266,26 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   se alguém voltar a promover a etapa para `filesAnalyzed`, dois deles falham** — a versão anterior
   não era capaz de apanhar exatamente esse erro. O total da suíte `service` **ainda não foi
   re-medido** depois desta reescrita; a linha `878 PASS / 53 FAIL` é de `9b7e823`.
+- **As 4 falhas de harness estão classificadas e corrigidas, com mudança só no fixture.**
+  (i) `dev-windows-readonly` 2 × `TypeError … reading 'status'`: o duplo da linha 469 fazia
+  spread de `servico.clamav`, e `health` é **getter do protótipo** de `ClamavBridge`
+  (`core/src/clamav.ts:3087-3096`) — o spread perde-o e o `init()` real rebentava ao registar
+  `engine-init clamavMs=… status=${this.clamav.health.status}` (`service/src/engine.ts:1007`).
+  O teste já conhecia esta armadilha e resolvia-a para o YARA (linhas 459-468); faltava-lhe só
+  no ClamAV. O duplo passou a declarar `health: { status: "unavailable", … }`, que é o estado
+  que o próprio duplo simula (`isAvailable()` finge o clamscan ausente) e é valor real de
+  `EngineSubsystemStatus` (`shared-types/src/index.ts:366`). Medido: **104/104** (antes
+  102/104). (ii) `dev-canary` 2 × `timed out waiting for condition`: o scan completava
+  (`status=completed`, `analyzed=2`) mas em **12,3 s** contra o orçamento de 10 s do `waitFor`,
+  porque o fixture construía um `ClamavBridge` real e pagava a prova de carga do produto
+  (`runLoadProof`, `core/src/clamav.ts:3336`, spawn `:3434`) — ~6 s de cold start antes do
+  batch de ~6-7 s. A correção usa a costura que o próprio produto expõe
+  (`loadProofEnabled: false`, decidido em `clamav.ts:3302`): **o `timeoutMs` de 10 s não foi
+  tocado e nenhuma asserção foi afrouxada**; medido 6,4 s / 6,3 s. A cobertura da prova de
+  carga não se perde com isto — vive em `core/test/clamav-load-proof-modes`,
+  `clamav-load-proof-rev4`, `clamav-positive-load-proof-lifecycle` e
+  `clamav-health-recovery` (existência verificada; o estado individual desses quatro ficheiros
+  não foi re-medido aqui). Log da investigação: `qoder-investigation-canary-debug.log`.
 - Estado do `ci` no `main` atualizado: run `41302290721` no SHA `9b7e823`, `conclusion: success`.
   A workflow continua a **não** correr a suíte `service` (corre a do desktop), por isso o verde do
   `ci` não cobre nenhuma das linhas acima.
