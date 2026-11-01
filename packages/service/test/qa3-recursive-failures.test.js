@@ -34,7 +34,18 @@ async function controlledManager(overrides) {
   const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022 } }).outputText;
   const errors = await import('../dist/scan-error.js');
   const fixtureGate = await import('../dist/dev-fixture-gate.js');
-  const deps = { 'node:fs/promises': { ...fs, ...overrides }, 'node:path': path, 'node:os': {}, 'node:crypto': await import('node:crypto'), './scan-error.js': errors, './dev-fixture-gate.js': fixtureGate };
+  // O scan-manager importa pinFixture de ./fixture-pin.js; sem esta chave o
+  // whitelist em baixo rebentava com «Unexpected dependency ./fixture-pin.js»
+  // em TODOS os casos desta ficha (5 falhas medidas no log service-full-39f096d)
+  // e deixava para trás o diretório fixture, porque o throw acontecia antes do
+  // t.after estar registado. Entrega-se o módulo real — este teste só substitui
+  // a fronteira do sistema de ficheiros.
+  const fixturePin = await import('../dist/fixture-pin.js');
+  // O scan-manager tambem importa readBoundedArchiveEntry de @cybersafe/core
+  // (src/scan-manager.ts:6). Entrega-se o pacote real: o workspace esta construido
+  // antes da suíte e a fronteira substituida aqui e so node:fs/promises.
+  const core = await import('@cybersafe/core');
+  const deps = { 'node:fs/promises': { ...fs, ...overrides }, 'node:path': path, 'node:os': {}, 'node:crypto': await import('node:crypto'), '@cybersafe/core': core, './scan-error.js': errors, './dev-fixture-gate.js': fixtureGate, './fixture-pin.js': fixturePin };
   const exports = {};
   vm.runInNewContext(js, { exports, require: key => { if (!(key in deps)) throw Error(`Unexpected dependency ${key}`); return deps[key]; }, process, console, Date, Buffer, setInterval, clearInterval, setTimeout, clearTimeout, structuredClone });
   return exports.ScanManager;
