@@ -654,3 +654,36 @@ symlink real, etc.) e não foram contados como PASS em lado nenhum.
 Re-corri a pasta completa do `service` depois das correções de `4f6a0c9` e obtive **1282 / 1220 PASS / 57 FAIL**, não 54. Não foi regressão: os três a mais são `dev-canary` (2 falhas a **exactamente ~10 s**, o `timeoutMs = 10_000`) e `p0-rpc-queue` (1). Cada um deles passa isolado — `dev-canary` 2/2 e `p0-rpc-queue` 3/3 em três corridas seguidas. O que muda é a concorrência: 147 ficheiros em paralelo estouram orçamentos de tempo, e o `npm test` do pacote, que corre com `--test-concurrency=1`, deu **962 testes / 920 PASS / 42 FAIL**, o mesmo 42 do baseline anterior às mudanças (logo: sem regressão, e com +31 testes novos de feed de hashes a passar).
 
 Publicar «54» sem dizer que a contagem depende do modo de execução foi um erro meu, e fica corrigido aqui e no `README.md`. A classificação por assinatura das causas mantém-se válida: 49 portão de terminação + 5 `inconclusive` contra `safe`; o que não é estável é o total, e dizê-lo é melhor do que fingir que é.
+
+### Definições ClamAV no percurso REAL — primeiro fornecedor validado de ponta a ponta
+
+Isto é uma **chamada real ao fornecedor** (espelho oficial `database.clamav.net`), feita de caso
+num directório próprio fora do repositório (`clamav-real-db/`), sem tocar na base da aplicação, na
+seed empacotada ou no perfil do utilizador. Config e argumentos vieram das funções do **produto**
+(`ensureFreshclamConfig`, `buildFreshclamArgs`), não de linhas escritas por mim.
+
+- **freshclam vendorizado, sem PATH**: `vendor/clamav/freshclam.exe` invocado por caminho absoluto;
+  `resolveFreshclamExecutable` (`updater.ts:312-347`) fixa o irmão do `clamscan` empacotado — e é
+  medido que o bundle publica o `freshclam.exe`: `ALLOWED_EXECUTABLES` e a lista
+  `required = ["clamscan.exe","freshclam.exe","COPYING.txt"]` em `scripts/vendor-clamav.mjs:148,645`.
+  As CVDs **não** vêm no instalador por decisão documentada (`:761): obtidas por freshclam, por
+  utilizador. Isso separa também as duas coisas que o pedido exige distinguir: actualizar
+  assinaturas (este caminho) ≠ actualizar o binário ClamAV (outro processo de distribuição).
+- **Descarga real, 1ª passagem**: exit 0 em 16,6 s; 112 829 214 bytes em `main.cvd` (89 072 577),
+  `daily.cvd` (23 447 611, versão remota 28171), `bytecode.cvd` (281 702) **com os `.sign`**
+  correspondentes. Segunda passagem exit 0 sem reescrever o que já era igual — o comportamento
+  estatuído que o pedido pede («sem alterações» é um resultado, não um erro).
+- **Carga real e saúde**: com a prova de carga ACTIVADA (como em produção), o `ClamavBridge` do core
+  sobre essa base real deu `isAvailable=true` (6,4 s), `health = active — "3 signature database
+  file(s)"` e `scanFile` de um ficheiro benigno → `verdict: clean`, `status.active`. A base oficial
+  de 112 MB carrega-se e usa-se, portanto, de facto.
+- **A minha primeira leitura estava errada, e corrijo-a aqui**: na mesma corrida, com
+  `loadProofEnabled: false`, o bridge devolveu `isAvailable=false` e `degraded` («a prova de carga
+  falhou»). Não é defeito do produto — é o fail-closed dele a funcionar: sem prova de carga não se
+  publica `active**. O que estava errado era a minha injecção. Ficou registado porque é exactamente o
+  tipo de «degradado» que, lido à pressa, se transformaria num falso defeito na ficha.
+
+Ainda **não** medido neste percurso: a preservação da base anterior quando o freshclam falha a meio
+da descarga (requisito 1, pontos 4 e 5) e a recuperação de saúde depois dessa falha. O
+`ClamDatabaseGate` (`updater.ts:362-420`) foi desenhado para isso e tem testes com duplos, mas
+falta a variação com o fornecedor real a interromper-se. Task #19 fica em curso por essa razão.
