@@ -2,11 +2,12 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import {ProtectionEngineService} from '../dist/engine.js';
 import {mkdtemp,readFile,rm} from 'node:fs/promises';
-import os from 'node:os';
+import {fileURLToPath} from 'node:url';
+import {LogWriter} from '../dist/log-writer.js';
 import path from 'node:path';
 function service() {
  const s=Object.create(ProtectionEngineService.prototype);
- Object.assign(s,{pipeAuthRequired:true,pipeToken:'synthetic-not-secret',disposed:false,isShuttingDown:false,startupStateValue:'ready',criticalRpcOperations:0,
+ Object.assign(s,{killRequestSeq:0,actionsLog:{write:async()=>{}},pipeAuthRequired:true,pipeToken:'synthetic-not-secret',disposed:false,isShuttingDown:false,startupStateValue:'ready',criticalRpcOperations:0,
   clamDatabaseGate:{state:{activeScans:0,updatePending:false,updateActive:false}},protectionState:false,protectionTransition:null,protectionStopUnconfirmed:false,fileObservationReads:0,realtimeQueue:{size:0,active:0},clamavPrefetches:new Map(),scanAbortControllers:new Map(),scanManager:{getActiveScan:()=>null},updater:{operationInProgress:false},ownChildPids:new Map(),processes:[]});
  return s;
 }
@@ -22,7 +23,7 @@ test('critical operation remains counted across async boundaries and is cleared 
 test('real service dispatch with fake native handle: proof-only event, sanitized audit, natural exit separate',async()=>{
  const oldReadonly=process.env.CYBERSAFE_DEV_WINDOWS_READONLY,oldFixture=process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN;
  delete process.env.CYBERSAFE_DEV_WINDOWS_READONLY;delete process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN;
- const root=await mkdtemp(path.join(os.tmpdir(),'termination-mocked-'));
+ const root=await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)),'termination-mocked-'));
  try{
  const s=service();const events=[];let exited=false,kills=0;
  const startedAt='2026-10-30T08:00:00.0000000Z';const creation=((BigInt(Date.parse(startedAt))+11644473600000n)*10000n).toString();
@@ -40,3 +41,16 @@ test('real service dispatch with fake native handle: proof-only event, sanitized
 });
 
 test('idle enabled protection is not disabled or treated as busy',()=>{const oldReadonly=process.env.CYBERSAFE_DEV_WINDOWS_READONLY,oldFixture=process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN;delete process.env.CYBERSAFE_DEV_WINDOWS_READONLY;delete process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN;try{const s=service();s.protectionState=true;assert.equal(s.terminationBlocked(),null,'sessão idle e protegida não é operação crítica');assert.equal(s.protectionState,true,'idle não desliga a proteção');const f=service();f.protectionState=true;process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN='1';assert.equal(f.terminationBlocked(),'critical-operation-or-untrusted-session','com scan de fixture real a sessão é não-confiável: `engine.ts:3934` veta a terminação de caso, e essa recusa é o comportamento garantido, não um efeito secundário');}finally{if(oldReadonly===undefined)delete process.env.CYBERSAFE_DEV_WINDOWS_READONLY;else process.env.CYBERSAFE_DEV_WINDOWS_READONLY=oldReadonly;if(oldFixture===undefined)delete process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN;else process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN=oldFixture;}});
+
+test('recusa legada fica auditada sem consultar nem atuar sobre processos', async t => {
+ const root=await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)),'legacy-audit-'));
+ const s=service();s.killRequestSeq=0;s.actionsLog=new LogWriter(root,'actions.log');
+ let queries=0,kills=0,events=0;
+ s.queryCimProcesses=async()=>{queries++;return []};s.runTaskkill=async()=>{kills++};s.eventBus={publish:()=>events++};
+ t.after(()=>rm(root,{recursive:true,force:true}));
+ for(const pid of [4,12345]){const result=await s.killProcess(pid);assert.equal(result.success,false);assert.equal(result.status,'failed');assert.match(result.error,/nenhuma ação/);}
+ const lines=(await readFile(path.join(root,'actions.log'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));
+ assert.equal(lines.length,2);assert.equal(new Set(lines.map(line=>line.requestId)).size,2);
+ for(const line of lines){assert.equal(line.action,'process.termination.refused');assert.equal(line.reason,'legacy-disabled');assert.equal(line.executed,false);}
+ assert.equal(queries,0);assert.equal(kills,0);assert.equal(events,0);
+});

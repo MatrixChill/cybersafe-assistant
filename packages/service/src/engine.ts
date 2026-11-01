@@ -4071,8 +4071,17 @@ if (processInfo.path) {
     }
 
     if (ProtectionEngineService.KILL_TERMINATION_DISABLED) {
-      // Fail-closed: sem ação, sem consulta, sem tentativa. A resposta diz a
-      // verdade — indisponibilidade, não uma falha inventada nem sucesso.
+      // Fail-closed: sem ação, sem consulta, sem tentativa. Registar apenas
+      // a recusa global, sem inventar identidade ou classificação do alvo.
+      await this.actionsLog.write(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        action: "process.termination.refused",
+        request: "manual",
+        requestId: this.nextKillRequestId(pid),
+        pid,
+        reason: "legacy-disabled",
+        executed: false,
+      }));
       return {
         success: false,
         status: "failed",
