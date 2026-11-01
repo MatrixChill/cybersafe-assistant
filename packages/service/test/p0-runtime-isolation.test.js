@@ -274,8 +274,11 @@ describe("P0 isolamento de runtime â€” os ficheiros que escreviam no home r
   it("G) nenhum teste constroi a engine sem baseDir injetado, nem deriva caminho do home real", async () => {
     const offenders = [
       "packages/service/test/threat-history-storage.test.js",
-      "packages/service/test/process-kill.test.js",
-      "packages/service/test/kill-budget.test.js",
+      "packages/service/test/legacy-disabled/process-kill.test.js",
+      "packages/service/test/legacy-disabled/kill-budget.test.js",
+      "packages/service/test/kill-contract.test.js",
+      "packages/service/test/processes-list-contract.test.js",
+      "packages/service/test/individual-process-termination.test.js",
       "packages/service/test/auto-kill-guard.test.js",
       "packages/service/test/process-truth-ttl.test.js",
       "packages/service/test/shutdown.test.js",

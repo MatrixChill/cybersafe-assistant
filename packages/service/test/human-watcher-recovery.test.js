@@ -21,6 +21,7 @@ import { RealtimeRecovery } from "../dist/realtime-recovery.js";
  */
 const handleFileObservation = ProtectionEngineService.prototype["handleFileObservation"];
 const reportRealtimeOverflow = ProtectionEngineService.prototype["reportRealtimeOverflow"];
+const realtimePriority = ProtectionEngineService.prototype["realtimePriority"];
 
 function costura({ leitura = null, enqueue = "accepted", reads = 0 } = {}) {
   const recovery = new RealtimeRecovery();
@@ -39,6 +40,7 @@ function costura({ leitura = null, enqueue = "accepted", reads = 0 } = {}) {
     overflowNoticeAt: 0,
     realtimeDroppedEvents: 0,
     exclusions: { isExcluded: () => false },
+    realtimePriority: (filePath) => realtimePriority.call(e, filePath),
     scanArtifact: async () => leitura,
     reportRealtimeOverflow: (caminho, stage, retry) => reportRealtimeOverflow.call(e, caminho, stage, retry),
   };
