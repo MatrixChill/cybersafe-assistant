@@ -617,3 +617,34 @@ Para o peso da palavra «FINAL»: dos quatro motores, três têm agora prova de 
 linha (nativo C++, YARA 4.6.0, ClamAV 1.5.4 — o último apenas via opt-in, que é por si um facto a
 corrigir: uma prova que só existe quando alguém se lembra de a activar não é uma prova de suíte).
 O quarto ponto em falta não é um motor: é o instalador, e esse depende de #13.
+
+### A segunda flag opt-in não tapava um defeito: tapava dois testes mal isolados
+
+`CYBERSAFE_REALDEV_FIXTURE_SCAN=1` corre 8 ficheiros (173 testes). Com a flag no ambiente, dois
+casos falhavam — `individual-process-termination:42` e `dev-windows-readonly:523` — e nenhum dos
+dois era defeito do produto. O produto **honra a flag de propósito**: `engine.ts:3934` trata
+`CYBERSAFE_REALDEV_FIXTURE_SCAN === "1"` como sessão não-confiável e `:3938` devolve o veto
+`critical-operation-or-untrusted-session`; e o comentário do próprio caso «USB=0 e RETOMA=0»
+declara que nos modos readonly/fixture/teste o agendador de definições **continua a NÃO nascer**.
+Os dois testes asseriam o comportamento do modo *normal* sem isolar o ambiente — ao contrário dos
+seus irmãos no mesmo ficheiro, que apagam as variáveis à volta da asserção.
+
+Correcções, ambas em fixture:
+
+- `individual-process-termination.test.js:42` passou a isolar `CYBERSAFE_DEV_WINDOWS_READONLY` e
+  `CYBERSAFE_REALDEV_FIXTURE_SCAN` como os irmãos fazem **e ganhou uma asserção nova**: com a flag
+  ligada, `terminationBlocked()` tem de devolver o veto. A garantia do produto fica lockada em vez
+  de ser apenas tolerada.
+- `dev-windows-readonly.test.js` — `envOK()` é o helper partilhado por muitos casos e não pinava a
+  flag de fixture; ficou com `CYBERSAFE_REALDEV_FIXTURE_SCAN: undefined` e
+  `CYBERSAFE_REALDEV_FIXTURE_ROOT: undefined` no mapa base (o ficheiro já documenta que
+  `process.env.X = undefined` NÃO apaga X — é `aplicarEnv` que apaga). Quem quiser a flag ON passa
+  `...extra` e ganha.
+
+**Medido nos dois sentidos, que é o que separa «passou» de «fica a passar»:** os dois ficheiros dão
+**109/109 com a flag ON e 109/109 com a flag OFF**; o lote completo das 8 fichas passa de
+164 PASS / 2 FAIL para **166 PASS / 0 FAIL / 7 SKIP**, `exit 0`
+(`realdev-fixture-scan.log` → `realdev-fixture-scan-after.log`).
+
+Os 7 SKIP que ficam são os casos que exigem *ainda mais* ambiente (base ClamAV oficial ausente,
+symlink real, etc.) e não foram contados como PASS em lado nenhum.

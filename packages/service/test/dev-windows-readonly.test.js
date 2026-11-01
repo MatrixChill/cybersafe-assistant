@@ -45,6 +45,14 @@ const envOK = (extra = {}) => ({
   CYBERSAFE_DEV_SERVICE_DIR: SERVICE_DIR,
   CYBERSAFE_DB_PATH: DB,
   CYBERSAFE_DEV_PIPE_NAME: PIPE,
+  // Fixado de propósito: `CYBERSAFE_REALDEV_FIXTURE_SCAN=1` é uma prova OPT-IN
+  // real, e o produto lê-a em `engine.ts:3934` como sessão não-confiável — com
+  // ela ligada o agendador de definições NÃO nasce (é o comportamento declarado
+  // no comentário do caso «USB=0 e RETOMA=0»). Sem esta linha, correr a suíte
+  // com a flag no ambiente mudava a resposta do produto e os testes falhavam
+  // por contaminação, não por defeito. Quem quiser a flag ON passa `...extra`.
+  CYBERSAFE_REALDEV_FIXTURE_SCAN: undefined,
+  CYBERSAFE_REALDEV_FIXTURE_ROOT: undefined,
   ...extra,
 });
 
