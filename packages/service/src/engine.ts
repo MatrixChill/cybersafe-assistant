@@ -395,6 +395,22 @@ const OWN_CHILD_IDENTITY_FUTURE_SLACK_MS = 2_000;
  */
 const HARDWARE_SNAPSHOT_REUSE_MS = 1_000;
 
+/** Traduz o codigo de bloqueio para uma causa accionavel. Sem caminhos. */
+export function terminationBlockedMessage(code: string): string {
+  switch (code) {
+    case "session-unauthenticated": return "Sessão não autenticada; nenhuma terminação foi enviada. Volta a iniciar sessão na aplicação.";
+    case "service-shutting-down": return "O serviço está a encerrar; nenhuma terminação foi enviada.";
+    case "service-not-ready": return "O serviço ainda não terminou o arranque; tenta novamente quando estiver pronto.";
+    case "readonly-mode": return "Modo de leitura ativo: a terminação de processos está desativada nesta sessão.";
+    case "critical-operation": return "Há uma operação crítica da aplicação em curso; a terminação fica indisponível até terminar.";
+    case "realtime-work-in-progress": return "A proteção em tempo real está a analisar ficheiros; aguarda alguns segundos e tenta novamente.";
+    case "scan-in-progress": return "Há uma análise em curso; a terminação de processos fica indisponível até terminar.";
+    case "definitions-update-in-progress": return "Está a decorrer uma atualização de definições; tenta novamente quando terminar.";
+    case "protected-or-identity-unconfirmed": return "O processo é protegido ou a identidade já não corresponde à instância selecionada.";
+    default: return "Terminação indisponível: " + code;
+  }
+}
+
 export class ProtectionEngineService {
   /** Admission can be OFF while a previous module teardown remains unconfirmed. */
   private protectionStopUnconfirmed = false;
@@ -4012,15 +4028,18 @@ if (processInfo.path) {
 
   private terminationBlocked(identity?: TerminationIdentity): string | null {
     const gate = this.clamDatabaseGate.state;
-    // Check actual work, not the enabled/disabled preference. No await follows
-    // this final gate before the native operation; protection is never suspended.
-    if (!this.pipeAuthRequired || !this.pipeToken || this.disposed || this.isShuttingDown ||
-        this.startupStateValue !== "ready" || this.criticalRpcOperations > 0 || process.env.CYBERSAFE_DEV_WINDOWS_READONLY === "1" ||
-        process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN === "1" ||
-        this.protectionTransition || this.protectionStopUnconfirmed || this.fileObservationReads > 0 ||
-        this.realtimeQueue.size > 0 || this.realtimeQueue.active > 0 || this.clamavPrefetches.size > 0 || this.scanAbortControllers.size > 0 ||
-        this.scanManager.getActiveScan() || this.updater.operationInProgress ||
-        gate.activeScans > 0 || gate.updatePending || gate.updateActive) return "critical-operation-or-untrusted-session";
+    // Cada causa tem o seu codigo: a UI nao pode dizer "operacao critica" a quem
+    // so precisa de saber que a sessao nao esta autenticada ou que ha um scan a
+    // correr. O bloqueio mantem-se exatamente o mesmo; so a RAZAO fica nomeada.
+    if (!this.pipeAuthRequired || !this.pipeToken) return "session-unauthenticated";
+    if (this.disposed || this.isShuttingDown) return "service-shutting-down";
+    if (this.startupStateValue !== "ready") return "service-not-ready";
+    if (process.env.CYBERSAFE_DEV_WINDOWS_READONLY === "1" ||
+        process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN === "1") return "readonly-mode";
+    if (this.criticalRpcOperations > 0 || this.protectionTransition || this.protectionStopUnconfirmed) return "critical-operation";
+    if (this.fileObservationReads > 0 || this.realtimeQueue.size > 0 || this.realtimeQueue.active > 0 || this.clamavPrefetches.size > 0) return "realtime-work-in-progress";
+    if (this.scanAbortControllers.size > 0 || this.scanManager.getActiveScan()) return "scan-in-progress";
+    if (this.updater.operationInProgress || gate.activeScans > 0 || gate.updatePending || gate.updateActive) return "definitions-update-in-progress";
     if (identity) {
       const cached = this.processes.find(p => p.pid === identity.pid);
       if (!cached || !matchesSnapshotCreation(cached.startedAt,identity.creation) ||
@@ -5028,7 +5047,8 @@ if (processInfo.path) {
         return this.protectionStartup.definirOptin(entrada.enabled);
       }
       case "process.termination.prepare":
-        if (this.terminationBlocked()) return {ok:false,status:"protected",error:"Terminação indisponível durante operações críticas ou sessão não autenticada."};
+        const bloqueio = this.terminationBlocked();
+        if (bloqueio) return {ok:false,status:"protected",error:terminationBlockedMessage(bloqueio)};
         try { return this.terminationController().prepare(payload); }
         catch { return {ok:false,status:"failed",error:"Componente nativo de terminação indisponível; nenhuma ação executada."}; }
       case "process.termination.confirm":
