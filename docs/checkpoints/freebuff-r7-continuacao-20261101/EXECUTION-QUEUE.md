@@ -46,3 +46,16 @@ origin/main intocada: 21fefa69
 - DONE: log do Scanner separa enumeração, laço, motor e overhead.
 - VERIFICADO: MATRIX/gestor/atualizações 105 PASS; WFP 4 PASS.
 - PENDING: inconclusivos por motor/fase; ensaio instalado; visual Electron; WFP e updates oficiais.
+
+## R8 — correções dirigidas (2026-11-01)
+
+| ID | Prio | Entrega | Estado | Evidência |
+|---|---|---|---|---|
+| R8-1 | P0 | Layout original “Definições de segurança” do Otimizar | DONE (código/teste); captura Electron pendente | `1204919`; grelha própria `optimize-source-row`; `p0-design-otimizar` exit 0 |
+| R8-2 | P0 | Política de caminhos protegidos antes da quarentena | DONE | `1204919`; `quarantine-path-policy` 3 PASS; valida raízes Windows, Program Files/Data, raiz do serviço e reparse points |
+| R8-3 | P0 | Motivos específicos dos inconclusivos | DONE | `0b944ef`; classificador só usa sinais textuais do motor; `inconclusive-classification` 2 PASS |
+| R8-4 | P1 | Prompt MATRIX com amostras e tendência | DONE (offline); fornecedor online não validado | `0b944ef`; bloco exige mesma instância, número de amostras e “sem tendência” quando ausente; API 2 PASS |
+| R8-5 | P0 | Captura antes/depois do Otimizar em Electron | TODO | Sem ambiente visual Electron nesta sessão; não declarar concluído |
+| R8-6 | P0 | Teste vm dedicado do IPC/preload da quarentena | TODO | Testes atuais cobrem política/serviço, não o canal `main.ts`/preload |
+| R8-7 | P1 | Instrumentação interna por motor | PARCIAL | Fases externas já existem; faltam tempos internos ClamAV/YARA/HashDB/native/ZIP persistidos |
+| R8-8 | BLOCKED | MATRIX online, updates oficiais, WFP | BLOCKED/NEEDS_HUMAN | Requer credencial autorizada, chave/manifesto de produção e provisionamento privilegiado |
