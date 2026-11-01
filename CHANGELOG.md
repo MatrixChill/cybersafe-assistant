@@ -245,10 +245,27 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   defeito de isolamento tenha voltado**, mas há um facto de produto por decidir (ficheiro inofensivo
   em `%TEMP%` reportado como não-conclusivo). **4 = harness, por classificar** — `dev-canary` 2 com
   `Error: timed out waiting for condition` aos ~10 s e `dev-windows-readonly` 2 com
-  `TypeError: Cannot read properties of undefined (reading 'status')`. **3 = possível defeito real**
-  — `scan-batch-terminal-reconcile`, contadores terminais a cair para `0`/`null` quando o batch
-  provou 8: é o único grupo que pode ser perda de integridade de resultados (§7) e **continua por
-  explicar**, não é dado como resolvido.
+  `TypeError: Cannot read properties of undefined (reading 'status')`. **3 = asserções no eixo
+  aposentado** — `scan-batch-terminal-reconcile`: exigem que `filesAnalyzed` suba com os terminais
+  provados pelo **batch**, e desde a decisão datada de 2026-10-23 em `scan-manager.ts:1044-1048` a
+  etapa do motor não escreve `filesAnalyzed` (promovê-los seria «afirmar cobertura que não existe —
+  400 do batch contra 61 aceites»); o valor de etapa está em `filesInEngineBatch`. **Retiro a
+  classificação anterior («possível defeito real, continua por explicar»): está refutada.** A
+  leitura do código prova que os três resultados são o contrato coerente (`filesScanned=8`,
+  `filesFailed=8`, `filesAnalyzed=0`, invariante `scanned = analisados+excluídos+falhados`
+  verificada), não perda de integridade de resultados (§7). Falta decidir se as asserções são
+  reescritas para o eixo vigente — e nessa reescrita têm de continuar a provar o que protegiam
+  (reconciliação terminal do count do batch sem double count), sem serem afrouxadas.
+- **Esse grupo está resolvido, e a reescrita foi medida.** `scan-batch-terminal-reconcile` passa
+  **5/5 PASS, exit 0** isolado (`scanbatch-axis-rewrite.log`). As três asserções deixaram de exigir
+  que `filesAnalyzed` suba com o batch e passaram a provar os dois eixos em separado: a
+  reconciliação 7 → 8 no eixo da etapa, lida na linha `SCANMANAGER_BATCH_END` do tracing opt-in
+  (`analyzedInBatch=8`, `outcomes=n/a` no contrato antigo), e a honestidade do eixo dos aceites —
+  `filesAnalyzed` tem de continuar em `0` enquanto o loop rejeita todos, e `filesInEngineBatch`
+  tem de mostrar `5` durante o batch e voltar a `0` no `finally`. **Nenhum teste ficou mais fraco:
+  se alguém voltar a promover a etapa para `filesAnalyzed`, dois deles falham** — a versão anterior
+  não era capaz de apanhar exatamente esse erro. O total da suíte `service` **ainda não foi
+  re-medido** depois desta reescrita; a linha `878 PASS / 53 FAIL` é de `9b7e823`.
 - Estado do `ci` no `main` atualizado: run `41302290721` no SHA `9b7e823`, `conclusion: success`.
   A workflow continua a **não** correr a suíte `service` (corre a do desktop), por isso o verde do
   `ci` não cobre nenhuma das linhas acima.
