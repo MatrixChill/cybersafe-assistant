@@ -151,6 +151,7 @@ interface RpcResponse<K extends keyof ServiceResponseMap = keyof ServiceResponse
 error aqui deve prolongar o encerramento.
  */
 const SHUTDOWN_BLOCKED_METHODS = new Set<string>([
+  "exclusions.update",
   "scan.start",
   "scan.fullSystem",
   "definitions.update",
@@ -956,6 +957,7 @@ export class ProtectionEngineService {
   private async initInternal() {
     this.throwIfDisposed();
     await fs.mkdir(this.baseDir, { recursive: true });
+    await this.exclusions.init(path.join(this.baseDir, "exclusions.json"), [path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."), path.dirname(process.execPath)]);
     this.quarantinePolicy = await loadQuarantinePolicy(path.join(this.baseDir, "protection-policy.json"));
     await fs.mkdir(this.logsDir, { recursive: true });
     await this.seedDefinitions();
@@ -5049,7 +5051,7 @@ if (processInfo.path) {
       case "exclusions.get":
         return this.exclusions.getConfig();
       case "exclusions.update":
-        return this.exclusions.updateConfig(payload as any);
+        return this.exclusions.updateRules(payload);
       case "scan.start": {
         const { type, targetPath } = payload as any;
         const id = await this.scanManager.startScan(type, targetPath);

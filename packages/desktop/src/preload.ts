@@ -90,6 +90,8 @@ contextBridge.exposeInMainWorld("electronAPI", {
   runRestrictedAnalysis: (filePath: string) => invoke("service:run-restricted-analysis", filePath),
   updateDefinitions: () => invoke("service:update-definitions"),
   getDefinitionsStatus: () => invoke("service:get-definitions-status"),
+  getExclusions: () => invoke("service:get-exclusions"),
+  updateExclusions: (config: { rules: import("@cybersafe/shared-types").ExclusionRule[] }) => invoke("service:update-exclusions", config),
   // Opt-in de retoma ao arrancar: passagem sem lógica própria. A preferência é
   // lida e escrita pelo serviço, que é quem confirma o que está em disco.
   getProtectionIntent: () => invoke("service:get-protection-intent"),

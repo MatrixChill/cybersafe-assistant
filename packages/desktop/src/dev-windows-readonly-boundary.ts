@@ -292,6 +292,7 @@ export const CANAIS_PERMITIDOS: ReadonlySet<string> = new Set([
   // Estado das definicoes de seguranca: leitura sem efeito, e e justamente na
   // lane read-only que a pagina precisa de mostrar o que ja foi tentado.
   "service:get-definitions-status",
+  "service:get-exclusions",
   // Ponte local do próprio processo: estado de ligação, sem RPC.
   "service:get-connection-state",
   // Janela própria (cosmético) e saída segura.
@@ -325,6 +326,7 @@ export const CANAIS_PERMITIDOS: ReadonlySet<string> = new Set([
  * arranque, preferências gravadas, actualizador e janela de relatório.
  */
 export const CANAIS_NEGADOS: ReadonlySet<string> = new Set([
+  "service:update-exclusions",
   "service:set-protection",
   "service:pause-protection",
   "service:set-protection-intent",

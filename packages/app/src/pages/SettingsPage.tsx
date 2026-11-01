@@ -15,6 +15,7 @@ import type { AccentMode, AppIdentity, SurfaceStyle, ThemeMode } from "../lib/ap
 import { IDENTITY_LABELS, SURFACE_LABELS } from "../lib/appearance";
 import { useState, useEffect } from "react";
 import { aboutIdentityLines, electronVersionFromUserAgent, formatBuildBadge, resolveIdentity, technicalInfoText } from "../lib/buildIdentity";
+import ExclusionsSection from "../components/ExclusionsSection";
 import { UpdatesSection } from "../components/updates/UpdatesSection";
 import { SurfaceHeroPreview } from "../components/visual/SurfaceHeroPreview";
 
@@ -868,6 +869,8 @@ export default function SettingsPage() {
           </button>
         </div>
       </section>
+
+      <ExclusionsSection />
 
       {/* === ATUALIZAÇÕES === */}
       <UpdatesSection />

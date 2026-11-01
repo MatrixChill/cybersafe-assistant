@@ -71,6 +71,8 @@ export interface ElectronAPI {
   getProcesses: () => Promise<import("@cybersafe/shared-types").ProcessListResult>;
   getConnections: () => Promise<ConnectionSnapshot[]>;
   getQuarantineFiles: () => Promise<QuarantineEntry[]>;
+  getExclusions: () => Promise<import("@cybersafe/shared-types").ExclusionConfig | null>;
+  updateExclusions: (config: { rules: import("@cybersafe/shared-types").ExclusionRule[] }) => Promise<{ success: boolean; error?: string } | null>;
   clearThreatEvents: () => Promise<{ success: boolean }>;
   scanFile: (filePath: string) => Promise<FileScanResponse | null>;
   prepareProcessTermination: (selection: {pid:number;startedAt:string}) => Promise<ProcessTerminationPreparation>;

@@ -893,7 +893,18 @@ export interface ServiceSnapshot {
   quarantine: QuarantineEntry[];
 }
 
+export interface ExclusionRule {
+  id: string;
+  type: "file" | "folder" | "extension";
+  value: string;
+  enabled: boolean;
+  createdAt: string;
+  reason?: string;
+}
+
 export interface ExclusionConfig {
+  rules?: ExclusionRule[];
+  error?: string;
   paths: string[];
   extensions: string[];
   files: string[];
@@ -1011,7 +1022,7 @@ export interface ServiceCommandMap {
   "windows.healthSnapshot": undefined;
   "pcstate.get": undefined;
   "exclusions.get": undefined;
-  "exclusions.update": Partial<ExclusionConfig>;
+  "exclusions.update": { rules: ExclusionRule[] };
   "scan.start": { type: ScanType; targetPath?: string };
   /** Estado da análise ativa (ressincronização da UI após remount/navegação). */
   "scan.getActive": undefined;
@@ -1123,7 +1134,7 @@ export interface ServiceResponseMap {
   "windows.healthSnapshot": WindowsHealthSnapshot;
   "pcstate.get": PcState;
   "exclusions.get": ExclusionConfig;
-  "exclusions.update": { success: boolean };
+  "exclusions.update": { success: boolean; error?: string };
   "scan.start": { id: string; success: boolean; error?: string };
   "scan.getActive": ScanState | null;
   "scan.getLast": ScanState | null;

@@ -1525,6 +1525,11 @@ function registerIpc(
   // Leitura do estado por fonte (ClamAV / YARA / HashDB). Pass-through fino: a
   // contagem, a idade e o backoff vivem no servico — o renderer nao os inferir.
   serviceRequest("service:get-definitions-status", () => client.request("definitions.status", undefined));
+  // Contrato R7: snapshot a pedido, nunca disparado por scan.progress.
+  // O serviço valida as regras antes de gravar; a política interna não é editável.
+  serviceRequest("service:get-exclusions", () => client.request("exclusions.get", undefined));
+  serviceRequest("service:update-exclusions", (_event, config: { rules: import("@cybersafe/shared-types").ExclusionRule[] }) =>
+    client.request("exclusions.update", config));
   // ── Opt-in de retoma ao arrancar ──────────────────────────────────────────
   // Pass-through fino e validado: a decisão de gravar e a confirmação em disco
   // vivem no serviço. O renderer não escreve ficheiros nem infere estado — e um
