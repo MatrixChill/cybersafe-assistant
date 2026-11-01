@@ -227,8 +227,42 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   `ok: o.success`, e a pregação de sucesso em `processActions.ts:606` só aceita
   `killed`/`already-exited`. **Reativar o delta é decisão do proprietário** (a janela
   revalidação→`taskkill` não é atómica; o delta existe precisamente para não a fingir segura) e
-  nenhuma asserção de teste foi afrouxada para esconder isto. Restam 23 falhas: `p1-3-prefetch-isolation`
-  7, `qa3-recursive` 5 (já corrigidas em `2eadccb`, total ainda não re-medido) e 11 por classificar.
+  nenhuma asserção de teste foi afrouxada para esconder isto.
+- **Re-medida a suíte completa no HEAD atual `9b7e823`** (`logs/service-full-9b7e823.log`):
+  **931 testes / 137 suítes / 878 PASS / 53 FAIL / 0 SKIP / 0 TODO**, duração **210 510 ms**. Isto
+  substitui a contagem de 58 e a frase «11 por classificar», e **retira a ideia de que a suíte
+  precisa de um teto de duração para ser exequível em CI**: ela cabe em 210 s; o que impedia o total
+  era a ausência de `dispose()`, não o tempo. Classificação por causa, medida e não inferida:
+  **38 = portão de terminação** — `process-kill` 30, `kill-budget` 5, `kill-blocked-log` 2
+  («pre-condicao: PID 4 e recusado» → `failed`; «esperava 4 linhas novas, obtive 0») e
+  `p0-runtime-isolation` 1 (o `actions.log` do kill fica vazio), tudo porque o portão devolve antes
+  de qualquer consulta e antes de qualquer `logKillBlocked`. **8 = `inconclusive` em ficheiro
+  benigno** — `p1-3-prefetch-isolation` 7 e `scan-post-batch-no-double-clamav` 1; um `*.exe` no
+  `%TEMP%` soma `dangerous_file_extension` + `suspicious_location` (15+15, `analysis.ts:207` /
+  `scoring.ts`) e no caso do `scan-post-batch` é **um `.txt` no `%TEMP%`**, em que só a localização
+  já chega. Consequência honesta: o marcador `safe` deixou de discriminar o isolamento, e as regras
+  listadas por ficheiro são as do nome/caminho do próprio ficheiro — **não há aqui prova de que o
+  defeito de isolamento tenha voltado**, mas há um facto de produto por decidir (ficheiro inofensivo
+  em `%TEMP%` reportado como não-conclusivo). **4 = harness, por classificar** — `dev-canary` 2 com
+  `Error: timed out waiting for condition` aos ~10 s e `dev-windows-readonly` 2 com
+  `TypeError: Cannot read properties of undefined (reading 'status')`. **3 = possível defeito real**
+  — `scan-batch-terminal-reconcile`, contadores terminais a cair para `0`/`null` quando o batch
+  provou 8: é o único grupo que pode ser perda de integridade de resultados (§7) e **continua por
+  explicar**, não é dado como resolvido.
+- Estado do `ci` no `main` atualizado: run `41302290721` no SHA `9b7e823`, `conclusion: success`.
+  A workflow continua a **não** correr a suíte `service` (corre a do desktop), por isso o verde do
+  `ci` não cobre nenhuma das linhas acima.
+- **GitHub Releases: zero, medido.** `gh api repos/MatrixChill/cybersafe-assistant/releases` → `[]`;
+  `releases/latest` → `404 Not Found`; `git ls-remote --tags origin` → nenhuma `refs/tags/*`. Não
+  existe **nenhum** artefacto publicado (nem R6 nem R7), o repositório é público (`isPrivate:
+  false`) e `main` é a branch por omissão. Qualquer release é a primeira pública e depende da
+  confirmação explícita do proprietário. O canal de atualizações devolve hoje «sem release» — estado
+  correto de um canal vazio, não uma atualização disponível.
+- Nota de mecanismo, para não repetir o erro: este worktree está na branch
+  `pap/final-qoder-20261101`, não em `main`. `git push origin main` tentava empurrar um `main`
+  local **7 commits atrás** do remoto e foi rejeitado por *non-fast-forward* — a proteção fez o seu
+  trabalho, sem `--force` e sem `reset`. A integração correta é confirmar ancestralidade e
+  `git push origin HEAD:refs/heads/main`, depois verificar com `git ls-remote`.
 - Estado do `ci` no `main`: **VERDE, medido**. A run `41300363725` (SHA `596fbee`,
   2026-11-01T11:06Z, `conclusion: success`) passou em **todos os nove passos**, incluindo
   `Vendor YARA e manifesto de packaging` e `Suíte do desktop`. Nada nisto significa que o
