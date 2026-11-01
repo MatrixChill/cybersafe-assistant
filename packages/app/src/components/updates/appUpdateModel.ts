@@ -31,6 +31,7 @@ const STATUS_LABELS: Record<AppUpdateStatus, string> = {
 const ERROR_MESSAGES: Record<AppUpdateErrorCode, string> = {
   offline: "Sem ligação à internet.",
   timeout: "A operação excedeu o tempo limite.",
+  "rate-limited": "Demasiados pedidos — aguarde antes de nova verificação.",
   "invalid-manifest": "A resposta do servidor não é um manifesto válido.",
   "untrusted-metadata": "Os metadados da atualização não são de confiança.",
   integrity: "A verificação de integridade falhou.",

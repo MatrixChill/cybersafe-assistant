@@ -9,7 +9,7 @@
  * de política e vive no `config.ts`/`updater.ts` (precisa da config), para o
  * manifesto não conhecer a configuração.
  */
-import { isValidSemVer } from "./semver.ts";
+import { isCoreVersion, isValidSemVer } from "./semver.ts";
 import type { RawReleaseManifest, ValidatedManifest } from "./types.ts";
 
 export type ManifestValidation =
@@ -18,6 +18,7 @@ export type ManifestValidation =
 
 const SHA256_HEX = /^[0-9a-fA-F]{64}$/;
 const BASE64 = /^[A-Za-z0-9+/]+={0,2}$/;
+const COMMIT_HEX = /^[0-9a-fA-F]{7,40}$/;
 
 function invalid(message: string): ManifestValidation {
   return { ok: false, code: "invalid-manifest", message };
@@ -100,6 +101,48 @@ export function validateManifest(raw: unknown): ManifestValidation {
 
   const requiresElevation = obj.requiresElevation === true;
 
+  // Campos de identidade/compatibilidade (§12.4): opcionais, mas quando
+  // presentes têm tipo estrito — um valor malformado é manifesto inválido,
+  // nunca "ignora-se e segue-se em frente".
+  let buildId: string | null = null;
+  if (obj.buildId !== undefined && obj.buildId !== null) {
+    if (typeof obj.buildId !== "string" || obj.buildId.length === 0 || obj.buildId.length > 64) {
+      return invalid("buildId presente mas inválido (string 1..64)");
+    }
+    buildId = obj.buildId;
+  }
+  let sourceCommit: string | null = null;
+  if (obj.sourceCommit !== undefined && obj.sourceCommit !== null) {
+    if (typeof obj.sourceCommit !== "string" || !COMMIT_HEX.test(obj.sourceCommit)) {
+      return invalid("sourceCommit presente mas não é hex de 7..40");
+    }
+    sourceCommit = obj.sourceCommit.toLowerCase();
+  }
+  let compatibility: ValidatedManifest["compatibility"] = null;
+  if (obj.compatibility !== undefined && obj.compatibility !== null) {
+    const comp = asRecord(obj.compatibility);
+    if (!comp) return invalid("compatibility presente mas não é objeto");
+    let minWindowsBuild: number | null = null;
+    if (comp.minWindowsBuild !== undefined && comp.minWindowsBuild !== null) {
+      if (
+        typeof comp.minWindowsBuild !== "number" ||
+        !Number.isSafeInteger(comp.minWindowsBuild) ||
+        comp.minWindowsBuild <= 0
+      ) {
+        return invalid("compatibility.minWindowsBuild inválido");
+      }
+      minWindowsBuild = comp.minWindowsBuild;
+    }
+    let fromVersion: string | null = null;
+    if (comp.fromVersion !== undefined && comp.fromVersion !== null) {
+      if (typeof comp.fromVersion !== "string" || !isCoreVersion(comp.fromVersion)) {
+        return invalid("compatibility.fromVersion não é X.Y.Z");
+      }
+      fromVersion = comp.fromVersion;
+    }
+    compatibility = { minWindowsBuild, fromVersion };
+  }
+
   return {
     ok: true,
     manifest: {
@@ -120,6 +163,9 @@ export function validateManifest(raw: unknown): ManifestValidation {
       },
       publisher: { name: publisher.name },
       requiresElevation,
+      buildId,
+      sourceCommit,
+      compatibility,
     },
   };
 }
@@ -130,7 +176,7 @@ export function validateManifest(raw: unknown): ManifestValidation {
  * independentemente de como o JSON foi serializado na origem.
  */
 export function canonicalManifestBytes(manifest: ValidatedManifest): string {
-  return JSON.stringify({
+  const body: Record<string, unknown> = {
     schema: manifest.schema,
     channel: manifest.channel,
     version: manifest.version,
@@ -143,5 +189,11 @@ export function canonicalManifestBytes(manifest: ValidatedManifest): string {
     },
     publisher: { name: manifest.publisher.name },
     requiresElevation: manifest.requiresElevation,
-  });
+  };
+  // Compatibilidade: campos declarados só entram nos bytes canónicos quando
+  // existem — um manifesto sem eles assina/verifica exatamente como antes.
+  if (manifest.buildId !== null) body.buildId = manifest.buildId;
+  if (manifest.sourceCommit !== null) body.sourceCommit = manifest.sourceCommit;
+  if (manifest.compatibility !== null) body.compatibility = manifest.compatibility;
+  return JSON.stringify(body);
 }

@@ -22,7 +22,7 @@ import { artifactFinalPath, CacheStore } from "./cache.ts";
 import { isUrlAllowed, type ConfigResolution } from "./config.ts";
 import { sha256Hex } from "./crypto.ts";
 import { canonicalManifestBytes, validateManifest } from "./manifest.ts";
-import { isDowngrade, isUpgrade } from "./semver.ts";
+import { isDowngrade, isUpgrade, parseSemVer } from "./semver.ts";
 import {
   SourceError,
   type Clock,
@@ -51,6 +51,7 @@ export class Updater {
   private validated?: ValidatedManifest;
   private artifactPath?: string;
   private busy = false;
+  private lastCheckAt?: number;
   private controller?: AbortController;
   private abortReason?: "timeout" | "cancel";
   private timer?: ReturnType<typeof setTimeout>;
@@ -155,7 +156,16 @@ export class Updater {
     const blocked = this.gate();
     if (blocked) return blocked;
     if (this.busy) return this.busyResult();
+    // Limite de pedidos (§12.3): recusa ANTES de tocar no feed; `undefined`
+    // (fakes/testes diretos) = sem limite. A produção vem sempre com 30s.
+    const limit = this.resolvedConfig!.minCheckIntervalMs;
+    const now = this.deps.clock?.now?.() ?? SYSTEM_CLOCK.now();
+    if (limit !== undefined && this.lastCheckAt !== undefined && now - this.lastCheckAt < limit) {
+      const waitS = Math.ceil((limit - (now - this.lastCheckAt)) / 1000);
+      return this.fail("rate-limited", `aguarde ${waitS}s antes de nova verificação de atualizações`);
+    }
     this.busy = true;
+    this.lastCheckAt = now;
     try {
       this.set({ phase: "checking", error: undefined });
       const op = this.startOp();
@@ -204,6 +214,14 @@ export class Updater {
         return this.fail("untrusted-metadata", "verificador de assinatura falhou (fail-closed)");
       }
 
+      // Pré-releases/versões internas NUNCA são oferecidas pelo canal estável,
+      // mesmo assinadas — identidade canónica é `X.Y.Z` sem pré-release.
+      const parsedVersion = parseSemVer(manifest.version);
+      if (parsedVersion && parsedVersion.prerelease.length > 0) {
+        this.validated = undefined;
+        return this.fail("invalid-manifest", `versão ${manifest.version} é pré-release/interna; o canal estável não a oferece`);
+      }
+
       if (isDowngrade(manifest.version, this.deps.installed.version)) {
         this.validated = undefined;
         return this.fail("downgrade", `versão ${manifest.version} é anterior à instalada ${this.deps.installed.version}`);
@@ -218,7 +236,14 @@ export class Updater {
       this.artifactPath = undefined;
       this.set({
         phase: "available",
-        latest: { version: manifest.version, publishedAt: manifest.publishedAt, notes: manifest.notes, sizeBytes: manifest.file.sizeBytes },
+        latest: {
+          version: manifest.version,
+          publishedAt: manifest.publishedAt,
+          notes: manifest.notes,
+          sizeBytes: manifest.file.sizeBytes,
+          ...(manifest.buildId !== null ? { buildId: manifest.buildId } : {}),
+          ...(manifest.sourceCommit !== null ? { sourceCommit: manifest.sourceCommit } : {}),
+        },
         canInstall: false,
         checkedAt,
         error: undefined,

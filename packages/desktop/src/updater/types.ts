@@ -44,6 +44,7 @@ export type UpdateErrorCode =
   | "unsupported"
   | "unconfigured"
   | "installation"
+  | "rate-limited"
   | "internal";
 
 export interface VersionInfo {
@@ -58,6 +59,10 @@ export interface ReleaseInfo {
   /** Texto simples. Nunca HTML de upstream. */
   notes: string;
   sizeBytes?: number;
+  /** Identidade do build, declarada e assinada no manifesto (opcional). */
+  buildId?: string;
+  /** Commit de origem do artefacto, hex minúsculo (opcional). */
+  sourceCommit?: string;
 }
 
 /** Bytes reais. `totalBytes` ausente = progresso indeterminado (não é 0). */
@@ -98,6 +103,12 @@ export interface UpdaterConfig {
   maxDownloadBytes: number;
   /** POR OMISSÃO false: nada de auto-update silencioso. */
   automaticCheckEnabled: boolean;
+  /**
+   * Intervalo mínimo entre `check()` bem-sucedidos OU atirados ao feed
+   * (limite de pedidos). `undefined`/ausente = sem limite (fakes de teste);
+   * `resolveUpdaterConfig` e a produção preenchem sempre 30_000.
+   */
+  minCheckIntervalMs?: number;
 }
 
 /**
@@ -126,6 +137,9 @@ export interface RawReleaseManifest {
   };
   publisher?: { name?: unknown };
   requiresElevation?: unknown;
+  buildId?: unknown;
+  sourceCommit?: unknown;
+  compatibility?: unknown;
 }
 
 /** Manifesto validado: campos garantidos pelo `manifest.ts`. */
@@ -139,6 +153,10 @@ export interface ValidatedManifest {
   signature: { algorithm: "ed25519"; value: string; signedByFingerprint: string };
   publisher: { name: string };
   requiresElevation: boolean;
+  /** `null` = não declarado. Presentes entram nos bytes canónicos da assinatura. */
+  buildId: string | null;
+  sourceCommit: string | null;
+  compatibility: { minWindowsBuild: number | null; fromVersion: string | null } | null;
 }
 
 /* ── Portas injetáveis ─────────────────────────────────────────────────────── */

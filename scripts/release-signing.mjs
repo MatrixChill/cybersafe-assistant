@@ -83,6 +83,33 @@ export function normalizeForSigning(raw) {
   if (!Number.isSafeInteger(file.sizeBytes) || file.sizeBytes <= 0) fail("file.sizeBytes inválido");
   const publisher = asRecord(m.publisher);
   if (!publisher || typeof publisher.name !== "string" || publisher.name.length === 0) fail("publisher.name ausente");
+  // Identidade/compatibilidade (§12.4): opcionais; presentes, válidos ou falha.
+  let buildId = null;
+  if (m.buildId !== undefined && m.buildId !== null) {
+    if (typeof m.buildId !== "string" || m.buildId.length === 0 || m.buildId.length > 64) fail("buildId inválido");
+    buildId = m.buildId;
+  }
+  let sourceCommit = null;
+  if (m.sourceCommit !== undefined && m.sourceCommit !== null) {
+    if (typeof m.sourceCommit !== "string" || !/^[0-9a-fA-F]{7,40}$/.test(m.sourceCommit)) fail("sourceCommit deve ser hex 7..40");
+    sourceCommit = m.sourceCommit.toLowerCase();
+  }
+  let compatibility = null;
+  if (m.compatibility !== undefined && m.compatibility !== null) {
+    const c = asRecord(m.compatibility);
+    if (!c) fail("compatibility não é objeto");
+    let minWindowsBuild = null;
+    if (c.minWindowsBuild !== undefined && c.minWindowsBuild !== null) {
+      if (!Number.isSafeInteger(c.minWindowsBuild) || c.minWindowsBuild <= 0) fail("compatibility.minWindowsBuild inválido");
+      minWindowsBuild = c.minWindowsBuild;
+    }
+    let fromVersion = null;
+    if (c.fromVersion !== undefined && c.fromVersion !== null) {
+      if (typeof c.fromVersion !== "string" || !/^\d+\.\d+\.\d+$/.test(c.fromVersion)) fail("compatibility.fromVersion não é X.Y.Z");
+      fromVersion = c.fromVersion;
+    }
+    compatibility = { minWindowsBuild, fromVersion };
+  }
   return {
     schema: typeof m.schema === "string" ? m.schema : "cybersafe-release/1",
     channel: "stable",
@@ -92,12 +119,15 @@ export function normalizeForSigning(raw) {
     file: { url: file.url, sha256: file.sha256.toLowerCase(), sizeBytes: file.sizeBytes },
     publisher: { name: publisher.name },
     requiresElevation: m.requiresElevation === true,
+    ...(buildId !== null ? { buildId } : {}),
+    ...(sourceCommit !== null ? { sourceCommit } : {}),
+    ...(compatibility !== null ? { compatibility } : {}),
   };
 }
 
 /** Bytes canónicos — mesma ordem e campos de `manifest.ts`. */
 export function canonicalManifestBytes(manifest) {
-  return JSON.stringify({
+  const body = {
     schema: manifest.schema,
     channel: manifest.channel,
     version: manifest.version,
@@ -110,7 +140,11 @@ export function canonicalManifestBytes(manifest) {
     },
     publisher: { name: manifest.publisher.name },
     requiresElevation: manifest.requiresElevation,
-  });
+  };
+  if (manifest.buildId != null) body.buildId = manifest.buildId;
+  if (manifest.sourceCommit != null) body.sourceCommit = manifest.sourceCommit;
+  if (manifest.compatibility != null) body.compatibility = manifest.compatibility;
+  return JSON.stringify(body);
 }
 
 /**

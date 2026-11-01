@@ -55,6 +55,7 @@ interface RawConfigInput {
   timeoutMs?: unknown;
   maxDownloadBytes?: unknown;
   automaticCheckEnabled?: unknown;
+  minCheckIntervalMs?: unknown;
 }
 
 function fail(
@@ -110,6 +111,17 @@ export function resolveUpdaterConfig(input: RawConfigInput): ConfigResolution {
     return fail("bad-limits", "timeout/max-bytes inválidos");
   }
 
+  // Limite de pedidos: só aplica quando explicitamente configurado (a produção
+  // define 30s em `production.ts`). Presente → tem de ser intervalo são.
+  let minCheckIntervalMs;
+  if (input.minCheckIntervalMs !== undefined) {
+    const v = input.minCheckIntervalMs;
+    if (typeof v !== "number" || !Number.isSafeInteger(v) || v < 1_000 || v > 3_600_000) {
+      return fail("bad-limits", "minCheckIntervalMs inválido (1s..1h, inteiro)");
+    }
+    minCheckIntervalMs = v;
+  }
+
   return {
     ok: true,
     config: {
@@ -122,6 +134,7 @@ export function resolveUpdaterConfig(input: RawConfigInput): ConfigResolution {
       timeoutMs,
       maxDownloadBytes,
       automaticCheckEnabled: input.automaticCheckEnabled === true,
+      minCheckIntervalMs,
     },
   };
 }

@@ -6,7 +6,7 @@ export type AppUpdateStatus =
 export type AppUpdateErrorCode =
   | "offline" | "timeout" | "invalid-manifest" | "untrusted-metadata"
   | "integrity" | "publisher" | "downgrade" | "interrupted" | "cancelled"
-  | "busy" | "unsupported" | "unconfigured" | "installation" | "internal";
+  | "busy" | "unsupported" | "unconfigured" | "installation" | "rate-limited" | "internal";
 export interface AppVersionInfo {
   version: string;
   build?: string;
@@ -18,6 +18,10 @@ export interface AppUpdateRelease {
   /** Plain text only. Never render upstream HTML. */
   notes: string;
   sizeBytes?: number;
+  /** Build identity declared and signed in the release manifest (optional). */
+  buildId?: string;
+  /** Origin commit of the artifact, lowercase hex (optional). */
+  sourceCommit?: string;
 }
 export interface AppUpdateSnapshot {
   status: AppUpdateStatus;
