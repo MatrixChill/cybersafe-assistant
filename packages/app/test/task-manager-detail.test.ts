@@ -197,12 +197,42 @@ describe("TaskManagerPage — estabilidade de selecao e copy do botao", () => {
     // continuam todas a contar.
     assert.doesNotMatch(page, /"Encerrar processo"/, "a página não pode voltar a oferecer terminação");
     assert.doesNotMatch(page, /Terminar Ameaça/, "o modal de análise também não termina nada");
-    assert.match(page, /KILL_READONLY_UNAVAILABLE/, "a recusa é a frase que processActions possui");
+    // A recusa é copy do `processActions`, nunca reescrita aqui. A versão anterior
+    // procurava o nome `KILL_READONLY_UNAVAILABLE` no ficheiro da página: essa
+    // recusa nunca foi literal do page — chega pelo desfecho (`runKillRequest`
+    // devolve `message: KILL_READONLY_UNAVAILABLE` em processActions.ts:433 e a
+    // página publica `o.message`). As duas frases que a página escreve ela própria
+    // são a de indisponibilidade do ambiente de trabalho (`KILL_UNAVAILABLE_ERROR`,
+    // importada de processActions) e o rótulo de sucesso. O que se exige é isso:
+    // copy de fora para os desfechos do serviço, e nenhum duplicado da recusa
+    // nomeada. A entrega dela é provada por comportamento em
+    // test/task-manager-readonly-policy.test.ts («indisponível nesta sessão»).
+    assert.match(page, /KILL_UNAVAILABLE_ERROR/, "a indisponibilidade usa a frase de processActions");
+    assert.match(
+      page,
+      /setKillNotice\(\{ message: o\.status === "killed"[^}]*:[\s\S]{0,40}o\.message/,
+      "o aviso tem de publicar o desfecho do serviço, não uma frase inventada na página",
+    );
+    assert.doesNotMatch(
+      page,
+      /modo de leitura|indisponível nesta sessão/,
+      "a recusa nomeada não pode ser duplicada na página: duplicar é dar duas copies ao mesmo 'nenhum processo foi terminado'",
+    );
     assert.match(page, /QUERY_MODE_BADGE/, "o modo de consulta está no ecrã");
     assert.match(page, /CircleStop/);
     assert.doesNotMatch(page, /Trash2/, "a lixeira saiu — nao ficou nenhum Trash2 nesta pagina");
     // Guardas que tem de manter: disabled por protecao, data-row-action, seletor do modal.
-    assert.match(page, /disabled=\{isProtected\}/);
+    // `disabled` passou a ser uma expressão composta (`isProtected || a preparar ||
+    // em curso || sem startedAt`); o que o guard exige é que `isProtected` continue
+    // a ser termo da barra, não que seja o único.
+    const linhaDeAcao = page.indexOf("data-row-action={process.pid}");
+    assert.ok(linhaDeAcao > 0, "a linha perdeu o data-row-action");
+    const barra = page.slice(page.lastIndexOf("disabled={", linhaDeAcao), linhaDeAcao);
+    assert.match(
+      barra,
+      /disabled=\{[^}]*\bisProtected\b/,
+      "a ação da linha deixou de barrar o processo protegido",
+    );
     assert.match(page, /data-row-action=\{process\.pid\}/);
     assert.match(page, /selectKillTarget\(process\)/);
     assert.match(page, /KillConfirmModal/);

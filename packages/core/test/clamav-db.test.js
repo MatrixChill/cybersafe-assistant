@@ -14,7 +14,9 @@ import {
   appClamavDatabaseDir,
   platformClamavDatabaseDir,
   SIGNATURE_MAX_AGE_MS,
+  spawnClamav,
 } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * P0-B1 — ClamAV signature database.
@@ -56,6 +58,25 @@ const CLAMSCAN_AVAILABLE = (() => {
     return false;
   }
 })();
+
+/**
+ * O spawner de PRODUÇÃO, com a PROVA DE CARGA respondida pelo harness.
+ *
+ * Os dois casos abaixo querem provar outra coisa: que uma base de ficheiros
+ * FALSOS (`main.cvd` com 1 byte) que o clamscan real recusa carregar (exit 2,
+ * `cl_load`) faz o motor descer a `degraded` com diagnóstico. Desde 3a95692 o
+ * `active` exige uma corrida de carga positiva, e essa corrida spawna pelo
+ * mesmo seam — com a base falsa, a prova falha ANTES do scan e `active` fica
+ * inalcançável, o que tornaria o caso impossível de exercitar.
+ *
+ * A resposta à prova é o único atalho: o SCAN continua real (mesmo
+ * `spawnClamav`, mesma base falsa, mesmo exit 2, mesma degradação observada).
+ * Não se afrouxa nenhuma asserção — só se deixa de medir a prova no lugar do
+ * scan.
+ */
+function scanRealComProvaRespondida() {
+  return (file, args, request) => (isLoadProof(request) ? makeLoadProofHandle() : spawnClamav(file, args, request));
+}
 
 let tmp;
 
@@ -361,7 +382,11 @@ describe("ClamavBridge — integração com o disco real", () => {
     // estado real antes do freshclam funcionar). O que interessa: o estado
     // tem de descer a degraded com o diagnóstico, e nunca dizer "active".
     const dir = await makeDb(path.join(tmp, "definitions", "clamav"), ["main.cvd"]);
-    const bridge = new ClamavBridge({ definitionsDir: path.join(tmp, "definitions"), datadir: dir });
+    const bridge = new ClamavBridge({
+      definitionsDir: path.join(tmp, "definitions"),
+      datadir: dir,
+      spawn: scanRealComProvaRespondida(),
+    });
     await bridge.isAvailable();
     assert.equal(bridge.datadir, dir, "a base explícita tem prioridade máxima");
     assert.equal(bridge.health.status, "active", "assinaturas presentes e frescas no disco ⇒ active");
@@ -489,7 +514,11 @@ describe("regressão do clamscan — flag e código de saída", () => {
   it("scanFile passa --database e o health degrada honestamente se a base não carregar", { skip: !CLAMSCAN_AVAILABLE }, async () => {
     const defs = path.join(tmp, "defs");
     const dir = await makeDb(path.join(defs, "clamav"), ["main.cvd", "daily.cld"]);
-    const bridge = new ClamavBridge({ definitionsDir: defs, datadir: dir });
+    const bridge = new ClamavBridge({
+      definitionsDir: defs,
+      datadir: dir,
+      spawn: scanRealComProvaRespondida(),
+    });
     await bridge.isAvailable(true);
     assert.equal(bridge.health.status, "active", "base com assinaturas frescas é active");
     assert.equal(bridge.datadir, dir);

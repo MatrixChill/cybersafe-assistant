@@ -21,6 +21,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { ClamavBridge, createSpawnClamav } from "../dist/index.js";
+import {
+  isLoadProof,
+  makeLoadProofHandle,
+  withLoadProofLease,
+} from "./fixtures/clamav-load-proof.js";
 
 /** Filho que, quando mata, NÃO emite `close` — a morte nunca é confirmada. */
 function makeStubbornChild(pid) {
@@ -70,12 +75,16 @@ describe("CODEX P1-1 achado 5 — sem gancho de prova de morte", () => {
     });
 
     const bridge = new ClamavBridge({
-      acquireDatabaseLease: () => ({
+      // A lease da prova de carga (chave `"load-proof"`) é sua: o contador
+      // `releases` é sobre o SCAN, e uma libertação da prova contaria como se o
+      // filho teimoso do scan tivesse confirmado a morte — passar pelo motivo
+      // errado é exatamente o que este ficheiro existe para impossibilitar.
+      acquireDatabaseLease: withLoadProofLease(() => ({
         release() {
           releases++;
         },
         released: false,
-      }),
+      })),
       // A handle sai SEM `onDeathConfirmed` — que é o spawner antigo, o
       // injectado, o que não tem o gancho. É o único cenário onde o `else`
       // corre, e é por isso que o `else` tem de estar certo.
@@ -85,7 +94,12 @@ describe("CODEX P1-1 achado 5 — sem gancho de prova de morte", () => {
       // spawner real recebia o executable como `file` e morria a meio, sem
       // spawnar nada. O teste falhava, mas por um motivo que não era o que
       // estava a testar.
+      //
+      // A prova de carga spawna por este MESMO seam. Sem o filtro ela criava o
+      // filho teimoso da prova (morte não confirmada → vaga envenenada → o scan
+      // nem chegava a nascer) e o `child` observado não era o do scan.
       spawn: (file, args, request) => {
+        if (isLoadProof(request)) return makeLoadProofHandle();
         const handle = base(file, args, request);
         return { pid: handle.pid, killTree: handle.killTree, outcome: handle.outcome };
       },

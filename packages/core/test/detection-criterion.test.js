@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { MalwareAnalyzer, SignatureDatabase, TrustEngine, YaraEngine } from "../dist/index.js";
+import { positiveControlMatchOrSkip } from "./fixtures/yara-av-denial.js";
 
 /**
  * O critério de ameaça. Regressões do P0 "scanner-detection-quality".
@@ -49,7 +50,7 @@ rule strong_probe { meta: cybersafe_evidence = "strong" strings: $a = "CS-STRONG
   assert.equal(strong.recommendedAction, "quarantined");
 });
 
-test("P2: EICAR hash and real YARA buffer match remain strong without writing EICAR to disk", async () => {
+test("P2: EICAR hash and real YARA buffer match remain strong without writing EICAR to disk", async (t) => {
   const signatures = new SignatureDatabase();
   await signatures.load(fileURLToPath(new URL("./missing-quality-hashes.json", import.meta.url)));
   const sha256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
@@ -57,7 +58,11 @@ test("P2: EICAR hash and real YARA buffer match remain strong without writing EI
   const yara = new YaraEngine();
   await yara.load(fileURLToPath(new URL("../../../definitions/yara/default.yar", import.meta.url)));
   const marker = Buffer.from(['X5O!P%@AP[4', '\\PZX54(P^)7CC)7}', '$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*'].join(''));
-  const matches = yara.match(marker);
+  // O antivírus da máquina pode negar ao yara64.exe a leitura deste alvo
+  // temporário. O harness só salta se medir exatamente essa causa e provar que
+  // o mesmo motor avalia um buffer benigno; qualquer outra falha continua FAIL.
+  const matches = positiveControlMatchOrSkip(t, yara, marker);
+  if (matches === null) return;
   assert.equal(matches.length, 1);
   assert.equal(matches[0].evidence, "strong");
   for (const input of [{ ...clean, signatureMatch: true }, { ...clean, yaraMatches: matches.length, strongYaraMatches: 1 }]) {

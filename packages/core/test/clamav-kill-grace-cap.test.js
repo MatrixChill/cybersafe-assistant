@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ClamavBridge, createSpawnClamav } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * P0 (Codex F1) - o grace do `killTree` LIBERTA A VAGA sem prova de morte.
@@ -166,9 +167,18 @@ async function newScenario(specs = [], { sessionFails = false } = {}) {
   const definitionsDir = await makeFakeReadyDefinitions(root);
   const children = [];
   const { hooks, state } = makeHooks({ specs, children, sessionFails });
+  // O spawner de produção, com o filho trocado.
+  const clamavSpawn = createSpawnClamav(hooks);
   const bridge = new ClamavBridge({
     definitionsDir,
-    spawn: createSpawnClamav(hooks),
+    // A prova de carga spawna por este seam com `scanId: "load-proof"`. Ela não
+    // pode consumir `specs[state.spawnCount]` nem entrar em `children`: os
+    // cenários-indexados por ordem de spawn e as asserções
+    // `children[0].state.killCalls` / `spawnCount` são sobre o filho do SCAN.
+    // A prova responde fora da simulação, com morte confirmada (nunca envenena
+    // a vaga que estes testes medem).
+    spawn: (file, args, request) =>
+      isLoadProof(request) ? makeLoadProofHandle() : clamavSpawn(file, args, request),
     scanTimeoutMs: 120,
   });
   const file = (name) => path.join(root, name);

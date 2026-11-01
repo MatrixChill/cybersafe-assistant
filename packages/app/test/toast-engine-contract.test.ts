@@ -45,6 +45,13 @@ const ENGINE_SRC = readFileSync(
   "utf8",
 );
 
+/** Lê `src/...` com o EOL do checkout irrelevante: o contrato é o conteúdo. */
+const ler = (...partes: string[]) =>
+  readFileSync(
+    path.resolve(fileURLToPath(new URL(".", import.meta.url)), "..", "src", ...partes),
+    "utf8",
+  ).replace(/\r\n/g, "\n");
+
 /**
  * Literais de template e de string do engine, com as interpolacoes
  * concretizadas. Um scanner de caracteres em vez de regex: uma regex para
@@ -171,24 +178,71 @@ describe("contrato service -> app: o summary do evento ja chega em PT-PT", () =>
     }
   });
 
-  test("App.tsx mostra o summary do service tal e qual", () => {
+  test("o toast mostra o summary do service tal e qual", () => {
     // Fecha o circulo pelo lado do render: o toast escreve o que o engine
     // mandou. Se alguem voltar a envolver o summary numa camada de traducao
     // na UI, este teste falha — e a correcao e desfazer a camada, nao
     // traduzir mais uma vez.
-    const appSrc = readFileSync(
-      path.resolve(fileURLToPath(new URL(".", import.meta.url)), "../src/App.tsx"),
-      "utf8",
-    ).replace(/\r\n/g, "\n");
+    //
+    // Para onde apontava (e porque deixou de apontar): o JSX do toast saiu do
+    // `App.tsx` e passou a viver em `components/SecurityEventMessage.tsx`, com
+    // o texto derivado em `lib/securityEventPresentation.ts`. O guard lia o
+    // App.tsx a procura de `{event.summary}` — um ponteiro, nao o contrato.
+    // Passa a afirmar o invariante nos tres ficheiros do caminho vivo:
+    //   1. o toast do App usa o renderizador partilhado de eventos de seguranca
+    //      (nao monta uma frase propria ao lado);
+    //   2. o summary cru do service chega ao DOM;
+    //   3. para um evento que nao e registo de processo, o titulo da
+    //      apresentacao e `original` — o summary, devolvido sem o tocar;
+    //   4. nao existe tabela de traducao no caminho de render.
+    // O que `securityEventPresentation` reescreve sao os registos de processo
+    // (`process.exited`/`process.killed`), e reescreve-os para NAO afirmar mais
+    // do que o service provou; nesses o registo original continua a ser
+    // publicado ao lado, em `{event.summary}` (SecurityEventMessage.tsx:9). Os
+    // eventos de seguranca — os unicos que trazem copy do engine para o toast —
+    // caem no ramo por defeito, onde o titulo e o summary verbatim.
+    const appSrc = ler("App.tsx");
+    const mensagemSrc = ler("components", "SecurityEventMessage.tsx");
+    const apresentacaoSrc = ler("lib", "securityEventPresentation.ts");
+
+    // Um guard que le um ficheiro vazio passa sempre. Os tres têem de existir.
+    assert.ok(
+      appSrc.length > 1000 && mensagemSrc.length > 200 && apresentacaoSrc.length > 200,
+      "o caminho de render do toast não foi lido",
+    );
+
     assert.match(
       appSrc,
+      /<SecurityEventMessage event=\{event\} \/>/,
+      "o toast tem de usar o renderizador partilhado do evento de segurança",
+    );
+    assert.match(
+      mensagemSrc,
       /\{event\.summary\}/,
       "o toast tem de renderizar o summary do service directamente",
     );
+    assert.match(
+      apresentacaoSrc,
+      /return\s*\{\s*text:\s*original\s*\|\|/,
+      "fora dos registos de processo, o título do toast tem de ser o summary cru",
+    );
+
+    // A camada removida nao pode voltar a aparecer no App.tsx — nem em mais
+    // nenhum ficheiro do caminho de render, como código: os comentarios sao
+    // retirados antes de procurar, porque documentar a historia nao e traduzir.
+    const codigoDoCaminho = [appSrc, mensagemSrc, apresentacaoSrc]
+      .join("\n")
+      .replace(/\/\*[\s\S]*?\*\//g, "");
     assert.doesNotMatch(
       appSrc,
       /translateToastSummary/,
       "a traducao de summary foi removida: nao pode voltar a aparecer no App.tsx",
     );
+    for (const ingles of ENGLISH_TOAST_SUMMARY) {
+      assert.ok(
+        !codigoDoCaminho.includes(ingles),
+        `apareceu "${ingles}" no caminho de render: uma camada de traducao voltou — a correcao e no service`,
+      );
+    }
   });
 });

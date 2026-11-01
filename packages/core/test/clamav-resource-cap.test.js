@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ClamavBridge, CLAMAV_ENGINE_PROCESS_NAMES } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * P0 — CLAMAV_RESOURCE_EXHAUSTION.
@@ -121,6 +122,12 @@ function makeFakeSpawner({ durationMs = 200, code = 0, neverFinishes = false, st
     state.spawned > 0 ? Promise.resolve() : new Promise((r) => spawnedWaiters.push(r));
 
   const spawn = (file, args, request) => {
+    // A prova de carga spawna por este mesmo seam (`scanId: "load-proof"`).
+    // Ela não é um scan: contar aqui faria `spawned`/`peak`/`liveCount` medirem
+    // a prova, e `neverFinishes` deixaria a prova pendurada 30 s. Responde
+    // limpa e invisível; o `active` continua a exigir a prova, só não se conta
+    // duas vezes.
+    if (isLoadProof(request)) return makeLoadProofHandle();
     state.spawned++;
     state.live++;
     state.peak = Math.max(state.peak, state.live);
@@ -321,7 +328,10 @@ describe("ClamavBridge — ausência de órfãos", () => {
 
   it("um spawn que falha não deixa nada para trás", async () => {
     let attempted = 0;
-    const spawn = () => {
+    const spawn = (_file, _args, request) => {
+      // A prova de carga spawna por este seam; `attempted` conta o spawn do
+      // SCAN que falhou, e é esse que tem de ser 1.
+      if (isLoadProof(request)) return makeLoadProofHandle();
       attempted++;
       const handle = {
         pid: 4242,

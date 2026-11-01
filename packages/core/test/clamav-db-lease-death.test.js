@@ -21,6 +21,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { ClamavBridge, createSpawnClamav } from "../dist/index.js";
+import {
+  isLoadProof,
+  makeLoadProofHandle,
+  withLoadProofLease,
+} from "./fixtures/clamav-load-proof.js";
 
 const SCAN_ARGS = ["--database=definitions", "C:\\scan\\alvo.exe"];
 
@@ -82,13 +87,17 @@ describe("CODEX P1-1 — a lease só se liberta com prova de morte", () => {
     };
 
     const bridge = new ClamavBridge({
-      acquireDatabaseLease: () => ({
+      // A prova de carga pede a lease com a chave `"load-proof"` e liberta-a no
+      // seu próprio `finally`. Contar essa libertação como se fosse a do scan é
+      // exatamente o "passar pelo motivo errado" que este ficheiro existe para
+      // evitar; por isso o pedido da prova tem lease própria.
+      acquireDatabaseLease: withLoadProofLease(() => ({
         release() {
           releases++;
         },
         released: false,
-      }),
-      spawn: () => child,
+      })),
+      spawn: (file, args, request) => (isLoadProof(request) ? makeLoadProofHandle() : child),
       spawnSync: () => ({ status: 0, stdout: "Scanned files: 1\nInfected files: 0\n", stderr: "", error: undefined }),
       probeIdentity: () => ({ row: null, probeFailed: true, detail: "sem identidade" }),
       captureIdentity: async () => ({ row: null, probeFailed: true, detail: "sem captura" }),
@@ -106,31 +115,41 @@ describe("CODEX P1-1 — a lease só se liberta com prova de morte", () => {
     let child = null;
     let releases = 0;
 
+    const clamavSpawn = createSpawnClamav({
+      spawn: () => {
+        child = makeStubbornChild(4242);
+        return child;
+      },
+      spawnSync: () => {
+        throw new Error("a terminação NÃO pode correr");
+      },
+      probeIdentity: () => ({ row: null, probeFailed: true, detail: "sem identidade" }),
+      captureIdentity: async () => ({ row: null, probeFailed: true, detail: "sem captura" }),
+    });
+
     const bridge = new ClamavBridge({
-      // A lease: conta quantas vezes foi libertada.
-      acquireDatabaseLease: () => ({
+      // A lease: conta quantas vezes foi libertada. O pedido da prova de carga
+      // (`"load-proof"`) tem lease própria: este contador é sobre o scan, e a
+      // prova liberta a dela no `finally` dela.
+      acquireDatabaseLease: withLoadProofLease(() => ({
         release() {
           releases++;
         },
         released: false,
-      }),
+      })),
       // O spawner é o de PRODUÇÃO (`createSpawnClamav`), com o filho trocado.
       //
       // A primeira versão deste teste passava um handle feito à mão, sem o
       // `whenDeathConfirmed` — e o gancho de produção nunca era exercitado. O
       // teste passou a provar o dublê, não o código. Aqui o handle é o real, e
       // o que é simulado é SÓ o processo.
-      spawn: createSpawnClamav({
-        spawn: () => {
-          child = makeStubbornChild(4242);
-          return child;
-        },
-        spawnSync: () => {
-          throw new Error("a terminação NÃO pode correr");
-        },
-        probeIdentity: () => ({ row: null, probeFailed: true, detail: "sem identidade" }),
-        captureIdentity: async () => ({ row: null, probeFailed: true, detail: "sem captura" }),
-      }),
+      //
+      // A prova de carga spawna pelo MESMO seam e, sem filtro, o filho
+      // teimoso dela envenenava a vaga ANTES do scan nascer — `child` ficava a
+      // apontar para o filho da prova e o teste media a prova. Ela responde
+      // fora da simulação, com morte confirmada.
+      spawn: (file, args, request) =>
+        isLoadProof(request) ? makeLoadProofHandle() : clamavSpawn(file, args, request),
     });
 
     // A ponte tem de ter assinaturas para chegar ao spawn.

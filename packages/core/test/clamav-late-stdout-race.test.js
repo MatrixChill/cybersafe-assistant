@@ -7,6 +7,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ClamavBridge, createSpawnClamav, isTrackedClamavPid } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * CODEX Scanner lifecycle — a cauda de stdout que chega DEPOIS do grace.
@@ -118,9 +119,15 @@ async function newScenario({ firstUnkillable = true } = {}) {
   const root = await fs.mkdtemp(path.join(os.tmpdir(), "cs-late-stdout-"));
   await makeFakeReadyDefinitions(root);
   const hooks = makeHooks({ pidBase: 50000, firstUnkillable });
+  const clamavSpawn = createSpawnClamav(hooks);
   const bridge = new ClamavBridge({
     definitionsDir: path.join(root, "definitions"),
-    spawn: createSpawnClamav(hooks),
+    // A prova de carga spawna pelo mesmo seam e, sem filtro, ficava com o
+    // índice 0 — que é precisamente o filho `firstUnkillable` do scan, o
+    // `children[0]` observado e a contagem de spawns. Ela responde fora da
+    // simulação; o primeiro filho passa a ser o do scan.
+    spawn: (file, args, request) =>
+      isLoadProof(request) ? makeLoadProofHandle() : clamavSpawn(file, args, request),
     scanTimeoutMs: 30,
   });
   return { root, hooks, bridge };

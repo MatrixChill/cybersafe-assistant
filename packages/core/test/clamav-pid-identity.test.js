@@ -14,6 +14,7 @@ import {
   expectedIdentityFor,
   parseTasklistImageName,
 } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * P1-2 — `killProcessTree()` mata por PID, e PID nao e identidade.
@@ -486,14 +487,21 @@ describe("integracao — a bridge com um PID ocupado por outrem", () => {
       return { status: 0 };
     };
     const probeIdentity = (pid) => ({ row: strangerRow(pid), probeFailed: false, detail: "simulado" });
+    const clamavSpawn = createSpawnClamav({
+      spawn: spawnFn,
+      spawnSync,
+      probeIdentity,
+      captureIdentity: async () => ({ row: null, probeFailed: true, detail: "CIM indisponivel" }),
+    });
     const bridge = new ClamavBridge({
       definitionsDir,
-      spawn: createSpawnClamav({
-        spawn: spawnFn,
-        spawnSync,
-        probeIdentity,
-        captureIdentity: async () => ({ row: null, probeFailed: true, detail: "CIM indisponivel" }),
-      }),
+      // A prova de carga passa pelo MESMO seam. Este caso afirma "um clamscan
+      // cuja morte não foi confirmada não pode dar lugar a um segundo" e conta
+      // spawns/filhos: a prova tem de responder fora desta simulação (sem
+      // filho, sem sessão de terminação) ou o `spawnCount === 1` mediria a
+      // prova, não o scan.
+      spawn: (file, args, request) =>
+        isLoadProof(request) ? makeLoadProofHandle() : clamavSpawn(file, args, request),
       scanTimeoutMs: 120,
     });
 

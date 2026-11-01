@@ -8,6 +8,14 @@ para eles.
 > **Base de código:** `MatrixChill/cybersafe-assistant` @ `212cb64c39f74f547d4ebc6c8bff7cc5bcbcdf56`
 > **Candidata ensaiada:** `0.1.10-internal.pap-r5.20261031` — SHA-256 `46718BCD9C5EE712D9E4C663B81AA2FED3317E65C3799F500255D33FB6E5BD75`, 491 414 411 B, `NotSigned`, `NOT_FOR_DISTRIBUTION`
 
+> **Âmbito deste documento — lê-lo antes de citar qualquer linha.** É um instantâneo de
+> 2026-10-31 sobre a base `212cb64` (que é hoje o `main` remoto) e sobre a candidata R5. Tudo o
+> que aqui aparece como «defeito» ou «pendente» descreve **essa** revisão. Desde então existem
+> candidatas R6 (`0.1.10-internal.pap-r6.20261031`, preservada, não substituída) e a identidade
+> canónica R7 (`0.1.11-internal.pap-r7.20261031`), com código corrigido que ainda não tem
+> instalador publicado. Para o estado efetivo de hoje, a fonte é `README.md` + `CHANGELOG.md`;
+> este documento não foi re-medido e não deve ser usado como prova de estado atual.
+
 ---
 
 ## 1. Factos tecnicamente comprovados

@@ -28,6 +28,7 @@ import * as path from "node:path";
 import * as os from "node:os";
 
 import { ClamavBridge, parseClamavOutput } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Spawner falso
@@ -51,7 +52,12 @@ Data scanned: 132 B
  */
 function fakeSpawn(stdout, stderr, code, opts = {}) {
   const calls = { count: 0, killed: 0, live: 0, peak: 0 };
-  const spawn = () => {
+  const spawn = (_file, _args, request) => {
+    // PROVA DE CARGA (`scanId: "load-proof"`): responde com evidência coerente
+    // para que `active` seja alcançável, mas NÃO entra em `count`/`live`/`peak`
+    // — este ficheiro afirma "UM spawn por batch e pico 1", e contar a prova
+    // faria a asserção medir a prova em vez do batch.
+    if (isLoadProof(request)) return makeLoadProofHandle();
     calls.count++;
     calls.live++;
     calls.peak = Math.max(calls.peak, calls.live);

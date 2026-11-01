@@ -1,11 +1,13 @@
 import { describe, it, beforeEach, afterEach } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
+import { EventEmitter } from "node:events";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
 import { ClamavBridge } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * P0 SCANNER_REAL_BATCH_STALL — o batch de ClamAV nunca arranca num scan grande.
@@ -49,6 +51,10 @@ async function makeFakeReadyDefinitions(root) {
 function makeRecordingSpawner({ stdoutFor } = {}) {
   const state = { calls: [], live: 0, peak: 0 };
   const spawn = (_file, args, request) => {
+    // A prova de carga spawna por este seam com `scanId: "load-proof"`. Não é
+    // um batch: não entra em `calls` (que é o argv que este ficheiro mede) nem
+    // em `live`/`peak`. Responde com evidência coerente para `active` existir.
+    if (isLoadProof(request)) return makeLoadProofHandle();
     state.calls.push({ args, request });
     state.live++;
     state.peak = Math.max(state.peak, state.live);
@@ -139,6 +145,7 @@ describe("P0 SCANNER_REAL_BATCH_STALL — o argv não pode levar os caminhos", (
     let lista = null;
     let conteudoDuranteOScan = null;
     const spySpawn = (file, args, request) => {
+      if (isLoadProof(request)) return fake.spawn(file, args, request);
       // Ler AGORA: no fim do scan a lista já foi apagada (e tem de estar).
       const flag = args.find((a) => a.startsWith("--file-list="));
       lista = flag ? flag.slice("--file-list=".length) : null;
@@ -169,6 +176,7 @@ describe("P0 SCANNER_REAL_BATCH_STALL — o argv não pode levar os caminhos", (
     const fake = makeRecordingSpawner({ stdoutFor: () => ficheiros.map((p) => `${p}: OK`) });
     let lista = null;
     const spySpawn = (file, args, request) => {
+      if (isLoadProof(request)) return fake.spawn(file, args, request);
       const flag = args.find((a) => a.startsWith("--file-list="));
       if (flag) lista = flag.slice("--file-list=".length);
       return fake.spawn(file, args, request);

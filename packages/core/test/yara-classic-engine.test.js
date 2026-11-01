@@ -301,6 +301,51 @@ rule empty_bytes { condition: filesize == 0 }
     assert.throws(() => scanner.scan(Buffer.from("BENIGN-OUTPUT-FIX")), /output|saída/i);
   });
 
+  it("falha do subprocesso leva o stderr do yara para o erro, não só o exit code", () => {
+    // O alvo do `scan` é escrito pelo próprio motor, por isso esta falha é
+    // provocada pelas REGRAS apontarem para um DIRECTÓRIO: benigno,
+    // determinístico e definitivamente não abrível como ficheiro. Medido com o
+    // binário vendorizado: exit 1 e, em stderr, "error: could not open file:
+    // <caminho>" — exatamente o texto que antes era descartado. Nada de EICAR.
+    const dir = tmpdir();
+    const rulesAsDirectory = path.join(dir, "regras-como-diretorio");
+    fs.mkdirSync(rulesAsDirectory, { recursive: true });
+    const scanner = createYaraClassicScanner({ rulesPath: rulesAsDirectory, binaries });
+    assert.throws(
+      () => scanner.scan(Buffer.from("BENIGN-DIAGNOSTIC-STDERR")),
+      (error) => {
+        assert.match(error.message, /YARA scan falhou \(prazo\/processo\/output\)/);
+        assert.match(error.message, /ficheiro NÃO avaliado/, "continua a dizer que não avaliou");
+        // O diagnóstico específico, que o exit code 1 não dava:
+        assert.match(error.message, /could not open file/);
+        assert.match(error.message, /regras-como-diretorio/, "é o stderr desta execução");
+        return true;
+      },
+    );
+  });
+
+  it("stderr longo chega aparado à primeira linha, nunca despejado na excepção", () => {
+    // Medido: um ficheiro de regras com 30 erros escreve 4 811 caracteres. O
+    // tecto do erro é a primeira linha + 400 caracteres de `firstDiagnosticLine`,
+    // não os 4 MiB de `MAX_CAPTURED_OUTPUT` (que é o que se CAPTA do filho).
+    const dir = tmpdir();
+    const brokenRules = path.join(dir, "muitos-erros.yar");
+    fs.writeFileSync(
+      brokenRules,
+      Array.from({ length: 30 }, (_, i) => `rule Errored_${i} { condicao invalida aqui }`).join("\n"),
+      "utf-8",
+    );
+    const scanner = createYaraClassicScanner({ rulesPath: brokenRules, binaries });
+    let message = "";
+    assert.throws(() => scanner.scan(Buffer.from("BENIGN-TRUNCATION-FIX")), (error) => {
+      message = error.message;
+      return true;
+    });
+    assert.match(message, /syntax error/, "a primeira linha do yara está presente");
+    assert.equal(message.includes("Errored_5"), false, "as linhas seguintes não são despejadas");
+    assert.ok(message.length < 1000, `diagnóstico aparado; mensagem com ${message.length} caracteres`);
+  });
+
   it("console.log do motor real nao pode ser interpretado como regra ou alvo", async () => {
     const { dir, scanner } = scannerFor('import "console"\nrule log_only { condition: console.log("BAD-PARSER-LINE") and false }');
     const file = write(dir, "benigno.txt", "BENIGN-CONSOLE-FIX");

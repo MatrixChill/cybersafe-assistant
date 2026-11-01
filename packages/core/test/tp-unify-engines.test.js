@@ -17,6 +17,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 import { EventEmitter } from "node:events";
 import { ClamavBridge, MalwareAnalyzer, SignatureDatabase, TrustEngine, parseClamavOutput } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 let dir;
 let file;
@@ -222,7 +223,10 @@ describe("clamav.ts — limites internos", () => {
  */
 function recordingSpawner(stdoutFor) {
   const calls = [];
-  const spawn = (_file, args) => {
+  const spawn = (_file, args, request) => {
+    // A prova de carga (`scanId: "load-proof"`) spawna por este seam. Ela não
+    // é uma invocação de scan: `calls` é o argv do batch que este caso mede.
+    if (isLoadProof(request)) return makeLoadProofHandle();
     calls.push(args);
     let resolveOutcome;
     let dead = false;

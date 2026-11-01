@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ClamavBridge, createSpawnClamav, classifyProcessIdentity, expectedIdentityFor } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * OS 9 CASOS DO CONTRATO DO UTILIZADOR (2026-10-03) - casos 7, 8 e 9.
@@ -106,6 +107,24 @@ async function makeDefinitions() {
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+/**
+ * Spawner de bridge com a PROVA DE CARGA filtrada.
+ *
+ * Desde 3a95692 o `active` exige uma corrida benigna (`runLoadProof`) que spawna
+ * pelo MESMO seam, com `scanId: "load-proof"`. Sem este filtro, o filho da prova
+ * ficava com o índice 0 do `spawnFn` (e com o `firstUnkillable`/`children[0]`
+ * observados); e como aqui a identidade é sempre UNKNOWN, a prova envenenava a
+ * vaga ANTES do scan — o caso 8a passava a ver o `POISONED_SCAN_DETAIL` do scan
+ * seguinte em vez da mensagem do scan que efectivamente não confirmou a morte.
+ * A prova responde fora da simulação, com morte confirmada; os casos 7/8/9
+ * continuam a ser exercitados pelo caminho de produção.
+ */
+function bridgeSpawn(hooks) {
+  const clamavSpawn = createSpawnClamav(hooks);
+  return (file, args, request) =>
+    isLoadProof(request) ? makeLoadProofHandle() : clamavSpawn(file, args, request);
+}
+
 describe("CONTRATO 7 - UNKNOWN nunca mata", () => {
   it("7a - o veredicto puro: sem identidade capturada, `ours` e INALCANCAVEL", () => {
     // Nao ha via de chegar a `ours` sem `capturedCreated`: e a identidade real
@@ -194,7 +213,7 @@ describe("CONTRATO 8 - UNKNOWN durante o cleanup => poisoned / unavailable", () 
     };
     const bridge = new ClamavBridge({
       definitionsDir,
-      spawn: createSpawnClamav({
+      spawn: bridgeSpawn({
         spawn: spawnFn,
         spawnSync: () => ({ status: 0 }),
         captureIdentity: async () => ({ row: null, probeFailed: true, detail: "CIM indisponivel" }),
@@ -248,7 +267,7 @@ describe("CONTRATO 8 - UNKNOWN durante o cleanup => poisoned / unavailable", () 
     };
     const bridge = new ClamavBridge({
       definitionsDir,
-      spawn: createSpawnClamav({
+      spawn: bridgeSpawn({
         spawn: spawnFn,
         spawnSync: () => ({ status: 0 }),
         captureIdentity: async () => ({ row: null, probeFailed: true, detail: "CIM indisponivel" }),
@@ -302,7 +321,7 @@ describe("CONTRATO 9 - poisoned impede um segundo clamscan", () => {
     };
     const envenenado = new ClamavBridge({
       definitionsDir,
-      spawn: createSpawnClamav({
+      spawn: bridgeSpawn({
         spawn: spawnFn,
         spawnSync: () => ({ status: 0 }),
         captureIdentity: async () => ({ row: null, probeFailed: true, detail: "CIM indisponivel" }),
@@ -314,7 +333,7 @@ describe("CONTRATO 9 - poisoned impede um segundo clamscan", () => {
     let spawnsDaBridgeNova = 0;
     const nova = new ClamavBridge({
       definitionsDir,
-      spawn: createSpawnClamav({
+      spawn: bridgeSpawn({
         spawn: () => {
           spawnsDaBridgeNova++;
           return makeFakeChild(34000 + spawnsDaBridgeNova);

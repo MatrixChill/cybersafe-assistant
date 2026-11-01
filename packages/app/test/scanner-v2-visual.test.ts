@@ -224,12 +224,55 @@ test("o bloco do Scanner só usa tokens, nunca cor literal", () => {
   assert.match(bloco, /var\(--shell-radius-card\)/, "o raio não vem da métrica do shell");
 });
 
+/**
+ * As regras do bloco do Scanner, e só elas.
+ *
+ * `slice(indexOf("CS-V2 · SCANNER"))` ia até ao fim do `index.css`: a partir
+ * dalí o ficheiro recebe outros patches (POST017 acrescentou
+ * `padding-bottom: var(--matrix-floating-clearance, 0px)` a `[data-cs-main]`,
+ * com token medido em runtime pelo `AIAssistant.tsx:2022`), e o guard do
+ * Scanner passou a acusar CSS que nunca foi seu. O contrato sempre foi
+ * «o que ESTE bloco escreve»; por isso se recortam as regras de topo cujo
+ * seletor — ou o corpo, no caso de `@supports`/`@media` — nomeia `cs-scanner`.
+ * Os comentários ficam fora: o contrato são declarações, não prosa.
+ */
+function regrasDoScanner(css: string): string {
+  const inicio = css.indexOf("CS-V2 · SCANNER");
+  assert.ok(inicio > 0, "não há bloco CS-V2 · SCANNER");
+  const corpo = css.slice(inicio).replace(/\/\*[\s\S]*?\*\//g, "");
+  const regras: string[] = [];
+  let profundidade = 0;
+  let abreEm = -1;
+  let cursor = 0;
+  for (let i = 0; i < corpo.length; i++) {
+    const ch = corpo[i];
+    if (ch === "{") {
+      if (profundidade === 0) abreEm = i;
+      profundidade++;
+    } else if (ch === "}") {
+      profundidade--;
+      if (profundidade === 0 && abreEm >= 0) {
+        const seletor = corpo.slice(cursor, abreEm);
+        const bloco = corpo.slice(abreEm, i + 1);
+        if (`${seletor}${bloco}`.includes("cs-scanner")) regras.push(`${seletor}${bloco}`);
+        cursor = i + 1;
+        abreEm = -1;
+      }
+    }
+  }
+  return regras.join("\n");
+}
+
 test("o bloco não acrescenta movimento nem espaçamento", () => {
   // O produto ainda não tem escala de spacing nem tokens de duração: enquanto
   // não existirem, nada neste patch os inventa.
-  const bloco = texto(CSS).slice(texto(CSS).indexOf("CS-V2 · SCANNER"));
+  const regras = regrasDoScanner(texto(CSS));
+  // Não-vacuidade: um recorte que devolvesse nada passaria sempre, que é a
+  // pior forma de um guard errar.
+  assert.ok(regras.includes("cs-scanner-tile"), "o recorte não apanhou as regras do Scanner");
+  assert.ok(/var\(--surface-inset\)/.test(regras), "o recorte não apanhou as superfícies do Scanner");
   for (const proibido of ["margin", "padding", "transition", "animation", "gap:"] as const) {
-    assert.equal(new RegExp(`\\b${proibido}`).test(bloco), false, `o bloco declara ${proibido}`);
+    assert.equal(new RegExp(`\\b${proibido}`).test(regras), false, `o bloco declara ${proibido}`);
   }
 });
 

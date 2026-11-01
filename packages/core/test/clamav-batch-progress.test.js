@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ClamavBridge, spawnClamav } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * P0 SCANNER_REAL_BATCH_STALL — PROGRESSO REAL durante o batch.
@@ -77,13 +78,19 @@ function bridgeWithFakeChild(options) {
   const bridge = new ClamavBridge({
     definitionsDir: options.definitionsDir,
     // Passa pelo `createSpawnClamav` real: só aí é que o stdout é lido.
-    spawn: (file, args, request) =>
-      spawnClamav(file, args, request, {
+    spawn: (file, args, request) => {
+      // A PROVA DE CARGA spawna por este mesmo seam. Se ela passar pelo
+      // `nodeSpawn`, `getChild()` trava no filho da prova (que não emite o
+      // stdout do scan) e o teste conta a prova em vez do batch. Respondemos
+      // fora do spawner simulado: o único filho observado passa a ser o do scan.
+      if (isLoadProof(request)) return makeLoadProofHandle();
+      return spawnClamav(file, args, request, {
         spawn: nodeSpawn,
         spawnSync: () => ({ status: 0, stdout: "", stderr: "" }),
         probeIdentity: () => ({ row: null, probeFailed: true, detail: "seam de teste" }),
         captureIdentity: () => Promise.resolve({ row: null, probeFailed: true, detail: "seam de teste" }),
-      }),
+      });
+    },
     scanTimeoutMs: 30_000,
   });
   return { bridge, getChild: () => child };

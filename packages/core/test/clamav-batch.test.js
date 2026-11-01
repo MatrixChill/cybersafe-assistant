@@ -6,6 +6,7 @@ import os from "node:os";
 import path from "node:path";
 
 import { ClamavBridge } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
 
 /**
  * FASE 4 (P0 CLAMAV_RESOURCE_EXHAUSTION) — batch: N ficheiros, 1 invocação.
@@ -61,7 +62,12 @@ const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 /** Spawner falso: conta invocações e concorrência. Serve para o Isolamento. */
 function makeCountingSpawner({ stdout = "", code = 0, durationMs = 50 } = {}) {
   const state = { spawned: 0, live: 0, peak: 0, argsSeen: [] };
-  const spawn = (_file, args, _request) => {
+  const spawn = (_file, args, request) => {
+    // A PROVA DE CARGA spawna por este mesmo seam com `scanId: "load-proof"`.
+    // Respondemos com um resultado coerente (para que `active` exista) mas sem
+    // a registar: este ficheiro afirma "1 spawn por batch" e lê o argv do
+    // batch — se a prova contar, mede-se a prova em vez do scan.
+    if (isLoadProof(request)) return makeLoadProofHandle();
     state.spawned++;
     state.live++;
     state.peak = Math.max(state.peak, state.live);

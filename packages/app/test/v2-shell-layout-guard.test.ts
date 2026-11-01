@@ -106,11 +106,49 @@ describe("faixa V2 do conteúdo (D2b) liga estado real", () => {
   const menu = read("v2", "theme-menu.tsx");
 
   test("o seletor de tema é o eixo do contexto, não um estado próprio", () => {
+    // O que este guard protege é o nome dele: o menu não pode ter um segundo
+    // estado de tema nem um espelho local. A versão anterior fixava
+    // `value={prefs.theme}` e `setTheme(event.target.value as V2Theme)` — o
+    // markup de um `<select>` nativo. O menu passou a ser um listbox acessível
+    // (botão + `aria-selected`), que escreve por `setTheme(tema)` ao escolher a
+    // opção; o `<select>` e o `event.target.value` desapareceram com ele. O
+    // contrato não era a tag, era a posse do estado, por isso afirma-se agora
+    // sobre a posse: leitura do contexto, escrita pelo contexto, e nenhum
+    // `useState` a nomear ou a semear-se no tema.
     assert.match(menu, /useAppearance\(\)/);
-    assert.match(menu, /value=\{prefs\.theme\}/);
-    assert.match(menu, /setTheme\(event\.target\.value as V2Theme\)/);
-    assert.match(menu, /V2_THEME_ORDER\.map/);
-    assert.equal(/useState/.test(menu), false, "o menu não pode duplicar o estado do tema");
+    assert.match(
+      menu,
+      /const \{ prefs, setTheme \} = useAppearance\(\)/,
+      "o menu tem de ler e escrever o mesmo eixo do AppearanceContext",
+    );
+
+    // A seleção mostrada/marcada vem sempre de `prefs.theme`: o identificador
+    // comparado com as opções tem de ser uma leitura direta do contexto.
+    const leitura = /const (\w+) = prefs\.theme\b/.exec(menu);
+    assert.ok(leitura, "a opção marcada tem de ser derivada de prefs.theme");
+    const selecionado = leitura[1];
+    assert.ok(
+      new RegExp(`===\\s*${selecionado}\\b`).test(menu),
+      "as opções não comparam a seleção com a leitura do contexto",
+    );
+
+    assert.match(menu, /setTheme\(/, "escrever o tema só pelo contexto");
+    assert.match(menu, /V2_THEME_ORDER\.map/, "o menu tem de percorrer os temas todos");
+
+    // Espelho local: qualquer `useState` cujo nome, tipo ou valor inicial
+    // diga respeito ao tema duplica o eixo — era exatamente o defeito.
+    const espelhos = [...menu.matchAll(/const \[(\w+), (\w+)\] = useState([^\n]*)/g)]
+      .filter(([, getter, setter, inicial]) =>
+        /theme|tema/i.test(`${getter}${setter}${inicial}`) || /\bprefs\b|V2Theme/.test(inicial))
+      .map((m) => m[0].trim());
+    assert.deepEqual(espelhos, [], "o menu não pode duplicar o estado do tema");
+    for (const setter of [...menu.matchAll(/const \[\w+, (\w+)\] = useState/g)].map((m) => m[1])) {
+      assert.equal(
+        new RegExp(`${setter}\\((?:[^)\\n]*)(?:theme|Theme|tema)`).test(menu),
+        false,
+        `\`${setter}\` recebe o tema: isso é um espelho local do eixo`,
+      );
+    }
   });
 
   test("o App importa a peça, não os dados de identidade", () => {

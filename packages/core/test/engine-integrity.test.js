@@ -15,6 +15,7 @@ import {
   engineIsDegraded,
   scoreToStatus,
 } from "../dist/index.js";
+import { positiveControlMatchOrSkip } from "./fixtures/yara-av-denial.js";
 
 // Marker benigno, sem assinatura conhecida pelo Windows Defender.
 // O teste prova o carregamento e a execucao de regras YARA, nao uma deteccao
@@ -122,7 +123,7 @@ describe("YARA engine integrity", () => {
     );
   });
 
-  test("ficheiro corrompido (JSON) reporta degradado e usou fallback, nunca falha em silêncio", async () => {
+  test("ficheiro corrompido (JSON) reporta degradado e usou fallback, nunca falha em silêncio", async (t) => {
     const badPath = path.join(tmpDir, "corrupt.json");
     await fs.writeFile(badPath, '[{"sha256":"404-not-found"}]', "utf-8");
 
@@ -167,7 +168,13 @@ describe("YARA engine integrity", () => {
     const eicarFile = Buffer.from(
       "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
     );
-    assert.equal(engine.match(eicarFile).length, 1, "o scanner tem de funcionar sobre o canário");
+    // O antivírus da máquina pode negar ao yara64.exe a leitura do alvo
+    // temporário deste conteúdo. `positiveControlMatchOrSkip` salta SÓ com essa
+    // causa medida e com o mesmo motor a avaliar um buffer benigno; sem isso é
+    // FAIL, porque o pipeline estaria partido.
+    const canario = positiveControlMatchOrSkip(t, engine, eicarFile);
+    if (canario === null) return;
+    assert.equal(canario.length, 1, "o scanner tem de funcionar sobre o canário");
 
     // E o detalhe tem de dizer que está em modo canário, para que "a analisar
     // com regras de teste" nunca seja lido como "a analisar com regras de malware".
@@ -190,7 +197,9 @@ describe("YARA engine integrity", () => {
     // O scanner tem de continuar a funcionar depois do restart, não apenas
     // reportar um estado. Um motor degradado que deixou de analisar não é
     // "degradado", é avariado com uma etiqueta mais simpática.
-    assert.equal(afterRestart.match(eicarFile).length, 1, "o scanner tem de funcionar após o restart");
+    const aposRestart = positiveControlMatchOrSkip(t, afterRestart, eicarFile);
+    if (aposRestart === null) return;
+    assert.equal(aposRestart.length, 1, "o scanner tem de funcionar após o restart");
     assert.equal(
       afterRestart.match(Buffer.from("powershell.exe -enc SQBFAFgA cmd.exe /c dir")).length,
       0,
@@ -253,7 +262,7 @@ describe("YARA engine integrity", () => {
     );
   });
 
-  test("canário persistido com marker e sintaxe corrompida recupera do canário canónico", async () => {
+  test("canário persistido com marker e sintaxe corrompida recupera do canário canónico", async (t) => {
     // O caso que faltava. Num arranque anterior o motor escreveu o canário em
     // disco. O utilizador, um sincronizador, ou um disco com sectores maus
     // corrompem esse ficheiro: o marker do canário sobrevive, a sintaxe não.
@@ -294,7 +303,11 @@ describe("YARA engine integrity", () => {
     const eicarFile = Buffer.from(
       "X5O!P%@AP[4\\PZX54(P^)7CC)7}$EICAR-STANDARD-ANTIVIRUS-TEST-FILE!$H+H*"
     );
-    assert.equal(engine.match(eicarFile).length, 1, "o canário reconstruído tem de funcionar");
+    // Mesma distinção do teste do canário: negação de leitura do alvo pelo
+    // antivírus da máquina (medido) é SKIP; pipeline partido continua FAIL.
+    const canarioRecuperado = positiveControlMatchOrSkip(t, engine, eicarFile);
+    if (canarioRecuperado === null) return;
+    assert.equal(canarioRecuperado.length, 1, "o canário reconstruído tem de funcionar");
     assert.equal(
       engine.match(Buffer.from("powershell.exe -enc SQBFAFgA cmd.exe /c dir")).length,
       0,

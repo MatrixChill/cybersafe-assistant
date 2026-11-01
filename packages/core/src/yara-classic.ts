@@ -50,6 +50,7 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { firstDiagnosticLine } from "./response.js";
 
 /** Versão vendorizada (release oficial com binários win64 publicados). */
 export const YARA_CLASSIC_VERSION = "4.6.0";
@@ -474,6 +475,25 @@ function positiveLimit(value: number, name: string): number {
   return value;
 }
 
+/**
+ * O diagnóstico que o PRÓPRIO yara escreveu, para colar na excepção.
+ *
+ * ── Porque é preciso ───────────────────────────────────────────────────────
+ * Um exit code 1 não distingue "o yara não conseguiu abrir o alvo" (é o que
+ * fazem os antivírus da máquina: negam ao processo filho a leitura de um ficheiro
+ * com conteúdo de teste de malware) de "prazo vencido" ou "processo morto". O
+ * operador fica com `1` e não pode concluir nada. A mensagem continua a dizer
+ * que o ficheiro NÃO foi avaliado — nada disto transforma a falha em limpo.
+ *
+ * O aparamento é o de `firstDiagnosticLine` (primeira linha não vazia, 400
+ * caracteres): `MAX_CAPTURED_OUTPUT` (4 MiB) é o tecto do que se CAPTA do
+ * subprocesso, não o que se pode escrever numa excepção. Medido com o corpus
+ * vendorizado: um ficheiro de regras com 30 erros escreve 4 811 caracteres.
+ */
+function yaraDiagnostic(stdout: string | null | undefined, stderr: string | null | undefined): string {
+  return firstDiagnosticLine(stdout ?? "", stderr ?? "");
+}
+
 /** Um alvo é sempre um ficheiro; diretórios e PIDs não fazem parte deste contrato. */
 function checkedTarget(filePath: string): string {
   const target = path.resolve(filePath);
@@ -493,7 +513,12 @@ export function createYaraClassicScanner(options: YaraClassicScannerOptions): Ya
     "-w", "-N", "-a", String(Math.max(1, Math.ceil(deadline / 1000))), rulesPath, target,
   ];
   const parseResult = (stdout: string, stderr: string, target: string): YaraClassicMatch[] => {
-    if (stderr !== "") throw new Error("YARA stderr não vazio; ficheiro NÃO avaliado.");
+    if (stderr !== "") {
+      const diagnostic = yaraDiagnostic(stdout, stderr);
+      throw new Error(
+        `YARA stderr não vazio; ficheiro NÃO avaliado${diagnostic ? ` — yara: ${diagnostic}` : ""}.`,
+      );
+    }
     return parseYaraScanOutput(stdout, options.meta, target);
   };
 
@@ -508,7 +533,14 @@ export function createYaraClassicScanner(options: YaraClassicScannerOptions): Ya
         windowsHide: true, shell: false, maxBuffer: outputLimit,
       });
       if (result.error || result.signal || result.status !== 0) {
-        throw new Error(`YARA scan falhou (prazo/processo/output); ficheiro NÃO avaliado: ${result.error?.message ?? result.signal ?? result.status}`);
+        // Falhou ANTES de qualquer parsing: o resultado não existe e o erro tem
+        // de dizer o que o yara escreveu, não apenas o código de saída.
+        const diagnostic = yaraDiagnostic(result.stdout, result.stderr);
+        throw new Error(
+          `YARA scan falhou (prazo/processo/output); ficheiro NÃO avaliado: ` +
+            `${result.error?.message ?? result.signal ?? result.status}` +
+            (diagnostic ? ` — yara: ${diagnostic}` : ""),
+        );
       }
       if (Buffer.byteLength(result.stdout) + Buffer.byteLength(result.stderr) > outputLimit) {
         throw new Error("YARA output excedeu o limite; ficheiro NÃO avaliado.");
@@ -591,7 +623,18 @@ export function createYaraClassicScanner(options: YaraClassicScannerOptions): Ya
         settled = true;
         cleanup();
         if (signal || code !== 0) {
-          reject(new YaraClassicScanError("process-error", "YARA terminou com erro; ficheiro NÃO avaliado.", child.pid, true));
+          // Mesmo contrato do `scanBuffer`: o `detail` deste desfecho chega ao
+          // operador, por isso leva o que o yara escreveu e não só o exit code.
+          const diagnostic = yaraDiagnostic(
+            Buffer.concat(stdout).toString("utf8"),
+            Buffer.concat(stderr).toString("utf8"),
+          );
+          reject(new YaraClassicScanError(
+            "process-error",
+            `YARA terminou com erro${diagnostic ? ` — yara: ${diagnostic}` : ""}; ficheiro NÃO avaliado.`,
+            child.pid,
+            true,
+          ));
           return;
         }
         try { resolve(parseResult(Buffer.concat(stdout).toString("utf8"), Buffer.concat(stderr).toString("utf8"), target)); }

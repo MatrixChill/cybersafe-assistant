@@ -18,6 +18,11 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import { ClamavBridge, createSpawnClamav } from "../dist/index.js";
+import {
+  isLoadProof,
+  makeLoadProofHandle,
+  withLoadProofLease,
+} from "./fixtures/clamav-load-proof.js";
 
 describe("CODEX P1-1 achado 1 — `error` com filho vivo", () => {
   let tmpDir;
@@ -66,13 +71,19 @@ describe("CODEX P1-1 achado 1 — `error` com filho vivo", () => {
     });
 
     const bridge = new ClamavBridge({
-      acquireDatabaseLease: () => ({
+      // Lease da prova de carga fora da contagem: `releases` conta a lease do
+      // SCAN (é o `error` com filho vivo que se quer verificar).
+      acquireDatabaseLease: withLoadProofLease(() => ({
         release() {
           releases++;
         },
         released: false,
-      }),
-      spawn: base,
+      })),
+      // A prova spawna pelo mesmo seam: sem filtro, o filho que emite `error`
+      // era o da prova, a vaga envenenava antes do scan e `child` não era o
+      // clamscan que este caso afirma ter nascido.
+      spawn: (file, args, request) =>
+        isLoadProof(request) ? makeLoadProofHandle() : base(file, args, request),
       spawnSync: () => {
         throw new Error("a terminação NÃO pode correr");
       },
