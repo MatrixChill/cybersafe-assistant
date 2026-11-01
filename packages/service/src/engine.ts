@@ -2336,8 +2336,9 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     filePath: string,
     reason: string,
     inconclusiveReason: import("@cybersafe/shared-types").InconclusiveReason = "no-verdict",
+    inconclusiveEngine: import("@cybersafe/shared-types").InconclusiveEngine = "filesystem",
   ): ServiceResponseMap["scan.artifact"] {
-    const result = { fileName:path.basename(filePath),size:0,severity:"low" as const,confidence:0,rulesTriggered:[],riskScore:0,verdict:"inconclusive" as const,sha256:"",analysisState:"failed" as const,inconclusiveReason,detail:reason };
+    const result = { fileName:path.basename(filePath),size:0,severity:"low" as const,confidence:0,rulesTriggered:[],riskScore:0,verdict:"inconclusive" as const,sha256:"",analysisState:"failed" as const,inconclusiveReason,inconclusiveEngines:[inconclusiveEngine],detail:reason };
     this.eventBus.publish("artifact.analyzed", "low", reason, {...result,artifactPath:filePath,reason});
     return {results:[result],totalFiles:1,highRiskCount:0,overallSeverity:"low",rulesTriggered:[],riskScore:0};
   }
@@ -3229,6 +3230,11 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           : analysis.factors.some((factor) => ["clamav-inconclusive", "yara-inconclusive"].includes(factor.id)) ? "engine-failed"
           : upstreamIncomplete ? "coverage-incomplete"
           : undefined;
+      const inconclusiveEngines: import("@cybersafe/shared-types").InconclusiveEngine[] = [
+        ...(!nativeCompleted ? ["native" as const] : []),
+        ...(analysis.factors.some((factor) => factor.id === "clamav-inconclusive") ? ["clamav" as const] : []),
+        ...(analysis.factors.some((factor) => ["yara-inconclusive", "yara-timeout"].includes(factor.id)) ? ["yara" as const] : []),
+      ];
       const coverageDetail = nativeDetail ?? (upstreamIncomplete
         ? "Pelo menos um motor não conseguiu avaliar o ficheiro; a deteção disponível foi preservada, mas a cobertura é inconclusiva."
         : undefined);
@@ -3281,7 +3287,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
       }
 
-      this.eventBus.publish("artifact.analyzed", finalSeverity, `Analisado ${analysis.fileName}`, { ...analysis, vtResult, analysisState, inconclusiveReason, nativeEngine, detail: coverageDetail });
+      this.eventBus.publish("artifact.analyzed", finalSeverity, `Analisado ${analysis.fileName}`, { ...analysis, vtResult, analysisState, inconclusiveReason, inconclusiveEngines, nativeEngine, detail: coverageDetail });
 
 
       // Log VT result to Action log (Workstream F: rotation + dedupe)
@@ -3300,6 +3306,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           verdict: analysis.verdict,
           analysisState,
           inconclusiveReason,
+          inconclusiveEngines,
           nativeEngine,
           detail: coverageDetail,
           sha256: analysis.sha256,

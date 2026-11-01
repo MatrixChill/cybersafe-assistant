@@ -4,7 +4,7 @@ import * as os from "node:os";
 import { randomUUID } from "node:crypto";
 import { pinFixture } from "./fixture-pin.js";
 import { readBoundedArchiveEntry } from "@cybersafe/core";
-import type { ExclusionReasonCount, ScanState, ScanType, SecurityEvent } from "@cybersafe/shared-types";
+import type { ExclusionReasonCount, InconclusiveEngine, InconclusiveEngineCount, ScanState, ScanType, SecurityEvent } from "@cybersafe/shared-types";
 import type { FileScanResponse, ThreatEvent } from "@cybersafe/shared-types";
 import { categorizeFsError, isTransientFsError } from "./scan-error.js";
 // ————— Observabilidade do CANCELAMENTO (TP-A5-D2-20261020) —————
@@ -95,6 +95,17 @@ export function addInconclusiveReason(
 ): InconclusiveReasonCount[] {
   const idx = list.findIndex((entry) => entry.reason === reason);
   if (idx < 0) return [...list, { reason, count: 1 }];
+  const next = list.slice();
+  next[idx] = { ...next[idx], count: next[idx].count + 1 };
+  return next;
+}
+
+export function addInconclusiveEngine(
+  list: InconclusiveEngineCount[],
+  engine: InconclusiveEngine,
+): InconclusiveEngineCount[] {
+  const idx = list.findIndex((entry) => entry.engine === engine);
+  if (idx < 0) return [...list, { engine, count: 1 }];
   const next = list.slice();
   next[idx] = { ...next[idx], count: next[idx].count + 1 };
   return next;
@@ -208,6 +219,7 @@ export interface ExtendedScanState extends ScanState {
    * `failedByReason`; `normalizeScanState` decide se o expõe à UI.
    */
   inconclusiveByReason?: InconclusiveReasonCount[];
+  inconclusiveByEngine?: InconclusiveEngineCount[];
 }
 
 /**
@@ -845,6 +857,7 @@ const heartbeat = setInterval(() => {
       let filesFailed = 0;
       let filesInconclusive = 0;
       let inconclusiveByReason: InconclusiveReasonCount[] = [];
+      let inconclusiveByEngine: InconclusiveEngineCount[] = [];
       /** Razões de ficheiros inacessíveis, agregadas por categoria. */
       let failedByReason: Record<FsErrorCategory, number> = {} as Record<FsErrorCategory, number>;
       // PORQUÊ cada ficheiro ficou fora dos motores — agregado por categoria.
@@ -1279,6 +1292,15 @@ const heartbeat = setInterval(() => {
                 inconclusiveByReason,
                 this.archiveCoverageGaps.has(id) ? "archive-incomplete" : structured ?? motivo,
               );
+              const engines = new Set<InconclusiveEngine>(
+                Array.isArray(scanResults)
+                  ? scanResults.flatMap((item) => item.inconclusiveEngines ?? [])
+                  : [],
+              );
+              if (this.archiveCoverageGaps.has(id)) engines.add("archive");
+              for (const engine of engines) {
+                inconclusiveByEngine = addInconclusiveEngine(inconclusiveByEngine, engine);
+              }
             }
             this.archiveCoverageGaps.delete(id);
             analyzed++;
@@ -1326,6 +1348,7 @@ const heartbeat = setInterval(() => {
              filesAnalyzed: mostradosAnalisados,
              filesInconclusive,
              inconclusiveByReason: inconclusiveByReason.length > 0 ? inconclusiveByReason : undefined,
+            inconclusiveByEngine: inconclusiveByEngine.length > 0 ? inconclusiveByEngine : undefined,
              filesExcluded: excluded,
              filesExcludedBy: excludedBy,
              threatsFound: threats,
@@ -1375,6 +1398,7 @@ const heartbeat = setInterval(() => {
             filesAnalyzed: analyzed,
             filesInconclusive,
             inconclusiveByReason: inconclusiveByReason.length > 0 ? inconclusiveByReason : undefined,
+            inconclusiveByEngine: inconclusiveByEngine.length > 0 ? inconclusiveByEngine : undefined,
             filesExcluded: excluded,
             filesExcludedBy: excludedBy,
             threatsFound: threats,
@@ -1400,6 +1424,7 @@ const heartbeat = setInterval(() => {
             filesAnalyzed: analyzed,
             filesInconclusive,
             inconclusiveByReason: inconclusiveByReason.length > 0 ? inconclusiveByReason : undefined,
+            inconclusiveByEngine: inconclusiveByEngine.length > 0 ? inconclusiveByEngine : undefined,
             filesExcluded: excluded,
             filesExcludedBy: excludedBy,
             threatsFound: threats,

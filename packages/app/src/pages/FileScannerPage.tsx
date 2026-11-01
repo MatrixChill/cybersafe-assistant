@@ -58,6 +58,7 @@ import {
   terminalResultLabels,
   uiStatusForState,
   inconclusiveReasonsLabel,
+  inconclusiveEnginesLabel,
   PER_FILE_ENGINE_COVERAGE_NOTE,
   PER_FILE_NATIVE_LABELS,
   PER_FILE_PASTA_NOTE,
@@ -1354,6 +1355,9 @@ export default function FileScannerPage({ pendingScan, onScanConsumed, onOpenThr
         const motivosInconclusivos = (scanProgress.filesInconclusive ?? 0) > 0
           ? inconclusiveReasonsLabel((scanProgress as ScanStateExtended).inconclusiveByReason)
           : null;
+        const motoresInconclusivos = (scanProgress.filesInconclusive ?? 0) > 0
+          ? inconclusiveEnginesLabel((scanProgress as ScanStateExtended).inconclusiveByEngine)
+          : null;
         const tomClasse =
           tom === "green" ? "text-cyber-green" : tom === "yellow" ? "text-cyber-yellow" : "text-cyber-red";
         return (
@@ -1435,6 +1439,12 @@ export default function FileScannerPage({ pendingScan, onScanConsumed, onOpenThr
                 <p className="text-xs text-muted-foreground mt-2">
                   <span className="font-semibold">Motivos dos inconclusivos: </span>
                   {motivosInconclusivos}
+                </p>
+              )}
+              {motoresInconclusivos && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  <span className="font-semibold">Motores com lacunas: </span>
+                  {motoresInconclusivos}
                 </p>
               )}
               {showNoThreatsReassurance(uiStatus, scanProgress) && (

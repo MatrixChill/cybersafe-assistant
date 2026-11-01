@@ -7,7 +7,7 @@ import {
 import type { ScanHistoryEntry, ScanType, UsbDeviceState } from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
 import { conclusiveHistoryCount, describeScanHistoryOutcome, describeScanTarget, formatDuration } from "@/lib/scanHistoryReport";
-import { inconclusiveReasonsLabel, type InconclusiveCauseCount } from "@/lib/scanSession";
+import { inconclusiveReasonsLabel, inconclusiveEnginesLabel, type InconclusiveCauseCount, type InconclusiveEngineCount } from "@/lib/scanSession";
 
 /**
  * R7-L3-FOLLOWUP — painel do histórico, DENTRO de "Análise de Segurança".
@@ -541,6 +541,9 @@ export function ScanHistoryPanel({ sessaoTerminada = null }: ScanHistoryPanelPro
                   const inconclusivosMotivos = inconclusiveReasonsLabel(
                     (e as ScanHistoryEntry & { inconclusiveByReason?: InconclusiveCauseCount[] }).inconclusiveByReason,
                   );
+                  const inconclusivosMotores = inconclusiveEnginesLabel(
+                    (e as ScanHistoryEntry & { inconclusiveByEngine?: InconclusiveEngineCount[] }).inconclusiveByEngine,
+                  );
                   return (
                     <Fragment key={e.id}>
                       <tr className="history-row" data-estado={e.status} data-parcial={resultado.partial ? "true" : "false"}>
@@ -622,6 +625,9 @@ export function ScanHistoryPanel({ sessaoTerminada = null }: ScanHistoryPanelPro
                               )}
                               {inconclusivosMotivos && (
                                 <p><b className="font-semibold">Motivos dos inconclusivos:</b> {inconclusivosMotivos}</p>
+                              )}
+                              {inconclusivosMotores && (
+                                <p><b className="font-semibold">Motores com lacunas:</b> {inconclusivosMotores}</p>
                               )}
                               {/* O registo é uma análise inteira, com contadores
                                   agregados. Não atribui motores a ficheiros

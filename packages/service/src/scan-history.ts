@@ -1,5 +1,5 @@
 import * as fs from "node:fs/promises";
-import type { ScanHistoryEntry, ScanHistoryPage, ScanHistoryStatus } from "@cybersafe/shared-types";
+import type { InconclusiveEngineCount, ScanHistoryEntry, ScanHistoryPage, ScanHistoryStatus } from "@cybersafe/shared-types";
 import type { ExtendedScanState, InconclusiveReasonCount } from "./scan-manager.js";
 
 /**
@@ -9,6 +9,7 @@ import type { ExtendedScanState, InconclusiveReasonCount } from "./scan-manager.
  */
 type HistoryEntryWithInconclusive = ScanHistoryEntry & {
   inconclusiveByReason?: InconclusiveReasonCount[];
+  inconclusiveByEngine?: InconclusiveEngineCount[];
 };
 
 /**
@@ -45,6 +46,10 @@ const INCONCLUSIVE_REASONS: ReadonlyArray<string> = [
   "file-changed",
   "archive-incomplete",
   "cancelled",
+];
+
+const INCONCLUSIVE_ENGINES: ReadonlyArray<string> = [
+  "clamav", "yara", "native", "archive", "filesystem",
 ];
 
 /** Teto de retenção a partir do env; valor inválido = default. */
@@ -102,6 +107,9 @@ export function toScanHistoryEntry(state: ExtendedScanState): HistoryEntryWithIn
     ...(Array.isArray(state.inconclusiveByReason) && state.inconclusiveByReason.length > 0
       ? { inconclusiveByReason: state.inconclusiveByReason }
       : {}),
+    ...(Array.isArray(state.inconclusiveByEngine) && state.inconclusiveByEngine.length > 0
+      ? { inconclusiveByEngine: state.inconclusiveByEngine }
+      : {}),
     threatsFound: nonNegativeInt(state.threatsFound),
   };
 }
@@ -138,6 +146,17 @@ function isScanHistoryEntry(value: unknown): value is ScanHistoryEntry {
             !item ||
             typeof item !== "object" ||
             !INCONCLUSIVE_REASONS.includes((item as { reason?: unknown }).reason as string) ||
+            typeof (item as { count?: unknown }).count !== "number" ||
+            !Number.isFinite((item as { count: number }).count) ||
+            (item as { count: number }).count <= 0,
+        ))) ||
+    (entry.inconclusiveByEngine !== undefined &&
+      (!Array.isArray(entry.inconclusiveByEngine) ||
+        entry.inconclusiveByEngine.some(
+          (item) =>
+            !item ||
+            typeof item !== "object" ||
+            !INCONCLUSIVE_ENGINES.includes((item as { engine?: unknown }).engine as string) ||
             typeof (item as { count?: unknown }).count !== "number" ||
             !Number.isFinite((item as { count: number }).count) ||
             (item as { count: number }).count <= 0,

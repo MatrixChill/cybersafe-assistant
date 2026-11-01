@@ -611,6 +611,8 @@ export interface ScanState {
   filesInconclusive?: number;
   /** Motivo agregado dos inconclusivos; ausente quando não foi medido. */
   inconclusiveByReason?: InconclusiveReasonCount[];
+  /** Motor agregado que não concluiu; ausente quando não foi medido. */
+  inconclusiveByEngine?: InconclusiveEngineCount[];
   /** Ficheiros ignorados pela política de exclusões (não passaram por nenhum motor) */
   filesExcluded?: number;
   /**
@@ -674,6 +676,14 @@ export interface InconclusiveReasonCount {
   count: number;
 }
 
+/** Motor que não concluiu a análise de um ficheiro. */
+export type InconclusiveEngine = "clamav" | "yara" | "native" | "archive" | "filesystem";
+
+export interface InconclusiveEngineCount {
+  engine: InconclusiveEngine;
+  count: number;
+}
+
 /**
  * Histórico persistente de análises (R7-L3): uma linha por análise em
  * `<baseDir>/scans.jsonl`, escrita quando a análise atinge um estado
@@ -704,6 +714,8 @@ export interface ScanHistoryEntry {
   filesInconclusive?: number;
   /** Motivo agregado dos inconclusivos; ausente quando não foi medido. */
   inconclusiveByReason?: InconclusiveReasonCount[];
+  /** Motor agregado dos inconclusivos; ausente quando não foi medido. */
+  inconclusiveByEngine?: InconclusiveEngineCount[];
   threatsFound: number;
   /** Só o que o MOTOR reportou. Ausente quando não houve limitação medida. */
   engineLimitations?: string[];
@@ -877,6 +889,8 @@ export interface FileScanResult {
   analysisState?: "completed" | "excluded" | "failed" | "engine-unavailable" | "inconclusive";
   /** Código estruturado da lacuna; nunca inferido de `detail`. */
   inconclusiveReason?: InconclusiveReason;
+  /** Motores concretos que não concluíram, quando atribuíveis. */
+  inconclusiveEngines?: InconclusiveEngine[];
   detail?: string;
   fileName: string;
   size: number;

@@ -175,6 +175,13 @@ export interface InconclusiveCauseCount {
   count: number;
 }
 
+export type InconclusiveEngine = "clamav" | "yara" | "native" | "archive" | "filesystem";
+
+export interface InconclusiveEngineCount {
+  engine: InconclusiveEngine;
+  count: number;
+}
+
 /** Reason label in PT-PT para cada categoria de erro de filesystem. */
 const FS_ERROR_REASON_LABEL: Record<FsErrorCategory, string> = {
   permissions_denied: "permissões",
@@ -187,6 +194,7 @@ const FS_ERROR_REASON_LABEL: Record<FsErrorCategory, string> = {
 export interface ScanStateExtended extends ScanState {
   failedByReason?: Record<FsErrorCategory, number>;
   inconclusiveByReason?: InconclusiveCauseCount[];
+  inconclusiveByEngine?: InconclusiveEngineCount[];
 }
 
 const INCONCLUSIVE_CAUSES: InconclusiveCause[] = [
@@ -201,6 +209,10 @@ const INCONCLUSIVE_CAUSES: InconclusiveCause[] = [
   "cancelled",
 ];
 
+const INCONCLUSIVE_ENGINES: InconclusiveEngine[] = [
+  "clamav", "yara", "native", "archive", "filesystem",
+];
+
 function asInconclusiveByReason(value: unknown): InconclusiveCauseCount[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const cleaned: InconclusiveCauseCount[] = [];
@@ -211,6 +223,20 @@ function asInconclusiveByReason(value: unknown): InconclusiveCauseCount[] | unde
     if (typeof reason !== "string" || !INCONCLUSIVE_CAUSES.includes(reason as InconclusiveCause)) continue;
     if (typeof count !== "number" || count <= 0) continue;
     cleaned.push({ reason: reason as InconclusiveCause, count: Math.round(count) });
+  }
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+function asInconclusiveByEngine(value: unknown): InconclusiveEngineCount[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const cleaned: InconclusiveEngineCount[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const engine = (raw as { engine?: unknown }).engine;
+    const count = asOptionalNumber((raw as { count?: unknown }).count);
+    if (typeof engine !== "string" || !INCONCLUSIVE_ENGINES.includes(engine as InconclusiveEngine)) continue;
+    if (typeof count !== "number" || count <= 0) continue;
+    cleaned.push({ engine: engine as InconclusiveEngine, count: Math.round(count) });
   }
   return cleaned.length > 0 ? cleaned : undefined;
 }
@@ -291,6 +317,7 @@ export function normalizeScanState(raw: unknown): ScanState & Partial<ScanStateE
     filesAnalyzed: asOptionalNumber(source.filesAnalyzed),
     filesInconclusive: asOptionalNumber(source.filesInconclusive),
     inconclusiveByReason: asInconclusiveByReason(source.inconclusiveByReason),
+    inconclusiveByEngine: asInconclusiveByEngine(source.inconclusiveByEngine),
     filesInEngineBatch: asOptionalNumber((source as { filesInEngineBatch?: unknown }).filesInEngineBatch),
     filesExcluded: asOptionalNumber(source.filesExcluded),
     filesExcludedBy: asExcludedBy(source.filesExcludedBy),
@@ -372,6 +399,10 @@ export function mergeScanState(
       (next.inconclusiveByReason?.length ?? 0) > 0
         ? next.inconclusiveByReason
         : current?.inconclusiveByReason,
+    inconclusiveByEngine:
+      (next.inconclusiveByEngine?.length ?? 0) > 0
+        ? next.inconclusiveByEngine
+        : current?.inconclusiveByEngine,
     filesDiscovered: keepMax(current.filesDiscovered, next.filesDiscovered) || undefined,
     // NÃO é keepMax: o batch tem começos e fins. Sobe para N e volta a 0, e um
     // `keepMax` deixaria a UI presa em "20 ficheiros" para sempre — a mentira
@@ -1060,6 +1091,25 @@ export function inconclusiveReasonsLabel(
   const parts = inconclusiveByReason
     .filter((entry) => entry.count > 0)
     .map((entry) => `${entry.count} ${entry.count === 1 ? "ficheiro" : "ficheiros"} (${INCONCLUSIVE_CAUSE_LABEL[entry.reason] ?? entry.reason})`);
+  return parts.length > 0 ? parts.sort().join(", ") : null;
+}
+
+const INCONCLUSIVE_ENGINE_LABEL: Record<InconclusiveEngine, string> = {
+  clamav: "ClamAV",
+  yara: "YARA",
+  native: "motor nativo",
+  archive: "arquivo",
+  filesystem: "sistema de ficheiros",
+};
+
+/** Explica quais os motores com lacunas; a contagem e' por motor, nao um total unico. */
+export function inconclusiveEnginesLabel(
+  inconclusiveByEngine: InconclusiveEngineCount[] | undefined,
+): string | null {
+  if (!inconclusiveByEngine || inconclusiveByEngine.length === 0) return null;
+  const parts = inconclusiveByEngine
+    .filter((entry) => entry.count > 0)
+    .map((entry) => `${entry.count} ${entry.count === 1 ? "ficheiro" : "ficheiros"} (${INCONCLUSIVE_ENGINE_LABEL[entry.engine] ?? entry.engine})`);
   return parts.length > 0 ? parts.sort().join(", ") : null;
 }
 

@@ -153,6 +153,7 @@ describe("Single file scan (custom type)", () => {
       results: [{
         analysisState: "inconclusive",
         inconclusiveReason: "timeout",
+        inconclusiveEngines: ["native"],
         detail: "coverage incomplete",
       }],
     });
@@ -165,6 +166,7 @@ describe("Single file scan (custom type)", () => {
     const state = mgr.getScan(id);
     assert.equal(state.filesInconclusive, 1);
     assert.deepEqual(state.inconclusiveByReason, [{ reason: "timeout", count: 1 }]);
+    assert.deepEqual(state.inconclusiveByEngine, [{ engine: "native", count: 1 }]);
 
     await cleanup(tmpDir);
   });
