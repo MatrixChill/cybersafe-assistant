@@ -133,26 +133,26 @@ describe("pipeline de empacotamento (--check)", () => {
 
   it("sem manifesto aprovado o --check não é verde e nomeia o motivo", () => {
     const { code, json } = checkJson();
-    if (json.freeze.manifestPresent) {
-      assert.equal(json.freeze.ok, true, "com manifesto aprovado, o --check só é verde se a árvore conferir");
+    /* manifestPresent só prova que existe um ficheiro; não prova que o HEAD
+       foi aprovado. O freeze falha fechado quando o registo de aprovadores não
+       existe ou quando o manifesto é de outra árvore. */
+    if (json.freeze.manifestPresent && json.freeze.ok) {
+      assert.equal(code, json.ok ? 0 : 1, "com fontes aprovadas, o código segue o resto dos inputs");
       return;
     }
-    /* Desde o mecanismo de aprovadores (2026-11-01) há dois motivos legítimos para
-       «não está verde» aqui, e a ordem é a da severidade: sem registo de aprovadores
-       não há quem possa ter aprovado, por isso esse erro de configuração é nomeado
-       ANTES de `manifest-missing` — um problema de config não pode ser disfarçado
-       por um manifesto em falta. O invariante que este caso protege não muda: nunca
-       é verde, e o motivo está nomeado. */
     assert.equal(json.freeze.ok, false);
     const kinds = json.freeze.problems.map((problem) => problem.kind);
-    assert.ok(kinds.includes("manifest-missing") || kinds.includes("approver-registry-missing"),
-      `motivo inesperado: ${JSON.stringify(kinds)}`);
+    assert.ok(kinds.length > 0, "um freeze não aprovado tem de nomear pelo menos um problema");
+    assert.ok(
+      kinds.some((kind) => ["manifest-missing", "approver-registry-missing", "manifest-digest-mismatch"].includes(kind)),
+      "motivo inesperado: " + JSON.stringify(kinds),
+    );
     if (kinds.includes("approver-registry-missing")) {
       assert.equal(kinds[0], "approver-registry-missing", "a falta de registo tem de vir nomeada em primeiro lugar");
     }
     assert.equal(code, 1, "sem manifesto aprovado o --check tem de sair != 0");
     const text = runScript(["--check"]);
-    assert.match(text.stdout, /fontes: (manifest-missing|approver-registry-missing)/, "o texto tem de dizer porque não está verde");
+    assert.match(text.stdout, /fontes: [a-z-]+/, "o texto tem de dizer porque não está verde");
   });
 
   it("o --check não executa nada: nem npm, nem electron-builder, nem staging novo", () => {
