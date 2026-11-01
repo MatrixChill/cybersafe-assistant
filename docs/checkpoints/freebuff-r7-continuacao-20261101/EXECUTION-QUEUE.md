@@ -41,3 +41,8 @@ origin/main intocada: 21fefa69
 - PENDING: medir o Scanner instalado com CYBERSAFE_DEBUG_SCAN=1 (nativo medido em ~12 ms; 830 s não é o spawn nativo).
 - PENDING: inconclusivos (22 cobertura + 1 falha de motor), quarentena automática na UI, MATRIX contextual, layout do Otimizar, atualizações, WFP opcional.
 - NEXT: nova aprovação de freeze e candidata; não reutilizar o manifesto anterior.
+- DONE: quarentena automática configurável com consentimento e persistência.
+- DONE: Otimizar mostra os quatro motores e a data de definições quando medida.
+- DONE: log do Scanner separa enumeração, laço, motor e overhead.
+- VERIFICADO: MATRIX/gestor/atualizações 105 PASS; WFP 4 PASS.
+- PENDING: inconclusivos por motor/fase; ensaio instalado; visual Electron; WFP e updates oficiais.

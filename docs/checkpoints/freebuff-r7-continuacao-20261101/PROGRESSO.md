@@ -231,3 +231,10 @@ Os números Core 1064 PASS / 4 FAIL / 30 SKIP / 1 TODO pertencem ao log antigo, 
 - `bccab63` Gestor de Tarefas: o serviço nomeia sessão, arranque, encerramento, modo leitura, operação crítica, tempo real, scan e atualização, em vez de uma frase única. Gate P1-1: 41/41. Família de identidade mantém 10 FAIL conhecidos.
 - `12b4c8b` Painel: a lista curta colapsa `scan.progress` por `scanId` e mantém a versão mais recente; histórico intacto. 2 PASS; typecheck da app verde.
 - Não houve validação na aplicação instalada, varrimento de 800 ficheiros, EICAR, quarentena, WFP, MATRIX, Otimizar, atualizações ou nova candidata.
+
+## Continuação autónoma (2026-11-01)
+- `8b054ae` quarentena automática configurável: escrita atómica de `protection-policy.json`, consentimento literal obrigatório e secção nas Definições. 5 testes de serviço e 2 de renderização PASS.
+- `6c17dfe` Otimizar: secção própria \"Definições e motores\" com YARA, HashDB, ClamAV e motor nativo; data de atualização só quando o serviço a reporta. Teste da página: 24 PASS.
+- `6c17dfe` Scanner: `ScanPerf` passa a publicar `gatherMs`, `scanLoopMs`, `engine` e `overheadMs`; não foi executado um scan instalado.
+- Verificado sem alteração: MATRIX/gestor/atualizações 105 PASS; mapeamento WFP 4 PASS. Não houve ativação de WFP nem chave de produção.
+- Pendente: motivos de inconclusão por motor/fase, ensaio instalado do Scanner, validação visual Electron, provisionamento WFP e atualizações oficiais.
