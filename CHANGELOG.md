@@ -458,3 +458,45 @@ perdeu o dono do prefetch e cai em `scanFile`) são o ponto de produto em aberto
 **Caveat que não retiro: `packages/native-engine/build/` é gitignored. Um checkout limpo desta
 linha reproduz as 9 falhas dependentes do binário.** O 54 pressupõe o motor compilado, e é por isso
 que o §13 ponto 14 (dependências nativas do instalador) precisa do build de distribuição, não deste.
+
+### Suítes que nenhum comando padrão seleciona (item 3 do pedido, continuado)
+
+A pergunta «que testes não são selecionados pelo comando padrão?» tem três respostas medidas nesta
+linha, e a terceira continha uma falha real:
+
+- **`scripts/test/` — 25 ficheiros, 240 testes, nenhum script os corre.** A raiz só expõe
+  `test:build-order`, `test:dev-isolation` e `test:native`. Medido à mão: **240 / 37 suítes /
+  234 PASS / 0 FAIL / 5 SKIP / 1 TODO**, `exit 0` (`scripts-test-after.log`). Os 5 SKIP são o
+  inspetor de conteúdo do pacote (`app.asar` legível, runtime dentro do asar, módulos nativos fora
+  do asar, nenhum caminho de build/máquina dentro do pacote, nenhum segredo/base/log/sourcemap) e
+  todos dizem «sem artefacto para inspecionar». **É aqui que vive a verificação de inclusão de
+  recursos do ponto 4: está escrita, é honesta, e hoje não corre porque não há artefacto** — o
+  artefacto depende do `source-freeze` aprovado.
+- **`native-windows` — o `npm test` lista 18 dos 28 ficheiros da pasta.** Pasta completa:
+  **246 / 21 suítes / 246 PASS / 0 FAIL**, `exit 0` (`native-windows-full-after.log`).
+- **`native-engine`** tem 25 vetores SHA-256/entropia (`npm run test:native`), todos verdes. Não
+  confundo com a prova de que o binário funciona: essa é `rc22-native-regressao`, acima.
+
+**A falha que só o âmbito completo apanha**: `process-enumeration-boundary.test.js:47` exigia
+`/indisponível|CIM|zero registos/i` para o payload corrompido, mas o produto distingue três causas
+(`src/index.ts:741` `spawn`, `:755` `parse`, `:797` `empty`) e a do JSON inválido é `parse`
+(«JSON parse: payload de processos não é JSON utilizável»). O comportamento estava certo —
+rejeitava, exatamente o que o teste declara —, a regex pertencia a outra fronteira. Fixei ao texto
+real do contrato, o que é **mais estrito** do que a disjunção: quem misturar `parse` com `empty`
+passa a rebentar aqui. Ficheiro isolado 6/6, pasta completa 246/246.
+
+**O segundo achado é de produto, não de teste, e fica como decisão do proprietário (task #15)**: o
+`scanner-dashboard-visibility.test.mjs` procurava as strings de UX em `DashboardPage.tsx`, que hoje
+é um contentor de dados de 70 linhas — a apresentação vive em `v2/dashboard/LabDashboard.tsx` e
+`components/visual/EngineGrid.tsx`. Reapontei as duas garantias que **existem** (legendas de
+proveniência «os cartões mostram o que o serviço reportou» / «não são uma leitura atual dos
+motores», «a ausência de leitura não significa que o histórico esteja vazio», limite de visibilidade
+`.slice(0, 3)`, zero controlos de paginação) e **não apaguei a terceira**: o pointer «o histórico
+completo está em Ameaças» perdeu-se na refactorização v2 (a shell navega pelo modelo `Page`,
+`App.tsx:573`, sem `<a>`). Mantive a asserção verdadeira e marquei-a `{todo: …}` com a razão, para
+que fique à vista como falha esperada e não como sucesso.
+
+**Numeração do `service` atualizada com o motor presente**: o âmbito `npm test` deu **931 / 137 /
+889 PASS / 42 FAIL** (`service-npmtest-d45c7b3.log`) contra os 46 publicados — a diferença de 4 é
+exatamente `p1-3-prefetch-isolation`, o efeito de `engine.ts:3151` com o binário compilado. A pasta
+completa mantém-se em 1282 / 1223 / 54 / 5.

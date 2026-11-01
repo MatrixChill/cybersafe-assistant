@@ -5,56 +5,68 @@ import { fileURLToPath } from "node:url";
 import { dirname, resolve, join } from "node:path";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const appRoot = join(__dirname, "..", "..", "packages", "app", "src", "pages");
+const appSrc = join(__dirname, "..", "..", "packages", "app", "src");
 
 /**
- * Pequeno patch de UX em `DashboardPage.tsx` (C4-fase2): evitar que o ecrã
- * actual da proteção seja lido como lista histórica de alertas/ameaças. Não
- * tocamos serviço, shared-types, App, Settings ou proteção.
+ * Guarda de UX do ecrã de proteção (C4-fase2): o ecrã ACTUAL não pode ser lido
+ * como lista histórica de alertas/ameaças.
  *
- * Critério verificado por leitura do ficheiro (não por screenshot / runtime):
- * - o dashboard já mostra data/hora em ameaças (`createdAt` → key + ameaçasPage);
- * - a secção de alertas/ameaças NO DASHBOARD inclui copy que diz que é leitura
- *   atual e que o histórico completo fica em Ameaças (/threats);
- * - não existe paginação, filtro arbitrário ou botão "amarelo" que prometa
- *   ação sobre o que o serviço já reportou.
+ * REAPONTADO a 2026-11-01, e a razão é medida, não estética: `DashboardPage.tsx`
+ * deixou de conter apresentação — os seus 70 linhas são hoje um contentor de
+ * dados que monta `<LabDashboard>`. Uma busca às strings antigas neste ficheiro
+ * falhava para sempre, verde ou vermelho que o produto estivesse bem. Onde a
+ * garantia vive hoje:
+ *   · `v2/dashboard/LabDashboard.tsx` — a leitura do histórico e o seu limite;
+ *   · `components/visual/EngineGrid.tsx` — a legenda de proveniência dos cartões.
+ *
+ * Asserção aposentada e porquê: `/Ameaças<\/a>/` pertencia a um `<a>` de
+ * react-router. A shell v2 navega pelo modelo `Page` (`App.tsx:573`:
+ * "dashboard", "pccenter", "threats", …), por isso nenhum `</a>` existe. A
+ * intenção que ela protegia — dizer ao utilizador ONDE está o histórico
+ * completo — **não foi substituída**: ver o `todo` no fim da suite. Não apago
+ * essa diferença; declaro-a.
  */
-const dashboardPath = resolve(appRoot, "DashboardPage.tsx");
-const source = readFileSync(dashboardPath, "utf8");
+const dashboard = readFileSync(resolve(appSrc, "v2", "dashboard", "LabDashboard.tsx"), "utf8");
+const engineGrid = readFileSync(resolve(appSrc, "components", "visual", "EngineGrid.tsx"), "utf8");
 
-const EXPECTED_LINES = [
-  // copy que separa "isto é o que leu agora" de "histórico completo está em /threats"
-  /Estes cartões são o que o serviço leu/,
-  /histórico completo de eventos e ameaças está em/,
-  /Ameaças<\/a>/,
-];
-
-describe("DashboardPage scanner UX visibility patch", () => {
-  it("acompanha o patch em DashboardPage.tsx (grep-based, sem runtime)", () => {
-    const checks = EXPECTED_LINES.map((pattern) => ({
-      pattern,
-      ok: pattern.test(source),
-    }));
-
-    const failures = checks.filter((c) => !c.ok);
-    assert.ok(
-      failures.length === 0,
-      `checks não passaram: ${failures.map((c) => c.pattern.toString()).join(" | ")}`,
+describe("Dashboard — o ecrã actual declara que é leitura, não histórico", () => {
+  it("os cartões dizem o que o serviço reportou, e não são apresentados como leitura histórica", () => {
+    assert.match(
+      engineGrid,
+      /Ligação confirmada: os cartões mostram o que o serviço reportou/,
+      "a legenda de proveniência tem de existir quando a ligação está confirmada",
+    );
+    assert.match(
+      engineGrid,
+      /Serviço desligado: os cartões abaixo não são uma leitura atual dos motores/,
+      "sem ligação os cartões têm de se auto-declarar não-leitura",
+    );
+    assert.match(
+      dashboard,
+      /A ausência de leitura não significa que o histórico esteja vazio/,
+      "a ausência de leitura não pode ser apresentada como histórico vazio",
     );
   });
 
-  it("alertas/ameaças do dashboard NÃO paginam nem filtram arbitrariamente", () => {
-    // O patch mantém `.slice(0, 5)` SÓ no ecrã de ameaças do dashboard, como
-    // visibilidade, não como paginação/filtro de histórico.
-    assert.ok(source.includes(".slice(0, 5)"), "o dashboard mantém limite de visibilidade de ameaças");
-    // Não há controlos de paginação introduzidos na secção do dashboard.
-    // Não introduzimos controlo de paginação/filtro novo na secção do dashboard.
-    // Mantivemos apenas o limite de visibilidade em ameaças (slice(0,5)).
-    assert.ok(
-      !/pageSize|nextCursor|Carregar mais/.test(source),
-      "não há paginação/filtro arbitrário introduzido no dashboard");
+  it("o dashboard limita a visibilidade, mas não introduz paginação nem filtro arbitrário", () => {
+    assert.ok(dashboard.includes(".slice(0, 3)"), "o dashboard mantém um limite de visibilidade");
+    for (const [onde, fonte] of [["LabDashboard", dashboard], ["EngineGrid", engineGrid]]) {
+      assert.ok(
+        !/pageSize|nextCursor|Carregar mais/.test(fonte),
+        `${onde}: nenhum controlo de paginação/filtro pode aparecer no ecrã actual`,
+      );
+    }
   });
+
+  it(
+    "o dashboard aponta para onde está o histórico completo",
+    { todo: "afordância perdida na refactorização v2; a shell navega por Page, não por <a>. Decisão do proprietário (task #15)." },
+    () => {
+      assert.match(
+        dashboard,
+        /histórico completo|ver (?:todo )?o histórico|Ameaças<\/a>/,
+        "tem de existir um pointer do ecrã actual para o histórico completo",
+      );
+    },
+  );
 });
-
-// micro-helper mínimo porque este ficheiro é apenas leitura + assertions simples.
-
