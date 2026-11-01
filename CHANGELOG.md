@@ -500,3 +500,41 @@ que fique à vista como falha esperada e não como sucesso.
 889 PASS / 42 FAIL** (`service-npmtest-d45c7b3.log`) contra os 46 publicados — a diferença de 4 é
 exatamente `p1-3-prefetch-isolation`, o efeito de `engine.ts:3151` com o binário compilado. A pasta
 completa mantém-se em 1282 / 1223 / 54 / 5.
+
+### Canais de actualização e primeira release: o que está medido e o que é armadilha (itens 5 e 7)
+
+Nada neste bloco afirma que a actualização está validada fim-a-fim — falta a chave pública do
+proprietário. Afirma factos lidos no código e no endpoint.
+
+- **O transporte funciona e o canal está vazio, não partido.** Sonda com o opener HTTPS real do
+  produto (`node-transport.ts:createNodeHttpsOpener`) contra o URL pinado em `release-trust.json`:
+  `status=404`, corpo `{"error":"Not Found"}` (21 bytes). Com `enabled:false`, o
+  `createProductionUpdater` nem chega ao pedido — devolve `unconfigured` (provado em
+  `updater-production-trust.test.mjs`, 5/5). A máquina completa do updater está coberta: o
+  `scripts/test/` deu 240 testes / 0 FAIL, e o assinador e o verificador de produção canonizam os
+  mesmos bytes (`release-signing-compat.test.mjs`).
+- **Armadilha de nomenclatura, medida em `semver.ts`.** O `product-version.json` de hoje é
+  `0.1.11-internal.pap-r7.20261031`: semver válido, **não** é core version. Por precedência SemVer,
+  `isUpgrade("0.1.11", "0.1.11-internal.pap-r7.20261031")` dá **`true`** — publicar uma release
+  `0.1.11` «seca» faria o updater oferecer como melhora o mesmo código, porque um núcleo sem
+  pré-lançamento precede qualquer pré-lançamento dele. O caminho seguro também está medido:
+  `…20261115 > …20261031` (identificadores numéricos comparam como números), logo **subir o sufixo
+  de data chega para oferecer uma atualização**. `validateManifest` (`manifest.ts:60`) exige
+  `isValidSemVer` e não `isCoreVersion`, por isso a versão canónica do produto pode viver no
+  manifesto sem mudar nada no produto.
+- **O manifesto fala de um canal que o produto não declara.** `manifest.ts:57` exige
+  `channel: "stable"` literalmente, enquanto `product-version.json` diz `channel: "internal"`. A
+  elegibilidade é do manifesto, não do produto (decisão `97469f1`). Não é incoerência de código, é
+  duas vocabulários de canal em superfícies diferentes; fica dito em vez de ser «harmonizado» à
+  pressa.
+- **Não há ferramenta de checksums.** `grep -rln "SHA256SUMS|sha256sums|checksums" scripts/ docs/`
+  devolve **zero** correspondências. O ponto 7 do pedido pede checksums; hoje só existiriam se
+  alguém os corresse à mão com `certutil`, o que não é reprodutível. Recomendo um
+  `scripts/release-checksums.mjs` (~30 linhas, mesmo formato `<hex>  <nome>`), e não o escrevo sem
+  decisão porque é superfície nova de empacotamento, não correção.
+- **Preparação da release existe como rascunho, fora do repositório**:
+  `…\qoder-goal-final-20261101\release-prep\FIRST-RELEASE-PREP.md` — modelo de manifesto com os
+  campos de artefacto por preencher, tabela do que depende de quê, rascunho das notas de lançamento a
+  partir dos **49 commits** desde `01dcfaf`, e a lista do que continua desligado. Não é documento
+  publicado nem `docs/`; enquanto não houver instalador, um `RELEASE-NOTES.md` no repo seria
+  uma promessa.
