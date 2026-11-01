@@ -167,10 +167,14 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   `212cb64`, sem `--force`), confirmado por `git ls-remote` em 2026-11-01T10:45Z. A primeira run da
   workflow `ci` falhou **antes de correr qualquer teste**: `npm ci` devolveu EUSAGE porque o npm do
   runner exige entradas `@emnapi/core`/`@emnapi/runtime` que o `package-lock.json` publicado não
-  tem, enquanto o npm que gerou o lock (11.6.2 / node 24.13.0) as aceita — neste commit,
-  `npm install --package-lock-only` não produz diff e `npm ci --dry-run` sai 0. O `ci.yml` fixa
-  agora esse npm; **é uma hipótese testada pela própria workflow que altera**, e a run seguinte
-  decide-a. Construção do instalador R7, *tag* e *release*: **PENDENTES**.
+  tem. **A primeira explicação dada estava errada e foi retirada**: fixar o npm em 11.6.2 (a versão
+  local) não mudou nada — a run `41299179863` falhou no mesmo passo com o mesmo texto — e numa
+  árvore limpa, sem `node_modules`, o mesmo npm resolve 778 pacotes e sai 0 (`npm ci --dry-run`),
+  ou seja, **o defeito não se reproduz nesta máquina e a causa continua por identificar**. Não há
+  `.npmrc` no repositório nem `omit` configurado. O pin de npm fica por reprodutibilidade, não
+  como correção, e diz isso mesmo no comentário do `ci.yml`. **Estado do `ci` no `main`: VERMELHO
+  no passo de instalação**, e nenhum passo de teste chegou a correr. Construção do instalador R7,
+  *tag* e *release*: **PENDENTES**.
 
 ## Estado das suítes medido em 2026-11-01
 

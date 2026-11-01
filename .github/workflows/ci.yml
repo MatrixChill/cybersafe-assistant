@@ -22,11 +22,12 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
-          # O `package-lock.json` é validado por este npm: `npm ci` é estrito com
-          # as arestas opcionais `@emnapi/core`/`@emnapi/runtime` e falha com
-          # EUSAGE noutro menor (medido na run 41298854964, 2026-11-01). Fixar o
-          # npm é o que torna a instalação reproduzível; mudar aqui obriga a
-          # regenerar o lock com o mesmo npm.
+          # Fixado por reprodutibilidade, NÃO como correção: a hipótese de o
+          # EUSAGE do `npm ci` vir da versão do npm foi TESTADA e é FALSA — com
+          # este pin o passo falhou da mesma forma (run 41299179863) e numa
+          # árvore limpa sem `node_modules` o mesmo npm 11.6.2 resolve 778
+          # pacotes e sai 0. A causa do `Missing: @emnapi/core@1.11.3` no runner
+          # continua por identificar; ver CHANGELOG.
           npm-version: "11.6.2"
           cache: npm
 
