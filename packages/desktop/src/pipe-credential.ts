@@ -91,7 +91,17 @@ function refuseLinks(
   if (stats.isSymbolicLink()) {
     throw new Error(`Credência do pipe recusada: ${label} em ${target} é um link simbólico e não um ficheiro desta instalação.`);
   }
-  if (stats.nlink > 1) {
+  // O `nlink` só prova partilha num objeto que POSSA ter ligações físicas. Uma
+  // diretoria em POSIX tem sempre `nlink >= 2` — o `.` dela mais a entrada no
+  // pai — e links físicos de diretórios não são criáveis; pelo que este teste,
+  // aplicado a `secrets/`, recusava por construction qualquer arranque em
+  // Linux/macOS do artefacto empacotado (medido: `secrets` recém-criado com
+  // `nlink=2`, e 8 testes de `qa2-pipe-credential.test.mjs` a falhar por esta
+  // razão em Linux). Em Windows uma diretoria reporta `nlink=1`, pelo que o
+  // comportamento Windows não muda; o `secrets/` mantido por um symlink já é
+  // apanhado pela linha acima.
+  const directoria = typeof stats.isDirectory === "function" ? stats.isDirectory() : false;
+  if (!directoria && stats.nlink > 1) {
     throw new Error(`Credência do pipe recusada: ${label} em ${target} tem ${stats.nlink} ligações físicas (partilharia a credência com outra instalação).`);
   }
 }

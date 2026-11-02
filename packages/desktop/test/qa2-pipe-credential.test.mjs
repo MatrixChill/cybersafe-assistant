@@ -130,6 +130,42 @@ describe("credencial do pipe — por instalação, não por processo", () => {
     }
   });
 
+  it("nlink ≥ 2 numa DIRETORIA é POSIX normal; num FICHEIRO é partilha", () => {
+    // Medido em Linux real: com o teste aplicado à `secrets/`, o artefacto
+    // empacotado nunca conseguia iniciar o serviço — `readOrCreatePipeCredential`
+    // recusava uma diretoria recém-criada com `nlink=2`, que é o valor correto
+    // de qualquer diretoria sem subdiretórios. Este caso fixa as duas metades:
+    // a diretoria com nlink=2 deixa avançar, o ficheiro com nlink=2 continua a
+    // ser recusado (é a posse que o pipe tem de provar).
+    const dir = tempUserData("dir-nlink");
+    const segredos = path.join(dir, "secrets");
+    const lstat = (alvo) => ({
+      isSymbolicLink: () => false,
+      isDirectory: () => alvo === segredos,
+      nlink: 2,
+    });
+    const escritos = [];
+    const fsFake = {
+      existsSync: () => false,
+      lstatSync: lstat,
+      mkdirSync: () => {},
+      chmodSync: () => {},
+      readFileSync: () => CRED_B,
+      writeFileSync: (alvo) => { escritos.push(alvo); },
+    };
+    try {
+      const criada = readOrCreatePipeCredential(dir, { fsImpl: fsFake, generate: () => CRED_B });
+      assert.equal(criada.credential, CRED_B, "a diretoria com nlink=2 não pode recusar o arranque");
+      assert.deepEqual(escritos, [path.join(segredos, PIPE_CREDENTIAL_FILENAME)], "publica no destino");
+
+      const partilhada = { ...fsFake, existsSync: () => true };
+      assert.throws(() => readOrCreatePipeCredential(dir, { fsImpl: partilhada }), /ligaç|partilh/i,
+        "hardlink no ficheiro regular continua a ser recusa");
+    } finally {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+  });
+
   it("publica com criação exclusiva NO DESTINO, nunca por cima", () => {
     const dir = tempUserData("wx");
     try {
