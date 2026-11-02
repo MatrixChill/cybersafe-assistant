@@ -99,24 +99,16 @@ http.get({host:"127.0.0.1",port:p,path:"/json/list",timeout:8000},(r)=>{
 ' "$PORT" 2>&1 | head -8
 echo "rc_no_de_erro_acima=ok_se_imprimiu_alvos"
 
-echo "--- fotografia da janela do pacote ---"
-# Um alvo CDP com `title` prova que há uma página; não prova que o utilizador
-# vê o dashboard. O §15 pede GUI, por isto a imagem vai para /mnt/c e é lida
-# como evidência. Sem `maim` diz-se `sem_maime` — nunca se afirma o que não foi
-# capturado.
-PASTA_ARTEFACTOS="/mnt/c/Users/caioc/.cybersafe-integration/qoder-linux-lite/artifacts"
-if command -v maim >/dev/null 2>&1; then
-  if maim --window "$(xdotool search --name 'CyberSafe' 2>/dev/null | head -1)" /tmp/cybersafe-pacote.png 2>/dev/null \
-     || maim /tmp/cybersafe-pacote.png 2>/dev/null; then
-    mkdir -p "$PASTA_ARTEFACTOS"
-    cp /tmp/cybersafe-pacote.png "$PASTA_ARTEFACTOS/cybersafe-pacote.png" 2>/dev/null \
-      && echo "SHOT_OK $PASTA_ARTEFACTOS/cybersafe-pacote.png bytes=$(stat -c %s /tmp/cybersafe-pacote.png)" \
-      || echo "SHOT_SEM_COPIA_A_MONTAR"
-  else
-    echo "SHOT_FALHOU"
-  fi
-else
-  echo "sem_maime"
+echo "--- o que o renderer do pacote mostra ---"
+# Não `maim`: em WSLg a janela do Electron não aparece na raiz X11 fotografada,
+# e a captura saiu como um ecrã branco com o cursor (medido em 3be47af). Uma
+# imagem que não mostra nada não é evidência. O `cdp-shot.mjs` pergunta ao
+# próprio Electron o que ele desenhou.
+timeout 25 node scripts/linux-lite/cdp-shot.mjs "$PORT" /tmp/cybersafe-pacote.png 2>&1 | head -3
+if [ -s /tmp/cybersafe-pacote.png ]; then
+  mkdir -p /mnt/c/Users/caioc/.cybersafe-integration/qoder-linux-lite/artifacts
+  cp /tmp/cybersafe-pacote.png /mnt/c/Users/caioc/.cybersafe-integration/qoder-linux-lite/artifacts/cybersafe-pacote.png \
+    && echo "COPIADO bytes=$(stat -c %s /tmp/cybersafe-pacote.png)"
 fi
 
 echo "--- encerramento com SIGTERM APENAS no processo principal ---"
