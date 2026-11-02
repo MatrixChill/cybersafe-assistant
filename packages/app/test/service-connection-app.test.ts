@@ -1,3 +1,4 @@
+import { DEFAULT_VISUAL_EFFECTS } from "../src/v2/theme";
 import * as progressiveReadReal from "../src/lib/progressiveRead";
 import * as batteryDisplayReal from "../src/lib/batteryDisplay";
 import * as cpuUsageReal from "../src/lib/cpuUsage";
@@ -140,7 +141,7 @@ function appHarness(transformSource: (source: string) => string = (source) => so
     react: hooks,
     "react/jsx-runtime": { jsx: (type: any, props: any) => ({ type, props }), jsxs: (type: any, props: any) => ({ type, props }) },
     "./contexts/AuthContext": { useAuth: () => ({ user: {}, logout() {} }) },
-    "./contexts/AppearanceContext": { useAppearance: () => ({ identity: "cybersafe-core" }) },
+    "./contexts/AppearanceContext": { useAppearance: () => ({ identity: "cybersafe-core", effects: {...DEFAULT_VISUAL_EFFECTS} }) },
     "./v2/theme-menu": { ThemeMenu: () => null },
     "./lib/protectionHealth": { deriveProtectionLevel },
     // Modulos REAIS (funcoes puras) pelos NOMES EXACTOS que o App importa.

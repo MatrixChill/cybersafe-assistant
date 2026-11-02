@@ -165,7 +165,7 @@ function buildDashboard(protection: ProtectionState | null, threats: ThreatEvent
 
 function AuthenticatedApp() {
   const { user, logout } = useAuth();
-  const { identity } = useAppearance();
+  const { identity, effects } = useAppearance();
   const [page, setPage] = useState<Page>("dashboard");
   const [protection, setProtection] = useState<ProtectionState | null>(null);
   const [serviceConnected, setServiceConnected] = useState<boolean | null>(null);
@@ -1131,10 +1131,10 @@ function AuthenticatedApp() {
               <motion.div
                 key={page}
                 ref={anchorNewPageAtTop}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
+                initial={effects.transitions ? { opacity: 0, y: 6 } : false}
+                animate={{ opacity: 1, y: 0 }}
+                exit={effects.transitions ? { opacity: 0, y: -6 } : { opacity: 1 }}
+                transition={{ duration: effects.transitions ? 0.2 : 0 }}
                 className="min-h-full"
               >
                 {renderPage()}
