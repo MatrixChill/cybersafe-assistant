@@ -340,8 +340,10 @@ function deComEXE(resultado, rotulo) {
 // O resto do ficheiro é a CLI. Um `import` deste módulo tem de ser inofensivo
 // (é assim que `scripts/test/linux-lite-package-renderer-guard.test.mjs` consegue
 // exercer o guarda); por isso nada aqui corre quando o ficheiro é importado.
+// `process.exitCode` em vez de `process.exit`: o relatório do build é escrito
+// por tubos e um exit imediato pode corta-lo antes de fazer flush.
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
-if (isMain) process.exit(main(process.argv.slice(2)));
+if (isMain) process.exitCode = main(process.argv.slice(2));
 
 export function main(argv) {
   const alvos = argv.includes("--appimage-only")

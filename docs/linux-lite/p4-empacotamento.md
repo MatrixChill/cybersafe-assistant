@@ -164,12 +164,23 @@ por cima do `dist/index.html` (linhas 21-39: build do desktop, build da app,
 pré-passo, e o seu préflight só perguntava se `dist/index.html` **existia** — o
 que era sempre verdadeiro, vazio ou não.
 
-Correção em `34e879a`, toda ela no caminho Linux:
+Correção em `34e879a` e `1d3b8ab`, toda ela no caminho Linux:
 
 - `construir()` passa a correr `node scripts/stage-renderer.mjs` antes do
   electron-builder;
-- o préflight exige ver o contentor do React e o `src` do script dentro do
-  `index.html`, e recusa escrever um `.deb` de uma casca vazia.
+- logo a seguir ao staging, e antes de qualquer escrita, `estadoRenderer()`
+  exige o contentor `#root` e o `src` do script no `dist/index.html` **e**
+  confere a identidade embutida no bundle com `verifyBuiltRenderer` — a mesma
+  verificação que o pipeline Windows já usa, por isso não há critério paralelo
+  inventado aqui. Falhando, sai `STAGING_SEM_RENDERER <motivo>` e nada é
+  escrito;
+- o préflight não reprova por isso (um `--check` não compila nada): reporta o
+  estado do `dist` como nota, com o motivo medido;
+- `package-linux.mjs` passou a ser importável (CLI atrás de `isMain`), e
+  `scripts/test/linux-lite-package-renderer-guard.test.mjs` exerce a
+  configuração exata deste bug — casca com `<body></body>` e versão certa no
+  `main.js` — e prova que o guarda dispara com o motivo nomeado. 6 testes, 6
+  passes, medidos em Windows e em Linux.
 
 O `stage-renderer.mjs` é o mesmo do Windows e não foi alterado. A medição da
 reconstrução segue-se; enquanto não estiver na tabela, a linha do empacotamento
