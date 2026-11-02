@@ -99,6 +99,26 @@ http.get({host:"127.0.0.1",port:p,path:"/json/list",timeout:8000},(r)=>{
 ' "$PORT" 2>&1 | head -8
 echo "rc_no_de_erro_acima=ok_se_imprimiu_alvos"
 
+echo "--- fotografia da janela do pacote ---"
+# Um alvo CDP com `title` prova que há uma página; não prova que o utilizador
+# vê o dashboard. O §15 pede GUI, por isto a imagem vai para /mnt/c e é lida
+# como evidência. Sem `maim` diz-se `sem_maime` — nunca se afirma o que não foi
+# capturado.
+PASTA_ARTEFACTOS="/mnt/c/Users/caioc/.cybersafe-integration/qoder-linux-lite/artifacts"
+if command -v maim >/dev/null 2>&1; then
+  if maim --window "$(xdotool search --name 'CyberSafe' 2>/dev/null | head -1)" /tmp/cybersafe-pacote.png 2>/dev/null \
+     || maim /tmp/cybersafe-pacote.png 2>/dev/null; then
+    mkdir -p "$PASTA_ARTEFACTOS"
+    cp /tmp/cybersafe-pacote.png "$PASTA_ARTEFACTOS/cybersafe-pacote.png" 2>/dev/null \
+      && echo "SHOT_OK $PASTA_ARTEFACTOS/cybersafe-pacote.png bytes=$(stat -c %s /tmp/cybersafe-pacote.png)" \
+      || echo "SHOT_SEM_COPIA_A_MONTAR"
+  else
+    echo "SHOT_FALHOU"
+  fi
+else
+  echo "sem_maime"
+fi
+
 echo "--- encerramento com SIGTERM APENAS no processo principal ---"
 # `pkill -TERM -f` apanhava TODA a família, incluindo o filho GPU do Chromium.
 # Matado o filho, o pai não encerra: aborta com `FATAL: GPU process isn't
