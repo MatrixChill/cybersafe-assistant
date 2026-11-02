@@ -919,6 +919,8 @@ const globalClamavSlots = {
   poisoned: 0,
   /** Fila dos scans do UTILIZADOR (têm scanId: quick/full/custom do ScanManager). */
   waitingUser: [] as Array<(granted: ClamavSlotResult) => void>,
+  /** Fila das provas de saúde/carga (não são scans do utilizador). */
+  waitingHealth: [] as Array<(granted: ClamavSlotResult) => void>,
   /** Fila de BACKGROUND (análise unitária de ficheiro/processo, sem scanId). */
   waitingBackground: [] as Array<(granted: ClamavSlotResult) => void>,
   /** Jobs de background RECUSADOS por fila cheia (backpressure honesta). */
@@ -929,11 +931,15 @@ const globalClamavSlots = {
  * Classe de prioridade de um job na vaga GLOBAL.
  *
  * `user`     = trabalho de um scan que o utilizador pediu (tem scanId).
+ * `health`   = prova de saúde/carga do motor. Não pode ficar atrás de uma
+ *              fila de análises automáticas (era a origem do `sem vaga dentro
+ *              de 30000 ms`), mas também não passa à frente de um scan pedido
+ *              pelo utilizador.
  * `background` = análise unitária automática (ficheiro observado, processo
  *              iniciado, correlação ETW). É o default, e é o conservador: só
  *              quem declara (ou traz scanId) sobe de prioridade.
  */
-export type ClamavJobPriority = "user" | "background";
+export type ClamavJobPriority = "user" | "health" | "background";
 
 /**
  * Tecto de jobs de BACKGROUND à espera da vaga.
@@ -1021,7 +1027,9 @@ async function acquireClamavSlot(
     const queue =
       priority === "user"
         ? globalClamavSlots.waitingUser
-        : globalClamavSlots.waitingBackground;
+        : priority === "health"
+          ? globalClamavSlots.waitingHealth
+          : globalClamavSlots.waitingBackground;
     let settled = false;
     const settle = (result: ClamavSlotResult) => {
       if (settled) return;
@@ -1048,8 +1056,9 @@ async function acquireClamavSlot(
  *
  * ORDEM DE PRIORIDADE (o P0 SCANNER_RUNTIME_ZERO_PROGRESS):
  *   1. scans do utilizador em espera, por ordem de chegada;
- *   2. análises de background em espera, por ordem de chegada;
- *   3. ninguém -> a vaga fica livre (`active` decrementa).
+ *   2. provas de saúde/carga, por ordem de chegada;
+ *   3. análises de background em espera, por ordem de chegada;
+ *   4. ninguém -> a vaga fica livre (`active` decrementa).
  *
  * O job ATIVO nunca é interrompido: a vaga só é decidida quando ele termina.
  * Isso é deliberado — matar um clamscan saudável a meio para preempção pagaria
@@ -1058,7 +1067,9 @@ async function acquireClamavSlot(
  */
 function releaseClamavSlot(): void {
   const next =
-    globalClamavSlots.waitingUser.shift() ?? globalClamavSlots.waitingBackground.shift();
+    globalClamavSlots.waitingUser.shift() ??
+    globalClamavSlots.waitingHealth.shift() ??
+    globalClamavSlots.waitingBackground.shift();
   if (next) {
     // `active` mantem-se: a vaga passa de mãos em mãos, nunca há um instante
     // em que o limite possa ser excedido.
@@ -1075,6 +1086,7 @@ function releaseClamavSlot(): void {
 export function clamavSlotStats(): {
   active: number;
   waitingUser: number;
+  waitingHealth: number;
   waitingBackground: number;
   poisoned: number;
   droppedBackground: number;
@@ -1083,6 +1095,7 @@ export function clamavSlotStats(): {
   return {
     active: globalClamavSlots.active,
     waitingUser: globalClamavSlots.waitingUser.length,
+    waitingHealth: globalClamavSlots.waitingHealth.length,
     waitingBackground: globalClamavSlots.waitingBackground.length,
     poisoned: globalClamavSlots.poisoned,
     droppedBackground: globalClamavSlots.droppedBackground,
@@ -1104,6 +1117,9 @@ function poisonClamavSlot(): void {
   // dos waiters presos para sempre — ninguém lhes daria vaga nem recusa.
   while (globalClamavSlots.waitingUser.length > 0) {
     globalClamavSlots.waitingUser.shift()!("poisoned");
+  }
+  while (globalClamavSlots.waitingHealth.length > 0) {
+    globalClamavSlots.waitingHealth.shift()!("poisoned");
   }
   while (globalClamavSlots.waitingBackground.length > 0) {
     globalClamavSlots.waitingBackground.shift()!("poisoned");
@@ -3351,7 +3367,10 @@ export class ClamavBridge {
     const slotWaitTimer = setTimeout(() => slotAbort.abort(), probeTimeoutMs);
     let slot: ClamavSlotResult;
     try {
-      slot = await acquireClamavSlot(this.concurrencyLimit, "background", slotAbort.signal);
+      // A prova é saúde, não trabalho automático: se entrar como background
+      // fica atrás de dezenas de análises e expira com "sem vaga dentro de
+      // 30000 ms", fazendo o motor oscilar active/degraded sem estar avariado.
+      slot = await acquireClamavSlot(this.concurrencyLimit, "health", slotAbort.signal);
     } finally {
       clearTimeout(slotWaitTimer);
       if (this.probeSlotAbort === slotAbort) this.probeSlotAbort = null;
@@ -3881,7 +3900,7 @@ export class ClamavBridge {
     scanPerfLog(
       "CLAMAV_SLOT_ACQUIRE_BEGIN",
       options.scanId,
-      `priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
+      `priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
     );
     // HEARTBEAT DA ESPERA PELA VAGA. A vaga é GLOBAL (1) e partilhada com o
     // monitor de ficheiros, o monitor de processos e o dashboard: se outro
@@ -3894,7 +3913,7 @@ export class ClamavBridge {
         scanPerfLog(
           "CLAMAV_SLOT_WAIT",
           options.scanId,
-          `waitedMs=${Date.now() - slotStartedAt} priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
+          `waitedMs=${Date.now() - slotStartedAt} priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
         );
       }, 5000);
     }
@@ -3903,7 +3922,7 @@ export class ClamavBridge {
     scanPerfLog(
       "CLAMAV_SLOT_ACQUIRE_END",
       options.scanId,
-      `result=${slot} priority=${priority} elapsedMs=${Date.now() - slotStartedAt} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} droppedBackground=${globalClamavSlots.droppedBackground}`,
+      `result=${slot} priority=${priority} elapsedMs=${Date.now() - slotStartedAt} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} droppedBackground=${globalClamavSlots.droppedBackground}`,
     );
     // Vaga envenenada: há um clamscan vivo cuja morte ninguém confirmou. Não
     // admitimos outro — seria 2 GB em voo. E não fingimos que o ficheiro está

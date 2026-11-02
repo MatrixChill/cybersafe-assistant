@@ -25,6 +25,9 @@ import { ClamavBridge, clamavSlotStats } from "../dist/index.js";
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
+const LOAD_PROOF_SUMMARY =
+  "----------- SCAN SUMMARY -----------\nKnown viruses: 3628193\nEngine version: 1.5.4\nScanned files: 1\nInfected files: 0\n";
+
 async function waitFor(predicate, { timeoutMs = 5_000, label = "condição" } = {}) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
@@ -47,6 +50,18 @@ function makeGatedSpawner() {
   const state = { spawned: 0, live: 0, peak: 0, pids: [] };
   const releases = new Map();
   const spawn = (_file, args, _request) => {
+    // A prova de carga não é um job de background: resolve-a antes do cenário
+    // para a vaga começar livre e a fila medida ser só de análises reais.
+    const isLoadProof = (args ?? []).some(
+      (a) => typeof a === "string" && a.includes("cybersafe-clamav-load-probe-"),
+    );
+    if (isLoadProof) {
+      return {
+        pid: 49000,
+        killTree() {},
+        outcome: Promise.resolve({ code: 0, stdout: LOAD_PROOF_SUMMARY, stderr: "" }),
+      };
+    }
     state.spawned++;
     state.live++;
     state.peak = Math.max(state.peak, state.live);
@@ -100,6 +115,7 @@ beforeEach(async () => {
     spawn: gate.spawn,
     scanTimeoutMs: 5_000,
   });
+  await bridge.isAvailable();
   fired.length = 0;
 });
 
@@ -128,6 +144,7 @@ describe("P0 STARVATION — a fila de background é LIMITADA", () => {
     for (let i = 1; i <= limit; i++) fired.push(bridge.scanFiles([target(i)], {}));
     await waitFor(() => clamavSlotStats().waitingBackground === limit, {
       label: "fila de background cheia",
+      timeoutMs: 10_000,
     });
 
     // Um scan do UTILIZADOR entra na mesma — a ação explícita não é recusada.
