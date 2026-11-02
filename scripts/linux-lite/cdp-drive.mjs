@@ -33,7 +33,11 @@ fs.mkdirSync(SAIDA, { recursive: true });
 // Conta SINTÉTICA: domínio `.invalid` (RFC 2606 — nenhum servidor aceita este
 // endereço, nada pode ser enviado para ele) e palavra-passe descartável criada
 // para o ensaio. Não há credencial pessoal nem transportada do Windows.
-const CONTA = { email: "linux-lite-teste@example.invalid", senha: "Teste-Linux-Lite-2026!", nome: "Teste Linux Lite" };
+// O local-part é único por execução: medido, a API do pacote guarda utilizadores
+// em `~/.cybersafe-service/cybersafe.db` — fora do `--user-data-dir` — por isso
+// um e-mail repetido é recusado («1 campo precisa de atenção») mesmo com o
+// perfil do Electron limpo. Ver task de isolamento de dados (§9).
+const CONTA = { email: `cs-linux-${Date.now().toString(36)}@example.invalid`, senha: "Teste-Linux-Lite-2026!", nome: "Teste Linux Lite" };
 // Rótulos LIDOS da navegação do pacote (medido: «Análise de Segurança» é a
 // entrada do Scanner; «Scanner» não existe na barra lateral).
 const VISTAS = ["Análise de Segurança", "Monitor em Tempo Real", "PC Center", "Gestor de Tarefas", "MATRIX", "Otimizar"];
@@ -142,7 +146,12 @@ if(!e) return "sem_campo_email"; ver(e,C.email);
 if(!senhas[0]) return "sem_campo_senha"; ver(senhas[0],C.senha);
 if(senhas[1]) ver(senhas[1],C.senha);
 const n=porRotulo("nome")||porNome("input","nome")||porTipo("text"); if(n) ver(n,C.nome);
-const btn=els("button").find((b)=>/criar (a )?conta|regist|submeter|continuar/i.test(txt(b)));
+// Caixas por confirmar: o formulário de registo tem consentimentos e a falta de
+// um deles devolve «1 campo precisa de atenção» (medido na corrida com perfil
+// limpo). É a aplicação a recusar um registo incompleto — comportamento correto.
+for(const cb of els('input[type="checkbox"]').filter((x)=>!x.checked)) cb.click();
+const tipo=els("button,[role=radio],label").find((x)=>/^pessoal$/i.test(txt(x))); if(tipo) tipo.click();
+const btn=[...els("button")].reverse().find((b)=>/criar (a )?conta|regist|submeter|continuar/i.test(txt(b)));
 if(!btn) return "sem_botao_submeter";
 btn.click(); await esperar(6000);
 return txt(btn)+" -> "+txt(document.body).slice(0,180);
