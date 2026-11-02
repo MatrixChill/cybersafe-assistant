@@ -51,3 +51,24 @@ test("sem limitações reportadas, o hero não inventa uma causa", () => {
   assert.equal(verdict.title, "Monitorização ligada");
   assert.doesNotMatch(verdict.description, /Limitações reportadas/);
 });
+
+test("snapshot produzido pelo serviço e serializado conserva as causas no Dashboard", async () => {
+  const { ProtectionEngineService } = await import("../../service/dist/engine.js");
+  const fs = await import("node:fs/promises");
+  const path = await import("node:path");
+  const { fileURLToPath } = await import("node:url");
+  const dir = await fs.mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), "dashboard-service-"));
+  try {
+    // Real producer, no init(): no watcher, ETW, network or personal profile.
+    const service = new ProtectionEngineService(dir);
+    const wire = JSON.parse(JSON.stringify(service.getProtectionState()));
+    assert.ok(wire.engine.degradedReasons.length > 0);
+    assert.equal(wire.engine.yara.coverage, "unknown");
+    const verdict = dashboardVerdict({ ...dashboard, systemStatus: wire.status, engineHealth: wire.engine }, { enabled: true, disponivel: true }, true);
+    assert.equal(verdict.title, "Proteção com limitações");
+    for (const reason of wire.engine.degradedReasons.slice(0, 2)) assert.ok(verdict.description.includes(reason.trim()));
+    assert.doesNotMatch(verdict.title, /completa/i);
+  } finally {
+    await fs.rm(dir, { recursive: true, force: true });
+  }
+});

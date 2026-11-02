@@ -61,3 +61,44 @@ test('recusa legada fica auditada sem consultar nem atuar sobre processos', asyn
  for(const line of lines){assert.equal(line.action,'process.termination.refused');assert.equal(line.reason,'legacy-disabled');assert.equal(line.executed,false);}
  assert.equal(queries,0);assert.equal(kills,0);assert.equal(events,0);
 });
+
+test('prepare -> confirm revalidates service gates and native identity without real processes', async t => {
+ const previous = new Map(['CYBERSAFE_DEV_WINDOWS_READONLY','CYBERSAFE_REALDEV_FIXTURE_SCAN'].map(k=>[k,process.env[k]]));
+ for(const key of previous.keys()) delete process.env[key];
+ const root=await mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)),'transition-audit-'));
+ t.after(async()=>{for(const [key,value] of previous){if(value===undefined)delete process.env[key];else process.env[key]=value;}await rm(root,{recursive:true,force:true});});
+ const startedAt='2026-10-30T08:00:00.0000000Z';
+ const cases=[
+  ['idle','killed',()=>{}],
+  ['scan and realtime queue become busy','killed',s=>Object.assign(s,{realtimeQueue:{size:4,active:1},fileObservationReads:2,scanAbortControllers:new Map([['global',{}]]),scanManager:{getActiveScan:()=>({id:'global'})}})],
+  ['natural exit','already-exited',(_s,f)=>f.exited=true],
+  ['PID reuse','reused',(_s,f)=>f.identity={...f.identity,creation:(BigInt(f.identity.creation)+10n).toString()}],
+  ['native eligibility revoked','protected',(_s,f)=>f.identity={...f.identity,eligible:false}],
+  ['own child becomes protected','protected',s=>s.ownChildPids.set(12345,{})],
+  ['critical operation begins','protected',s=>s.criticalRpcOperations=1],
+  ['shutdown begins','protected',s=>s.isShuttingDown=true],
+  ['authentication lost','protected',s=>s.pipeToken=undefined],
+  ['readonly enabled','protected',()=>process.env.CYBERSAFE_DEV_WINDOWS_READONLY='1'],
+  ['ticket expired','failed',(s,f)=>s.individualTermination.tickets.get(f.ticket).expiresAt=Date.now()-1],
+  ['ticket invalid','failed',(_s,f)=>f.ticket='not-a-ticket'],
+  ['controller disposed','failed',s=>s.individualTermination.dispose()],
+ ];
+ for(const [name,expected,change] of cases) await t.test(name,async()=>{
+  delete process.env.CYBERSAFE_DEV_WINDOWS_READONLY;
+  const s=service();let kills=0,closes=0,opens=0;
+  const f={exited:false,identity:{pid:12345,name:'notepad.exe',path:path.win32.join('C:', 'Synthetic', 'notepad.exe'),startedAt,creation:((BigInt(Date.parse(startedAt))+11644473600000n)*10000n).toString(),eligible:true},ticket:''};
+  Object.assign(s,{logsDir:root,individualTermination:null,processes:[{...f.identity,ppid:0}],eventBus:{publish(){}},gateMethodDuringStartup:async()=>{},
+   killProtectionContext:()=>({selfPid:1,ancestorPids:[],internalPaths:[],internalPathPrefixes:[],commandLineMarkers:[],fallbackNames:[],systemPidThreshold:100}),
+   openIndividualProcess:()=>{opens++;return {read:()=>({...f.identity}),exited:()=>f.exited,terminate:()=>{kills++;f.exited=true},close:()=>closes++}}});
+  try {
+   const p=await s.dispatch('process.termination.prepare',{pid:12345,startedAt});assert.equal(p.ok,true,name);assert.equal(kills,0);f.ticket=p.ticket;
+   change(s,f);
+   const result=await s.dispatch('process.termination.confirm',{ticket:f.ticket});
+   assert.equal(result.status,expected,name);assert.equal(kills,expected==='killed'?1:0,name);assert.equal(opens,1,'confirm must never reopen by PID');
+   assert.equal((await s.dispatch('process.termination.confirm',{ticket:f.ticket})).success,false,'one-use confirmation');
+  } finally {s.individualTermination.dispose();}
+  assert.equal(closes,1,'retained handle closes exactly once');
+ });
+ // Audit writes are append-only and asynchronous, not a claimed native proof.
+ await new Promise(resolve=>setTimeout(resolve,50));
+});
