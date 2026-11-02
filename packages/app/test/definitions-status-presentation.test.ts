@@ -119,3 +119,11 @@ describe("estado das definições por fonte", () => {
     assert.match(r.texto, /Base de hashes — Indisponível/);
   });
 });
+
+it('dados parciais não inventam contagens nem prazos e rejeitam nomes herdados', () => {
+  const partial=linhaDasDefinicoes(fonte({itensCarregados:undefined,proximaVerificacaoAtMs:undefined,ultimaTentativaAtMs:undefined}),AGORA);
+  assert.match(partial.texto,/contagem não medida/);
+  assert.doesNotMatch(partial.texto,/undefined|NaN/);
+  const result=resumoDasDefinicoes({fontes:[fonte({fonte:'toString'}),fonte({estado:'constructor'})]} as any,AGORA);
+  assert.equal(result.linhas.length,0);
+});

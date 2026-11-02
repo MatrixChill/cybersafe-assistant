@@ -51,7 +51,7 @@ const SEVERIDADES: Record<DefinitionsSourceState, "ok" | "atencao" | "critico"> 
  * Ordem importa: a primeira correspondência ganha.
  */
 function categoriaDaCausa(erro: string | null): string | null {
-  if (!erro) return null;
+  if (typeof erro !== "string" || !erro) return null;
   if (/sem chave|missing api key/i.test(erro)) return "chave de acesso não configurada";
   if (/recusada|bad auth|unauthorized/i.test(erro)) return "chave de acesso recusada";
   if (/429|limite de pedidos|exceeding rate/i.test(erro)) return "limite de pedidos do fornecedor";
@@ -72,6 +72,7 @@ function tempo(ms: number | null, agora: number): string {
 }
 
 function quando(ms: number, agora: number): string {
+  if (typeof ms !== "number" || !Number.isFinite(ms) || ms <= 0) return "próxima verificação não reportada";
   const diff = ms - agora;
   if (diff <= 0) return "na próxima verificação";
   const minutos = Math.round(diff / 60000);
@@ -90,7 +91,7 @@ export interface LinhaDefinicoes {
 
 export function linhaDasDefinicoes(f: DefinitionsSourceStatus, agora: number): LinhaDefinicoes {
   const carregados =
-    f.itensCarregados === null
+    !Number.isSafeInteger(f.itensCarregados) || (f.itensCarregados ?? -1) < 0
       ? "contagem não medida"
       : f.fonte === "hashes"
         ? `${f.itensCarregados} assinaturas de hash carregadas`
@@ -117,7 +118,7 @@ export function linhaDasDefinicoes(f: DefinitionsSourceStatus, agora: number): L
 export function linhasDasDefinicoes(status: DefinitionsStatus | null | undefined, agora = Date.now()): LinhaDefinicoes[] {
   if (!status || !Array.isArray(status.fontes)) return [];
   return status.fontes
-    .filter((f): f is DefinitionsSourceStatus => !!f && typeof f.fonte === "string" && f.fonte in NOMES && f.estado in ROTULOS)
+    .filter((f): f is DefinitionsSourceStatus => !!f && typeof f.fonte === "string" && Object.hasOwn(NOMES, f.fonte) && typeof f.estado === "string" && Object.hasOwn(ROTULOS, f.estado))
     .map((f) => linhaDasDefinicoes(f, agora));
 }
 
