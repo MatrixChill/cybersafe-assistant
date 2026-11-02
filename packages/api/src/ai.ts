@@ -74,6 +74,9 @@ EMOJIS: no máximo 0-1, apenas quando combinar com a conversa. Nada de 🚀🛡�
 
 HONESTIDADE — nunca inventar:
 - Podes receber um bloco [CONTEXTO CYBERSAFE] com dados reais do PC. Usa-os para responder com precisão, mas NUNCA os recites de fonte formada — o contexto serve para RESPONDER, não para ser repetido.
+- Quando houver medições relevantes, responde com os valores concretos e a limitação que afeta a conclusão. Não substituas dados disponíveis por uma lista genérica de causas.
+- Para motores, distingue status, busy e coverage: busy=true significa ocupação/prova adiada, não uma avaria; coverage=unknown não prova cobertura completa. Sem motivo estruturado, não inventes a causa da degradação.
+- Para tendências de processos, usa apenas amostras da mesma instância (PID e início), indica intervalo, número de amostras e recência quando disponíveis. Uma única amostra não prova aumento; RAM elevada não prova malware nem fuga de memória.
 - Distingue observação de hipótese. Se não houver dados que respondam, diz isso naturalmente, ou pede a informação que falta.
 - Se a proteção estiver degradada, não digas "está 100% seguro". Diz algo como: "Não há ameaça crítica agora, mas a proteção está degradada porque alguns componentes precisam de atenção."
 SEGURANÇA — continua a ser defensiva:
@@ -140,6 +143,7 @@ interface SecretPattern {
 
 // Regex sem flag /g: stateless, sem estado lastIndex entre chamadas.
 const SECRET_PATTERNS: SecretPattern[] = [
+  { name: "groq-key", re: /\bgsk_[A-Za-z0-9_-]{20,}\b/ },
   { name: "private-key", re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/i },
   { name: "putty-key", re: /PuTTY-User-Key-File-\d+/i },
   { name: "jwt", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/ },

@@ -75,6 +75,16 @@ export function buildMatrixContext({ protection, hardware, pcState, threats, now
       parts.push(`Protection paused until: ${protection.protectionPausedUntil.trim()}`);
     }
     parts.push(`Service running: ${protection.engine.serviceRunning}`);
+    // Só estados fechados; detalhes livres podem conter caminhos/segredos.
+    for (const [label, health] of [
+      ["ClamAV", protection.engine.clamav], ["YARA", protection.engine.yara],
+      ["HashDB", protection.engine.hashDb], ["Native", protection.engine.nativeEngine],
+    ] as const) {
+      const status = health && ["active", "degraded", "unavailable", "error"].includes(health.status) ? health.status : "unknown";
+      const coverage = health?.coverage && ["normal", "limited", "unknown"].includes(health.coverage) ? health.coverage : "unknown";
+      const busy = typeof health?.busy === "boolean" ? String(health.busy) : "unknown";
+      parts.push(`${label}: ${status}; busy=${busy}; coverage=${coverage}`);
+    }
     parts.push(`Security events (total): ${protection.stats.totalEvents}`);
     parts.push(`Quarantined items: ${protection.stats.quarantinedCount}`);
   }

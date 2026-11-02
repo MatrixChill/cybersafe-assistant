@@ -129,3 +129,15 @@ test('MemoryCompression: nome com caminho usa basename, protecao texto honesto',
   assert.match(reply,/não encerrar.*componente/i);
   assert.doesNotMatch(reply,/protecção do sistema|não usar taskkill/i);
 });
+
+
+test('general context distinguishes engine health, busy and unknown coverage without private detail', () => {
+  const context = buildMatrixContext({hardware:null,pcState:null,threats:[],protection:{
+    status:'degraded',stats:{riskScore:10,totalEvents:0,quarantinedCount:0},
+    engine:{serviceRunning:true,clamav:{status:'active',busy:true,coverage:'normal',detail:'C:\\Users\\private-sentinel'},yara:{status:'degraded',coverage:'limited'}},
+  }} as any);
+  assert.match(context,/ClamAV: active; busy=true; coverage=normal/);
+  assert.match(context,/YARA: degraded; busy=unknown; coverage=limited/);
+  assert.match(context,/HashDB: unknown/);
+  assert.doesNotMatch(context,/private-sentinel|Users/);
+});
