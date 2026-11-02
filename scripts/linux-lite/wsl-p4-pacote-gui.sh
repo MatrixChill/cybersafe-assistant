@@ -17,6 +17,18 @@ B="$D/packages/desktop/release-linux/linux-unpacked/cybersafe-assistant-linux-li
 PORT="${CS_PACOTE_PORT:-9231}"
 LOG="/tmp/cybersafe-pacote-gui.log"
 PADRAO='[c]ybersafe-assistant-linux-lite'
+# O diretório de dados criado por ESTE pacote (nome de pacote definido em
+# `extraMetadata.name`). Tem de estar escrito aqui dentro: num comando passado
+# por `wsl -e bash -lc '...'`, a própria linha de comando do shell continha o
+# nome e o `pkill -f [c]ybersafe-assistant-linux-lite` matou o pai (medido:
+# `rc=9`, zero output).
+PERFIL="$HOME/.config/cybersafe-assistant-linux-lite"
+
+if [ "${1:-}" = "--limpar-perfil" ]; then
+  rm -rf "$PERFIL"
+  echo "perfil_de_teste_removido=$PERFIL"
+fi
+
 
 if [ ! -x "$B" ]; then echo "SEM_BINARIO $B (correr package-linux.mjs primeiro)"; exit 1; fi
 
@@ -65,4 +77,17 @@ pkill -TERM -f "$PADRAO" 2>/dev/null; sleep 5
 echo "apos_SIGTERM_remanescentes=$(pgrep -c -f "$PADRAO" 2>/dev/null || echo 0)"
 limpar
 echo "POS_SIGTERM_LOG=$(tail -3 "$LOG" 2>/dev/null | tr "\n" " ")"
+
+echo "--- onde o pacote escreveu ---"
+# A pergunta do §9 é esta: o artefacto usa uma raiz só dele, ou vai ter ao
+# mesmo sítio que o perfil de desenvolvimento?
+if [ -d "$PERFIL" ]; then
+  echo "perfil_do_pacote=$PERFIL"
+  ls -1 "$PERFIL" 2>/dev/null | head -10 | sed 's/^/  conteúdo: /'
+  stat -c '  secrets nlink=%h %n' "$PERFIL/secrets" 2>/dev/null || echo "  sem secrets/ (serviço não chegou a criar credência)"
+else
+  echo "perfil_do_pacote=não_foi_criado ($PERFIL)"
+fi
+echo "--- sobra do perfil de desenvolvimento? ---"
+stat -c 'dev_seed_nlink=%h %n' "$HOME/.config/@cybersafe/desktop/secrets" 2>/dev/null || echo "  sem @cybersafe/desktop/secrets"
 echo FIM

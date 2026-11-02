@@ -1,8 +1,8 @@
 # P1 — Lista de processos no Linux Lite (medida)
 
-Estado: **listagem operacional em Linux real (WSL2); terminação ainda bloqueada**
-(ver «O que ainda não funciona» em baixo). Nada aqui está marcado como feito sem
-medição.
+Estado: **listagem operacional em Linux real (WSL2); terminação medida a
+funcionar em POSIX** desde `b0368de` — ver «O que ainda não funciona», que é a
+lista do que continua em falta. Nada aqui está marcado como feito sem medição.
 
 ## O problema medido, não assumido
 
@@ -116,7 +116,7 @@ sem spawn de processo externo — contra ~0,3–2 s de um CIM no Windows.
 
 ## O que ainda não funciona (sem fingir)
 
-Actualizado após `b0368de`. As duas razões que impediam a terminação em Linux
+Atualizado após `b0368de`. As duas razões que impediam a terminação em Linux
 foram tratadas e **medidas a funcionar**: `KILL_TERMINATION_DISABLED` deixou de
 ser aplicada às plataformas POSIX (a recusa passou a ser por cadeia de
 identidade, com o motivo nomeado) e o passo «a fonte é consultada ANTES de agir»
