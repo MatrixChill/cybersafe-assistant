@@ -1,4 +1,4 @@
-﻿; ---------------------------------------------------------------------------
+; ---------------------------------------------------------------------------
 ; CyberSafe Assistant — superficie do instalador para electron-builder 25.1.8
 ;
 ; Nao substitui o script do electron-builder. Usa apenas os hooks oficiais:
@@ -107,6 +107,9 @@ Var CSSpaceState
   IntOp $R3 $CSH * ${HPCT}
   IntOp $R3 $R3 / 100
   System::Call 'user32::MoveWindow(p ${CONTROL}, i $R0, i $R1, i $R2, i $R3, i 1)'
+  ; O bitmap de fundo e criado como controlo irmao; sem este raise os
+  ; labels/botoes ficam por tras dele em algumas versoes do nsDialogs.
+  System::Call 'user32::SetWindowPos(p ${CONTROL}, p 0, i 0, i 0, i 0, i 0, i 0x13)'
 !macroend
 
 !macro CS_CardColors CONTROL
@@ -118,6 +121,16 @@ Var CSSpaceState
 !macro CS_ReadRoot ROOT
   ReadRegStr $0 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" InstallLocation
   ReadRegStr $1 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" DisplayVersion
+  ${If} $0 == ""
+  ${AndIf} $1 != ""
+    ; Ha instalacoes antigas com InstallLocation vazio. O caminho e fixo
+    ; (allowToChangeInstallationDirectory=false); so o aceitamos se o
+    ; desinstalador real existir, nunca por suposicao.
+    StrCpy $0 "$LOCALAPPDATA\Programs\${APP_FILENAME}"
+    ${IfNot} ${FileExists} "$0\Uninstall ${PRODUCT_FILENAME}.exe"
+      StrCpy $0 ""
+    ${EndIf}
+  ${EndIf}
   ${If} $0 != ""
   ${AndIf} ${FileExists} "$0\Uninstall ${PRODUCT_FILENAME}.exe"
     StrCpy $CSInstalledDir "$0"

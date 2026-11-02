@@ -1,4 +1,4 @@
-﻿; Gerado por gen-lang.mjs — não editar à mão.
+; Gerado por gen-lang.mjs — não editar à mão.
 !macro CS_LangStrings
   LangString CS_WelcomeHeader 1033 "Installation"
   LangString CS_WelcomeHeader 1031 "Installation"
@@ -145,8 +145,8 @@
   LangString CS_NotInstalled 1044 "CyberSafe Assistant is not installed yet. Repair and uninstall become available after the first installation."
   LangString CS_NotInstalled 1035 "CyberSafe Assistant is not installed yet. Repair and uninstall become available after the first installation."
   LangString CS_NotInstalled 1049 "CyberSafe Assistant is not installed yet. Repair and uninstall become available after the first installation."
-  LangString CS_NotInstalled 2070 "O CyberSafe Assistant ainda não está instalado. Reparar e desinstalar ficam disponíveis após a primeira instalação."
-  LangString CS_NotInstalled 1046 "O CyberSafe Assistant ainda não está instalado. Reparar e desinstalar ficam disponíveis após a primeira instalação."
+  LangString CS_NotInstalled 2070 "Ainda não instalado. Reparar e desinstalar ficam disponíveis após a instalação."
+  LangString CS_NotInstalled 1046 "Ainda não instalado. Reparar e desinstalar ficam disponíveis após a instalação."
   LangString CS_NotInstalled 1045 "CyberSafe Assistant is not installed yet. Repair and uninstall become available after the first installation."
   LangString CS_NotInstalled 1058 "CyberSafe Assistant is not installed yet. Repair and uninstall become available after the first installation."
   LangString CS_NotInstalled 1029 "CyberSafe Assistant is not installed yet. Repair and uninstall become available after the first installation."
