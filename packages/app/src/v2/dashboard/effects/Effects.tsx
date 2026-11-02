@@ -5,7 +5,7 @@ import {lazy,Suspense,useEffect,useRef,useState,useCallback,type CSSProperties} 
 import {useAppearance} from './Appearance';
 import Aurora from './Aurora';
 const CoreScene=lazy(()=>import('./CoreScene'));
-const orbitalProposal=import.meta.env.DEV&&import.meta.env.VITE_CYBERSAFE_ORBITAL_PREVIEW==='1';
+const orbitalProposal=import.meta.env?.DEV&&import.meta.env.VITE_CYBERSAFE_ORBITAL_PREVIEW==='1';
 export const palette:Record<string,string[]>={core:['#06485f','#00d4e6','#4060b0'],neon:['#e341e8','#593eff','#00e7f1'],terminal:['#164a2b','#49d77f','#102e1e'],aurora:['#79e4d0','#8278ff','#ed8fbf'],belbete:['#351320','#b15d72','#c5a48a'],glass:['#186682','#7dcddd','#3c698f'],tactical:['#24483c','#8fc2a4','#233333'],light:['#266a87','#6daed5','#a7cbbf']};
 export function AuroraBackdrop(){const{p,animate,gpu,dpr}=useAppearance();const[failed,setFailed]=useState(false);const fail=useCallback(()=>setFailed(true),[]);return <div className="aurora-backdrop" aria-hidden="true">{gpu&&animate&&!failed?<Aurora onFailure={fail} colorStops={palette[p.theme]} speed={p.movement==='cinematic'?.45:.16} amplitude={1.1} layers={2} dpr={dpr} intro={false} mouseInteraction={false}/>:<div className="static-aurora"/>}</div>}
 // Adapted from Magic UI Orbiting Circles (MIT). Same child angles/radius transform;
