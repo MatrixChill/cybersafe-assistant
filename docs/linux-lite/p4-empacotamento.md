@@ -226,6 +226,206 @@ Encerramento do mesmo pacote: `processo_principal=457`,
 `principal_saiu_em=3s`, `apos_SIGTERM_remanescentes=0`, última linha do log
 `[Electron] Processo do Serviço encerrou com código: 0`.
 
+## A janela abria-se sem API: `skipped` com ecrã de login
+
+O pacote de `f62e0bf` mostrava a interface e o serviço ligados, mas o log dizia
+`API local não arrancou (skipped): API não encontrada no artefacto`. Janela com
+login que não autentica não é um produto — é uma maqueta.
+
+Causa, no pipeline e não na aplicação: `package-linux.mjs` compilava os
+workspaces de que o `desktop` precisa mas nunca o workspace `api`, por isso
+`packages/api/dist` não existia quando `resolveApiEntryPath()`
+(`desktop/src/api-lifecycle.ts:155-168`) procurava
+`app.asar/node_modules/api/dist/index.js` e devolvia `null`. O pipeline Windows
+já compila a `api` (`BUILD_WORKSPACES` em `scripts/package-windows.mjs`); a lista
+Linux estava encurtada.
+
+Correção (`9907c0f`): `compilarWorkspaces()` com a mesma lista do Windows e
+`estadoApi()` — se a entrada não estiver no palco, o build recusa ANTES de
+escrever seja o que for, porque um `.deb` sem API é exatamente o artefacto que
+engana quem o testa. Protegido por
+`scripts/test/linux-lite-package-api-guard.test.mjs` (3 casos, incluindo o
+negativo e a verificação de que o guard e o `api-lifecycle.ts` procuram a mesma
+entrada).
+
+## O addon nativo não era do Electron: `ERR_DLOPEN_FAILED`
+
+Com a API dentro, o filho da API morria a abrir o SQLite:
+
+```
+ERR_DLOPEN_FAILED … better_sqlite3.node: NODE_MODULE_VERSION 127 … 130 required
+```
+
+`127` é o ABI do Node com que o `npm install` trouxe o `better-sqlite3`; `130` é
+o do Electron 33.4.11. No WSL não havia `g++`, `cc` nem `make` (medido:
+AUSENTE), portanto reconstruir não era opção — e o pipeline Linux tem
+`npmRebuild: false` precisamente para o electron-builder não reificar o worktree.
+
+Correção (`9907c0f`): trocar o binário com o instalador do próprio addon e depois
+**obrigar** a medição antes de empacotar.
+
+```
+node node_modules/prebuild-install/bin.js --runtime=electron \
+     --target=33.4.11 --arch=x64 --platform=linux     # em node_modules/better-sqlite3
+GATE_ABI ABI_OK 130 33.4.11 1                          # abre a DB dentro do Electron-as-node
+```
+
+O gate corre antes de qualquer escrita no palco; sem `ABI_OK` o build pára. É o
+equivalente Linux do «rebuild nativo do pipeline» que o Windows já faz
+(`scripts/package-windows.mjs:678-694`) — sem ele a ABI errada viajaria em
+silêncio, como viajou.
+
+Dependência externa a declarar: o `prebuild-install` vai buscar o binário ao
+sítio do `vendor` do addon. A primeira construção de uma máquina sem cache precisa
+de rede; as seguintes usam o que já está em `node_modules/better-sqlite3`.
+
+## A raiz de dados da API não era a do Linux Lite
+
+Medido no `.deb` de `9907c0f`, com `--user-data-dir` apontado para um perfil de
+teste limpo:
+
+```
+~/linux-lite-validation/perfil-ui5/secrets          ← certo (sessão, por perfil)
+  FORA_DO_PROFILE: api-lifecycle.jsonl              ← ~/.cybersafe-service/
+  FORA_DO_PROFILE: cybersafe.db                    ← ~/.cybersafe-service/
+```
+
+O serviço Linux Lite escreve em `~/.cybersafe-linux-lite` (é o que
+`core/dev-isolation.ts:43` e `defaultServiceBaseDir()` decidem por plataforma); a
+API tinha o nome fixo no seu próprio módulo — `dbPessoalApi()` devolvia
+`path.join(os.homedir(), ".cybersafe-service", "cybersafe.db")`. Consequência
+concreta: os utilizadores registados e o registo de ciclo de vida do pacote Linux
+iam para a raiz com o nome do produto Windows — §1 proíbe partilhar bases entre
+versões, §9 pede raiz exclusiva.
+
+Correção: `dbPessoalApi()` passa a construir a partir de
+`defaultServiceBaseDir()` (o único ponto que descreve `~` + nome), mantendo o
+caminho de Windows e macOS byte-idêntico. Testes em
+`packages/api/test/dev-isolation.test.js`: `win32`/`darwin` =
+`.cybersafe-service`, `linux` = `.cybersafe-linux-lite` e sem a substring
+Windows, mais o negativo de sempre (DEV a apontar para a DB pessoal da plataforma
+atual é recusado pela razão certa). Regressão do caminho partilhado: **48/48**
+nesta ficha e **429/429** no workspace `api` corrido em Windows.
+
+Reconstrução e medição depois da correção (WSL2, 19:50, mesmo `.deb` extraído):
+
+```
+NAO_EXISTE ~/.cybersafe-service                     ← não foi recriado
+~/.cybersafe-linux-lite/cybersafe.db   77 824 B
+~/.cybersafe-linux-lite/api-lifecycle.jsonl   394 B
+```
+
+## Artefactos do MVP (construídos em WSL2 · Ubuntu 26.04, não instalados por `apt`)
+
+| Artefacto | Bytes | SHA-256 |
+|---|---|---|
+| `CyberSafe Assistant Linux Lite-0.1.11-internal.pap-r7.20261031-linux-amd64.deb` | 81 774 768 | `7846b356a3d5bf4460ae0417cc4b7d37d3083a88880726bee3eb049eefcf0730` |
+| `CyberSafe Assistant Linux Lite-0.1.11-internal.pap-r7.20261031-linux-x86_64.AppImage` | 119 551 369 | `95f769b1e59809197e97d1c1f1ab00c548f4a612e3459c3ee97e7ff9283e89af` |
+
+Conteúdo do `.deb` desta corrida: 160 entradas, **0 `.exe`**, `.desktop`
+presente, ícone presente. O `usrBin: []` é facto medido e não lacuna escondida: o
+electron-builder não cria lançador em `/usr/bin`; o `Exec=` do `.desktop` aponta
+para `/opt/CyberSafe Assistant Linux Lite/cybersafe-assistant-linux-lite`, que é
+o caminho que uma instalação real usa.
+
+Ultrapassados por estes, e mantidos aqui porque registam o que foi medido:
+`256a27d0…` (0.1.11 sem API compilada), `70fe4ec3…` (0.1.11 com API, antes do
+isolamento da raiz de dados), `6e23bdd1…`/`f8b69c21…` (0.1.2, versão errada).
+
+## Como se executa o pacote (fora do repositório de desenvolvimento)
+
+```bash
+# extração para validação, sem root e sem tocar no sistema
+dpkg-deb -x "CyberSafe Assistant Linux Lite-0.1.11-internal.pap-r7.20261031-linux-amd64.deb" ./extraido
+./extraido/"opt/CyberSafe Assistant Linux Lite"/cybersafe-assistant-linux-lite
+
+# instalação real (precisa de root; ainda NÃO validada — ver limitações)
+sudo apt install ./extraido.deb
+cybersafe-assistant-linux-lite          # ou pelo menu, via /usr/share/applications
+```
+
+O binário do pacote não depende do repositório: a única raiz de escrita é
+`~/.cybersafe-linux-lite` (serviço e API) e `<userData>` do Electron (sessão em
+`secrets/auth-session.bin`). A extração acima correu a jornada completa de
+interface sem o clone em disco.
+
+## A jornada de interface, medida no pacote final
+
+`scripts/linux-lite/cdp-drive.mjs` conduz o renderer do pacote extraído pelo
+canal que uma pessoa usa: ecrã de entrada → «Criar conta» → preencher o
+formulário → submeter → navegar. Não há atalho: `/auth/dev/ensure-admin` foi
+removido em 2026-10-09 e o condutor não chama `/auth/*` por fora — a sessão é
+consequência do formulário. Ambiente: WSL2 · Ubuntu 26.04, 19:52, `.deb`
+`7846b356…` extraído, perfil `--user-data-dir` limpo.
+
+| Passo | O que o pacote devolveu |
+|---|---|
+| entrada | `Inicie sessão na sua conta`, campos `email/password/checkbox` |
+| formulário | 4 campos obrigatórios (`O teu nome`, `o.teu@email.com`, `Mínimo 6 caracteres`, `Repete a palavra-passe`) + botões `Pessoal`, `Empresa`, `Criar conta` |
+| submeter | `A criar a conta…` e, do lado do serviço, utilizador novo na DB do Linux Lite |
+| Painel | `O essencial, sob controlo.` · `Proteção com limitações` · `Ainda sem análises registadas` · `Os teus motores de análise` |
+| Análise de Segurança | `O que pretende analisar?` · `ESTADO ATUAL DOS MOTORES` · `Monitorização de unidades USB` |
+| Monitor em Tempo Real | `Eventos de Segurança` · `Processos Ativos` — **20 linhas**, amostra `systemd ~ 1 ~ 0.9% ~ 13 MB ~ NEUTRAL`, `chronyd-starter ~ 178 ~ 0.1% ~ 2 MB`, `cron ~ 179 ~ 0.0% ~ 3 MB` |
+| PC Center | `Processador` · `Memória RAM` · `Armazenamento` · `Rede Local` — `Uso de CPU ~ 23 % ~ snapshot de hardware do serviço · lido 2026-11-02T19:52:33.837Z ~ medido`; `Temperatura da CPU ~ — ~ instante não publicado ~ desconhecido` |
+| Gestor de Tarefas | `Gestão avançada de processos e análise`, `Actualização automática a cada 2 s`, `Terminação individual limitada — aplicações comuns elegíveis; sujeita a confirmação` |
+| MATRIX | painel MATRIX montado a partir da mesma janela |
+| Otimizar | `VERIFICAÇÕES AUTOMÁTICAS`, `Espaço livre em disco`, `MANUTENÇÃO RECOMENDADA` — e os dois títulos Windows (§11, em aberto) |
+| exceções | `excecoes_renderer 0` |
+| encerramento | SIGTERM só no processo principal: `saiu_em=3s`, `remanescentes=0` aos 3 s e aos 8 s, `remanescentes_finais=0` |
+
+Três coisas que só se veem quando se pergunta ao DOM em vez de adivinhar:
+
+- **O `—` do PC Center é o estado certo.** A temperatura não é publicada no
+  WSL2; a vista mostra-lhe um travessão com `desconhecido` ao lado, não um zero
+  inventado (§6). É a diferença entre «não medido» e «medido a zero».
+- **O `linhas:0` do Gestor de Tarefas não prova lista vazia.** A vista usa
+  painéis próprios (o campo de pesquisa está lá, `campos:["text"]`); a sonda só
+  conta `<table> tbody tr`, como se vê pelas 20 linhas do Monitor. Fica como
+  limitação do instrumento, não como resultado da aplicação.
+- **O assistente de boas-vindas tapava vistas.** Na corrida de 19:44, «Gestor de
+  Tarefas» e «MATRIX» foram capturados com o passo 1 de 3 por cima, e as
+  leituras vinham uma vista desalinhadas das capturas. Agora o condutor fecha o
+  assistente («Agora não») e espera pela assinatura de títulos antes de capturar;
+  sem mudança, diz `sem_mudanca` em vez de fingir que leu a vista certa.
+
+O banner que aparece depois do registo está explicado e é honesto:
+`Um componente da proteção reporta um erro. Confirmado pelo serviço: YARA (em
+erro). Isto é um estado confirmado, não uma espera.` — ou seja, o pacote não
+esconde um motor em falha atrás de um «protegido». O que ainda não se sabe é
+**porque** falha o YARA neste ambiente, e isso é trabalho aberto (não se declara
+motor ativo sem medir, §7).
+
+## Limitações do que está escrito acima
+
+- **Ambiente.** Tudo o que está nesta página foi medido em WSL2 (Ubuntu 26.04,
+  `uid=1000`, WSLg para a janela). O §15 diz que WSL2 não substitui a validação
+  de uma aplicação desktop instalada numa distribuição: `apt install`, `postinst`,
+  a entrada no menu e o ícone visto pelo gestor de janelas continuam **não
+  validados**, e não há aqui resultado nenhum a fazê-los parecer validados.
+- **Lançador.** Medido: `usrBin: []`, `temLauncher: false`, `temDesktop: true`.
+  O `.desktop` aponta para o binário em `/opt/...`; não há symlink em `/usr/bin`.
+  A linha `sudo apt install ./…deb` deste documento é o comando a correr, não um
+  resultado obtido.
+- **Cópia Windows a aparecer em Linux.** A vista Otimizar mostra
+  «Firewall do Windows» e «Saúde geral do Windows»; o assistente de boas-vindas
+  abre com «Proteção em tempo real» e o Monitor mostra «Camada de Contenção de
+  Rede» — nenhum desses mecanismos existe no Linux Lite (a proteção em tempo real
+  com fanotify é §12, e o firewall do §11 ainda não é consultado). É defeito de
+  estado, não lacuna de medição: está em aberto.
+- **Gestor de Tarefas.** A vista monta-se e declara o contrato certo
+  («Terminação individual limitada — aplicações comuns elegíveis; sujeita a
+  confirmação», atualização a cada 2 s), mas a sonda não conta linhas porque a
+  lista não usa `<table>`. A listagem real está medida no serviço (P1,
+  `p1-process-listing.md`); a captura a partir do pacote ainda não está.
+- **Scanner manual.** A vista foi lida a partir do pacote (motores, unidades
+  USB, análise em segundo plano), mas uma análise de ficheiro/pasta conduzida
+  pela interface do pacote ainda não foi feita: o seletor é um diálogo nativo do
+  Electron e o CDP não o aciona. Enquanto não for, o §7 do plano não se pode
+  dar por fechado a partir do artefacto.
+- **YARA em erro.** O pacote reporta-o como em erro, e reporta-o bem. A causa
+  não foi investigada; declarar o motor «ativo» sem a causa resolvida seria o
+  contrário do que esta secção prova.
+
 O que isto NÃO diz: o que se mede é o ecrã de entrada, apresentado sem qualquer
 interação. O dashboard, a navegação e os painéis ficam detrás de uma sessão e
 continuo a não os ter lido a partir do pacote. E WSL2 não é uma instalação: a

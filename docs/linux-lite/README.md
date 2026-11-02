@@ -89,11 +89,12 @@ feito.
 | MATRIX: onde a chave repousa e o que o ecrã pode afirmar | medido | `p2-matrix-credenciais.md` |
 | Quarentena: recusas, montagem, restauro, permissões, auditoria em disco | medido em percursos validados; **não** declarada automática | `p3-quarentena-*.md` |
 | Volumes montados / armazenamento sem letras de unidade | medido e ligado ao motor; **deteção positiva com pen física ainda não medida** | `p3-montes-usb.md` |
-| Otimizar e firewall (UFW/firewalld/nftables) | **não validado** — nenhuma medição nesta branch | — |
-| Empacotamento `.deb` e `.AppImage` | construído e aberto em Linux; encerramento limpo (SIGTERM no processo certo, resíduo 0); a versão do pacote vem de `product-version.json` desde `7ae8b24` | `p4-empacotamento.md` |
+| Otimizar e firewall (UFW/firewalld/nftables) | **não validado** — nenhuma medição do firewall nesta branch. Medido no pacote, e é um defeito: a vista mostra «Firewall do Windows» e «Saúde geral do Windows» em Linux | `p4-empacotamento.md` |
+| Empacotamento `.deb` e `.AppImage` | construído e aberto em Linux; API compilada dentro do pacote e addon na ABI do Electron com gate obrigatório (`9907c0f`); encerramento limpo (SIGTERM no processo certo, resíduo 0 aos 3 s e aos 8 s); a versão do pacote vem de `product-version.json` desde `7ae8b24` | `p4-empacotamento.md` |
 | Interface **a partir do pacote** | **medido** desde `34e879a`: `#root` com conteúdo, `<script>` do `app.asar`, texto do ecrã de entrada, 0 exceções, PNG de 428 kB (contra 4,7 kB de vazio antes do staging) | `p4-empacotamento.md` |
-| Dashboard e painéis **a partir do pacote** | **não validado** — ficam detrás de uma sessão, e nenhuma sessão foi aberta no pacote | — |
-| Instalação do `.deb` por `apt` num sistema real | **não testado** | — |
+| Dashboard e painéis **a partir do pacote** | **medido** em `7846b356…`: registo pelo formulário real → sessão → Painel, Análise de Segurança, Monitor (20 processos com PID/CPU/RAM), PC Center (`Uso de CPU ~ 23 % ~ medido`, temperatura `— ~ desconhecido`), Gestor de Tarefas, MATRIX, Otimizar; 0 exceções. YARA reportado em erro pelo próprio pacote; análise de ficheiro conduzida pela interface ainda não feita | `p4-empacotamento.md` |
+| Raiz de dados do pacote | **medido**: a API escrevia em `~/.cybersafe-service` (raiz do produto Windows); com a resolução por plataforma, `~/.cybersafe-service` não é recriado e a DB fica em `~/.cybersafe-linux-lite` | `p4-empacotamento.md` |
+| Instalação do `.deb` por `apt` num sistema real | **não testado** — precisa de root e de desktop nativo; o `usrBin: []` medido é facto do pacote, não resultado de instalação | — |
 
 ## Testes automatizados por plataforma
 
@@ -103,6 +104,9 @@ Medido em `c637a68`, cada número com o comando que o produziu:
 |---|---|---|
 | `node --import tsx --test packages/desktop/test/*.test.mjs` | WSL2 Ubuntu 26.04 | 646 testes, **644 pass, 0 fail, 2 skipped** |
 | `node --import tsx --test test/dev-windows-readonly-boundary.test.mjs` | Windows 10 (repo isolado) | 74 testes, 74 pass, 0 fail, **0 skipped** |
+| `npm test -w api` (regressão do caminho partilhado, depois de `dbPessoalApi` passar a depender da plataforma) | Windows 10 (repo isolado) | 429 testes, **429 pass, 0 fail** |
+| `node --test packages/api/test/dev-isolation.test.js` | Windows 10 | 48 testes, **48 pass, 0 fail** — inclui `win32`/`darwin` byte-idênticos e `linux` em `.cybersafe-linux-lite` |
+| `npm run test:scripts` | Windows 10 | 423 testes, **410 pass, 0 fail**, 13 com `todo`/salto de plataforma — inclui os 3 casos do guard `linux-lite-package-api-guard` |
 
 Os dois saltos de Linux não são funcionalidade escondida: um é o caso de
 fronteira que só existe com semântica de caminho Windows (o guarda usa o `path`
