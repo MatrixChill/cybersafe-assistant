@@ -77,6 +77,26 @@ Preparar corpus benigno isolado e, só nesta VM, uma pasta EICAR separada.
 
 ## 6. Gestor de Tarefas
 
+### Fixture benigna preparada para o ensaio instalado
+
+Somente na VM autorizada, numa consola sem elevação e na mesma sessão/conta da candidata:
+
+```powershell
+.\scripts\vm-process-fixture.ps1 -AuthorizedVm -OutDirectory C:\lab\process-case-01 -StartFixture
+```
+
+Usar uma pasta nova por caso. O helper recusa host sem identificação de VM, elevação, caminhos protegidos e substituição de ficheiros. Compila com o .NET local um `termination-fixture.exe` que apenas espera três minutos e sai naturalmente. Não termina processos, não faz rede, não modifica serviços nem instala ferramentas. O reconhecimento de VM é uma guarda operacional, não uma fronteira contra um operador malicioso.
+
+Guardar `fixture-evidence.json` (SHA-256, PID e início). Na UI, pesquisar esse nome e confirmar **PID e início da mesma instância**, sem selecionar processos pessoais ou homónimos. Verificar CPU/RAM como medições, sem exigir valores artificiais específicos.
+
+1. Abrir a confirmação e cancelar: o processo continua e nenhuma terminação é auditada como sucesso.
+2. Criar outra fixture, preparar e confirmar dentro da validade do ticket: exigir resultado real, auditoria e desaparecimento após nova enumeração. Confirmar ausência com `Get-Process -Id <PID da fixture>`; se o PID reaparecer, comparar o início antes de concluir.
+3. Criar outra fixture e deixá-la sair naturalmente: a UI não pode atribuir a saída ao CyberSafe.
+4. Ticket expirado, confirmação repetida e identidade desatualizada devem ser recusados. Não alterar relógio, direitos ou processos do Windows para fabricar estes casos; usar os testes deterministas existentes e registar o limite do ensaio manual.
+5. Processos protegidos permanecem inelegíveis. `KILL_TERMINATION_DISABLED` continua ativo; não chamar o comando legado nem usar taskkill como alternativa.
+
+Estado deste procedimento: **PREPARADO, NÃO EXECUTADO EM VM**. A sintaxe do helper foi verificada; não foi compilada nem iniciada uma fixture no computador pessoal. Este procedimento ainda não comprova a terminação instalada.
+
 - Abrir Notepad ou processo benigno elegível.
 - Confirmar listagem, detalhe e classificação.
 - Testar uma terminação individual permitida e uma recusa protegida; confirmar auditoria e ausência de crash.
@@ -94,7 +114,15 @@ Só com fornecedor real e credencial autorizada.
 
 ## 8. Atualizador
 
-Só depois de existir chave Ed25519 pública de produção, fingerprint aprovado e feed assinado.
+O ensaio da cadeia com HTTPS local e chaves efémeras pode ser executado antes de provisionar confiança de produção:
+
+```powershell
+node --import tsx --test packages/desktop/test/updater-local-https.integration.test.mjs
+```
+
+Exige OpenSSL local (ou `CYBERSAFE_TEST_OPENSSL`), gera TLS/Ed25519 efémeros, usa apenas loopback e cache temporária, e nunca executa instalador. A CA é confiada apenas pelo processo filho de teste; não é instalada no Windows. Não equivale a upgrade instalado.
+
+Para o canal oficial, exigir chave pública de produção, fingerprint aprovado e feed assinado. Para upgrade com candidatas de teste, usar configuração explicitamente isolada e aprovada; nunca substituir `release-trust.json` de produção por material de fixture.
 
 - Feed de teste assinado, manifesto, tamanho e SHA-256.
 - Atualização aplicada, reinício e versão nova.
