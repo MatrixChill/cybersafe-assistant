@@ -845,7 +845,7 @@ function AuthenticatedApp() {
       case "pccenter":
         // O estado de ligação é lido aqui, no commit do render — não dentro de um `useMemo`
         // sobre um ref. Em produção o prop é `null` e o PC Center não emite atributos.
-        return <PCCenterPage hardware={pcCenterHardware} pcState={pcState} dataOrigin={pcCenterOrigin} devTraceConnection={import.meta.env.DEV ? { connected: serviceConnected, generation: connectionGeneration.current } : null} />;
+        return <PCCenterPage hardware={pcCenterHardware} pcState={pcState} dataOrigin={pcCenterOrigin} onAnalisarVolume={(mount) => handleScan("custom", mount)} devTraceConnection={import.meta.env.DEV ? { connected: serviceConnected, generation: connectionGeneration.current } : null} />;
       case "threats":
         return (
           <ThreatsPage

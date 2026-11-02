@@ -1,10 +1,11 @@
 # P3 (Linux Lite) — descoberta de volumes montados, sem letras de unidade
 
-Âmbito: **descobrir, medir e publicar os volumes reais de Linux** — a base do
-«USB e armazenamento» do plano (§10) e do estado de armazenamento do PC Center
-(§6). Está medido em máquina real e **ligado ao motor** (`hardware.ts` escolhe a
-fonte por plataforma). O que ainda não está ligado — o alvo de scanner
-selecionável — está declarado no fim desta página em vez de ser apresentado como
+Âmbito: **descobrir, medir, publicar e tornar analisáveis os volumes reais de
+Linux** — a base do «USB e armazenamento» do plano (§10) e do estado de
+armazenamento do PC Center (§6). Está medido em máquina real e **ligado ao
+motor** (`hardware.ts` escolhe a fonte por plataforma), e o alvo selecionável já
+existe como gesto. O que **não** está medido — a deteção positiva com uma pen
+ligada — continua declarado no fim desta página em vez de apresentado como
 concluído.
 
 ## Porque não o caminho do Windows
@@ -215,6 +216,70 @@ O que esta medição prova e o que não prova:
    correu no `dist` compilado e devolveu a lista vazia sem lançar, com o estado
    de espera declarado ausente (`semEstadoEspera: true`).
 
+## O volume escolhido passa a ser alvo de análise (§10)
+
+O plano pedia «permitir selecionar um volume montado e analisá-lo com os motores
+disponíveis». Em Linux Lite isso é uma linha no cartão Armazenamento do PC
+Center: cada volume de trabalho medido agora recebe um «Analisar» que entrega a
+montagem ao funil que já existe.
+
+**A regra está separada do desenho**, em `diskVolumeScanActions`
+(`packages/app/src/lib/diskDisplay.ts`), porque a pergunta tem duas réguas e uma
+delas não é do volume:
+
+| Régua | Porquê |
+|---|---|
+| plataforma a `linux` | o `osInfo().platform` publicado é `"Windows"` no Windows e `"linux"` em Linux; no Windows já existe o diálogo de pastas e este alvo nunca foi medido lá |
+| `readStatus === "ok"` | um ponto de montagem pode desaparecer entre leituras; oferecer análise sobre a última leitura válida seria prometer um caminho que pode já não estar montado |
+
+Além destas, `kind !== "working"` fica de fora (partição reservada pelo sistema
+não é volume do utilizador) e a montagem tem de ser caminho absoluto. **`readOnly`
+não fica de fora:** a exclusão do `readOnly` no alarme de espaço existe porque o
+texto manda «libertar espaço»; ler não é escrever, e uma pen montada `ro` é
+justamente o que se quer analisar.
+
+O gesto **não lança nada**. `PCCenterPage` recebe `onAnalisarVolume` opcional e
+`App.tsx` liga-o a `handleScan("custom", mount)` — o mesmo caminho do Dashboard e
+da bandeja: `pendingScan` → página do Scanner → `FolderConfirmationPanel`, que
+mostra nome e caminho e **só arranca com o clique explícito** «Analisar esta
+pasta». Do teclado só existe a recusa: `folderConfirmationKeyAction` devolve
+apenas `"cancel"` (`FileScannerPage.tsx:375`) — confirmar por tecla não é
+oferecido. Um botão noutro ecrã a chamar `scan.start` direto seria o defeito, não
+a funcionalidade. O `mount` entregue é o valor cru do contrato (`volume.mount`),
+não o rótulo redigido que aparece noutros blocos.
+
+### O perigo que tinha de ser resolvido antes
+
+Antes de oferecer «analisar a raiz de um volume» audiu-se o walk do scanner, e a
+auditoria encontrou um caso em que o botão enforcava a análise: `/proc/kcore` é
+um ficheiro **regular** cujo tamanho declarado é o espaço de endereçamento do
+kernel. `MalwareAnalyzer.analyze` calcula o SHA-256 (`packages/core/src/analysis.ts:73`)
+**antes** do portão de tamanho (`:77`), e `sha256File` não tem limite nem
+aborta. A derivação de `targetPath` para `/` passava por `resolvePathsForScan`
+sem controlo, por isso o alvo era lido como qualquer pasta.
+
+A correção é uma poda exata, não uma heurística de nome:
+`RAIZES_DO_KERNEL_POSIX = ["/proc","/sys","/dev","/run"]` e
+`eRaizDoKernelPosix(caminho, plataforma)`, que devolve `false` em `win32` — o
+caminho Windows fica byte-a-byte como estava. A poda é por **igualdade exata**
+da raiz, não por substring: `~/projetos/proc` e `/var/run/user/1000` continuam a
+ser analisados. Entra nos dois walk (`gatherFiles` e `gatherFilesQuick`), antes
+de tocar no disco.
+
+O que isto **não** resolve, declarado em vez de escondido:
+
+- um pseudo-FS montado noutro ponto (um `tmpfs` em `/tmp`) não é apanhado, porque
+  a regra seria «voltar a ler o mountinfo na derivação de alvo» — é o passo
+  seguinte sensato, não foi feito neste corte;
+- a poda é silenciosa: o utilizador não vê «6000 ficheiros de /proc ignorados».
+  Um alvo todo podido **termina `status: "failed"`** com «Nenhum ficheiro para
+  analisar no alvo selecionado.», pelo que uma poda nunca pode produzir um
+  «limpo»;
+- o risco de base mantém-se para qualquer pasta com um ficheiro enorme declarado:
+  o SHA-256 sem limite acontece antes do portão de tamanho e não respeita o
+  pedido de cancelamento entre ficheiros. Mudar isso altera o veredicto de
+  «demasiado grande» para ficheiros reais, por isso fica como dívida declarada.
+
 ## Testes
 
 `packages/core/test/p3-montes-posix.test.js` — 11 casos, com a tabela real de
@@ -261,27 +326,135 @@ pen ausente e recusa a identidade de índice; e o `UsbReadOnlyScanAdapter` arran
 `custom` na raiz do detetor Linux sempre com `readOnly: true` e `confirmarTerminal`
 ligado. O ficheiro está inscrito na lista de `scripts.test` do `@cybersafe/service`.
 
-Regressão no clone isolado, depois de `disk.ts` e `hardware.ts` terem mudado
-win32, Node 26.3.0 — este corte **altera código partilhado com o Windows**, por
-isso os números abaixo são a prova, não uma nota de rodapé:
+`packages/service/test/p3-scan-walk-pseudo-fs.test.js` — 11 casos para a poda do
+walk. Além da tabela do predicado (as quatro raízes em Linux; `"/PROC"` e `""`
+fora; win32 sempre `false`, incluindo `"C:\\dev"`; `/`, `/mnt/c`, `/usr`, `/etc`
+e `/home` a **não** serem podido), fixa os dois lados do comportamento em cada um
+dos dois walk: uma raiz do kernel recolhe `[]` **com `stats.failed === 0`** (foi
+podida antes de tocar no disco — uma falha de leitura teria contado) e uma árvore
+verdadeira com subpasta recolhe o ficheiro que está **dentro dela**, sem nenhuma
+falha, mantendo `node_modules` de fora.
 
-| Suite | Resultado |
+O caso positivo existe por um motivo incómodo e foi encontrado por medição em
+Linux, não por leitura do teste: a primeira versão chamava os métodos com um
+`this` de objeto plano, mas o walk recursa com `this.gatherFiles` — o `TypeError`
+rebentava dentro do `try` e o `catch` contava-o como falha de leitura. A
+afirmação `failed === 1` passava, mas pela razão errada, e a recursão nunca foi
+exercida.
+Agora o `this` é `Object.create(ScanManager.prototype, …)`, e o caso que prova
+que a poda não custou nenhuma leitura legítima está fixado.
+
+### Medido em Linux real: o alvo escolhido no PC Center
+
+Ambiente: WSL2, `Linux 6.6.114.1-microsoft-standard-WSL2 x86_64`, uid 1000,
+Node 22.23.4, `packages/service/dist` compilado deste branch. Reproduzir:
+
+```bash
+wsl -e bash -lc 'S=/mnt/c/Users/caioc/.cybersafe-integration/qoder-linux-lite/repo/scripts/linux-lite; \
+  tr -d "\015" < $S/wsl-p3-scan-alvo.sh > /tmp/alvo.sh && bash /tmp/alvo.sh'
+```
+
+```text
+STAT /proc/kcore tamanhoDeclarado=140737471594496 bytes | blocosFisicos=0 x 512
+IMPORT ok | exportacoesDoCorte=["eRaizDoKernelPosix","RAIZES_DO_KERNEL_POSIX"] | ScanManager=true
+WALK gatherFiles      {"alvo":"/tmp/p3alvo","ficheiros":4,"falhos":0,"ms":2}
+WALK gatherFiles      {"alvo":"/tmp/p3alvo/proc","ficheiros":1,"falhos":0,"ms":0}
+WALK gatherFiles      {"alvo":"/proc","ficheiros":0,"falhos":0,"ms":0}  (idem /sys, /dev, /run)
+WALK gatherFilesQuick {"alvo":"/tmp/p3alvo","ficheiros":4,"falhos":0,"ms":1}
+WALK gatherFilesQuick {"alvo":"/proc","ficheiros":0,"falhos":0,"ms":0}   (idem as outras raízes)
+```
+
+Quatro factos que só a máquina real dá:
+
+1. **O perigo estava medido, não imaginado:** `/proc/kcore` declara
+   140737471594496 bytes (~128 TiB — o espaço de endereçamento do kernel) com
+   **zero blocos físicos**. É ficheiro regular, `entry.isFile()` diz que sim, e o
+   SHA-256 era calculado antes do portão de tamanho: sem poda, a análise de `/`
+   ficava presa nesse `await`.
+2. **A poda não custou nenhuma leitura legítima:** o mesmo walk recolhe os quatro
+   ficheiros da árvore de teste — incluindo o que está dentro de uma subpasta e o
+   que está numa subpasta chamada `proc` — com `falhos: 0`, e as exclusões de
+   sempre (`node_modules`, `.git`, symlink) continuam a acontecer.
+3. **Igualdade exata é o que distingue as duas coisas:** `/tmp/p3alvo/proc` deu
+   1 ficheiro; `/proc` deu zero sem tocar no disco.
+4. **O `dist` do serviço carrega em Linux** com as exportações do corte visíveis,
+   pelo que isto não é um ramo de código que só existe no Windows.
+
+O que **não** foi medido aqui: o pedido de análise com o `service` em execução e
+um volume real montado, com ficheiros a passar pelos motores. Isso precisa de
+sessão gráfica, como o resto da validação de GUI.
+
+`packages/app/test/p3-volume-scan-action.test.ts` — 10 casos da regra de
+eligibilidade: linha Linux analisável; Windows nunca analisável e sempre com
+motivo; plataforma ausente/`"unknown"`/vazia/`"Linux"` maiúsculo não é Linux;
+`stale` e `unavailable`; `system-reserved`; montagens não absolutas (`""`,
+`"mnt/c"`, `"C:"`, `"  /mnt/c"`); `readOnly` **continua** analisável; ordem e
+comprimento preservados; lista vazia.
+
+`packages/app/test/p3-volume-analisar-ssr.test.ts` — 6 casos do markup do cartão
+Armazenamento: dois volumes de trabalho, dois botões com o caminho no `title`;
+Windows zero; sem callback zero; `stale`/`unavailable` zero; `system-reserved`
+fora e o vizinho de trabalho dentro; `readOnly` dentro.
+
+`packages/app/test/service-connection-app.test.ts` ganhou o caso da ligação: a
+função entregue ao PC Center mete `{type:"custom", targetPath:"/mnt/usb"}` no
+`pendingScan` do Scanner e **não** chama `scan.start` (contagem de pedidos a
+zerar) — o que separa «entregar ao funil» de «disparar daqui».
+
+Em `packages/app/test/scanner-folder-confirmation.test.ts`, o bloco
+«P3-LINUX · montagem POSIX» usa o mesmo harness dos handlers reais: `/mnt/usb`
+aparece no painel com nome `usb` e zero arranques até ao `onConfirm`; `/` tem
+rótulo `/` (sem último componente não fica sem nome) e confirma para `/`;
+`onCancel` não arranca nada.
+
+Regressão no clone isolado, Windows 11 / Node 26.3.0. Este corte **altera código
+partilhado com o Windows** (`scan-manager.ts`), por isso os números abaixo são a
+prova, não uma nota de rodapé. Cada suite foi corrida **sozinha**, com as outras
+fora de jogo; a razão para isso está escrita logo depois da tabela:
+
+| Suite | Resultado (máquina sem mais nada a correr) |
 |---|---|
-| `@cybersafe/core` | 1220 testes, 1188 passados, **0 falhas**, 31 `skip`, 1 `todo` |
-| `@cybersafe/app` | 2877 / 2877 |
+| `@cybersafe/core` | 1220 testes, 1187 passados, **1 falha** — ver «a falha do `core`» abaixo, 31 `skip`, 1 `todo` |
+| `@cybersafe/app` | 2897 / 2897 |
 | `@cybersafe/desktop` | 645 / 645 |
-| `@cybersafe/service` | 951 testes, 943 passados, **8 falhas** — ver o parágrafo seguinte |
-| typecheck `core` e build `service` | limpos |
+| `@cybersafe/service` | 962 testes, 954 passados, **8 falhas** — ver o parágrafo seguinte |
+| typecheck `app` (`tsc -b`), build `core` e build `service` | limpos |
+
+**A primeira medição mentiu por minha causa, e é por isso que fica registada.**
+Corridas em paralelo, quatro suites ao mesmo tempo, deram `core` 1221 / 1185 /
+**4 falhas** e `service` 962 / 952 / **10 falhas**. Três das quatro de `core`
+eram sondas reais do Windows a esgotar o próprio prazo — `probe CIM real` e
+`reconhece o proprio filho…` com `spawnSync powershell ETIMEDOUT`, e
+`adl-worker-lifecycle` como ficheiro inteiro — e as duas a mais no `service`
+eram o canário `dev` com prazo de 10 s. Corridas sozinhas, **essas cinco
+passaram**. Se eu tivesse publicado o primeiro número, tinha escrito «quatro
+falhas de regressão» sobre o meu próprio ruído de CPU. O que vale é o da máquina
+parada; o episódio fica aqui para que ninguém volte a contar uma corrida
+concorrente como se fosse um veredicto.
+
+**A falha do `core` não é deste corte e não é do `core`.** É
+`hardware-disk-first-read.test.js`: a primeira leitura dos volumes espera no
+máximo `DISK_FIRST_READ_TIMEOUT_MS = 4_000` (`hardware.ts:150`, em
+`Promise.race` com `readDisksOnce()`), e numa suite que corre ficheiros em
+paralelo com motores reais, `si.fsSize()` passou desse prazo. Medido em vez de
+afirmado: o mesmo ficheiro, corrido sozinho **três vezes seguidas**, passou as
+três (`✔ … (11378 ms)`, `11084 ms`, `11493 ms`, `fail 0` nas três). E `git status
+--porcelain -- packages/core` está vazio — nem o motor nem o teste têm uma linha
+por commitar neste corte; o ficheiro de teste foi tocado pela última vez em
+`3a95692`, trabalho Windows anterior a esta linha Linux. Fica registada como
+**instabilidade pré-existente do caminho real de Windows sob concorrência**, com
+o prazo de 4 s como a peça sensível; aumentar o prazo é mexer no contrato de
+arranque do Windows e não é decisão deste corte.
 
 As 8 falhas do `service` **não vêm deste corte**, e isso foi medido em vez de
-afirmado: `p1-3-prefetch-isolation.test.js` falha 7 dos seus casos (`B tem de ler
-o SEU veredicto (clean), nunca o de A — obtido "inconclusive", regras:
-dangerous_file_extension,suspicious_location`) com o motor YARA real carregado
-(`[YARA] Scanner carregado (file). Regras: 1`). Revertido `engine.ts` para o
-estado do commit — `grep -c criarDeteccaoUsbPosix` a zero, rebuild limpo — os
-mesmos 7 casos falharam da mesma maneira. Ficam registadas como estado pré-existente
-da branch neste clone, não como regressão deste corte; a causa (regras de
-localização/extensão a disparar sobre os caminhos do fixture) não foi
+afirmado: concentram-se nos dois ficheiros do cache de prefetch — os casos
+`P1-3-A/B/C/E/G/H/I` de `p1-3-prefetch-isolation.test.js` e os dois casos de
+`scan-post-batch-no-double-clamav.test.js` — e falham com o motor YARA real
+carregado (`[YARA] Scanner carregado (file). Regras: 1`). Revertido `engine.ts`
+para o estado do commit — `grep -c criarDeteccaoUsbPosix` a zero, rebuild limpo —
+os mesmos casos falharam da mesma maneira. Ficam registadas como estado
+pré-existente da branch neste clone, não como regressão deste corte; a causa
+(regras de localização/extensão a disparar sobre os caminhos do fixture) não foi
 diagnosticada aqui.
 
 O salto de 1201 para 1208 testes foram os 7 casos do corte anterior; 1208 → 1220
@@ -298,12 +471,22 @@ consulta a fonte POSIX» fixa que o caminho Windows não toca em `/proc`.
 
 ## Ainda não feito (não declarar como feito)
 
-- **O volume escolhido pelo utilizador ainda não é alvo de scanner.** Em Linux o
-  volume amovível já chega ao `UsbReadOnlyScanAdapter` pela porta do monitor (e os
-  testes fixam que esse caminho corre com `readOnly: true`), mas a lista de
-  montagens publicada no PC Center ainda não tem o gesto «analisar este volume»
-  ligado ao pedido de análise (§10). O que falta é a escolha em interface e o
-  pedido explícito, não a descoberta.
+- **O gesto está ligado, mas não foi percorrido com o serviço real em Linux.** As
+  provas são de regra (`diskVolumeScanActions`), de markup (`StorageCard` em SSR),
+  de ligação (`onAnalisarVolume` → `pendingScan`, zero `scan.start`) e de portão
+  (montagem POSIX no `FolderConfirmationPanel`, handlers reais). Falta o clique
+  numa sessão com o `service` ligado a um volume real — e a validação em VM
+  gráfica, que este clone não tem.
+- **O SHA-256 continua sem limite nem cancelamento dentro de um ficheiro.** O
+  hash é calculado antes do portão de tamanho (`analysis.ts:73` vs `:77`) e o
+  cancelamento só é verificado entre ficheiros. A poda das quatro raízes do
+  kernel fecha o caso do `/proc/kcore`, não a classe: uma pasta com um ficheiro
+  esparso grande declarado pode parar a análise pelo mesmo mecanismo.
+- **A poda só conhece as raízes exatas.** Um pseudo-FS montado noutro ponto
+  (p. ex. `tmpfs` em `/tmp`) não é apanhado; a alternativa era consultar o
+  mountinfo na derivação do alvo, o que ainda não foi feito.
+- **A poda não é reportada ao utilizador.** Não há contagem de ignorados no
+  resultado da análise; só o teste distingue «podado» de «lido e falhado».
 - **A deteção positiva de USB não foi medida.** `/sys/block/<dev>/removable`,
   `device/serial` e o join por `major:minor` são lidos e testados, e a máquina
   real foi interrogada (28 nós, nenhum em USB, confirmado por `/dev/disk/by-id`);
