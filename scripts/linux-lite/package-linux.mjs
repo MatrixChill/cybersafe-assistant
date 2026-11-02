@@ -257,6 +257,9 @@ function deComEXE(resultado, rotulo) {
     linhas: linhas.length,
     exe: exes.length,
     amostraExe: exes.slice(0, 3),
+    // Lançadores listados por onde, não um booleano: o `.deb` medido não tinha
+    // nenhuma entrada em /usr/bin e o booleano mascarava isso como «false».
+    usrBin: linhas.filter((l) => /\/usr\/bin\//.test(l)).slice(0, 3),
     temLauncher: linhas.some((l) => /usr\/bin\/cybersafe-assistant-linux-lite|AppRun/.test(l)),
     temDesktop: linhas.some((l) => /cybersafe-assistant-linux-lite\.desktop/.test(l)),
     temIco: linhas.some((l) => /\.png$/.test(l) && /icons\//.test(l)),

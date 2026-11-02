@@ -58,7 +58,7 @@ extraMetadata:
   homepage: https://github.com/MatrixChill/cybersafe-assistant
   # Vai para `Comment=` do `.desktop`. A descrição do `package.json` do desktop
   # diz «desktop shell» genérica; no Linux Lite o menu tem de dizer o que esta
-  # edição é, sem tocar no ficheiro compartilhado com o Windows.
+  # edição é, sem tocar no ficheiro partilhado com o Windows.
   description: Assistente de segurança do CyberSafe para Linux (edição Linux Lite)
 linux:
   # O electron-builder exige `author.email` para deduzir o Maintainer do .deb;
@@ -77,11 +77,18 @@ linux:
   # aplicação — não há logótipo novo (§13).
   category: System
   icon: src/assets/icon.png
+  # `Section: default` não é secção Debian válida (medido no control do pacote
+  # anterior). `linux.packageCategory` vai para `--category` do fpm
+  # (`FpmTarget.js:138-140`), que é o que escreve o `Section:` do control.
+  packageCategory: utils
   # O nome do `.desktop` e o `Name=` já saem de `executableName`/`productName`.
   # Não se escreve um bloco `desktop:` aqui: em 25.1.8 as chaves dele vão para o
   # ficheiro literais (medido: um `desktop: {entryName, comment}` produziu as
   # linhas `entryName=…` e `comment=…` dentro do `.desktop` gerado), e o
   # `Comment=` quer-se da descrição do produto, que vai em `extraMetadata`.
-  mimeTypes:
-    - x-scheme-handler/cybersafe
+  # Sem `mimeTypes`: pus `x-scheme-handler/cybersafe` e apaguei-o. O pacote
+  # declarava ao ambiente gráfico que abria links `cybersafe:`, mas não há
+  # `setAsDefaultProtocolClient` nem handler `open-url` em parte alguma de
+  # `packages/` (medido por grep) — seria uma capacidade anunciada sem
+  # mecanismo atrás.
 artifactName: "${productName}-${version}-linux-${arch}.${ext}"
