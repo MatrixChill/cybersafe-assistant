@@ -213,7 +213,7 @@ const INCONCLUSIVE_ENGINES: InconclusiveEngine[] = [
   "clamav", "yara", "native", "archive", "filesystem",
 ];
 
-function asInconclusiveByReason(value: unknown): InconclusiveCauseCount[] | undefined {
+export function asInconclusiveByReason(value: unknown): InconclusiveCauseCount[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const cleaned: InconclusiveCauseCount[] = [];
   for (const raw of value) {
@@ -227,7 +227,7 @@ function asInconclusiveByReason(value: unknown): InconclusiveCauseCount[] | unde
   return cleaned.length > 0 ? cleaned : undefined;
 }
 
-function asInconclusiveByEngine(value: unknown): InconclusiveEngineCount[] | undefined {
+export function asInconclusiveByEngine(value: unknown): InconclusiveEngineCount[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const cleaned: InconclusiveEngineCount[] = [];
   for (const raw of value) {

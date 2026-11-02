@@ -32,7 +32,7 @@ export function generateConsolidatedPdfHtml(report: ConsolidatedScanReport): str
   const hidePersonal = filterApplied.hidePersonalData ?? false;
 
   const rowsHtml = entries.map((entry, idx) => {
-    const statusClass = entry.status === "completed" ? "status-ok" : entry.status === "failed" ? "status-crit" : "status-warn";
+    const statusClass = entry.status === "completed" && !entry.isPartial ? "status-ok" : entry.status === "failed" ? "status-crit" : "status-warn";
     const statusLabel = entry.status === "completed" ? (entry.isPartial ? "Parcial" : "Concluída") : entry.status === "cancelled" ? "Cancelada" : "Falhou";
 
     return `
@@ -47,6 +47,11 @@ export function generateConsolidatedPdfHtml(report: ConsolidatedScanReport): str
         <td class="mono text-right ${(entry.threatsFound ?? 0) > 0 ? "text-crit font-bold" : ""}">${entry.threatsFound ?? "—"}</td>
         <td class="mono text-right">${esc(entry.durationFormatted)}</td>
       </tr>
+      ${entry.filesInconclusive !== 0 ? `<tr><td></td><td colspan="8">
+        <b>Resultados inconclusivos: ${esc(entry.filesInconclusive ?? "não reportados")}</b><br>
+        Motivos: ${esc(entry.inconclusiveReasons ?? "não reportados")}<br>
+        Motores: ${esc(entry.inconclusiveEngines ?? "não reportados")}. As contagens por motor podem referir-se ao mesmo ficheiro.
+      </td></tr>` : ""}
     `;
   }).join("\n");
 
