@@ -9,7 +9,8 @@ movimentos olhando para os **eventos** publicados no `SecurityEventBus` e para o
 `manifest.json`. Os eventos vivem enquanto o processo vive: um `quarantine.added`
 de há três dias não se lê em lado nenhum. A auditoria é o outro lado — o que fica
 em `<baseDir>/history.jsonl` depois de a operação acabar e depois de a janela
-ser fechada. Este corte mede isso.
+ser fechada. Este corte mede isso — e, ao fazê-lo, apanha a alínea «Confirmação»,
+que só significa alguma coisa se a decisão estiver no mesmo registo.
 
 ## O que o código faz, por linha
 
@@ -63,7 +64,7 @@ por isso que os casos usam um helper que espera até a linha aparecer, com prazo
 de 3 s e mensagem que diz quantas linhas vieram. Não se afirma aqui que a escrita
 é síncrona: afirma-se que aparece. O que fica por medir é o que acontece quando o
 `baseDir` está num disco cheio ou o `appendFile` falha — o corpo de `logHistory`
-é `try { await fs.appendFile(...) } catch { // Ignore }` (engine.ts:5456-5461),
+é `try { await fs.appendFile(...) } catch { // Ignore }` (`logHistory`, engine.ts:5470-5475),
 pelo que uma auditoria pode ficar muda sem que nada o diga ao utilizador. Isso é
 um diagnóstico em dívida, não uma passagem.
 
@@ -92,19 +93,79 @@ exit=0
 # skipped 0
 ```
 
-Os cinco casos novos passam nas duas plataformas. Nenhum é `skip`ado: a
+Os cinco casos do isolamento passam nas duas plataformas. Nenhum é `skip`ado: a
 diferença do corte de modos POSIX, o que aqui se afirma (linhas JSON, campos,
 contagens) não depende de bits de permissão.
 
-## Regressão Windows do `engine.ts` mexido
+## O restauro também fica no registo
 
-A linha de sucesso é código partilhado: o `engine.ts` deste clone é o mesmo que o
-Windows executa, por isso o §16 obriga a correr o suite do serviço no clone
-isolado. `npm test` em Windows, depois das alterações:
+Medido o isolamento, o `restoreQuarantine` — o caminho que a janela da
+Quarentena usa, via `quarantine.restore` — era a única mutação do ciclo sem
+qualquer linha em disco: publicava `quarantine.restored` no bus e devolvia
+`{success, error?}` à janela. Nada no `history.jsonl`. Passa a haver linha nos
+dois desfechos, com o que o `id` não diz:
 
 ```
-ℹ tests 987
-ℹ pass 978
+type: "quarantine.restored" | "quarantine.restore.failed"
+id, fileName, sha256, artifactPath, trustAfterRestore, error?, timestamp
+```
+
+`fileName`/`sha256`/`artifactPath` vêm da entrada lida do manifesto *antes* do
+movimento; se a entrada não existir, a linha fica com o `id` e sem campos que o
+motor não tem, em vez de inventar. Três casos novos:
+
+| Caso | O que afirma |
+|---|---|
+| linha que nomeia o ficheiro devolvido | `id`, `sha256`, `fileName`, `artifactPath` da linha batem com o pedido; `trustAfterRestore:false`; sem `error`; e o ficheiro está no caminho com os bytes originais |
+| recusa auditada com o motivo | destino recriado por outra coisa → `quarantine.restore.failed` com `/destino/i` no `error`, `artifactPath` certo, os bytes alheios intactos, a entrada ainda no manifesto |
+| confiança permanente | `restoreQuarantine(id, true)` → `trustAfterRestore:true` na linha **e** o `allowHash` foi chamado com exatamente o `sha256` dessa linha — a linha não afirma uma confiança que o motor não aplicou |
+
+Medição:
+
+```
+Windows (audit + r5-quarantine-restore-result + r7-l3-history)   tests 30 / pass 30 / fail 0
+WSL2, TMPDIR em ext4 (audit + r5)                                # tests 13 / # pass 13 / # fail 0
+```
+
+## §9 «Confirmação» costurada com a auditoria
+
+Faltava uma alínea do §9 — «Confirmação» — e é a que dá sentido à palavra
+`authorization` das linhas de cima: se um isolamento aparece marcado como
+`automatic`, a pergunta «o utilizador tinha autorizado isto?» só se responde com
+o registo da decisão que mudou a política. Essa linha já existia no código da era
+Windows (`changeQuarantinePolicy`, engine.ts:2683-2688: `{type:
+"quarantine.policy.changed", policy, authorization, timestamp}`) — não foi
+preciso escrever nada; foi preciso medir que ela existe, que diz o que precisa de
+dizer, e que não existe quando o consentimento falta.
+
+Dois casos, pelo canal real (`quarantine.policy.set` através do `dispatch`, como
+a janela faz):
+
+| Caso | O que afirma |
+|---|---|
+| consentimento literal | `{ok:true, policy:"automatic-high-confidence"}`; linha com `authorization:"user-consent"` e instante analisável; e `protection-policy.json` lido por `loadQuarantinePolicy` devolve a mesma política — é o ficheiro que manda depois de reiniciar, não a memória |
+| sem consentimento | `{ok:false, policy:"warn", error:"consent_required"}`; `e.quarantinePolicy` continua `warn`; o ficheiro continua `warn`; **nenhuma** linha `quarantine.policy.changed`; o alvo isolado antes do pedido continua isolado |
+
+O segundo caso precisa de uma escrita conhecida primeiro (um isolamento manual):
+`logHistory` não espera pelo `appendFile`, por isso afirmar a *ausência* de uma
+linha logo a seguir a um `await` seria medir a corrida do escalonador e não a
+recusa. A linha do isolamento garante que o escritor está vivo antes de se
+concluir que nada foi escrito.
+
+As duas plataformas: `test/p3-quarantine-audit-engine.test.js` sozinho dá
+`tests 10 / pass 10 / fail 0 / skipped 0` em Windows e `# tests 10 / # pass 10 /
+# fail 0` em WSL2 (não-root, `TMPDIR=$HOME/tmp-cs`, ext4).
+
+## Regressão Windows do `engine.ts` mexido
+
+As linhas de sucesso do isolamento e do restauro são código partilhado: o
+`engine.ts` deste clone é o mesmo que o Windows executa, por isso o §16 obriga a
+correr o suite do serviço no clone isolado. `npm test` em Windows, já com o
+`restoreQuarantine` alterado (990 = 987 anteriores + os 3 casos de restauro):
+
+```
+ℹ tests 990
+ℹ pass 981
 ℹ fail 8
 ℹ skipped 1
 ```
@@ -158,16 +219,35 @@ deixei passar: ficam corrigidas neste corte.
 
 ## Ainda não é dito
 
+- **as duas metades da confirmação não correm no mesmo motor.** A linha de
+  consentimento e a linha `authorization:"automatic"` são medidas em casos
+  separados, cada um com o seu motor temporário. O percurso completo — consentir,
+  e *no mesmo processo* deixar que uma análise crítica produza o isolamento
+  automático com a linha correspondente — não é afirmado aqui; a parte do scan
+  automático é o que `recovery-security-pipeline.test.js` caso C mede pelos
+  eventos, não pelo `history.jsonl`.
 - **não é o percurso completo.** A auditoria medida aqui começa em
   `requestQuarantine`. O pedido que chega pelo IPC (`quarantine.ts`, canal do
   `requestQuarantine` manual) continua por medir de ponta a ponta, incluindo o
   que o `actions.log` escreve nesses pedidos — este ficheiro não afirma nada
   sobre `<baseDir>/logs/actions.log`, só sobre `history.jsonl`.
-- **o restauro não tem linha de auditoria própria.** O §9 pede auditoria à
-  quarentena; o `restore()` publicado no corte anterior move o ficheiro de volta
-  e reescreve o manifesto, mas não há aqui nada que prove que a linha de restauro
-  exista no `history.jsonl`. Antes de afirmar «auditado», é preciso medir o
-  `restore` pelo motor, não só pelo manager.
+- **o restauro tem dois caminhos e só um nomeia o ficheiro.** A janela da
+  Quarentena usa `restoreQuarantine`, que agora fica no registo com `fileName`,
+  `sha256` e `artifactPath`. O outro, `threat.action` com `action:"restore"`
+  (`threat.action`, engine.ts:5423), continua a escrever `{type:"threat.restored", id, timestamp}`
+  — existe, mas um `id` opaco não diz que ficheiro voltou a existir. É a mesma
+  ação com dois nomes de tipo; deixei os dois como estão porque esta página não
+  mede o `threat.action` com restauro real, e mudar o tipo de uma linha que pode
+  estar a ser lida por outra coisa precisa de ser medido, não suposto.
+- **o que é eliminado não fica no registo.** `deleteQuarantine` (engine.ts:3508)
+  não publica evento — comentário no código diz que reaproveitar «restored»
+  mentiria sobre o que aconteceu ao ficheiro — e também não escreve linha. Não há
+  forma de, dias depois, provar que uma entrada foi eliminada em vez de restaurada.
+- **a decisão de confiança direta não fica no registo.** `allowHash` publica
+  `trust.updated` e escreve na lista de confiança, sem linha em `history.jsonl`.
+  O que a linha do restauro prova é que *naquele restauro* a confiança foi pedida
+  e aplicada; um `trust.allowHash` pedido fora da quarentena continua sem rasto em
+  disco, e é a decisão mais duradoura das três.
 - **«foi pedido» não fica no ficheiro.** A linha 2395 publica o evento e não
   regista. Se o processo morrer entre o pedido e o movimento, o `history.jsonl`
   não tem rasto nenhum da tentativa. O único rasto durável pré-movimento é o

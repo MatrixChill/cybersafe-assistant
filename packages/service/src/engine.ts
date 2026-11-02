@@ -3488,6 +3488,20 @@ if (processInfo.path) {
     if (success) {
       this.eventBus.publish("quarantine.restored", "low", `Entrada de quarentena restaurada ${id}`, { id });
     }
+    // Linux Lite §9 «Auditoria»: um ficheiro que volta a existir no sistema de
+    // ficheiros é tantas vezes o acontecimento importante como o que foi isolado,
+    // e esta era a única mutação do ciclo da quarentena sem registo em disco. A
+    // linha nomeia o ficheiro (a UI só mostra um `id`), diz se o utilizador pediu
+    // confiança permanente e fica também quando a recusa aconteceu — uma recusa
+    // não auditada é indistinguível de «ninguém tentou».
+    void this.logHistory({
+      type: success ? "quarantine.restored" : "quarantine.restore.failed",
+      id,
+      ...(entry ? { fileName: entry.fileName, sha256: entry.sha256, artifactPath: entry.originalPath } : {}),
+      trustAfterRestore,
+      ...(error !== undefined ? { error } : {}),
+      timestamp: new Date().toISOString(),
+    });
     return { success, ...(error !== undefined ? { error } : {}) };
   }
 
