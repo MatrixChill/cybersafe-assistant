@@ -1,5 +1,21 @@
 # CyberSafe — intensive close / continuidade técnica A–K
 
+## Entrega RC1 — 2026-11-02 (substitui o estado Git/YARA anterior)
+
+- Limpeza REMOTA executada após fetch/prune e ancestralidade confirmada imediatamente antes de cada eliminação: codex/pap-final-integration-20261102 e freebuff/r7-final-integration-20261101 contidos na integração; pap/final-qoder-20261101 contido na main. Consulta direta ao origin confirmou **6→3 branches**: main, experimental/linux-lite e integration/windows-v0.2.0. Worktrees/histórico preservados, sem force-push.
+- Seis commits anteriores publicados e HEAD remoto confirmado: c80c6681fa57efcd2f725b956ea9df0c81368c82. Main/Linux não alterados. Commit desta preparação identifica a RC interna; pedido PENDING exato em output/release-delivery-20261102/review-request.json.
+- **YARA: causa ambiental demonstrada nesta máquina.** Reprodução sem serviço, com regra condition:false e binário YARA vendorizado: conteúdo original da fixture (SHA256 daacb0ded6129036ba5be4c830c423899fe314ea70f14d828e40c3f7b4b6f2ed, 29 B) dá YARA exit1/could-not-open e Node UNKNOWN. Leitura independente .NET retorna HRESULT **0x800700E1**, Win32 **225**, vírus/software potencialmente indesejado. Controlo benigno: leituras YARA/Node/.NET passam. Isto comprova recusa do SO/antivírus, não identifica qual fornecedor nem prova que o conteúdo seja malicioso.
+- Teste original preservado e ainda **9/10** (a mesma falha do conjunto adicional anterior27/28); **não é PASS nem skip**. Cópia diagnóstica fora das fontes, alterando apenas conteúdo para controlo benigno e caminhos de importação, conserva asserções e passa **10/10**. O produto mantém inconclusive em erro de leitura; nenhuma proteção desligada, exclusão criada, fixture original alterada ou deteção reduzida. Esta falha ambiental não exige mudança do Scanner para gerar uma candidata interna; a leitura YARA do corpus instalado continua no gate VM.
+- NSIS revalidado por compilação real: **15/15**, zero skips, três configurações/26 idiomas. Não executado no PC pessoal. Páginas de escolha/progresso/conclusão e capturas reais só serão VALIDADAS EM INSTALAÇÃO REAL pelo proprietário na VM; não confundir compilação com aparência comprovada.
+- Candidata definida: **0.2.0-rc.1**, canal internal, codename windows-rc1; versão Windows0.2.0.0. Não é tag/Release pública v0.2.0. Teste de identidade4/4 e build renderer com typecheck; aviso chunks>500kB mantido. Pipeline recompila do HEAD aprovado; build de preparação não é payload final.
+- Nenhuma alteração funcional adicional a Scanner/USB/terminação/Dashboard/updater. Trust de produção permanece desativada; sem instalação automática/Authenticode alegados. Suítes anteriores não repetidas sem necessidade.
+- Freeze/packaging **BLOQUEADOS POR APROVAÇÃO**: registo externo ausente, aprovação nova obrigatória para HEAD/tree exatos. Sem setup novo/hash de instalador, sem reutilizar4069af1. Manifesto de fontes inclui agora os12 recursos NSIS (correção já publicada).
+- Gates restantes: proprietário aprova freeze/build interno e fornece caminhos exatos do registo/aprovação fora do repo; pipeline oficial→payload/hash→checklist VM curta; só após resultados/autorizações, promoção canónica0.2.0, novo freeze/build se fontes mudarem, merge/CI/tag/Release/verificação do download e eliminação da integração. Nenhum merge/tag/Release/VM/instalação foi executado nesta preparação.
+- Evidências desta execução em output/release-delivery-20261102: branches-before/after, push-review.json, yara-os-diagnostic.json, no-double-original.log, no-double-control.log, nsis.log e version-final.log. Os outputs são locais, não publicar em bloco.
+
+---
+
+
 ## Fecho técnico Windows — 2026-11-02, continuação após db8f863
 
 **Não é aprovação de Release.** Estado: **IMPLEMENTADO / TESTADO AUTOMATICAMENTE nos contratos abaixo; PENDENTE DE TESTE HUMANO e BLOQUEADO POR APROVAÇÃO para candidata/Release.** Existe ainda uma falha de integração Scanner/YARA, explicitamente não resolvida. As secções anteriores no tempo, abaixo deste checkpoint, são histórico e não aprovam este código.
