@@ -60,6 +60,8 @@ const DEFAULT_CLAMAV_DB = 'C:/Users/caioc/.cybersafe-integration/pap-integration
 // mantém a janela aberta. `--interactive=only` abre sem prova, com o orçamento
 // de escrita intacto para o operador experimentar à mão.
 const ARGV = new Set(process.argv.slice(2));
+// --settings-proof exercises navigation only; never isolates/restores/deletes.
+const SETTINGS_PROOF = ARGV.has('--settings-proof');
 const INTERACTIVE_ONLY = ARGV.has('--interactive=only');
 const INTERACTIVE = INTERACTIVE_ONLY || ARGV.has('--interactive');
 const INTERACTIVE_MAX_MS = Number(process.env.CYBERSAFE_QUARANTINE_INTERACTIVE_MAX_MS || 30 * 60 * 1000);
@@ -321,6 +323,44 @@ deps.onStackReady = async ({ plan, spawned }) => {
         `(() => { const b=document.querySelector('[aria-label=' + ${JSON.stringify(JSON.stringify(label))} + ']'); if(!b) return false; b.click(); return true; })()`,
       );
     const bodyText = () => evaluate('document.body.innerText');
+
+    if (SETTINGS_PROOF) {
+      await safeShot('dashboard-current-real');
+      assert.equal(await clickSidebar('Configurações'), true);
+      await until(() => evaluate(`Boolean(document.querySelector('nav[aria-label="Categorias das configurações"]'))`), 'categorias prontas');
+      const ids = ['geral','aparencia','protecao','exclusoes','atualizacoes','matrix','avancado'];
+      facts.settings = [];
+      for (const id of ids) {
+        const result = await evaluate(`(() => {
+          const link = document.querySelector('a[href="#settings-${id}"]');
+          const region = document.getElementById('settings-${id}');
+          if (!link || !region) return null;
+          link.focus(); link.click();
+          return {id:region.id,role:region.getAttribute('role'),label:region.getAttribute('aria-labelledby'),focus:document.activeElement.id};
+        })()`);
+        assert.equal(result?.id, 'settings-' + id);
+        assert.equal(result.role, 'region');
+        assert.ok(result.label);
+        assert.equal(result.focus, result.id, "a âncora move o foco para a região");
+        // Hash navigation must not invalidate the trusted-frame IPC guard.
+        assert.ok(await evaluate('window.electronAPI.getServiceConnectionState()'));
+        facts.settings.push(result);
+      }
+      await evaluate(`document.querySelector('a[href="#settings-geral"]').click()`);
+      await timeout(300);
+      await cdp.send('Input.dispatchKeyEvent', {type:'keyDown', key:'Tab', code:'Tab', windowsVirtualKeyCode:9});
+      await cdp.send('Input.dispatchKeyEvent', {type:'keyUp', key:'Tab', code:'Tab', windowsVirtualKeyCode:9});
+      facts.settingsKeyboard = await evaluate('({tag:document.activeElement.tagName,role:document.activeElement.getAttribute("role")})');
+      assert.ok(['BUTTON','INPUT','A'].includes(facts.settingsKeyboard.tag), 'Tab chega a um controlo');
+      await safeShot('settings-categories-real');
+      await cdp.send('Emulation.setDeviceMetricsOverride', {width:900,height:700,deviceScaleFactor:1,mobile:false});
+      await timeout(300);
+      facts.settingsHorizontalOverflow = await evaluate('document.documentElement.scrollWidth > innerWidth');
+      assert.equal(facts.settingsHorizontalOverflow, false);
+      await safeShot('settings-categories-900-real');
+      fs.writeFileSync(path.join(evidence, 'settings-facts.json'), JSON.stringify(facts, null, 2));
+      return;
+    }
 
     // A prova automatizada (passos 2–9). Em `--interactive=only` é saltada: o
     // operador experimenta à mão com o orçamento de escrita intacto.

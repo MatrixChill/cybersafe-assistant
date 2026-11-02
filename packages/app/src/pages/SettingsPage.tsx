@@ -316,7 +316,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <nav aria-label="Categorias das configurações" className="flex flex-wrap gap-2">
+      <nav aria-label="Categorias das configurações" className="sticky top-0 z-20 flex flex-wrap gap-2 bg-background py-2">
         <a href="#settings-geral" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Geral</a>
         <a href="#settings-aparencia" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Aparência</a>
         <a href="#settings-protecao" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Proteção</a>
@@ -326,7 +326,7 @@ export default function SettingsPage() {
         <a href="#settings-avancado" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Avançado</a>
       </nav>
 
-      <div id="settings-geral" role="region" aria-labelledby="settings-geral-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+      <div id="settings-geral" role="region" aria-labelledby="settings-geral-title" tabIndex={-1} className="space-y-4 scroll-mt-32">
         <h2 id="settings-geral-title" className="font-mono text-lg font-semibold text-foreground">Geral</h2>
       <section className="surface-elevated cyber-border rounded-xl p-6">
         <div className="flex items-center gap-3 mb-6">
@@ -443,7 +443,7 @@ export default function SettingsPage() {
       </section>
       </div>
 
-      <div id="settings-aparencia" role="region" aria-labelledby="settings-aparencia-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+      <div id="settings-aparencia" role="region" aria-labelledby="settings-aparencia-title" tabIndex={-1} className="space-y-4 scroll-mt-32">
         <h2 id="settings-aparencia-title" className="font-mono text-lg font-semibold text-foreground">Aparência</h2>
       <section className="surface-elevated cyber-border rounded-xl p-6 space-y-6">
         <div className="flex items-center gap-3">
@@ -768,7 +768,7 @@ export default function SettingsPage() {
       </section>
       </div>
 
-      <div id="settings-protecao" role="region" aria-labelledby="settings-protecao-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+      <div id="settings-protecao" role="region" aria-labelledby="settings-protecao-title" tabIndex={-1} className="space-y-4 scroll-mt-32">
         <h2 id="settings-protecao-title" className="font-mono text-lg font-semibold text-foreground">Proteção</h2>
       <section data-settings-quarantine-policy className="surface-elevated cyber-border rounded-xl p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -883,17 +883,17 @@ export default function SettingsPage() {
       </section>
       </div>
 
-      <div id="settings-exclusoes" role="region" aria-labelledby="settings-exclusoes-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+      <div id="settings-exclusoes" role="region" aria-labelledby="settings-exclusoes-title" tabIndex={-1} className="space-y-4 scroll-mt-32">
         <h2 id="settings-exclusoes-title" className="font-mono text-lg font-semibold text-foreground">Exclusões</h2>
       <ExclusionsSection />
       </div>
 
-      <div id="settings-atualizacoes" role="region" aria-labelledby="settings-atualizacoes-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+      <div id="settings-atualizacoes" role="region" aria-labelledby="settings-atualizacoes-title" tabIndex={-1} className="space-y-4 scroll-mt-32">
         <h2 id="settings-atualizacoes-title" className="font-mono text-lg font-semibold text-foreground">Atualizações</h2>
       <UpdatesSection />
       </div>
 
-      <div id="settings-matrix" role="region" aria-labelledby="settings-matrix-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+      <div id="settings-matrix" role="region" aria-labelledby="settings-matrix-title" tabIndex={-1} className="space-y-4 scroll-mt-32">
         <h2 id="settings-matrix-title" className="font-mono text-lg font-semibold text-foreground">MATRIX e Privacidade</h2>
       <section data-settings-matrix-consent className="surface-elevated cyber-border rounded-xl p-6">
         <div className="flex items-center gap-3 mb-4">
@@ -964,7 +964,7 @@ export default function SettingsPage() {
       </section>
       </div>
 
-      <div id="settings-avancado" role="region" aria-labelledby="settings-avancado-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+      <div id="settings-avancado" role="region" aria-labelledby="settings-avancado-title" tabIndex={-1} className="space-y-4 scroll-mt-32">
         <h2 id="settings-avancado-title" className="font-mono text-lg font-semibold text-foreground">Avançado</h2>
       <section className="surface-elevated cyber-border rounded-xl p-6">
         <h2 className="text-lg font-semibold text-foreground mb-1">Sobre o CyberSafe</h2>
