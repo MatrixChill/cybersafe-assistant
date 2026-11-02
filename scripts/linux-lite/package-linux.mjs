@@ -265,9 +265,27 @@ function construir(alvos) {
     return { ok: false, codigo: 1, saida: `staging sem renderer: ${renderer.porque}` };
   }
   console.log(`renderer no pacote: ${renderer.porque}`);
+  // A versão do pacote vem de `product-version.json`, não do
+  // `packages/desktop/package.json`. Medido no pacote anterior: o `.deb` dizia
+  // `Version: 0.1.2` (a versão INTERNA do workspace, que `app-version.mjs:17-19`
+  // declara explicitamente «não é identidade do produto») enquanto o renderer
+  // dentro dele dizia `0.1.11-internal.pap-r7.20261031`. O `apt`, o gestor de
+  // pacotes e o `app.getVersion()` mostram a primeira ao utilizador — era
+  // exatamente a divergência de três fontes que aquele módulo existe para evitar.
+  // Vai por `--config`, não pelo YAML, para que a fonte continue a ser uma.
+  const { version } = readProductVersion({ root: RAIZ });
   materializarWorkspaces();
-  const args = ["--config", "electron-builder.linux-lite.yml", "--linux", ...alvos, "--x64", "--publish", "never"];
-  console.log(`$ electron-builder ${args.join(" ")}`);
+  const args = [
+    "--config",
+    "electron-builder.linux-lite.yml",
+    `--config.extraMetadata.version=${version}`,
+    "--linux",
+    ...alvos,
+    "--x64",
+    "--publish",
+    "never",
+  ];
+  console.log(`$ electron-builder ${args.join(" ")}  (versão canónica ${version})`);
   return executar(path.join(RAIZ, "node_modules", ".bin", "electron-builder"), args, { cwd: DESKTOP });
 }
 
@@ -291,6 +309,10 @@ function verificarArtefactos() {
       const info = executar("dpkg-deb", ["--info", completo]);
       // O `Depends:` é o que §14 pede documentado: é a lista que o `apt` exige.
       relatorio.push(`DEB_INFO ${info.ok ? info.saida.replace(/\s+/g, " ").slice(0, 1200) : "DESCONHECIDO " + info.saida.slice(0, 200)}`);
+      // A identidade que o gestor de pacotes mostra tem de ser a canónica, e os
+      // outros campos de `extraMetadata` têm de sobreviver ao `--config` da
+      // linha de comandos (uma substituição rasa do objeto apagava-mo-los).
+      relatorio.push(identidadeDoDeb(info));
       const conteudo = executar("dpkg-deb", ["--contents", completo], { maxBuffer: 256 * 1024 * 1024 });
       relatorio.push(deComEXE(conteudo, "DEB_CONTEUDO"));
     }
@@ -318,6 +340,37 @@ function verificarArtefactos() {
     }
   }
   return { ficheiros, relatorio };
+}
+
+/**
+ * A identidade que o `apt` e o gestor de pacotes mostram, conferida com a fonte
+ * única. `extraMetadata` vem de dois sítios (o YAML e o `--config` da linha de
+ * comandos), por isso não basta o `Version:` estar certo — os campos do YAML
+ * têm de lá estar todos, senão a linha de comandos substituiu o objeto inteiro.
+ */
+function identidadeDoDeb(info) {
+  if (!info.ok) return `DEB_IDENTIDADE DESCONHECIDO ${info.saida.slice(0, 200)}`;
+  const campo = (nome) => {
+    const m = info.saida.match(new RegExp(`^${nome}:\\s*(.+)$`, "m"));
+    return m ? m[1].trim() : null;
+  };
+  let esperado = null;
+  try {
+    esperado = readProductVersion({ root: RAIZ }).version;
+  } catch {
+    esperado = null;
+  }
+  const obtido = campo("Version");
+  return `DEB_IDENTIDADE ${JSON.stringify({
+    esperado,
+    obtido,
+    versaoIgual: !!esperado && obtido === esperado,
+    // Os campos que só existem porque o YAML os declara: se algum for `null`
+    // depois do `--config`, a fusão não foi profunda.
+    homepage: campo("Homepage"),
+    maintainer: campo("Maintainer"),
+    temDescricao: info.saida.includes("Description:"),
+  })}`;
 }
 
 function deComEXE(resultado, rotulo) {
