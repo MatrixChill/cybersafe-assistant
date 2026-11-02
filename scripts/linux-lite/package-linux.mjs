@@ -34,6 +34,7 @@ import {
 } from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { readProductVersion, verifyBuiltRenderer } from "../app-version.mjs";
 
 const RAIZ = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..", "..");
 const DESKTOP = path.join(RAIZ, "packages", "desktop");
@@ -66,6 +67,43 @@ function lerCabeca(ficheiro, bytes = 4) {
 }
 
 const sha256De = (ficheiro) => createHash("sha256").update(readFileSync(ficheiro)).digest("hex");
+
+/**
+ * O `dist` do desktop TEM de conter o renderer, não só o shell.
+ *
+ * Porque isto é uma verificação e não um `existsSync`: o `index.html` do
+ * desktop é `<body></body>` por origem (medido em `packages/desktop/dist`), e o
+ * React real só aparece lá depois de `scripts/stage-renderer.mjs` copiar
+ * `packages/app/dist` por cima. Sem staging, o `electron-builder` empacota uma
+ * casca e a janela abre-se vazia — foi exatamente o que a sonda CDP mediu no
+ * pacote de `49eb4f3`: `{"root":-1,"body":0,"texto":"","scripts":[]}` com zero
+ * exceções. Um ficheiro que existe não é prova de conteúdo.
+ *
+ * Exigimos as duas coisas que a janela precisa de facto: o contentor onde o
+ * React monta (`#root`) e o `src` do script; e a identidade embutida no bundle
+ * conferida por `verifyBuiltRenderer` — a mesma verificação que o pipeline
+ * Windows já usa, por isso não inventamos aqui um critério paralelo.
+ */
+export function estadoRenderer(distDir, { root = RAIZ } = {}) {
+  let html;
+  try {
+    html = readFileSync(path.join(distDir, "index.html"), "utf8");
+  } catch (error) {
+    return { comRenderer: false, porque: `sem index.html legível (${error.code ?? error.message})` };
+  }
+  if (!/<div[^>]+\bid="root"/.test(html)) return { comRenderer: false, porque: "index.html não tem o contentor #root do React" };
+  if (!/<script[^>]+\bsrc=/.test(html)) return { comRenderer: false, porque: "index.html não referencia nenhum script" };
+  let version;
+  try {
+    version = readProductVersion({ root }).version;
+  } catch (error) {
+    return { comRenderer: false, porque: `versão canónica ilegível (${error.message})` };
+  }
+  const ver = verifyBuiltRenderer({ distDir, version, allowCommitUnknown: true });
+  if (!ver.ok) return { comRenderer: false, porque: `renderer verificado como ${version}: ${ver.problems.join("; ")}` };
+  const id = ver.identities[0];
+  return { comRenderer: true, porque: `#root + <script src>, renderer ${id.version} build ${id.buildId} (${id.files.length} .js)` };
+}
 
 /**
  * O PREFLIGHT diz o que falta ANTES de perder minutos num build. Cada linha é
@@ -128,17 +166,16 @@ export function preflight() {
   }
 
   // O `index.html` do desktop é uma casca vazia POR ORIGEM (`<body></body>`): o
-  // React real é copiado por cima por `scripts/stage-renderer.mjs`. Empacotar
-  // sem esse pré-passo dá uma janela sem nada — foi exatamente o que a sonda CDP
-  // mediu no pacote de 49eb4f3: `root:-1, body:0, scripts:[]`, zero exceções,
-  // ecrã preto. Existir não chega; tem de levar o contentor e o script.
-  let html = "";
-  try { html = readFileSync(path.join(DESKTOP, "dist", "index.html"), "utf8"); } catch { /* conta como falha */ }
-  verificar(
-    "renderer-staged",
-    /<script[^>]+src=/.test(html) && /id="root"/.test(html),
-    "packages/desktop/dist/index.html não contém o renderer; correr `node scripts/stage-renderer.mjs` antes de empacotar (o build do desktop só produz o shell)"
-  );
+  // React real é copiado por cima por `scripts/stage-renderer.mjs`, que
+  // `construir()` corre. Um `--check` não compila nada, por isso aqui a
+  // ausência ainda não pode ser um obstáculo — é nota. A asserção dura está em
+  // `construir()`, logo a seguir ao staging e antes de qualquer escrita.
+  const estagio = estadoRenderer(path.join(DESKTOP, "dist"));
+  if (!estagio.comRenderer) {
+    console.log(`nota: dist/ ainda sem renderer (${estagio.porque}); construir() corre stage-renderer.mjs e volta a verificar antes de escrever`);
+  } else {
+    console.log(`nota: dist/ já tem renderer — ${estagio.porque}`);
+  }
 
   // Só as ferramentas que o BUILD chama. `unsquashfs` não está aqui de
   // propósito: quem desembrulha o AppImage na verificação é o runtime do
@@ -218,6 +255,16 @@ function construir(alvos) {
     return estagio;
   }
   console.log("staging do renderer ok");
+  // Depois do staging, e antes de qualquer escrita: é aqui que a casca vazia se
+  // torna um obstáculo. Se o `stage-renderer.mjs` tiver saido 0 sem copiar o
+  // React, o `electron-builder` escreveria um `.deb` que abre uma janela sem
+  // interface — um artefacto construído com sucesso e inutilizável.
+  const renderer = estadoRenderer(path.join(DESKTOP, "dist"));
+  if (!renderer.comRenderer) {
+    console.log(`STAGING_SEM_RENDERER ${renderer.porque} — nada foi escrito`);
+    return { ok: false, codigo: 1, saida: `staging sem renderer: ${renderer.porque}` };
+  }
+  console.log(`renderer no pacote: ${renderer.porque}`);
   materializarWorkspaces();
   const args = ["--config", "electron-builder.linux-lite.yml", "--linux", ...alvos, "--x64", "--publish", "never"];
   console.log(`$ electron-builder ${args.join(" ")}`);
@@ -290,33 +337,42 @@ function deComEXE(resultado, rotulo) {
   })}`;
 }
 
-const alvos = process.argv.includes("--appimage-only")
-  ? ["AppImage"]
-  : process.argv.includes("--deb-only")
-    ? ["deb"]
-    : ["deb", "AppImage"];
-const soCheck = process.argv.includes("--check");
+// O resto do ficheiro é a CLI. Um `import` deste módulo tem de ser inofensivo
+// (é assim que `scripts/test/linux-lite-package-renderer-guard.test.mjs` consegue
+// exercer o guarda); por isso nada aqui corre quando o ficheiro é importado.
+const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
+if (isMain) process.exit(main(process.argv.slice(2)));
 
-// Reler um pacote já escrito não precisa de ambiente de build nenhum.
-if (process.argv.includes("--verify-only")) {
+export function main(argv) {
+  const alvos = argv.includes("--appimage-only")
+    ? ["AppImage"]
+    : argv.includes("--deb-only")
+      ? ["deb"]
+      : ["deb", "AppImage"];
+  const soCheck = argv.includes("--check");
+
+  // Reler um pacote já escrito não precisa de ambiente de build nenhum.
+  if (argv.includes("--verify-only")) {
+    for (const linha of verificarArtefactos().relatorio) console.log(linha);
+    return 0;
+  }
+
+  const falhas = preflight();
+  for (const f of falhas) console.log(`PREFLIGHT_FALHA ${f}`);
+  if (falhas.length) {
+    console.log(`PREFLIGHT ${falhas.length} obstáculo(s) — nada foi construído.`);
+    return 1;
+  }
+  console.log("PREFLIGHT ok");
+  if (soCheck) return 0;
+
+  const build = construir(alvos);
+  console.log(build.saida.split("\n").slice(-40).join("\n"));
+  if (!build.ok) {
+    console.log(`BUILD_FALHOU codigo=${build.codigo}`);
+    return 1;
+  }
+  console.log("BUILD ok");
   for (const linha of verificarArtefactos().relatorio) console.log(linha);
-  process.exit(0);
+  return 0;
 }
-
-const falhas = preflight();
-for (const f of falhas) console.log(`PREFLIGHT_FALHA ${f}`);
-if (falhas.length) {
-  console.log(`PREFLIGHT ${falhas.length} obstáculo(s) — nada foi construído.`);
-  process.exit(1);
-}
-console.log("PREFLIGHT ok");
-if (soCheck) process.exit(0);
-
-const build = construir(alvos);
-console.log(build.saida.split("\n").slice(-40).join("\n"));
-if (!build.ok) {
-  console.log(`BUILD_FALHOU codigo=${build.codigo}`);
-  process.exit(1);
-}
-console.log("BUILD ok");
-for (const linha of verificarArtefactos().relatorio) console.log(linha);
