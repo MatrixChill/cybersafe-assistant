@@ -342,6 +342,42 @@ describe("source-freeze (manifesto aprovado, fail-closed)", () => {
     assert.ok(config.counts.modified >= 1);
   });
 
+  it("recursos fonte do instalador entram no freeze apesar do nome build", (t) => {
+    const { root, manifestPath, writeManifest, put } = fixture(t);
+    const hook = "packages/desktop/build/installer/cybersafe-installer.nsh";
+    const controls = "packages/desktop/build/installer/cybersafe-controls.nsh";
+    const bitmap = "packages/desktop/build/installer/background.bmp";
+    put(hook, "; original installer hook");
+    put(controls, "; native controls");
+    put(bitmap, "BM-fixture");
+    const manifest = writeManifest();
+    for (const file of [hook, controls, bitmap]) {
+      assert.ok(manifest.entries.some(entry => entry.path === file), file);
+    }
+    assert.equal(verifySourceFreeze({ root, manifestPath }).ok, true);
+    put(hook, "; changed installer hook");
+    const changed = verifySourceFreeze({ root, manifestPath });
+    assert.equal(changed.ok, false);
+    assert.equal(changed.counts.modified, 1);
+    assert.ok(changed.samples.modified.some(entry => entry.path === hook));
+  });
+
+  it("adicionar ou remover recursos do instalador invalida o freeze", (t) => {
+    const { root, manifestPath, writeManifest, put } = fixture(t);
+    const bitmap = "packages/desktop/build/installer/background.bmp";
+    put(bitmap, "BM-fixture");
+    writeManifest();
+    fs.unlinkSync(path.join(root, bitmap));
+    const removed = verifySourceFreeze({ root, manifestPath });
+    assert.equal(removed.ok, false);
+    assert.equal(removed.counts.removed, 1);
+    put(bitmap, "BM-fixture");
+    put("packages/desktop/build/installer/new.bmp", "BM-new");
+    const added = verifySourceFreeze({ root, manifestPath });
+    assert.equal(added.ok, false);
+    assert.equal(added.counts.added, 1);
+  });
+
   it("o pipeline usa o driver com os três gates (PRE, PRE-builder, POS)", () => {
     const source = fs.readFileSync(path.join(HERE, "..", "package-windows.mjs"), "utf8");
     assert.ok(source.includes("runFreezeGatedPipeline({"), "o pipeline tem de usar o driver injectável");

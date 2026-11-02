@@ -12,7 +12,8 @@
  * Cobertura: package.json, package-lock.json, tsconfig*, vite config e .npmrc da
  * raiz; scripts/**, packages/** (fontes, configs, assets, contratos) e assets/**
  * (branding e o corpus de licenças publicado), excepto
- * node_modules/dist/release/logs/coverage/build/output; scan-engine.exe e
+ * node_modules/dist/release/logs/coverage/build/output (excepto os recursos fonte
+ * em packages/desktop/build); scan-engine.exe e
  * vendor/clamav/VENDOR.json. `dist`/`release` são gerados e nunca entram.
  * `assets/licenses/THIRD-PARTY-NOTICES.txt` e `assets/licenses/PROVENANCE.json`
  * são obrigatórios mesmo num `--write`: sem eles o contrato nasce incompleto.
@@ -255,7 +256,9 @@ function walk({ root, relRoot, api, problems }) {
       if (entry.isSymbolicLink()) {
         problems.push({ kind: "link", path: rel, detail: "link/junction na árvore" });
       } else if (entry.isDirectory()) {
-        if (!EXCLUDED_DIRS.has(entry.name.toLowerCase())) pending.push(rel);
+        // electron-builder's buildResources directory contains authored NSIS,
+        // branding and bitmaps, not compiler output. Freeze these exact inputs.
+        if (rel === "packages/desktop/build" || !EXCLUDED_DIRS.has(entry.name.toLowerCase())) pending.push(rel);
         else if (isPublishedAsset(rel)) {
           // `assets/` alimenta recursos publicados (licenças via extraResources,
           // branding via sync-branding). Um diretório que o walker ignora noutros
