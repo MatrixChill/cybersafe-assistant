@@ -68,6 +68,12 @@ Var CSSpaceState
   PageExEnd
 !macroend
 
+; Expanded by electron-builder inside its install-mode function, AFTER any
+; optional licence page has consumed its own one-shot MUI SHOW callback.
+!macro customInstallMode
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW CS_InstallModeShow
+!macroend
+
 !macro customPageAfterChangeDir
   !insertmacro MUI_PAGE_INIT
   !insertmacro MUI_SET CS_CONFIG_PAGE ""
@@ -109,6 +115,7 @@ Var CSSpaceState
   ${If} $CSDialog == error
     Abort
   ${EndIf}
+  SetCtlColors $CSDialog 0xEDF8F8 0x07151A
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
   File "/oname=button-secondary.bmp" "${CS_ASSET_DIR}\button-secondary.bmp"
@@ -251,11 +258,28 @@ Var CSSpaceState
     System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 34, *i 0x001A1507, i 4)'
     SetCtlColors $HWNDPARENT 0xEDF8F8 0x07151A
   FunctionEnd
+  !ifndef INSTALL_MODE_PER_ALL_USERS
+  Function CS_InstallModeShow
+    Call CS_ApplyFrame
+    SetCtlColors $MultiUser.InstallModePage 0xEDF8F8 0x07151A
+    SetCtlColors $MultiUser.InstallModePage.Text 0xEDF8F8 0x07151A
+    System::Call 'uxtheme::SetWindowTheme(p $MultiUser.InstallModePage.AllUsers,w "",w "")'
+    System::Call 'uxtheme::SetWindowTheme(p $MultiUser.InstallModePage.CurrentUser,w "",w "")'
+    SetCtlColors $MultiUser.InstallModePage.AllUsers 0xEDF8F8 0x07151A
+    SetCtlColors $MultiUser.InstallModePage.CurrentUser 0xEDF8F8 0x07151A
+    SetCtlColors $RadioButtonLabel1 0xEDF8F8 0x07151A
+    Call CS_StyleFooter
+  FunctionEnd
+  !endif
   Function CS_ProgressShow
     Call CS_ApplyFrame
+    SetCtlColors $mui.InstFilesPage 0xEDF8F8 0x07151A
+    SetCtlColors $mui.InstFilesPage.Text 0xEDF8F8 0x07151A
+    SetCtlColors $mui.InstFilesPage.Log 0xEDF8F8 0x07151A
+    System::Call 'uxtheme::SetWindowTheme(p $mui.InstFilesPage.Log,w "",w "")'
     System::Call 'uxtheme::SetWindowTheme(p $mui.InstFilesPage.ProgressBar,w "",w "")'
     SendMessage $mui.InstFilesPage.ProgressBar 0x409 0 0x00C1D616
-    SendMessage $mui.InstFilesPage.ProgressBar 0x401 0 0x001A1507
+    SendMessage $mui.InstFilesPage.ProgressBar 0x2001 0 0x001A1507
     Call CS_StyleFooter
   FunctionEnd
   Function CS_FinishShow

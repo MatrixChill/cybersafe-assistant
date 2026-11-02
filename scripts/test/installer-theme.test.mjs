@@ -62,3 +62,13 @@ test('o manifesto liga o include personalizado ao NSIS', () => {
 test('o bitmap de fundo fica atrás dos controlos', () => {
   assert.match(nsh, /NSD_SetStretchedImage[\s\S]{0,300}SetWindowPos\(p \$CSBg/);
 });
+
+test('os diálogos filhos recebem o tema e o progresso nativo nunca é simulado', () => {
+  assert.match(nsh, /SetCtlColors \$CSDialog 0xEDF8F8 0x07151A/);
+  assert.match(nsh, /MUI_PAGE_CUSTOMFUNCTION_SHOW CS_InstallModeShow/);
+  for (const control of ['MultiUser.InstallModePage','MultiUser.InstallModePage.Text','MultiUser.InstallModePage.AllUsers','MultiUser.InstallModePage.CurrentUser','RadioButtonLabel1','mui.InstFilesPage','mui.InstFilesPage.Text','mui.InstFilesPage.Log']) {
+    assert.ok(nsh.includes(`SetCtlColors $${control} 0xEDF8F8 0x07151A`),control);
+  }
+  assert.doesNotMatch(nsh, /(?:SendMessage[^\n]+0x40[125]|CreateTimer|PBM_SETPOS)/,'no timer, position or range mutation');
+  assert.match(nsh, /SendMessage \$mui\.InstFilesPage\.ProgressBar 0x2001/,'PBM_SETBKCOLOR, not PBM_SETRANGE');
+});
