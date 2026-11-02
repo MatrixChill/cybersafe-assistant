@@ -117,6 +117,9 @@ def orbital(image: Image.Image, cx: int, cy: int, rx: int, ry: int, symbol_w: in
     rear = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw_arc(rear, cx, cy, rx, ry, -21, VIOLET, 70, 2, 185, 355)
     draw_arc(rear, cx, cy, rx * 1.18, ry * 0.65, 25, CYAN_SOFT, 55, 2, 190, 350)
+    # Wide translucent bands give the rings body before the bright core.
+    draw_arc(rear, cx, cy, rx, ry, -21, VIOLET, 28, 10, 185, 355)
+    draw_arc(rear, cx, cy, rx * 1.18, ry * 0.65, 25, CYAN, 25, 9, 190, 350)
     rear = rear.filter(ImageFilter.GaussianBlur(4))
     image = Image.alpha_composite(image, rear)
 
@@ -136,9 +139,11 @@ def orbital(image: Image.Image, cx: int, cy: int, rx: int, ry: int, symbol_w: in
 
     # Front arcs pass over the lower half of the symbol: convincing depth without redraw.
     front = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    draw_arc(front, cx, cy, rx, ry, -21, CYAN, 190, 2, 5, 175)
+    draw_arc(front, cx, cy, rx, ry, -21, CYAN, 36, 8, 5, 175)
+    draw_arc(front, cx, cy, rx, ry, -21, CYAN, 145, 3, 5, 175)
     draw_arc(front, cx, cy, rx * 0.96, ry * 0.96, -21, (178, 255, 244), 205, 1, 24, 114)
-    draw_arc(front, cx, cy, rx * 1.18, ry * 0.65, 25, VIOLET, 105, 2, 5, 165)
+    draw_arc(front, cx, cy, rx * 1.18, ry * 0.65, 25, VIOLET, 42, 6, 5, 165)
+    draw_arc(front, cx, cy, rx * 1.18, ry * 0.65, 25, VIOLET, 125, 2, 5, 165)
     front_glow = front.filter(ImageFilter.GaussianBlur(7))
     image = Image.alpha_composite(image, front_glow)
     image = Image.alpha_composite(image, front)
