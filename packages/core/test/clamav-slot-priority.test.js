@@ -322,7 +322,7 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
     }
   });
 
-  it("uma vaga ENVENENADA acorda as DUAS filas (ninguém fica preso à espera)", async () => {
+  it("uma vaga ENVENENADA acorda as três filas (ninguém fica preso à espera)", async () => {
     fired.push(bridge.scanFiles([target(0)], {}));
     await waitFor(() => gate.state.spawned === 1, { label: "job ativo" });
 
@@ -331,6 +331,11 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
     fired.push(user, background);
     await waitFor(() => clamavSlotStats().waitingUser === 1 && clamavSlotStats().waitingBackground === 1, {
       label: "ambas as classes na fila antes da morte não confirmada",
+    });
+
+    const health = bridge.isAvailable(true);
+    await waitFor(() => clamavSlotStats().waitingHealth === 1, {
+      label: "saúde na fila antes da morte não confirmada",
     });
 
     // Morte NÃO confirmada: é isto que envenena a vaga no `finally` da bridge.
@@ -343,7 +348,10 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
       deathUnconfirmed: true,
     });
 
-    const [u, b] = await Promise.all([user, background]);
+    const [u, b, available] = await Promise.all([user, background, health]);
+    assert.equal(available, false, "a prova de saúde falha fechada quando a morte não é confirmada");
+    assert.equal(clamavSlotStats().waitingHealth, 0, "a fila de saúde também é drenada");
+    assert.equal(bridge.health.status, "degraded");
     assert.equal(u.status.status, "unavailable", "a fila do utilizador não pode ficar presa");
     assert.equal(b.status.status, "unavailable", "a fila de background não pode ficar presa");
     assert.equal(
