@@ -27,14 +27,15 @@ Page custom PreviewCreate
 Section
   ; Deliberately empty: this executable cannot install the application.
 SectionEnd
+!include "${CS_PREVIEW_ASSETS}\cybersafe-controls.nsh"
+Var Bg
+Var BgImage
 Var Dialog
 Var Heading
 Var Body
 Var Status
 Var TitleFont
 Var BodyFont
-Var Mark
-Var MarkImage
 Var Mode
 Var WindowDpi
 Var LayoutWidth
@@ -42,6 +43,11 @@ Var LayoutHeight
 Var ClientWidth
 Var ClientHeight
 Var HeadingFont
+Var Nav0
+Var Nav1
+Var Nav2
+Var Nav3
+Var Nav4
 
 Function ClosePreview
   Quit
@@ -61,12 +67,8 @@ Function ModeUpgrade
   ${NSD_SetText} $Body "Proposta: versões, integridade e preservação dos dados.$\r$\nSem download nem progresso fictício neste estudo."
   ${NSD_SetText} $Status "ESTUDO VISUAL · nenhum upgrade executado"
 FunctionEnd
-Function ModeChanged
-  Pop $0
-  Call ModeSelect
-FunctionEnd
 Function ModeSelect
-  ${NSD_LB_GetSelection} $Mode $0
+  StrCpy $0 $Mode
   ${If} $0 == "Instalação"
     Call ModeInstall
   ${ElseIf} $0 == "Atualização"
@@ -95,6 +97,69 @@ Function ModeSelect
     ${NSD_SetText} $Status "PROTÓTIPO VISUAL · não instala nem altera o Windows"
   ${EndIf}
 FunctionEnd
+Function Select0
+  Pop $0
+  StrCpy $Mode "Boas-vindas"
+  Call ModeSelect
+  Call NavPaint
+FunctionEnd
+
+Function Select1
+  Pop $0
+  StrCpy $Mode "Instalação"
+  Call ModeSelect
+  Call NavPaint
+FunctionEnd
+
+Function Select2
+  Pop $0
+  StrCpy $Mode "Atualização"
+  Call ModeSelect
+  Call NavPaint
+FunctionEnd
+
+Function Select3
+  Pop $0
+  StrCpy $Mode "Reparação"
+  Call ModeSelect
+  Call NavPaint
+FunctionEnd
+
+Function Select7
+  Pop $0
+  StrCpy $Mode "Desinstalação"
+  Call ModeSelect
+  Call NavPaint
+FunctionEnd
+
+Function NavPaint
+  ${If} $Mode == "Boas-vindas"
+    !insertmacro CS_StyleButton $Nav0 "$PLUGINSDIR\button-primary.bmp"
+  ${Else}
+    !insertmacro CS_StyleButton $Nav0 "$PLUGINSDIR\button-secondary.bmp"
+  ${EndIf}
+  ${If} $Mode == "Instalação"
+    !insertmacro CS_StyleButton $Nav1 "$PLUGINSDIR\button-primary.bmp"
+  ${Else}
+    !insertmacro CS_StyleButton $Nav1 "$PLUGINSDIR\button-secondary.bmp"
+  ${EndIf}
+  ${If} $Mode == "Atualização"
+    !insertmacro CS_StyleButton $Nav2 "$PLUGINSDIR\button-primary.bmp"
+  ${Else}
+    !insertmacro CS_StyleButton $Nav2 "$PLUGINSDIR\button-secondary.bmp"
+  ${EndIf}
+  ${If} $Mode == "Reparação"
+    !insertmacro CS_StyleButton $Nav3 "$PLUGINSDIR\button-primary.bmp"
+  ${Else}
+    !insertmacro CS_StyleButton $Nav3 "$PLUGINSDIR\button-secondary.bmp"
+  ${EndIf}
+  ${If} $Mode == "Desinstalação"
+    !insertmacro CS_StyleButton $Nav4 "$PLUGINSDIR\button-primary.bmp"
+  ${Else}
+    !insertmacro CS_StyleButton $Nav4 "$PLUGINSDIR\button-secondary.bmp"
+  ${EndIf}
+FunctionEnd
+
 Function PreviewCreate
   nsDialogs::Create 1018
   Pop $Dialog
@@ -104,9 +169,9 @@ Function PreviewCreate
     StrCpy $0 96
   ${EndIf}
   StrCpy $WindowDpi $0
-  IntOp $LayoutWidth 720 * $WindowDpi
+  IntOp $LayoutWidth 900 * $WindowDpi
   IntOp $LayoutWidth $LayoutWidth / 96
-  IntOp $LayoutHeight 460 * $WindowDpi
+  IntOp $LayoutHeight 600 * $WindowDpi
   IntOp $LayoutHeight $LayoutHeight / 96
   System::Call 'user32::GetSystemMetrics(i 0)i.r0'
   IntOp $0 $0 - $LayoutWidth
@@ -131,6 +196,9 @@ Function PreviewCreate
   GetDlgItem $0 $HWNDPARENT 1035
   ShowWindow $0 0
   System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT,i 20,*i 1,i 4)i.r0'
+  System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT,i 35,*i 0x001A1507,i 4)i.r0'
+  System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT,i 36,*i 0x00F8F8ED,i 4)i.r0'
+  System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT,i 34,*i 0x001A1507,i 4)i.r0'
   GetDlgItem $0 $HWNDPARENT 1028
   ShowWindow $0 0
   ; The classic NSIS resource has unnamed etched Static separators.
@@ -153,8 +221,8 @@ Function PreviewCreate
     ${EndIf}
   ${Loop}
   System::Free $R9
-  SetCtlColors $HWNDPARENT F3F6FA 07131E
-  SetCtlColors $Dialog F3F6FA 07131E
+  SetCtlColors $HWNDPARENT EDF8F8 07151A
+  SetCtlColors $Dialog EDF8F8 07151A
   GetDlgItem $0 $HWNDPARENT 1
   ${NSD_SetText} $0 "Fechar"
   GetDlgItem $0 $HWNDPARENT 2
@@ -162,48 +230,62 @@ Function PreviewCreate
   CreateFont $TitleFont "Segoe UI" 16 700
   CreateFont $BodyFont "Segoe UI" 11 400
   CreateFont $HeadingFont "Segoe UI" 16 600
-  ${NSD_CreateIcon} 4% 6% 40u 40u ""
-  Pop $Mark
-  ${NSD_SetIconFromInstaller} $Mark $MarkImage
-  ${NSD_CreateLabel} 16% 6% 80% 9% "CYBERSAFE ASSISTANT"
-  Pop $0
-  SendMessage $0 ${WM_SETFONT} $TitleFont 1
-  SetCtlColors $0 70E1EB 07131E
-  ${NSD_CreateLabel} 16% 16% 80% 6% "${CS_PRODUCT_VERSION} · setup em avaliação"
-  Pop $0
-  SetCtlColors $0 BDB2D1 07131E
-  ${NSD_CreateLabel} 35% 30% 61% 13% "Preparar uma experiência CyberSafe"
+  InitPluginsDir
+  File "/oname=$PLUGINSDIR\preview.bmp" "${CS_PREVIEW_ASSETS}\preview.bmp"
+  File "/oname=$PLUGINSDIR\button-primary.bmp" "${CS_PREVIEW_ASSETS}\button-primary.bmp"
+  File "/oname=$PLUGINSDIR\button-secondary.bmp" "${CS_PREVIEW_ASSETS}\button-secondary.bmp"
+  ${NSD_CreateBitmap} 0 0 100% 100% ""
+  Pop $Bg
+  ${NSD_SetStretchedImage} $Bg "$PLUGINSDIR\preview.bmp" $BgImage
+  System::Call 'user32::SetWindowPos(p $Bg,p 1,i 0,i 0,i 0,i 0,i 0x13)'
+  ${NSD_CreateLabel} 34% 49% 61% 10% "Preparar uma experiência CyberSafe"
   Pop $Heading
+  System::Call 'user32::SetWindowPos(p $Heading,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $Heading ${WM_SETFONT} $HeadingFont 1
-  SetCtlColors $Heading F3F6FA 07131E
-  ${NSD_CreateLabel} 35% 45% 59% 24% "Composição nativa com recursos oficiais.$\r$\nPré-visualização: não instala nem altera o Windows."
+  SetCtlColors $Heading EDF8F8 transparent
+  ${NSD_CreateLabel} 34% 61% 60% 16% "Composição nativa com recursos oficiais.$\r$\nPré-visualização: não instala nem altera o Windows."
   Pop $Body
+  System::Call 'user32::SetWindowPos(p $Body,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $Body ${WM_SETFONT} $BodyFont 1
-  SetCtlColors $Body F3F6FA 07131E
-  ${NSD_CreateListBox} 4% 30% 27% 49% ""
-  Pop $Mode
-  SendMessage $Mode ${WM_SETFONT} $BodyFont 1
-  SetCtlColors $Mode B6C8D7 102330
-  ${NSD_LB_AddString} $Mode "Boas-vindas"
-  ${NSD_LB_AddString} $Mode "Instalação"
-  ${NSD_LB_AddString} $Mode "Atualização"
-  ${NSD_LB_AddString} $Mode "Reparação"
-  ${NSD_LB_AddString} $Mode "Progresso"
-  ${NSD_LB_AddString} $Mode "Conclusão"
-  ${NSD_LB_AddString} $Mode "Erros"
-  ${NSD_LB_AddString} $Mode "Desinstalação"
-  ${NSD_LB_SelectString} $Mode "Boas-vindas"
-  ${NSD_OnChange} $Mode ModeChanged
-  ${NSD_CreateLabel} 35% 73% 61% 8% "ESTUDO VISUAL · nenhum progresso simulado"
+  SetCtlColors $Body EDF8F8 transparent
+  ${NSD_CreateButton} 4% 31% 22% 6% "Visão geral"
+  Pop $Nav0
+  System::Call 'user32::SetWindowPos(p $Nav0,p 0,i 0,i 0,i 0,i 0,i 0x13)'
+  SendMessage $Nav0 ${WM_SETFONT} $BodyFont 1
+  ${NSD_OnClick} $Nav0 Select0
+  ${NSD_CreateButton} 4% 39% 22% 6% "Instalar"
+  Pop $Nav1
+  System::Call 'user32::SetWindowPos(p $Nav1,p 0,i 0,i 0,i 0,i 0,i 0x13)'
+  SendMessage $Nav1 ${WM_SETFONT} $BodyFont 1
+  ${NSD_OnClick} $Nav1 Select1
+  ${NSD_CreateButton} 4% 47% 22% 6% "Atualizar"
+  Pop $Nav2
+  System::Call 'user32::SetWindowPos(p $Nav2,p 0,i 0,i 0,i 0,i 0,i 0x13)'
+  SendMessage $Nav2 ${WM_SETFONT} $BodyFont 1
+  ${NSD_OnClick} $Nav2 Select2
+  ${NSD_CreateButton} 4% 55% 22% 6% "Reparar"
+  Pop $Nav3
+  System::Call 'user32::SetWindowPos(p $Nav3,p 0,i 0,i 0,i 0,i 0,i 0x13)'
+  SendMessage $Nav3 ${WM_SETFONT} $BodyFont 1
+  ${NSD_OnClick} $Nav3 Select3
+  ${NSD_CreateButton} 4% 63% 22% 6% "Desinstalar"
+  Pop $Nav4
+  System::Call 'user32::SetWindowPos(p $Nav4,p 0,i 0,i 0,i 0,i 0,i 0x13)'
+  SendMessage $Nav4 ${WM_SETFONT} $BodyFont 1
+  ${NSD_OnClick} $Nav4 Select7
+  ${NSD_CreateLabel} 34% 79% 61% 7% "ESTUDO VISUAL · nenhum progresso simulado"
   Pop $Status
-  SetCtlColors $Status B6A4FF 07131E
-  ${NSD_CreateLabel} 4% 89% 65% 7% "ESTUDO NATIVO · SEM PAYLOAD · NÃO INSTALA"
-  Pop $0
-  SetCtlColors $0 B6A4FF 07131E
+  System::Call 'user32::SetWindowPos(p $Status,p 0,i 0,i 0,i 0,i 0,i 0x13)'
+  SetCtlColors $Status 9E9BFF transparent
   ${NSD_CreateButton} 76% 86% 20% 9% "Fechar estudo"
   Pop $0
+  System::Call 'user32::SetWindowPos(p $0,p 0,i 0,i 0,i 0,i 0,i 0x13)'
+  SendMessage $0 ${WM_SETFONT} $BodyFont 1
+  !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-secondary.bmp"
   ${NSD_OnClick} $0 ClosePreview
+  StrCpy $Mode "Boas-vindas"
   Call ModeSelect
+  Call NavPaint
   ${GetParameters} $0
   ${GetOptions} $0 "/AUTOCLOSE" $1
   ${IfNot} ${Errors}
@@ -211,4 +293,7 @@ Function PreviewCreate
     nsDialogs::CreateTimer $0 90000
   ${EndIf}
   nsDialogs::Show
+FunctionEnd
+Function .onGUIEnd
+  Call CSFreeButtonImages
 FunctionEnd

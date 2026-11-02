@@ -1,0 +1,19 @@
+{
+  "schema": 1,
+  "sources": {
+    "02_CyberSafe_simbolo.png": "2b1b0edb0b503cdd26b7283460458a7fddeb1e11366edb1d9b7ee090155a5883",
+    "07_CyberSafe_horizontal_lockup.png": "01d061e1a71b11f5e07de2a55125ec3ce321a4546d860c2844decde9984c84c6"
+  },
+  "files": {
+    "button-primary.bmp": "fa038ccd34109ee4b30519bce2de7344b918eebd0708ff93255c12680a319b1d",
+    "button-secondary.bmp": "9c99780124b8c76fed913ddac747e94004783eed28cba46b7362afdb97d038ff",
+    "installerHeader.bmp": "3ed202acd5c49a50bf6ea72763ef2a032974d025f2efbb4eb8cd841dfe3ec97f",
+    "installerSidebar.bmp": "b2602272deb9f3f796e072c97c60a80de7b33fe9277941056fc4d9531f86b371",
+    "page-config.bmp": "aa69e10f64b865cb47402aa21f4c6d578219731f73b20029592e792e586ad7c7",
+    "page-welcome.bmp": "4c12c7711d9e0fff39f586f3a5a6c28196d8a22d9b68c48827bac96bfa0a121a",
+    "preview.bmp": "99435296750857d59e97d0aba6d24bb6686183ac8cd6359a710414123079cfbe",
+    "uninstallerSidebar.bmp": "b2602272deb9f3f796e072c97c60a80de7b33fe9277941056fc4d9531f86b371"
+  },
+  "logoTreatment": "alpha bounds crop, aspect-preserving downscale and composition; no redraw or recolour",
+  "paletteSource": "packages/app/src/index.css: CyberSafe Core dark"
+}

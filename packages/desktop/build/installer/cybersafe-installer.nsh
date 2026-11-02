@@ -13,6 +13,11 @@
 ; deleteAppDataOnUninstall=false e o fluxo /KEEP_APP_DATA do proprio builder).
 ; ---------------------------------------------------------------------------
 
+ ; Core dark palette; MUI remains the native extraction/finish engine.
+!define MUI_BGCOLOR "07151A"
+!define MUI_TEXTCOLOR "EDF8F8"
+!define MUI_INSTFILESPAGE_COLORS "EDF8F8 07151A"
+
 !ifndef BUILD_UNINSTALLER
 
 !include "LogicLib.nsh"
@@ -51,6 +56,7 @@ Var CSErrorLabel
 Var CSRepairNote
 Var CSErrorText
 Var CSSpaceState
+!include "${CS_ASSET_DIR}\cybersafe-controls.nsh"
 
 ; --- registo das paginas (corpo expandido depois de MUI2 estar carregado) ---
 
@@ -68,6 +74,26 @@ Var CSSpaceState
   PageEx custom
     PageCallbacks CSConfigPre CSConfigLeave
   PageExEnd
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW CS_ProgressShow
+!macroend
+
+; Adapted from electron-builder assistedInstaller.nsh (MIT): same MUI finish
+; and StartApp path. Only the SHOW callback is added for native styling.
+!macro customFinishPage
+  !ifndef HIDE_RUN_AFTER_FINISH
+    Function StartApp
+      ${if} ${isUpdated}
+        StrCpy $1 "--updated"
+      ${else}
+        StrCpy $1 ""
+      ${endif}
+      ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+    FunctionEnd
+    !define MUI_FINISHPAGE_RUN
+    !define MUI_FINISHPAGE_RUN_FUNCTION "StartApp"
+  !endif
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW CS_FinishShow
+  !insertmacro MUI_PAGE_FINISH
 !macroend
 
 ; --- codigo diferido: so compila depois de MUI2, MUI_LANGUAGE e flags ---
@@ -85,6 +111,8 @@ Var CSSpaceState
   ${EndIf}
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
+  File "/oname=button-secondary.bmp" "${CS_ASSET_DIR}\button-secondary.bmp"
+  File "/oname=button-primary.bmp" "${CS_ASSET_DIR}\button-primary.bmp"
   File "/oname=${BMPNAME}" "${CS_ASSET_DIR}\${BMPNAME}"
   ${NSD_CreateBitmap} 0 0 1u 1u ""
   Pop $CSBg
@@ -113,7 +141,7 @@ Var CSSpaceState
 !macroend
 
 !macro CS_CardColors CONTROL
-  SetCtlColors ${CONTROL} 0x20130C 0xFAF6F3
+  SetCtlColors ${CONTROL} 0xEDF8F8 0x07151A
 !macroend
 
 ; ReadRegStr exige uma chave de registo literal, por isso o root vem por
@@ -213,6 +241,43 @@ Var CSSpaceState
 !macroend
 
 !macro CS_Deferred
+  ; Native frame: DWM dark caption and accent border. The OS still owns the
+  ; minimise/close buttons, focus, Alt+F4 and accessibility; nothing is hidden.
+  Function CS_ApplyFrame
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 20, *i 1, i 4)'
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 19, *i 1, i 4)'
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 35, *i 0x001A1507, i 4)'
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 36, *i 0x00F8F8ED, i 4)'
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 34, *i 0x001A1507, i 4)'
+    SetCtlColors $HWNDPARENT EDF8F8 07151A
+  FunctionEnd
+  Function CS_ProgressShow
+    Call CS_ApplyFrame
+    System::Call 'uxtheme::SetWindowTheme(p $mui.InstFilesPage.ProgressBar,w "",w "")'
+    SendMessage $mui.InstFilesPage.ProgressBar 0x409 0 0x00C1D616
+    SendMessage $mui.InstFilesPage.ProgressBar 0x401 0 0x001A1507
+    Call CS_StyleFooter
+  FunctionEnd
+  Function CS_FinishShow
+    Call CS_ApplyFrame
+    Call CS_StyleFooter
+  FunctionEnd
+  Function CS_StyleFooter
+    InitPluginsDir
+    File "/oname=$PLUGINSDIR\button-primary.bmp" "${CS_ASSET_DIR}\button-primary.bmp"
+    File "/oname=$PLUGINSDIR\button-secondary.bmp" "${CS_ASSET_DIR}\button-secondary.bmp"
+    SetCtlColors $HWNDPARENT EDF8F8 07151A
+    GetDlgItem $0 $HWNDPARENT 1
+    !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-primary.bmp"
+    GetDlgItem $0 $HWNDPARENT 2
+    !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-secondary.bmp"
+    GetDlgItem $0 $HWNDPARENT 3
+    !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-secondary.bmp"
+  FunctionEnd
+  Function .onGUIEnd
+    Call CSFreeButtonImages
+  FunctionEnd
+
 
   ; Mede a area util da pagina (pixels logicos; NSIS e DPI-unaware).
   Function CS_Measure
@@ -321,6 +386,11 @@ Var CSSpaceState
     File "/oname=THIRD-PARTY-NOTICES.txt" "${PROJECT_DIR}\assets\licenses\THIRD-PARTY-NOTICES.txt"
     Call CS_CreateFonts
 
+    ${NSD_CreateLabel} 0 0 1u 1u "01  /  BOAS-VINDAS"
+    Pop $R9
+    !insertmacro CS_Place $R9 39 3 57 3
+    SetCtlColors $R9 0xC1D616 0x07151A
+
     ${NSD_CreateLabel} 0 0 1u 1u "$(CS_WelcomeTitle)"
     Pop $R9
     !insertmacro CS_Place $R9 39 8 57 9
@@ -354,11 +424,13 @@ Var CSSpaceState
     ${NSD_CreateButton} 0 0 1u 1u "$(CS_InstallBtn)"
     Pop $R9
     !insertmacro CS_Place $R9 39 64 24 8
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-primary.bmp"
     ${NSD_OnClick} $R9 CS_ChooseInstall
 
     ${NSD_CreateButton} 0 0 1u 1u "$(CS_RepairBtn)"
     Pop $R9
     !insertmacro CS_Place $R9 64 64 24 8
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-secondary.bmp"
     ${NSD_OnClick} $R9 CS_ChooseRepair
     ${If} $CSInstalledDir == ""
       EnableWindow $R9 0
@@ -367,6 +439,7 @@ Var CSSpaceState
     ${NSD_CreateButton} 0 0 1u 1u "$(CS_UninstallBtn)"
     Pop $R9
     !insertmacro CS_Place $R9 39 75 24 8
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-secondary.bmp"
     ${NSD_OnClick} $R9 CS_ChooseUninstall
     ${If} $CSInstalledDir == ""
       EnableWindow $R9 0
@@ -375,6 +448,7 @@ Var CSSpaceState
     ${NSD_CreateButton} 0 0 1u 1u "$(CS_LicenseBtn)"
     Pop $R9
     !insertmacro CS_Place $R9 64 75 24 8
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-secondary.bmp"
     ${NSD_OnClick} $R9 CS_ShowLicense
 
     ; A pagina tem os seus proprios botoes de accao; o Next/Back do wizard
@@ -384,6 +458,7 @@ Var CSSpaceState
     GetDlgItem $0 $HWNDPARENT 2
     ShowWindow $0 ${SW_HIDE}
 
+    Call CS_ApplyFrame
     nsDialogs::Show
   FunctionEnd
 
@@ -563,6 +638,11 @@ Var CSSpaceState
     !insertmacro CS_BeginPage "page-config.bmp"
     Call CS_CreateFonts
 
+    ${NSD_CreateLabel} 0 0 1u 1u "02  /  VERIFICAÇÃO"
+    Pop $R9
+    !insertmacro CS_Place $R9 39 3 57 3
+    SetCtlColors $R9 0xC1D616 0x07151A
+
     ${NSD_CreateLabel} 0 0 1u 1u "$(CS_ConfigTitle)"
     Pop $R9
     !insertmacro CS_Place $R9 39 8 57 7
@@ -579,20 +659,24 @@ Var CSSpaceState
     ${NSD_CreateText} 0 0 1u 1u "$INSTDIR"
     Pop $CSDirEdit
     !insertmacro CS_Place $CSDirEdit 39 29 43 7
+    SetCtlColors $CSDirEdit 0xEDF8F8 0x07151A
 
     ${NSD_CreateButton} 0 0 1u 1u "$(CS_Browse)"
     Pop $R9
     !insertmacro CS_Place $R9 83 29 13 7
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-secondary.bmp"
     ${NSD_OnClick} $R9 CS_Browse
 
     ${NSD_CreateCheckbox} 0 0 1u 1u "$(CS_DesktopShortcut)"
     Pop $CSDesktop
     !insertmacro CS_Place $CSDesktop 39 40 57 6
+    SetCtlColors $CSDesktop 0xEDF8F8 0x07151A
     ${NSD_SetState} $CSDesktop ${BST_CHECKED}
 
     ${NSD_CreateCheckbox} 0 0 1u 1u "$(CS_StartMenuShortcut)"
     Pop $CSStartMenu
     !insertmacro CS_Place $CSStartMenu 39 46 57 5
+    SetCtlColors $CSStartMenu 0xEDF8F8 0x07151A
     ${NSD_SetState} $CSStartMenu ${BST_CHECKED}
 
     ${NSD_CreateLabel} 0 0 1u 1u ""
@@ -616,7 +700,7 @@ Var CSSpaceState
     ${NSD_CreateLabel} 0 0 1u 1u ""
     Pop $CSErrorLabel
     !insertmacro CS_Place $CSErrorLabel 39 79 57 9
-    SetCtlColors $CSErrorLabel 0x2000B0 0xFAF6F3
+    SetCtlColors $CSErrorLabel 0x5C5CFF 0x07151A
 
     ; O botao Next passa a chamar-se Instalar apenas neste ecra.
     GetDlgItem $0 $HWNDPARENT 1
@@ -626,6 +710,7 @@ Var CSSpaceState
     ShowWindow $0 ${SW_SHOW}
 
     Call CS_UpdateSpace
+    Call CS_StyleFooter
     nsDialogs::Show
   FunctionEnd
 
