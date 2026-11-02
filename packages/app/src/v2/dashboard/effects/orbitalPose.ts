@@ -1,5 +1,7 @@
 export const ORBITAL_RADII = [1.85, 2.1] as const;
 export type OrbitalVariant = 'exterior' | 'depth';
+/** Human visual approval, 2026-11-02. A remains available in the development lab. */
+export const APPROVED_ORBITAL_VARIANT:OrbitalVariant = 'depth';
 
 /** Bounded precession: neither plane can turn edge-on across the emblem. */
 export function orbitalRingPose(seconds: number, ring: 0 | 1, variant:OrbitalVariant='exterior'): [number, number, number] {

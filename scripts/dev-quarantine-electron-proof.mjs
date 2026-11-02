@@ -62,7 +62,8 @@ const DEFAULT_CLAMAV_DB = 'C:/Users/caioc/.cybersafe-integration/pap-integration
 const ARGV = new Set(process.argv.slice(2));
 // --settings-proof exercises navigation only; never isolates/restores/deletes.
 const ORBITAL_COMPARE = ARGV.has('--orbital-compare');
-const ORBITAL_FALLBACK_ONLY = ARGV.has('--orbital-fallback-proof');
+const APPROVED_ORBITAL_PROOF = ARGV.has('--approved-orbital-proof');
+const ORBITAL_FALLBACK_ONLY = ARGV.has('--orbital-fallback-proof') || APPROVED_ORBITAL_PROOF;
 const ORBITAL_CAPTURE = ARGV.has('--orbital-capture') || ORBITAL_COMPARE;
 const ORBITAL_PROOF = ARGV.has('--orbital-proof') || ORBITAL_CAPTURE || ORBITAL_FALLBACK_ONLY;
 const VISUAL_PAGES_PROOF = ARGV.has('--visual-pages-proof');
@@ -175,7 +176,8 @@ let evidenceDir;
 
 deps.spawn = (cmd, args, options) => {
   const env = { ...options.env };
-  if (ORBITAL_PROOF) env.VITE_CYBERSAFE_ORBITAL_PREVIEW = "1";
+  if (ORBITAL_PROOF && !APPROVED_ORBITAL_PROOF) env.VITE_CYBERSAFE_ORBITAL_PREVIEW = "1";
+  if (APPROVED_ORBITAL_PROOF) delete env.VITE_CYBERSAFE_ORBITAL_PREVIEW;
   const isServiceEntry = (arg) => /packages[\\/]service[\\/]dist[\\/]index\.js$/.test(String(arg));
   const service = args.some(isServiceEntry);
   const desktop = String(cmd).toLowerCase().endsWith('electron.exe');
@@ -388,7 +390,8 @@ deps.onStackReady = async ({ plan, spawned }) => {
         fs.writeFileSync(path.join(evidence,'ui-repair-facts.json'),JSON.stringify(facts,null,2));return;
       }
       if(WEBGL_FAILURE_PROOF){
-        const injected=await cdp.send('Page.addScriptToEvaluateOnNewDocument',{source:`const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return /^webgl|experimental-webgl/.test(type)?null:original.call(this,type,...args);};`});
+        await cdp.send('Page.enable');
+        const injected=await cdp.send('Page.addScriptToEvaluateOnNewDocument',{runImmediately:true,source:`(()=>{const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return /^webgl|experimental-webgl/.test(type)?null:original.call(this,type,...args);};})()`});
         await cdp.send('Page.reload');
         await until(()=>evaluate('Boolean(document.querySelector(".visual-adaptation-notice"))'),'aviso de incompatibilidade WebGL');
         assert.equal(await evaluate('Boolean(document.querySelector(".three-scene canvas"))'),false);
@@ -459,7 +462,14 @@ deps.onStackReady = async ({ plan, spawned }) => {
           await selectValue('settings-performance','balanced');
           await evaluate(`(() => {const input=document.getElementById('settings-webgl');if(!input.checked)input.click();})()`);
           await clickSidebar('Painel');
-          await until(() => evaluate(`Boolean(document.querySelector('[data-orbital-proposal="true"] .three-scene canvas'))`),'cena 3D da proposta',15000);
+          await until(() => evaluate(`Boolean(document.querySelector('.brand-scene .three-scene canvas'))`),'cena 3D orbital',15000);
+          if(APPROVED_ORBITAL_PROOF){
+            assert.equal(await evaluate('document.querySelector(".brand-scene").dataset.orbitalVariant'),'depth');
+            assert.equal(await evaluate('Boolean(document.querySelector("[data-orbital-select]"))'),false);
+            assert.equal(await evaluate('Boolean(document.querySelector("[data-orbital-proposal]"))'),false);
+            facts.approvedOrbital={variant:'depth',labFlag:false,comparisonControls:false};
+            await safeShot('orbital-b-approved-product');
+          }
           await timeout(500);
           facts.orbitalProposal = {webglScene:true,productionDefault:false};
           if(ORBITAL_CAPTURE){
