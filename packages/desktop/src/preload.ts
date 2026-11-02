@@ -209,10 +209,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openReportWindow: (html: string) => invoke("app:open-report-window", html),
   aiCredentials: {
     getStatus: () => invoke("ai-credentials:get-status"),
-    save: (key: string, provider: string) => {
+    save: (key: string, provider: string, consentidoSemCifra?: boolean) => {
       if (typeof key !== "string" || key.length < 16 || key.length > 512 || /[\r\n\x00]/.test(key) || !["groq", "openai"].includes(provider))
         return Promise.reject(new Error("Configuração de IA inválida."));
-      return invoke("ai-credentials:save", key, provider);
+      return invoke("ai-credentials:save", key, provider, consentidoSemCifra === true);
     },
     clear: () => invoke("ai-credentials:clear"),
   },

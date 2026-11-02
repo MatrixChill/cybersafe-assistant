@@ -409,7 +409,9 @@ let apiChild: ChildProcess | null = null;
 let apiStartInFlight = false;
 let aiStore: AiCredentialsStore | undefined;
 function currentAiStore() {
-  return aiStore ??= createAiCredentialsStore(app.getPath("userData"), safeStorage);
+  // A plataforma entra explicitamente: em Linux o mecanismo (libsecret/kwallet
+  // vs basic_text) decide se podemos afirmar que a chave está cifrada.
+  return (aiStore ??= createAiCredentialsStore(app.getPath("userData"), safeStorage, { plataforma: process.platform }));
 }
 
 /** Tenta abrir o named pipe do serviço. true = um serviço vivo está a servir. */

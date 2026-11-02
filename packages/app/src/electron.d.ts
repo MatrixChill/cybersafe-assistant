@@ -29,6 +29,29 @@ import type {
   UsbCancelResult,
 } from "@cybersafe/shared-types";
 
+/** Como a chave de IA fica em repouso — eixo separado de «existe chave». */
+export interface AiMecanismoArmazenamento {
+  nivel: "seguro" | "nao-seguro" | "desconhecido";
+  rotulo: string;
+  explicacao: string;
+  remedio?: string;
+}
+
+export interface AiCredentialsEstado {
+  hasKey: boolean;
+  provider: string;
+  origem?: "cifrado" | "local-protegido" | null;
+  mecanismo?: AiMecanismoArmazenamento;
+  state: string;
+}
+
+export interface AiCredentialsResultado extends Partial<AiCredentialsEstado> {
+  ok: boolean;
+  applied?: boolean;
+  error?: string;
+  codigo?: "mecanismo-insuficiente" | "sem-consentimento" | "cifra-segura-disponivel";
+}
+
 export interface ElectronAPI {
   getServiceConnectionState: () => Promise<{ connected: boolean }>;
   onServiceConnectionState: (callback: (state: { connected: boolean }) => void) => () => void;
@@ -148,9 +171,9 @@ export interface ElectronAPI {
   openReportWindow: (html: string) => Promise<{ success: boolean }>;
   /** Guarda o relatório como PDF real (diálogo de escolha + renderização A4). */
   aiCredentials: {
-    getStatus: () => Promise<{ hasKey: boolean; provider: string; state: string }>;
-    save: (key: string, provider: string) => Promise<{ ok: boolean; applied?: boolean; hasKey?: boolean; provider?: string; state?: string; error?: string }>;
-    clear: () => Promise<{ ok: boolean; applied?: boolean; hasKey?: boolean; provider?: string; state?: string; error?: string }>;
+    getStatus: () => Promise<AiCredentialsEstado>;
+    save: (key: string, provider: string, consentidoSemCifra?: boolean) => Promise<AiCredentialsResultado>;
+    clear: () => Promise<AiCredentialsResultado>;
   };
   exportReportPdf: (html: string, suggestedName: string) => Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }>;
 }
