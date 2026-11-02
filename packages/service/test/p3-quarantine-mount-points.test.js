@@ -3,7 +3,7 @@ import test from "node:test";
 import assert from "node:assert/strict";
 
 import { isMountPointPath } from "../dist/quarantine-path-policy.js";
-import { quarantineMountRefusal } from "../dist/quarantine-mounts.js";
+import { quarantineMountRefusal, quarantinePathRefusal } from "../dist/quarantine-mounts.js";
 
 const TABELA_MAQUINA = ["/", "/boot", "/home", "/media/caioc/pen", "/mnt/c", "/run", "/sys"];
 
@@ -87,4 +87,76 @@ test("a recusa aplica-se também ao caminho que seria montagem, com tabela incom
     ok: true, montagens: [], ilegiveis: 1, reason: "x",
   }));
   assert.equal(motivo, "mount-table-incomplete");
+});
+
+/**
+ * O portão completo, tal como o motor o chama. Os casos abaixo não instanciam o
+ * motor — instanciá-lo para provar três linhas de decisão pagaria a máquina
+ * inteira (pipes, SQLite, watchers) — mas exercitam a MESMA função que o
+ * `requestQuarantine` chama, incluindo a ordem dos portões.
+ */
+const CONTEXTO = { baseDir: "/opt/cybersafe" };
+const SEMPRE_LIVRE = async () => true;
+const TABELA_DE = (...montagens) => () => ({ ok: true, montagens, ilegiveis: 0, reason: null });
+
+test("caminho protegido é recusado antes de qualquer leitura de montagem", async () => {
+  let abertas = 0;
+  let reparsePedida = 0;
+  const recusa = await quarantinePathRefusal("/opt/cybersafe/data/maestro.dll", CONTEXTO, {
+    platform: "linux",
+    reparseFree: async () => { reparsePedida += 1; return true; },
+    tabelaDeMontagens: () => { abertas += 1; return { ok: true, montagens: ["/opt"], ilegiveis: 0, reason: null }; },
+  });
+  assert.equal(recusa, "protected-path");
+  assert.equal(reparsePedida, 0, "o `realpath` não é pedido sobre um caminho já recusado");
+  assert.equal(abertas, 0);
+});
+
+test("caminho redirecionado por link continua a ser protected-path", async () => {
+  const recusa = await quarantinePathRefusal("/home/caioc/veneno.bin", CONTEXTO, {
+    platform: "linux",
+    reparseFree: async () => false,
+    tabelaDeMontagens: TABELA_DE(),
+  });
+  assert.equal(recusa, "protected-path");
+});
+
+test("ponto de montagem é recusado pelo motivo dele, não como caminho protegido", async () => {
+  const recusa = await quarantinePathRefusal("/media/caioc/pen", CONTEXTO, {
+    platform: "linux",
+    reparseFree: SEMPRE_LIVRE,
+    tabelaDeMontagens: TABELA_DE("/", "/media/caioc/pen"),
+  });
+  assert.equal(recusa, "mount-point");
+});
+
+test("em Windows o portão completo não abre a tabela de montagens", async () => {
+  let abertas = 0;
+  const recusa = await quarantinePathRefusal("/mnt/c/veneno.exe", CONTEXTO, {
+    platform: "win32",
+    reparseFree: SEMPRE_LIVRE,
+    tabelaDeMontagens: () => { abertas += 1; return TABELA_DE("/mnt/c")(); },
+  });
+  assert.equal(recusa, null);
+  assert.equal(abertas, 0);
+});
+
+test("caminho limpo em Linux passa, com a tabela consultada uma vez", async () => {
+  let abertas = 0;
+  const recusa = await quarantinePathRefusal("/home/caioc/veneno.bin", CONTEXTO, {
+    platform: "linux",
+    reparseFree: SEMPRE_LIVRE,
+    tabelaDeMontagens: () => { abertas += 1; return TABELA_DE(...TABELA_MAQUINA)(); },
+  });
+  assert.equal(recusa, null);
+  assert.equal(abertas, 1);
+});
+
+test("tabela ilegível fecha o portão", async () => {
+  const recusa = await quarantinePathRefusal("/home/caioc/veneno.bin", CONTEXTO, {
+    platform: "linux",
+    reparseFree: SEMPRE_LIVRE,
+    tabelaDeMontagens: () => ({ ok: false, montagens: [], ilegiveis: 0, reason: "x" }),
+  });
+  assert.equal(recusa, "mount-table-unreadable");
 });

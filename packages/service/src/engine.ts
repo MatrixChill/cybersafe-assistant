@@ -88,8 +88,7 @@ import { NativeEngineBridge } from "./native-engine-bridge.js";
 import { RealtimeFileQueue } from "./realtime-file-queue.js";
 import { RealtimeRecovery, type SaturationStage } from "./realtime-recovery.js";
 import { canAutoQuarantine, loadQuarantinePolicy, saveQuarantinePolicy, type QuarantinePolicy } from "./quarantine-policy.js";
-import { hasReparseFreePath, isProtectedQuarantinePath } from "./quarantine-path-policy.js";
-import { quarantineMountRefusal } from "./quarantine-mounts.js";
+import { quarantinePathRefusal } from "./quarantine-mounts.js";
 import { isTransientFsError, TRANSIENT_SCAN_ERROR_WINDOW_MS } from "./scan-error.js";
 import { DefinitionUpdater, agendadorDefinicoesDeveArrancar, recuperacaoYaraPermitida } from "./updater.js";
 import { ClamDatabaseGate } from "./clam-database-gate.js";
@@ -2374,26 +2373,23 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
   private async requestQuarantine(analysis: AnalysisResult, authorization: "manual" | "automatic"): Promise<boolean> {
     const evidence = {artifactPath:analysis.artifactPath,fileName:analysis.fileName,sha256:analysis.sha256,authorization};
-    const caminhoPermitido = !isProtectedQuarantinePath(analysis.artifactPath, { baseDir: this.baseDir, execPath: process.execPath })
-      && await hasReparseFreePath(analysis.artifactPath);
-    if (!caminhoPermitido) {
-      this.eventBus.publish("quarantine.failed", "high", `Isolamento recusado por caminho protegido: ${analysis.fileName}`, {...evidence, reason:"protected-path"});
-      void this.logHistory({type:"quarantine.failed",...evidence,reason:"protected-path",timestamp:new Date().toISOString()});
-      return false;
-    }
-    // Linux Lite §9: «a quarentena deve respeitar … Mount points». A recusa por
-    // caminho protegido de cima não a cobre: `/media/...` não é uma raiz
-    // protegida, e §10 acabou de dar ao utilizador um botão que analisa um
-    // volume montado — logo, o produto passou a ter montagens nos seus alvos.
-    const recusaMontagem = quarantineMountRefusal(analysis.artifactPath);
-    if (recusaMontagem) {
-      const descricao = recusaMontagem === "mount-point"
-        ? `Isolamento recusado por ser um ponto de montagem: ${analysis.fileName}`
-        : recusaMontagem === "mount-table-incomplete"
-          ? `Isolamento recusado: a tabela de montagens tem linhas não interpretadas e não se pode confirmar que ${analysis.fileName} não é uma montagem`
-          : `Isolamento recusado: a tabela de montagens não pôde ser lida e não se pode confirmar que ${analysis.fileName} não é uma montagem`;
-      this.eventBus.publish("quarantine.failed", "high", descricao, {...evidence, reason:recusaMontagem});
-      void this.logHistory({type:"quarantine.failed",...evidence,reason:recusaMontagem,timestamp:new Date().toISOString()});
+    // Linux Lite §9: «a quarentena deve respeitar … Caminhos protegidos. Links
+    // simbólicos. Mount points.» Os três portões vivem numa só função
+    // precisamente para serem a função que os testes exercitam. A recusa por
+    // montagem não é coberta pelas duas primeiras: `/media/...` não é raiz
+    // protegida nem link, e o §10 acabou de dar ao utilizador um botão que
+    // analisa um volume montado — o produto passou a ter montagens nos alvos.
+    const recusa = await quarantinePathRefusal(analysis.artifactPath, { baseDir: this.baseDir, execPath: process.execPath });
+    if (recusa) {
+      const descricao = recusa === "protected-path"
+        ? `Isolamento recusado por caminho protegido: ${analysis.fileName}`
+        : recusa === "mount-point"
+          ? `Isolamento recusado por ser um ponto de montagem: ${analysis.fileName}`
+          : recusa === "mount-table-incomplete"
+            ? `Isolamento recusado: a tabela de montagens tem linhas não interpretadas e não se pode confirmar que ${analysis.fileName} não é uma montagem`
+            : `Isolamento recusado: a tabela de montagens não pôde ser lida e não se pode confirmar que ${analysis.fileName} não é uma montagem`;
+      this.eventBus.publish("quarantine.failed", "high", descricao, {...evidence, reason:recusa});
+      void this.logHistory({type:"quarantine.failed",...evidence,reason:recusa,timestamp:new Date().toISOString()});
       return false;
     }
     this.eventBus.publish("quarantine.requested", "high", `Quarentena solicitada: ${analysis.fileName}`, evidence);

@@ -1,8 +1,16 @@
 import { lerPontosDeMontagemReais, type ResultadoPontosDeMontagem } from "@cybersafe/core";
-import { isMountPointPath } from "./quarantine-path-policy.js";
+import {
+  hasReparseFreePath,
+  isMountPointPath,
+  isProtectedQuarantinePath,
+  type QuarantinePathContext,
+} from "./quarantine-path-policy.js";
 
 /** Porquê de a quarentena ter recusado um caminho ao consultar as montagens. */
 export type QuarantineMountRefusal = "mount-point" | "mount-table-unreadable" | "mount-table-incomplete";
+
+/** Que portão recusou: o mesmo `protected-path` de sempre, ou um dos três novos. */
+export type QuarantinePathRefusal = "protected-path" | QuarantineMountRefusal;
 
 /**
  * O caminho é proibido ao isolamento por ser (ou poder ser) um ponto de
@@ -38,4 +46,36 @@ export function quarantineMountRefusal(
   if (!tabela.ok) return "mount-table-unreadable";
   if (tabela.ilegiveis > 0) return "mount-table-incomplete";
   return isMountPointPath(filePath, tabela.montagens) ? "mount-point" : null;
+}
+
+export interface QuarantineGateSources {
+  /** injectável porque a pergunta das montagens só existe fora de Windows */
+  platform?: NodeJS.Platform;
+  /** injectável porque é um `realpath` no sistema de ficheiros de quem corre */
+  reparseFree?: (filePath: string) => Promise<boolean>;
+  tabelaDeMontagens?: () => ResultadoPontosDeMontagem;
+}
+
+/**
+ * O portão completo do `requestQuarantine`, na mesma ordem de sempre — raízes
+ * protegidas, depois links, depois (só POSIX) montagens — e com a mesma
+ * preguiça: um caminho protegido não chega a ser `realpath`-ado.
+ *
+ * Vive aqui e não dentro do motor por uma razão de teste: o motor é a única
+ * consumidora, mas instanciá-lo para provar um `if` seria pagar a máquina
+ * inteira (pipes, SQLite, watchers) por três linhas. Assim, o que o motor chama
+ * é o que os testes exercitam, razão de recusa incluída.
+ */
+export async function quarantinePathRefusal(
+  filePath: string,
+  context: QuarantinePathContext,
+  sources: QuarantineGateSources = {},
+): Promise<QuarantinePathRefusal | null> {
+  if (isProtectedQuarantinePath(filePath, context)) return "protected-path";
+  if (!(await (sources.reparseFree ?? hasReparseFreePath)(filePath))) return "protected-path";
+  return quarantineMountRefusal(
+    filePath,
+    sources.platform ?? process.platform,
+    sources.tabelaDeMontagens ?? lerPontosDeMontagemReais,
+  );
 }

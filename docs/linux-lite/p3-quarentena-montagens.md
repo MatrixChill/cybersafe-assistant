@@ -58,8 +58,17 @@ esse lado do dilema de propósito.
 |---|---|---|
 | `packages/core/src/mounts-posix.ts` — `lerPontosDeMontagem`, `lerPontosDeMontagemReais` | a fonte: todos os pontos de montagem da tabela do kernel, pseudo-FS incluídos | é este módulo que sabe o que é uma montagem; `parseMountinfo` e o desescapamento já vivem aqui |
 | `packages/service/src/quarantine-path-policy.ts` — `isMountPointPath` | a regra pura, sobre uma tabela fornecida | continua sem I/O nem dependências, como as outras regras do ficheiro |
-| `packages/service/src/quarantine-mounts.ts` — `quarantineMountRefusal` | a decisão por plataforma + os três modos de falha | é a única alça que precisa de ler; injectável para que o teste não responda pela máquina |
-| `packages/service/src/engine.ts:2388` | o ponto de uso, no `requestQuarantine` | é onde as outras duas recusas já acontecem |
+| `packages/service/src/quarantine-mounts.ts` — `quarantineMountRefusal`, `quarantinePathRefusal` | a decisão por plataforma + os três modos de falha, e o portão completo na ordem de sempre | é a única alça que precisa de ler; injectável para que o teste não responda pela máquina |
+| `packages/service/src/engine.ts:2382` | o ponto de uso, no `requestQuarantine` | é onde as outras duas recusas já aconteciam |
+
+O motor chama **uma** função, `quarantinePathRefusal`, e não três verificações
+coladas no `if`. Motivo de teste, não de estilo: o portão é a linha que decide se
+um ficheiro é movido, e instanciar o motor para provar um `if` pagaria a máquina
+inteira (pipes, SQLite, watchers) por três chamadas. Assim, o que o motor chama é
+literalmente o que os testes unitários exercitam, razão de recusa incluída. O nível
+do motor tem teste próprio (`test/p3-quarantine-mount-engine.test.js`, em baixo).
+A ordem e a preguiça mantêm-se as de sempre: raiz protegida → link → montagem, e
+um caminho protegido não chega a ser `realpath`-ado nem faz abrir a tabela.
 
 O `lerPontosDeMontagem` **inclui os pseudo-FS**, ao contrário do
 `lerMontagensPosix` que alimenta o PC Center. É a mesma tabela com duas
@@ -82,10 +91,67 @@ ilegível contada, falha de leitura com `reason`, e tabela vazia ≠ falha. Um d
 casos afirma explicitamente a diferença entre as duas visões: `/sys` está nas
 montagens e não está nos volumes.
 
-`packages/service/test/p3-quarantine-mount-points.test.js` — 11 casos, 11
-verdes, acrescentado à lista do `scripts.test`. O caso que vale o corte é o
-prefixo: `/media/caioc/pen/malware.exe` com `/media/caioc/pen` na tabela **tem de
-poder ser isolado**; e `/home/.../ficheiro.txt` com `/` na tabela idem.
+`packages/service/test/p3-quarantine-mount-points.test.js` — 17 casos, 17
+verdes, acrescentado à lista do `scripts.test`. Onze casos cobrem a regra pura e
+a decisão por plataforma; seis cobrem o portão completo `quarantinePathRefusal`
+— ordem das três verificações, preguiça (caminho protegido não abre a tabela),
+motivo certo por caso, e a tabela consultada exatamente uma vez num caminho limpo.
+
+O caso que vale o corte é o prefixo: `/media/caioc/pen/malware.exe` com
+`/media/caioc/pen` na tabela **tem de poder ser isolado**; e
+`/home/.../ficheiro.txt` com `/` na tabela idem.
+
+## O motor, instalado e a perguntar-lhe por um isolamento
+
+`packages/service/test/p3-quarantine-mount-engine.test.js` — 3 casos. Não é um
+teste de função isolada: constrói `ProtectionEngineService` sobre um diretório
+temporário, subscreve o `eventBus` e pede o isolamento. O que fica provado é a
+linha que o produto executa, motivo de recusa incluído. Em Windows o primeiro
+caso é `skip`ado com a razão escrita — a regra das montagens não existe lá, e
+um «passou» em Windows sobre uma montagem seria uma asserção falsa sobre outra
+plataforma.
+
+Medido nas duas plataformas, com o mesmo ficheiro:
+
+```
+Windows 10.0.26300 x64, Node v26.3.0 (regra das montagens não existe)
+  ﹣ o motor recusa uma montagem real antes de a mover   # skip, com a razão
+  ✔ o motor recusa o próprio interpretador pelo motivo de sempre
+  ✔ o motor isola mesmo um ficheiro descartável fora da raiz do serviço
+
+WSL2 kernel 6.6.114.1-microsoft-standard-WSL2, Node v22.23.4, UID 1000
+  ok 1 - o motor recusa uma montagem real antes de a mover
+  # montagem escolhida na máquina: /init
+  ok 2 - o motor recusa o próprio interpretador pelo motivo de sempre
+  ok 3 - o motor isola mesmo um ficheiro descartável fora da raiz do serviço
+  # pass 3 / # fail 0 / # skipped 0
+```
+
+Cada caso, e o que dá para afirmar a partir dele:
+
+1. **Recusa antes do movimento.** O alvo é uma montagem verdadeira da tabela do
+   kernel, escolhida por ser *não protegida* e *sem links* — ou seja, este é
+   exatamente o caminho em que as duas regras antigas nada diziam. O motor
+   devolve `false`, publica `quarantine.failed` com `reason: "mount-point"`, e
+   os dois eventos que significariam movimento (`quarantine.requested`,
+   `quarantine.added`) não chegam a existir. O `lstat` da montagem é comparado
+   antes e depois pelo `ino`: continua no sítio.
+2. **O motivo histórico não mudou de nome.** O executável que corre o teste é
+   recusado com `protected-path` e com a mesma frase de sempre, nas duas
+   plataformas. É a asserção de que o Windows não perdeu nada.
+3. **O isolamento real aconteceu em Linux.** Um ficheiro descartável fora da
+   raiz de dados do motor foi efectivamente movido para a quarentena:
+   `quarantine.added` com entrada, o caminho original deixou de existir e o
+   ficheiro isolado passou a estar no destino. É o primeiro `rename` de
+   quarentena medido a correr em Linux — e é também a prova de que a regra nova
+   não transformou o portão num botão morto.
+
+Descoberta feita a escrever este teste, e que vale registo: **a própria
+`baseDir` do motor é uma raiz protegida.** Um fixture colocado dentro da raiz de
+dados do serviço é recusado com `protected-path` — comportamento correto do
+produto (o motor não isola o seu próprio armazenamento), mas uma armadilha para o
+teste: a primeira versão deste ficheiro escreveu o fixture dentro de `dir` e o
+caso de sucesso falhou por um motivo certo.
 
 ## Medido em Linux real
 
@@ -140,15 +206,19 @@ que lemos. Passou a comparação de conjuntos, com `duplicados` impresso.
 
 ## Ainda não é dito (e não deve ser lido como feito)
 
-- **Nenhum movimento foi tentado.** A sonda não isola nada — não havia nada a
-  isolar e uma montagem seria preciso desmontá-la para o provar, o que é
-  proibido neste trabalho. O que está medido é a decisão no ponto do portão, não
-  um `rename` sobre uma montagem.
-- **O portão ao nível do motor não tem teste de integração.** O que está coberto
-  é `isMountPointPath` + `quarantineMountRefusal` (unidade) e a compilação do
-  `engine.ts` que os chama; não existe um teste que instale o motor e peça o
-  isolamento de um caminho de montagem para observar o `quarantine.failed` com o
-  motivo certo. É o próximo elo.
+- **Nenhuma montagem foi movida — e não pode ser.** O que o teste de movimento
+  prova é o caminho de um ficheiro comum; provar a recusa *em ação* sobre uma
+  montagem seria preciso desmontá-la para ver o que aconteceu, o que é proibido
+  neste trabalho. O que está medido sobre montagens é a decisão no portão do
+  motor, mais a verificação de que a montagem continua exatamente no mesmo
+  `ino` depois do pedido recusado.
+- **O que continua por medir em Linux é o que está ACIMA do portão.** O teste
+  instala o motor e chama o `requestQuarantine` dele; não exerce o `dispatch` de
+  IPC com confirmação e digestos (`threat.action`), nem o caminho automático após
+  uma análise, nem o restauro, nem o destino já existente. Em Windows esses
+  degraus já têm teste próprio; em Linux faltam-lhes a corrida, e dizê-lo aqui é
+  o ponto: **nada neste corte autoriza a dizer «quarentena automática
+  operacional em Linux»**.
 - **A janela entre a leitura e o movimento não é eliminada.** Uma montagem que
   apareça depois do `readFileSync` não está na tabela; o que a impede nesse
   instante é o `EXDEV`/`EPERM` do sistema de ficheiros, não esta regra. A regra
@@ -168,10 +238,15 @@ que lemos. Passou a comparação de conjuntos, com `duplicados` impresso.
 | Suite | Resultado |
 |---|---|
 | `packages/core` | 1228 testes, **1196 passados, 0 falhas**, 31 skip, 1 todo |
-| `packages/service` | 973 testes, 965 passados, **8 falhas** — as mesmas 8 pré-existentes deste clone (7 em `p1-3-prefetch-isolation`, 1 em `engine-batch-cache-lookup`); o número não mudou com este corte e os 11 testes novos passam |
+| `packages/service` | 982 testes, 973 passados, **8 falhas** — as mesmas 8 pré-existentes deste clone (7 em `p1-3-prefetch-isolation`, 1 em `engine-batch-cache-lookup`); 1 skip, que é o caso de montagem em Windows; os 20 testes deste ficheiro (17 + 3) passam. Medido depois de o portão ter passado a uma só função e de o teste do motor ter entrado no `scripts.test` |
 | `packages/app` | 2897 testes, 2897 passados, 0 falhas |
 | `packages/desktop` | 645 testes, 645 passados, 0 falhas |
 | `tsc` de `core` e `service` | limpos (o `service` é onde o `engine.ts` alterado é compilado) |
+
+As linhas de `core`, `app` e `desktop` foram corridas no corte anterior
+(`09fd7e5`). O seguimento aqui descrito só altera ficheiros de
+`packages/service` e desta documentação — por isso essas três suítes não têm
+regressão por re-medir, e o que se pode afirmar é que não foram tocadas.
 
 Nota de método: as duas primeiras linhas foram corridas isoladamente, uma a
 seguir à outra — é a razão por que o `hardware-disk-first-read` do `core`, que
