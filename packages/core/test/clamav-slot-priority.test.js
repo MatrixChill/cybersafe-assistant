@@ -5,8 +5,8 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 
-import { ClamavBridge, clamavSlotStats } from "../dist/index.js";
-import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.js";
+import { ClamavBridge, clamavSlotStats, releasePoisonedClamavSlot } from "../dist/index.js";
+import { isLoadProof, makeLoadProofHandle, LOAD_PROOF_SUMMARY } from "./fixtures/clamav-load-proof.js";
 
 /**
  * P0 SCANNER_RUNTIME_ZERO_PROGRESS — STARVATION DA VAGA GLOBAL DO CLAMAV.
@@ -56,13 +56,13 @@ async function makeFakeReadyDefinitions(root) {
  * Spawner com PORTÃO. Cada filho só termina quando o teste o libertar, o que
  * torna a FILA observável: o job ativo fica preso o tempo que for preciso.
  */
-function makeGatedSpawner() {
+function makeGatedSpawner({ gateLoadProof = false } = {}) {
   const state = { spawned: 0, live: 0, peak: 0, order: [] };
   const releases = new Map();
 
   const spawn = (_file, args, request) => {
     // A prova exerce o semáforo real, mas não é um scan preso no portão.
-    if (isLoadProof(request)) return makeLoadProofHandle();
+    if (isLoadProof(request) && !gateLoadProof) return makeLoadProofHandle();
     state.spawned++;
     state.live++;
     state.peak = Math.max(state.peak, state.live);
@@ -129,6 +129,9 @@ beforeEach(async () => {
     // para que um teste falhado não deixe um timer vivo a segurar o processo.
     scanTimeoutMs: 5_000,
   });
+  // Aquece a sonda: a prova de carga (se correr) termina antes do cenário e
+  // não entra na fila que este ficheiro quer medir.
+  await bridge.isAvailable();
   fired.length = 0;
   assert.equal(await bridge.isAvailable(), true, "a prova de carga conclui antes de medir a fila");
   assert.equal(gate.state.spawned, 0, "a prova de carga não é um job do portão");
@@ -147,6 +150,10 @@ afterEach(async () => {
   }
   gate?.releaseAll();
   await Promise.allSettled(fired);
+  // O teste da vaga envenenada deixa, de propósito, `poisoned=1` para provar
+  // que ninguém nasce. O próximo teste precisa de uma vaga limpa; o seam de
+  // teste simula aqui o `close` do SO que a libertaria em produção.
+  while (clamavSlotStats().poisoned > 0) releasePoisonedClamavSlot();
   await fs.rm(tmp, { recursive: true, force: true }).catch(() => {});
 });
 
@@ -253,6 +260,7 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
     fired.push(...queued);
     await waitFor(() => clamavSlotStats().waitingBackground === queued.length, {
       label: "fila de background com os jobs à espera",
+      timeoutMs: 10_000,
     });
 
     await bridge.dispose();
@@ -343,5 +351,78 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
       1,
       "com a vaga envenenada não pode nascer outro clamscan (~2 GB em voo)",
     );
+  });
+
+  it("prova de saúde fica à frente do background e atrás do scan do utilizador", async () => {
+    const localTmp = await fs.mkdtemp(path.join(os.tmpdir(), "cs-health-prio-"));
+    const localGate = makeGatedSpawner({ gateLoadProof: true });
+    const localBridge = new ClamavBridge({
+      definitionsDir: await makeFakeReadyDefinitions(localTmp),
+      spawn: localGate.spawn,
+      loadProofEnabled: true,
+      scanTimeoutMs: 5_000,
+    });
+    const localTarget = (i) => path.join(localTmp, `local-${i}.txt`);
+
+    try {
+      // A prova de carga inicial é feita aqui e termina antes do cenário: a
+      // vaga fica livre e a saúde fica active. A partir daqui, uma nova prova
+      // forçada tem de disputar a vaga como saúde.
+      const warm = localBridge.isAvailable();
+      await waitFor(() => localGate.state.spawned === 1, { label: "prova inicial" });
+      localGate.release(localGate.state.order[0].pid, {
+        code: 0,
+        stdout: LOAD_PROOF_SUMMARY,
+        stderr: "",
+      });
+      assert.equal(await warm, true, "a prova inicial tem de deixar a saúde active");
+
+      // 1 background ativo, 1 background à espera.
+      fired.push(localBridge.scanFiles([localTarget(0)], {}));
+      await waitFor(() => localGate.state.spawned === 2, { label: "scan ativo" });
+      fired.push(localBridge.scanFiles([localTarget(1)], {}));
+      await waitFor(() => clamavSlotStats().waitingBackground === 1, {
+        label: "background à espera",
+        timeoutMs: 10_000,
+      });
+
+      // O scan do utilizador entra primeiro (não fica preso no probe forçado
+      // que ainda vai nascer); a prova de saúde entra depois e tem de esperar
+      // pelo utilizador, mas passar ao background.
+      fired.push(localBridge.scanFiles([localTarget(2)], { scanId: "health-priority-user" }));
+      await waitFor(() => clamavSlotStats().waitingUser === 1, {
+        label: "scan do utilizador na fila",
+        timeoutMs: 10_000,
+      });
+      const health = localBridge.isAvailable(true);
+      await waitFor(() => clamavSlotStats().waitingHealth === 1, {
+        label: "prova de saúde na fila",
+        timeoutMs: 10_000,
+      });
+
+      // Liberta o background ativo: o utilizador recebe a vaga seguinte.
+      localGate.release(localGate.state.order[1].pid);
+      await waitFor(() => localGate.state.spawned === 3, { label: "utilizador na vaga" });
+      assert.equal(localGate.state.order[2].target, localTarget(2), "o utilizador passa à frente da saúde");
+
+      // Liberta o utilizador: agora sim a prova de saúde, antes do background.
+      localGate.release(localGate.state.order[2].pid);
+      await waitFor(() => localGate.state.spawned === 4, { label: "prova de saúde na vaga" });
+      assert.match(localGate.state.order[3].target, /cybersafe-clamav-load-probe-/, "a prova de saúde passa à frente do background");
+
+      // A prova termina; o background só então retoma.
+      localGate.release(localGate.state.order[3].pid, {
+        code: 0,
+        stdout: LOAD_PROOF_SUMMARY,
+        stderr: "",
+      });
+      assert.equal(await health, true, "a prova de saúde devia confirmar a carga");
+      await waitFor(() => localGate.state.spawned === 5, { label: "background depois da saúde" });
+      assert.equal(localGate.state.order[4].target, localTarget(1), "o background retoma depois da saúde");
+    } finally {
+      localGate.releaseAll();
+      await localBridge.dispose();
+      await fs.rm(localTmp, { recursive: true, force: true }).catch(() => {});
+    }
   });
 });

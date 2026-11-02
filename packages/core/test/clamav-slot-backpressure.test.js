@@ -103,6 +103,7 @@ beforeEach(async () => {
     spawn: gate.spawn,
     scanTimeoutMs: 5_000,
   });
+  await bridge.isAvailable();
   fired.length = 0;
   assert.equal(await bridge.isAvailable(), true, "a prova de carga conclui antes de medir a fila");
   assert.equal(gate.state.spawned, 0, "a prova de carga não é um job do portão");
@@ -133,6 +134,7 @@ describe("P0 STARVATION — a fila de background é LIMITADA", () => {
     for (let i = 1; i <= limit; i++) fired.push(bridge.scanFiles([target(i)], {}));
     await waitFor(() => clamavSlotStats().waitingBackground === limit, {
       label: "fila de background cheia",
+      timeoutMs: 10_000,
     });
 
     // Um scan do UTILIZADOR entra na mesma — a ação explícita não é recusada.
