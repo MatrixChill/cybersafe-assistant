@@ -910,14 +910,7 @@ function updateTrayMenu() {
 
   // Copy + tradução de estados vivem em tray-menu.ts (testável, sem enums crus).
   const template = buildTrayMenuTemplate(info, {
-    open: () => {
-      if (mainWindow) {
-        mainWindow.show();
-        mainWindow.focus();
-      } else {
-        createWindow();
-      }
-    },
+    open: () => requestMainWindowForeground(),
     // Confirmação integrada (modal CyberSafe) — nunca o diálogo nativo branco.
     exit: () => {
       void exitConfirmation.request();
@@ -1029,12 +1022,7 @@ function trayActionHandlers(): Pick<
 }
 
 function showWindow() {
-  if (mainWindow) {
-    mainWindow.show();
-    mainWindow.focus();
-  } else {
-    createWindow();
-  }
+  requestMainWindowForeground();
 }
 
 /**
@@ -1277,6 +1265,9 @@ function createTray() {
     ? (dedicated ? primary : primary.resize({ width: size, height: size }))
     : (fallback.isEmpty() ? nativeImage.createEmpty() : fallback.resize({ width: size, height: size }));
   tray = new Tray(trayImage);
+  // O clique simples mantém o comportamento existente; o duplo clique expressa
+  // um pedido explícito de abertura, pelo mesmo percurso do menu contextual.
+  tray.on("double-click", () => requestMainWindowForeground());
 
   updateTrayMenu();
 

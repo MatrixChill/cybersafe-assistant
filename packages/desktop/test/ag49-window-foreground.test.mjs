@@ -11,8 +11,8 @@ const main=fs.readFileSync(new URL("../src/main.ts",import.meta.url),"utf8");
 const ast=ts.createSourceFile("main.ts",main,ts.ScriptTarget.Latest,true,ts.ScriptKind.TS);
 const printer=ts.createPrinter();
 const functions=ast.statements.filter(n=>ts.isFunctionDeclaration(n)&&["createWindow","revealMainWindow","requestMainWindowForeground"].includes(n.name?.text));
-let second;
-function visit(n){if(ts.isCallExpression(n)&&n.expression.getText(ast)==="app.on"&&n.arguments[0]?.text==="second-instance")second=n.arguments[1];ts.forEachChild(n,visit)}visit(ast);
+let second; let trayDouble;
+function visit(n){if(ts.isCallExpression(n)&&n.expression.getText(ast)==="app.on"&&n.arguments[0]?.text==="second-instance")second=n.arguments[1];if(ts.isCallExpression(n)&&n.expression.getText(ast)==="tray.on"&&n.arguments[0]?.text==="double-click")trayDouble=n.arguments[1];ts.forEachChild(n,visit)}visit(ast);
 function fixture({hidden=false,synchronousReady=false}={}) {
  const timers=new Map();let serial=0;const windows=[];const calls=[];
  class Window extends EventEmitter {
@@ -32,6 +32,7 @@ function fixture({hidden=false,synchronousReady=false}={}) {
   app:{isPackaged:true,isReady:()=>false},console:{log(){},error(){},warn(){}},logExitEvent(){},
   resolveWindowMaterial:()=>({options:{},reason:"fixture"}),resolveWindowIconPath:()=>"",titleBarOverlayWindowOptions:()=>({}),
   setTimeout:fn=>{const id=++serial;timers.set(id,fn);return id},clearTimeout:id=>timers.delete(id)};
+ ctx.trayDouble=()=>{throw new Error("native double-click not wired")};
  vm.createContext(ctx);
  const helper=new URL("../src/window-foreground.ts",import.meta.url);
  if(fs.existsSync(helper)) {
@@ -39,6 +40,7 @@ function fixture({hidden=false,synchronousReady=false}={}) {
   Object.assign(ctx,ctx.exports);
  }
  const code=functions.map(n=>printer.printNode(ts.EmitHint.Unspecified,n,ast)).join("\n")+"\nthis.second="+printer.printNode(ts.EmitHint.Unspecified,second,ast);
+ if(trayDouble) vm.runInContext("this.trayDouble="+printer.printNode(ts.EmitHint.Unspecified,trayDouble,ast),ctx);
  vm.runInContext(ts.transpileModule(code,{compilerOptions:{module:ts.ModuleKind.None,target:ts.ScriptTarget.ES2022}}).outputText,ctx);
  return {ctx,calls,windows,create:()=>vm.runInContext("createWindow()",ctx),flush:()=>{const pending=[...timers.values()];timers.clear();pending.forEach(fn=>fn())},get timers(){return timers.size}};
 }
@@ -56,3 +58,10 @@ test("a tray/user show before the deadline consumes the delayed reveal",()=>{con
 test("a destroyed previous window is replaced once for an explicit new launch",()=>{const f=fixture({hidden:true});f.create();f.windows[0].destroyed=true;f.windows[0].emit("closed");f.ctx.app.isReady=()=>true;f.ctx.second({},["cybersafe.exe"]);assert.equal(f.windows.length,2);f.windows[1].emit("ready-to-show");assert.deepEqual(f.calls,["show","focus"])});
 
 test("early explicit launch followed by normal bootstrap never creates duplicate windows",()=>{const f=fixture({hidden:true});f.ctx.app.isReady=()=>true;f.ctx.second({},["cybersafe.exe"]);f.create();assert.equal(f.windows.length,1);f.windows[0].emit("ready-to-show");assert.deepEqual(f.calls,["show","focus"])});
+
+test("native tray double-click restores a minimized hidden window without duplicating it",()=>{const f=fixture({hidden:true});f.create();f.windows[0].emit("ready-to-show");f.windows[0].minimized=true;f.ctx.trayDouble();assert.deepEqual(f.calls,["restore","show","focus"]);assert.equal(f.windows.length,1)});
+test("tray double-click during shutdown never recreates a window",()=>{const f=fixture();f.ctx.isQuitting=true;f.ctx.app.isReady=()=>true;f.ctx.trayDouble();assert.equal(f.windows.length,0)});
+
+test("tray double-click queues opening before ready and recreates a destroyed window once",()=>{const f=fixture({hidden:true});f.ctx.trayDouble();f.create();f.windows[0].emit("ready-to-show");assert.deepEqual(f.calls,["show","focus"]);f.windows[0].destroyed=true;f.windows[0].emit("closed");f.ctx.app.isReady=()=>true;f.ctx.trayDouble();f.ctx.trayDouble();assert.equal(f.windows.length,2);f.windows[1].emit("ready-to-show");assert.ok(f.calls.includes("focus"))});
+
+test("installer upgrade launch --updated stays visible and is not hidden autostart",()=>{const f=fixture({hidden:true});f.ctx.second({},["cybersafe.exe","--updated"]);f.create();f.windows[0].emit("ready-to-show");assert.deepEqual(f.calls,["show","focus"]);assert.equal(f.windows.length,1)});
