@@ -46,6 +46,11 @@ export interface PosixProviderOptions {
   leitura?: (caminho: string) => string;
   /** `getconf CLK_TCK` / `getconf PAGESIZE`. `null` = sem resposta. */
   sysconf?: (nome: "CLK_TCK" | "PAGESIZE") => number | null;
+  /**
+   * `false` numa consulta de identidade: não deslocar a amostra sobre a qual a
+   * percentagem de CPU seguinte é medida.
+   */
+  registrarAmostra?: boolean;
 }
 
 /** Estado entre enumerações: só existe para o CPU intervalo fazer sentido. */
@@ -59,6 +64,7 @@ interface AmostraAnterior {
 }
 
 const MIB = 1024 * 1024;
+const RAIZ_PROC_PADRAO = "/proc";
 /** Campos 14..15 (utime, stime) e 24 (rss) de `/proc/<pid>/stat`, a partir do `state`. */
 const DESLOCAMENTO_UTIME = 14 - 3;
 const DESLOCAMENTO_STIME = 15 - 3;
@@ -85,6 +91,23 @@ function sysconfPadrao(nome: "CLK_TCK" | "PAGESIZE"): number | null {
   } catch {
     return null;
   }
+}
+
+/**
+ * Resolve a superfície real a usar. Partilhado entre a enumeração e a
+ * verificação de cadeia para que as duas perguntem ao MESMO `/proc`: uma
+ * default para o disco e outra para a façade injectada faria a verificação de
+ * disponibilidade responder sobre o sistema do testador, não sobre o alvo.
+ */
+function superficie(opcoes: PosixProviderOptions) {
+  const proc = opcoes.proc ?? (fs as unknown as ProcDirLike);
+  return {
+    proc,
+    raiz: opcoes.raizProc ?? RAIZ_PROC_PADRAO,
+    agora: opcoes.agora ?? (() => Date.now()),
+    leitura: opcoes.leitura ?? ((caminho: string) => proc.readFileSync(caminho, "utf-8")),
+    sysconf: opcoes.sysconf ?? sysconfPadrao,
+  };
 }
 
 /**
@@ -171,6 +194,31 @@ export interface PosixProcessProviderState {
   utilizadores: Map<number, string> | null;
 }
 
+/**
+ * Filtros que a fonte de identidade precisa de entender. O serviço chama com os
+ * mesmos três filtros que usa no CIM (`ProcessId=n`, `ParentProcessId=n`,
+ * `Name='x'`); um filtro desconhecido É FALHA, nunca lista vazia — responder
+ * «não existe» a uma pergunta que não soubemos interpretar seria a mesma
+ * mentira, com melhor aparência.
+ */
+export type FiltroProcessosPosix =
+  | { tipo: "pid"; pid: number }
+  | { tipo: "ppid"; ppid: number }
+  | { tipo: "nome"; nome: string };
+
+export function analisarFiltroProcessosPosix(filtro: string): FiltroProcessosPosix {
+  const exato = /^\s*(\w+)\s*=\s*(\d+)\s*$/.exec(filtro);
+  if (exato) {
+    const valor = Number.parseInt(exato[2], 10);
+    if (exato[1] === "ProcessId") return { tipo: "pid", pid: valor };
+    if (exato[1] === "ParentProcessId") return { tipo: "ppid", ppid: valor };
+    throw new Error(`filtro de processos POSIX não interpretado: «${filtro}»`);
+  }
+  const nome = /^\s*Name\s*=\s*'((?:[^']|'')*)'\s*$/.exec(filtro);
+  if (nome) return { tipo: "nome", nome: nome[1].replace(/''/g, "'") };
+  throw new Error(`filtro de processos POSIX não interpretado: «${filtro}»`);
+}
+
 function constantes(
   leitura: (caminho: string) => string,
   sysconf: (nome: "CLK_TCK" | "PAGESIZE") => number | null,
@@ -192,10 +240,9 @@ export function listPosixProcesses(
   opcoes: PosixProviderOptions = {},
 ): ProcessSnapshot[] {
   const proc = opcoes.proc ?? (fs as unknown as ProcDirLike);
-  const raiz = opcoes.raizProc ?? "/proc";
+  const raiz = opcoes.raizProc ?? RAIZ_PROC_PADRAO;
   const agora = opcoes.agora ?? (() => Date.now());
-  const leitura = opcoes.leitura ?? ((caminho: string) => proc.readFileSync(caminho, "utf-8"));
-  const sysconf = opcoes.sysconf ?? sysconfPadrao;
+  const { leitura, sysconf } = superficie(opcoes);
 
   if (!estado.constantes) estado.constantes = constantes(leitura, sysconf);
   if (!estado.utilizadores) estado.utilizadores = mapaUtilizadores(leitura);
@@ -278,12 +325,43 @@ export function listPosixProcesses(
     });
   }
 
-  estado.amostras = proximas;
+  if (opcoes.registrarAmostra !== false) estado.amostras = proximas;
 
   if (linhas.length === 0) {
     throw new Error(`enumeração POSIX de processos: zero registos legíveis em ${raiz} — fonte indisponível, não lista vazia`);
   }
   return linhas;
+}
+
+/**
+ * Consulta pontual da mesma fonte: `ProcessId=n`, `ParentProcessId=n` ou
+ * `Name='x'`. É o equivalente POSIX do `queryCimProcesses` do serviço — e tem
+ * de ser a MESMA fonte da enumeração, porque a revalidação antes do sinal
+ * compara campos entre as duas leituras. Duas fontes dariam duas respostas
+ * para o mesmo PID, e a resposta do ponto de decisão seria sempre «não
+ * confirmado».
+ *
+ * Não regista amostras de CPU: uma consulta pontual de identidade não pode
+ * deslocar a base da qual a percentagem seguinte é medida.
+ */
+export function consultarProcessosPosix(
+  estado: PosixProcessProviderState,
+  filtro: string,
+  opcoes: PosixProviderOptions = {},
+): ProcessSnapshot[] {
+  const selecionado = analisarFiltroProcessosPosix(filtro);
+  const linhas = listPosixProcesses(estado, { ...opcoes, registrarAmostra: false });
+  switch (selecionado.tipo) {
+    case "pid": return linhas.filter((l) => l.pid === selecionado.pid);
+    case "ppid": return linhas.filter((l) => l.ppid === selecionado.ppid);
+    case "nome": return linhas.filter((l) => l.name === selecionado.nome);
+  }
+}
+
+/** O que faltou para a cadeia de identidade POSIX funcionar. */
+export interface CadeiaIdentiaPosix {
+  ok: boolean;
+  motivo: "ok" | "sem-clk-tck" | "sem-btime" | "proc-ilegivel";
 }
 
 /**
@@ -302,6 +380,32 @@ export class PosixProcessProvider {
   /** Lista síncrona; o serviço chama-a dentro da enumeração já single-flight. */
   list(): ProcessSnapshot[] {
     return listPosixProcesses(this.estado, this.opcoes);
+  }
+
+  /** Consulta por filtro (equivalente POSIX da query CIM do serviço). */
+  consultar(filtro: string): ProcessSnapshot[] {
+    return consultarProcessosPosix(this.estado, filtro, this.opcoes);
+  }
+
+  /**
+   * A fonte permite provar identidade de criação? Sem `CLK_TCK` ou sem `btime`
+   * não há instante verificável, e sem instante não há autorização para agir —
+   * é a mesma regra do Windows com CreationDate ausente. Perguntar isto antes
+   * de aceitar um pedido evita um `failed` sem explicação.
+   */
+  cadeiaIdentia(): CadeiaIdentiaPosix {
+    try {
+      if (!this.estado.constantes) {
+        const { leitura, sysconf } = superficie(this.opcoes);
+        this.estado.constantes = constantes(leitura, sysconf);
+      }
+    } catch {
+      return { ok: false, motivo: "proc-ilegivel" };
+    }
+    const { hz, bootMs } = this.estado.constantes;
+    if (!hz) return { ok: false, motivo: "sem-clk-tck" };
+    if (bootMs === null) return { ok: false, motivo: "sem-btime" };
+    return { ok: true, motivo: "ok" };
   }
 
   /** O que a fonte sabe sobre o sistema; `null` quando não foi perguntado. */

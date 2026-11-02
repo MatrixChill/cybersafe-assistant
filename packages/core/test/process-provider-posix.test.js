@@ -2,8 +2,10 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 
 import {
+  analisarFiltroProcessosPosix,
   analisarLinhasStat,
   calcularCpuPercent,
+  consultarProcessosPosix,
   listPosixProcesses,
   PosixProcessProvider,
 } from "../dist/process-provider-posix.js";
@@ -183,4 +185,57 @@ test("PosixProcessProvider mantém estado entre chamadas (CPU por intervalo)", (
   agoraMs = BOOT_MS + 115_000;
   assert.equal(fornecedor.list()[0].cpu, 40);
   assert.equal(fornecedor.constantes().hz, HZ);
+});
+
+test("analisarFiltroProcessosPosix entende os três filtros que o serviço usa", () => {
+  assert.deepEqual(analisarFiltroProcessosPosix("ProcessId=42"), { tipo: "pid", pid: 42 });
+  assert.deepEqual(analisarFiltroProcessosPosix("ParentProcessId=7"), { tipo: "ppid", ppid: 7 });
+  assert.deepEqual(analisarFiltroProcessosPosix("Name='sleep'"), { tipo: "nome", nome: "sleep" });
+  assert.deepEqual(analisarFiltroProcessosPosix("Name='O''Brien'"), { tipo: "nome", nome: "O'Brien" });
+});
+
+test("filtro que o fornecedor não sabe interpretar LANÇA, não responde «não existe»", () => {
+  assert.throws(() => analisarFiltroProcessosPosix("WorkingSet>100"), /não interpretado/);
+  assert.throws(() => analisarFiltroProcessosPosix("Status=S"), /não interpretado/);
+});
+
+test("consultarProcessosPosix devolve só a linha pedida e não mexe nas amostras de CPU", () => {
+  const entradas = {
+    "42": { stat: stat(42, "sleep", { starttime: 1000, utime: 100, ppid: 43 }) },
+    "43": { stat: stat(43, "cron", { starttime: 2000, utime: 50, ppid: 1 }) },
+  };
+  const proc = procFalso(entradas);
+  const agora = () => BOOT_MS + 110_000;
+  const estado = estadoNovo();
+  const opcoes = { proc, agora, sysconf: sysconfOk };
+
+  listPosixProcesses(estado, opcoes);
+  const baseline = estado.amostras.get(42).ticks;
+
+  const peloPid = consultarProcessosPosix(estado, "ProcessId=43", opcoes);
+  assert.deepEqual(peloPid.map((l) => l.pid), [43]);
+  assert.equal(peloPid[0].name, "cron");
+  assert.equal(peloPid[0].startedAt, new Date(BOOT_MS + 20_000).toISOString());
+  assert.deepEqual(consultarProcessosPosix(estado, "Name='sleep'", opcoes).map((l) => l.pid), [42]);
+  assert.deepEqual(consultarProcessosPosix(estado, "ParentProcessId=1", opcoes).map((l) => l.pid), [43]);
+  assert.deepEqual(consultarProcessosPosix(estado, "ProcessId=9999", opcoes), []);
+  assert.equal(estado.amostras.get(42).ticks, baseline, "consulta de identidade não desloca a base do intervalo");
+});
+
+test("cadeiaIdentia diz porque é que a terminação não pode ser autorizada", () => {
+  const proc = procFalso({ "42": { stat: stat(42, "sleep") } });
+  assert.deepEqual(
+    new PosixProcessProvider({ proc, sysconf: sysconfOk }).cadeiaIdentia(),
+    { ok: true, motivo: "ok" },
+  );
+  assert.deepEqual(
+    new PosixProcessProvider({ proc, sysconf: (n) => (n === "CLK_TCK" ? null : PAGES) }).cadeiaIdentia(),
+    { ok: false, motivo: "sem-clk-tck" },
+  );
+  const semBtime = procFalso({ "42": { stat: stat(42, "sleep") } });
+  semBtime._ficheiros.set("/proc/stat", "cpu  1 2 3 4\n");
+  assert.deepEqual(
+    new PosixProcessProvider({ proc: semBtime, sysconf: sysconfOk }).cadeiaIdentia(),
+    { ok: false, motivo: "sem-btime" },
+  );
 });

@@ -3902,6 +3902,69 @@ if (processInfo.path) {
   }
 
   /**
+   * Fonte de identidade pontual — o mesmo `queryCimProcesses` do Windows, `/proc`
+   * em POSIX, com os mesmos três filtros (`ProcessId=n`, `ParentProcessId=n`,
+   * `Name='x'`). Uma primitiva dispatchada em vez de um ramo em cada chamada é o
+   * que garante que a foto, a revalidação antes do sinal, o diagnóstico de alias,
+   * a varredura de árvore e a sonda de reaparecimento vêm todos do MESMO sítio:
+   * a comparação de identidade só vale entre duas leituras da mesma fonte.
+   *
+   * Não há ramo POSIX que «_ENUMERA TUDO_» aqui disfarçado: um filtro que o
+   * fornecedor não saiba interpretar LANÇA, em vez de responder «não existe».
+   */
+  private async consultarFonteIdentidade(
+    filtro: string,
+    timeoutMs = ProtectionEngineService.CIM_QUERY_TIMEOUT_MS,
+  ): Promise<Array<KillTargetInfo & { startedAt?: string }>> {
+    if (process.platform === "win32") return this.queryCimProcesses(filtro, timeoutMs);
+    return this.posixProcessProvider.consultar(filtro);
+  }
+
+  /** Rótulo da fonte que foi consultada — para o diagnóstico não nomear o que não correu. */
+  private get rotuloFonteIdentidade(): string {
+    return process.platform === "win32" ? "CIM" : "/proc";
+  }
+
+  /** O que foi realmente enviado ao processo: `taskkill` só existe em Windows. */
+  private get rotuloTerminacao(): string {
+    return process.platform === "win32" ? "taskkill" : "SIGTERM";
+  }
+
+  /**
+   * A terminação está indisponível, e porquê.
+   *
+   * Windows: a decisão do congelamento da R7 vale sozinha — `KILL_TERMINATION_DISABLED`
+   * não ganhou exceção nem plataforma, e a linha de auditoria e o erro ficam
+   * byte a byte como estavam.
+   *
+   * POSIX: a cadeia de identidade é `/proc` + `getconf`. Sem `CLK_TCK` ou sem
+   * `btime` não há instante de criação provável, e sem instante não há
+   * autorização para sinalizar — perguntar isto antes de aceitar o pedido dá um
+   * motivo nomeado em vez de um `failed` sem explicação.
+   */
+  private bloqueioDeTerminacao(): { motivo: string; mensagem: string } | null {
+    if (process.platform === "win32") {
+      return ProtectionEngineService.KILL_TERMINATION_DISABLED
+        ? {
+          motivo: "legacy-disabled",
+          mensagem: "Terminação de processos indisponível: identidade não pode ser provada de ponta a ponta; nenhuma ação foi executada.",
+        }
+        : null;
+    }
+    const cadeia = this.posixProcessProvider.cadeiaIdentia();
+    if (cadeia.ok) return null;
+    const porque = cadeia.motivo === "sem-clk-tck"
+      ? "getconf CLK_TCK indisponível: o instante de criação não é conversível"
+      : cadeia.motivo === "sem-btime"
+        ? "/proc/stat sem btime: o instante de criação não é verificável"
+        : "/proc ilegível: não há fonte de identidade";
+    return {
+      motivo: cadeia.motivo,
+      mensagem: `Terminação de processos indisponível neste sistema: ${porque}; nenhuma ação foi executada.`,
+    };
+  }
+
+  /**
    * Foto do SO + o que o monitor-publicou durante a foto. Só entra o que ainda
    * está no cache de eventos: um processo que saiu foi removido do cache e
    * tombstonado, portanto não pode ser ressuscitado por aqui.
@@ -3977,7 +4040,7 @@ if (processInfo.path) {
     pid: number,
     timeoutMs?: number,
   ): Promise<(KillTargetInfo & { startedAt?: string }) | undefined> {
-    const rows = await this.queryCimProcesses(`ProcessId=${pid}`, timeoutMs);
+    const rows = await this.consultarFonteIdentidade(`ProcessId=${pid}`, timeoutMs);
     return rows.find((entry) => entry.pid === pid);
   }
 
@@ -3986,7 +4049,7 @@ if (processInfo.path) {
     // not-found; uma falha de CIM aqui não pode inventar uma instância viva.
     // Por isso este é o único caminho tolerante explícito.
     try {
-      return await this.queryCimProcesses(`Name='${name.replace(/'/g, "''")}'`, timeoutMs);
+      return await this.consultarFonteIdentidade(`Name='${name.replace(/'/g, "''")}'`, timeoutMs);
     } catch {
       return [];
     }
@@ -4076,7 +4139,7 @@ if (processInfo.path) {
       for (const parentPid of frontier) {
         const children = treeChildrenOf(
           parentPid,
-          await this.queryCimProcesses(`ParentProcessId=${parentPid}`, step(ProtectionEngineService.KILL_ALIAS_QUERY_TIMEOUT_MS)),
+          await this.consultarFonteIdentidade(`ParentProcessId=${parentPid}`, step(ProtectionEngineService.KILL_ALIAS_QUERY_TIMEOUT_MS)),
         );
         for (const child of children) {
           if (seen.has(child.pid)) continue;
@@ -4177,7 +4240,8 @@ if (processInfo.path) {
       return { success: false, status: "failed", pid, error: "PID inválido" };
     }
 
-    if (ProtectionEngineService.KILL_TERMINATION_DISABLED) {
+    const bloqueioTerminacao = this.bloqueioDeTerminacao();
+    if (bloqueioTerminacao) {
       // Fail-closed: sem ação, sem consulta, sem tentativa. Registar apenas
       // a recusa global, sem inventar identidade ou classificação do alvo.
       await this.actionsLog.write(JSON.stringify({
@@ -4186,14 +4250,14 @@ if (processInfo.path) {
         request: "manual",
         requestId: this.nextKillRequestId(pid),
         pid,
-        reason: "legacy-disabled",
+        reason: bloqueioTerminacao.motivo,
         executed: false,
       }));
       return {
         success: false,
         status: "failed",
         pid,
-        error: "Terminação de processos indisponível: identidade não pode ser provada de ponta a ponta; nenhuma ação foi executada.",
+        error: bloqueioTerminacao.mensagem,
       };
     }
 
@@ -4267,8 +4331,8 @@ if (processInfo.path) {
           status: "failed",
           pid,
           error: sourceError
-            ? `Identidade do processo não confirmada: a fonte CIM falhou (${(sourceError as Error)?.message ?? String(sourceError)}); terminação recusada.`
-            : `Identidade do processo não confirmada: o CIM não devolveu o PID ${pid}, mas o processo está vivo; terminação recusada.`,
+            ? `Identidade do processo não confirmada: a fonte ${this.rotuloFonteIdentidade} falhou (${(sourceError as Error)?.message ?? String(sourceError)}); terminação recusada.`
+            : `Identidade do processo não confirmada: o ${this.rotuloFonteIdentidade} não devolveu o PID ${pid}, mas o processo está vivo; terminação recusada.`,
         };
       }
       // Existe linha, mas não existe referência de snapshot do utilizador.
@@ -4315,7 +4379,7 @@ if (processInfo.path) {
     // taskkill sem a fonte ser consultada.)
     let fresco: (KillTargetInfo & { startedAt?: string }) | undefined;
     try {
-      const linhas = await this.queryCimProcesses(
+      const linhas = await this.consultarFonteIdentidade(
         `ProcessId=${pid}`,
         step(ProtectionEngineService.CIM_QUERY_TIMEOUT_MS),
       );
@@ -4327,7 +4391,7 @@ if (processInfo.path) {
         success: false,
         status: "failed",
         pid,
-        error: `Identidade do processo não confirmada: a fonte CIM falhou (${(error as Error)?.message ?? String(error)}); terminação recusada.`,
+        error: `Identidade do processo não confirmada: a fonte ${this.rotuloFonteIdentidade} falhou (${(error as Error)?.message ?? String(error)}); terminação recusada.`,
       };
     }
     if (!fresco) {
@@ -4374,7 +4438,9 @@ if (processInfo.path) {
         success: false,
         status: "timeout",
         pid,
-        error: `Orçamento de ${ProtectionEngineService.KILL_TOTAL_BUDGET_MS} ms esgotado antes do taskkill.`,
+        error: process.platform === "win32"
+          ? `Orçamento de ${ProtectionEngineService.KILL_TOTAL_BUDGET_MS} ms esgotado antes do taskkill.`
+          : `Orçamento de ${ProtectionEngineService.KILL_TOTAL_BUDGET_MS} ms esgotado antes de enviar ${this.rotuloTerminacao}.`,
       };
     }
 
@@ -4461,7 +4527,7 @@ if (processInfo.path) {
         exitCode: taskkill.exitCode,
         stdout: taskkill.stdout,
         stderr: taskkill.stderr,
-        error: "taskkill não terminou dentro do prazo.",
+        error: `${this.rotuloTerminacao} não terminou dentro do prazo.`,
       };
     }
     if (taskkill.status === "access-denied") {
@@ -4493,7 +4559,7 @@ if (processInfo.path) {
           status: "failed",
           pid,
           exitCode: taskkill.exitCode,
-          error: `Árvore não confirmada: a fonte CIM falhou (${(error as Error)?.message ?? String(error)}); terminação não declarada.`,
+          error: `Árvore não confirmada: a fonte ${this.rotuloFonteIdentidade} falhou (${(error as Error)?.message ?? String(error)}); terminação não declarada.`,
         };
       }
       const rootAlive = await this.killTargetStillAlive(pid, step(ProtectionEngineService.KILL_ALIAS_QUERY_TIMEOUT_MS));
@@ -4525,7 +4591,7 @@ if (processInfo.path) {
           `${taskkill.error ?? "Falha ao terminar processo."} ` +
           `Tentativas=${attempt}; ` +
           (survivors.length > 0
-            ? `continuam vivos no Windows: PID ${survivors.join(", ")}.`
+            ? `continuam vivos${process.platform === "win32" ? " no Windows" : ""}: PID ${survivors.join(", ")}.`
             : `a arvore caiu mas o PID ${pid} nao foi confirmado morto.`),
       };
     }
@@ -4572,7 +4638,7 @@ if (processInfo.path) {
         // `isProcessAlive` acima é síncrono e não consome orçamento.
         let current: (KillTargetInfo & { startedAt?: string }) | undefined;
         try {
-          const linhas = await this.queryCimProcesses(
+          const linhas = await this.consultarFonteIdentidade(
             `ProcessId=${candidate}`,
             step(ProtectionEngineService.CIM_QUERY_TIMEOUT_MS),
           );
@@ -4610,7 +4676,7 @@ if (processInfo.path) {
         exitCode: taskkill.exitCode,
         stdout: taskkill.stdout,
         stderr: taskkill.stderr,
-        error: "Processo ainda ativo depois do taskkill.",
+        error: process.platform === "win32" ? "Processo ainda ativo depois do taskkill." : `Processo ainda ativo depois de ${this.rotuloTerminacao}.`,
       };
     }
 
