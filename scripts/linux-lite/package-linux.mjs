@@ -118,7 +118,6 @@ export function preflight() {
 
   for (const [p, ficheiro] of [
     ["packages/desktop", "dist/main.js"],
-    ["packages/desktop", "dist/index.html"],
     ["packages/desktop", "dist/preload.cjs"],
   ]) {
     verificar(
@@ -127,6 +126,19 @@ export function preflight() {
       `falta ${p}/${ficheiro}; correr primeiro ` + "npm run build:all"
     );
   }
+
+  // O `index.html` do desktop é uma casca vazia POR ORIGEM (`<body></body>`): o
+  // React real é copiado por cima por `scripts/stage-renderer.mjs`. Empacotar
+  // sem esse pré-passo dá uma janela sem nada — foi exatamente o que a sonda CDP
+  // mediu no pacote de 49eb4f3: `root:-1, body:0, scripts:[]`, zero exceções,
+  // ecrã preto. Existir não chega; tem de levar o contentor e o script.
+  let html = "";
+  try { html = readFileSync(path.join(DESKTOP, "dist", "index.html"), "utf8"); } catch { /* conta como falha */ }
+  verificar(
+    "renderer-staged",
+    /<script[^>]+src=/.test(html) && /id="root"/.test(html),
+    "packages/desktop/dist/index.html não contém o renderer; correr `node scripts/stage-renderer.mjs` antes de empacotar (o build do desktop só produz o shell)"
+  );
 
   // Só as ferramentas que o BUILD chama. `unsquashfs` não está aqui de
   // propósito: quem desembrulha o AppImage na verificação é o runtime do
@@ -196,6 +208,16 @@ function materializarWorkspaces() {
 
 /** Constrói com a configuração Linux; `--publish never` não é negociável. */
 function construir(alvos) {
+  // O staging do renderer faz parte do pacote, não é um luxo do Windows: o
+  // `vite build` do desktop só produz o shell, cujo `index.html` é
+  // `<body></body>`. Sem o pré-passo empacotou-se uma janela vazia — medido no
+  // pacote de 49eb4f3 pela sonda CDP (`root:-1, scripts:[]`, zero exceções).
+  const estagio = executar("node", [path.join(RAIZ, "scripts", "stage-renderer.mjs")], { cwd: RAIZ });
+  if (!estagio.ok) {
+    console.log(`STAGING_FALHOU rc=${estagio.codigo}\n${estagio.saida.slice(-1500)}`);
+    return estagio;
+  }
+  console.log("staging do renderer ok");
   materializarWorkspaces();
   const args = ["--config", "electron-builder.linux-lite.yml", "--linux", ...alvos, "--x64", "--publish", "never"];
   console.log(`$ electron-builder ${args.join(" ")}`);
