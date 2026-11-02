@@ -28,6 +28,7 @@
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { defaultServiceBaseDir } from "@cybersafe/core/dist/dev-isolation.js";
 
 export const PRODUCTION_API_PORT = 4000;
 export const DEV_API_PORT_FLOOR = 4100;
@@ -40,9 +41,22 @@ export interface PerfilModo {
   motivo: string;
 }
 
-/** Caminho da base de dados pessoal — o que uma corrida DEV nunca pode abrir. */
-export function dbPessoalApi(): string {
-  return path.join(os.homedir(), ".cybersafe-service", "cybersafe.db");
+/**
+ * Caminho da base de dados pessoal — o que uma corrida DEV nunca pode abrir, e o
+ * default de produção. A raiz vem do único ponto que descreve `~` + nome por
+ * plataforma (`core/dev-isolation`): `~/.cybersafe-service` fora do Linux,
+ * byte-idêntico ao histórico; `~/.cybersafe-linux-lite` no Linux.
+ *
+ * O nome estava fixo aqui, por isso a API do pacote Linux Lite escrevia
+ * utilizadores e o registo de ciclo de vida na raiz do produto Windows — medido
+ * no `.deb` de 9907c0f (`~/.cybersafe-service/cybersafe.db` criado fora do
+ * `--user-data-dir`, partilhado entre as duas edições).
+ */
+export function dbPessoalApi(
+  home: string = os.homedir(),
+  platform: NodeJS.Platform = process.platform,
+): string {
+  return path.join(defaultServiceBaseDir(home, platform), "cybersafe.db");
 }
 
 export function identificarModo(opts: { entrypoint: string; env: NodeJS.ProcessEnv }): PerfilModo {
