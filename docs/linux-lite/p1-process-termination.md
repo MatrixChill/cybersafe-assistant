@@ -231,18 +231,58 @@ Um detalhe honesto do primeiro caso: o `timeout` traz o `signal` mas **não** tr
 prova de terminação a declarar. É por isso que a UI mostra «o processo continua
 vivo» e oferece a escalada, em vez de um sucesso.
 
+### O bilhete medido através do socket real (WSL2, não-root)
+
+A viagem pelo pipe estava parada em «Versão do protocolo do pipe não suportada»,
+com a causa por encontrar. Eram dois defeitos da sonda e um terceiro que não era
+defeito nenhum:
+
+1. **`auth-response` sem `v`.** O serviço valida a versão em *cada* frame do
+   handshake (engine.ts:5089), não só no `auth-hello`. A sonda só punha `v` no
+   primeiro, por isso o segundo era sempre recusado. O cliente real já o manda nos
+   dois (packages/desktop/src/service-client.ts:263) — foi o `grep` ao cliente que
+   o disse, não uma suposição.
+2. **A lista de sincronização estava envelhecida.** O script copiava cinco
+   ficheiros para a cópia Linux; `engine.ts` tem 22 imports locais e entretanto
+   passou a importar `quarantine-mounts` e `usb-detection-adapter-posix`, que só
+   existiam no clone. O `tsc` rebentava antes de a sonda correr. Agora vai a
+   árvore `src` dos três pacotes construídos.
+3. **O primeiro `prepare` recusado não era um portão encravado.** Respondia
+   «Está a decorrer uma atualização de definições» para *todos* os alvos, PID 1
+   incluído — o que lido à pressa parece um portão permanentemente fechado. É o
+   `updater.operationInProgress` (engine.ts:4228), verificado antes de qualquer
+   identidade, apanhado ~1 s depois de o socket aparecer. A sonda passou a
+   esperar que o portão abra e a reportar o custo:
+   `gate_aberto {"aberto":true,"segundos":1,"tentativas":2}`. Sem essa espera
+   teria escrito a conclusão errada; com ela, o que se afirma é que o bloqueio
+   existe, é transitório e nomeia a razão certa.
+
+O percurso completo, com o veredicto lido no `/proc` e nunca pela resposta do
+motor:
+
+| Passo | Resultado medido |
+|---|---|
+| handshake | `auth {"ok":true,"erro":null}` |
+| `processes.list` | 33 linhas, `startedAt` com sete casas decimais |
+| `process.termination.prepare` | bilhete UUID, `target{pid,name,startedAt}`, `mode:"sigterm"`, `modes:["sigterm","sigkill"]` |
+| `process.termination.confirm` | `status:"killed"`, `confirmation:"identity-reconfirmed"`, `scope:"single-process"`, `signal:"sigterm"` |
+| efeito no `/proc` | alvo A ausente; alvo B vivo e intacto |
+| bilhete devolvido | `cancel {"cancelled":true}`, B continua vivo |
+| PID 1 | recusado, processo intacto |
+| `startedAt` adulterado numa casa | `status:"reused"` — «a identidade do processo mudou» |
+| PID inexistente | `status:"already-exited"` — «nenhuma terminação foi atribuída ao CyberSafe» |
+| `logs/actions.log` | `{"action":"process.termination","status":"killed","source":"user-confirmed","operationId":<o bilhete>,"signal":"sigterm"}` |
+
+Duas coisas que esta tabela **não** passa a afirmar: continua por validar o botão
+na janela Electron de um desktop Linux com ambiente gráfico (§15) — o que está
+medido é o contrato até ao serviço, pelo socket, não o clique; e a recusa do PID 1
+veio com `status:"failed"` e a razão «não foi possível confirmar a identidade ou
+a disponibilidade da operação», não com uma classificação «crítico». O efeito é o
+pedido (§5 exige ausência de efeitos quando a identidade não se confirma), mas a
+*razão mostrada* não nomeia a criticidade, e dizer que nomeia seria passar uma
+medida por outra.
 ### O que ainda não funciona (sem fingir)
 
-- **O bilhete ainda não foi medido através do socket.** O que está medido acima é
-  o `SafeProcessTermination` + lease POSIX com o predicado de proteção do
-  serviço, chamado diretamente. A viagem pelo pipe exige o handshake
-  `auth-hello`/`auth-challenge`/`auth-response`; a sonda em
-  `scripts/linux-lite/wsl-p1-ticket.sh` envia `{v:2}` (confirmado como número, e
-  `PIPE_AUTH_VERSION === 2` nos dois lados) e recebe «Versão do protocolo do
-  pipe não suportada». Causa ainda não encontrada — por isso o botão do GUI em
-  Linux está **implementado e medido ao nível do motor**, não **validado na
-  aplicação**. A validação real do percurso é a janela Electron num desktop
-  Linux, que continua por fazer.
 - O `success:true` de `already-exited` significa «o objetivo não está em
   execução», não «o CyberSafe terminou-o»; a UI não o pode mostrar como
   terminado por si.

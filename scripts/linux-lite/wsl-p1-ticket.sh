@@ -12,13 +12,13 @@ SRCDIR="/mnt/c/Users/caioc/.cybersafe-integration/qoder-linux-lite/repo"
 SOCK="$HOME/.cybersafe-linux-lite/engine.sock"
 LOG=/tmp/cs-ticket-service.log
 
-# ── sincronizar só o que mudou neste passo, a partir do clone isolado ─────────
-for f in packages/shared-types/src/index.ts \
-         packages/core/src/process-termination-posix.ts \
-         packages/core/src/process-provider-posix.ts \
-         packages/core/src/safe-process-termination.ts \
-         packages/service/src/engine.ts; do
-  cp "$SRCDIR/$f" "$REPO/$f"
+# ── sincronizar o código do branch para a cópia Linux, a partir do clone isolado ─
+# Enumerar ficheiros à mão já rebentou uma vez: o `engine.ts` ganhou imports novos
+# (`quarantine-mounts`, `usb-detection-adapter-posix`) e o build do serviço fallhou
+# por módulos que existiam no clone mas não na cópia. Um harness que não compila o
+# que o branch escreve não mede o branch, por isso vai a árvore toda.
+for p in shared-types core service; do
+  cp -a "$SRCDIR/packages/$p/src/." "$REPO/packages/$p/src/"
 done
 
 ( cd "$REPO" && npm run build -w @cybersafe/shared-types -w @cybersafe/core -w @cybersafe/service ) > /tmp/cs-ticket-build.log 2>&1
@@ -35,7 +35,9 @@ echo "benign_b_pid=$B"
 export CYBERSAFE_PIPE_TOKEN="$(head -c 32 /dev/urandom | od -An -tx1 | tr -d ' \n')"
 export NODE_ENV=production
 rm -rf "$HOME/.cybersafe-linux-lite"
-( cd "$REPO/packages/service" && timeout 120 node dist/index.js > "$LOG" 2>&1 ) &
+# O prazo tem de cobrir a espera do portão (90 s) mais o resto do percurso; 120 s
+# matava o serviço a meio e a falha seria lida como defeito do contrato.
+( cd "$REPO/packages/service" && timeout 300 node dist/index.js > "$LOG" 2>&1 ) &
 SRV=$!
 for i in $(seq 1 30); do
   [ -S "$SOCK" ] && break
@@ -102,7 +104,11 @@ const vivoB = () => vivo(pidB);
   if (desafio.proof !== auth.makePipeProof(token, 'server', clientNonce, desafio.nonce)) {
     console.log('CASE auth_challenge PROVA_SERVIDOR_DIFERE');
   }
-  escrever({ type: 'auth-response', proof: auth.makePipeProof(token, 'client', clientNonce, desafio.nonce) });
+  // O `v` vai em AMBOS os frames: o serviço verifica a versão em cada fase do
+  // handshake (engine.ts:5089), não só no hello — omiti-lo aqui produzia
+  // «Versão do protocolo do pipe não suportada» e fazia um contrato correto
+  // parecer incompatível. O cliente real faz o mesmo (service-client.ts:263).
+  escrever({ type: 'auth-response', v: auth.PIPE_AUTH_VERSION, proof: auth.makePipeProof(token, 'client', clientNonce, desafio.nonce) });
   const autenticado = await esperaFrame((m) => m && m.type === 'auth');
   console.log('CASE auth ' + JSON.stringify({ ok: !!autenticado.ok, erro: autenticado.error || null }));
   if (!autenticado.ok) process.exit(1);
@@ -128,7 +134,26 @@ const vivoB = () => vivo(pidB);
   }));
 
   // 3) prepare legítimo → bilhete; confirm → killed com identity-reconfirmed.
-  const prep = await pedir('process.termination.prepare', { pid: pidA, startedAt: linhaA && linhaA.startedAt });
+  // O serviço abre uma atualização de definições ao subir e o portão da
+  // terminação fecha-se enquanto ela decorre. Medir o bilhete logo a seguir ao
+  // boot mediria o portão, não o contrato; por isso se espera que ele abra, com
+  // prazo, e se reporta quanto custou — inclusive o caso de não abrir.
+  const erroPrep = (r) => String((r && r.result && r.result.error) || (r && r.error) || '');
+  const bloqueadoPorAtualizacao = (r) => /atualiza/i.test(erroPrep(r));
+  const pedirPrepareA = () => pedir('process.termination.prepare', { pid: pidA, startedAt: linhaA && linhaA.startedAt });
+  const t0 = Date.now();
+  let prep = await pedirPrepareA();
+  let tentativas = 1;
+  while (bloqueadoPorAtualizacao(prep) && Date.now() - t0 < 90000) {
+    await esperar(1000);
+    prep = await pedirPrepareA();
+    tentativas++;
+  }
+  console.log('CASE gate_aberto ' + JSON.stringify({
+    aberto: !bloqueadoPorAtualizacao(prep),
+    segundos: Math.round((Date.now() - t0) / 1000),
+    tentativas,
+  }));
   const ticket = prep.ok && prep.result && prep.result.ok ? prep.result.ticket : null;
   console.log('CASE prepare_A ' + resumo(prep));
   if (ticket) {
