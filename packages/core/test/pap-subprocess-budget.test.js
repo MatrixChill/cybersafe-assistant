@@ -111,6 +111,20 @@ function sandbox(options = {}) {
     './win-pdh.js': {
       PdhDiskProbe: class { poll() { return { status: 'unavailable', reason: 'sandbox' }; } close() {} },
     },
+    // Fonte POSIX das montagens: stubada pelo mesmo motivo do PDH — um sandbox
+    // não lê o disco de quem corre a suite. «Nada medido» com motivo, nunca
+    // uma lista vazia silenciosa.
+    './mounts-posix.js': {
+      lerMontagensReais: () => ({
+        ok: false,
+        volumes: [],
+        excluidos: [],
+        naoMedidos: [],
+        semCapacidadeUtil: [],
+        ilegiveis: 0,
+        reason: 'sandbox: sem tabela de montagens',
+      }),
+    },
   };
   return { engine: load('hardware', deps).HardwareHealthEngine, counts, si };
 }

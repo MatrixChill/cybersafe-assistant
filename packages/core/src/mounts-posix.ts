@@ -33,6 +33,8 @@
  * uma só vez em `disk.ts` — aqui produzo o mesmo formato de entrada que
  * `describeDiskRead` já aceita, para não haver duas regras de arredondamento.
  */
+import * as fsReal from "node:fs";
+
 import type { RawFsEntry } from "./disk.js";
 
 /** `Statfs` do Node (`fs.statfsSync`) na parte que usamos. */
@@ -42,6 +44,9 @@ export interface StatfsBasico {
   bfree: number | bigint;
   bavail: number | bigint;
 }
+
+/** A tabela do kernel que diz o que está montado. Não é uma lista de letras. */
+export const CAMINHO_MOUNTINFO_PADRAO = "/proc/self/mountinfo";
 
 /** Fonte injectável: testes não tocam no disco, e um chroot troca a raiz. */
 export interface MontesFsLike {
@@ -219,7 +224,7 @@ const porMontagem = (a: VolumePosix, b: VolumePosix) => a.mount.localeCompare(b.
  * pontos de montagem ficam registados como montagens daquele volume — um
  * `bind` ou um `/mnt/wslg/distro` não é um disco novo.
  */
-export function lerMontagensPosix(fs: MontesFsLike, caminho = "/proc/self/mountinfo"): ResultadoMontagens {
+export function lerMontagensPosix(fs: MontesFsLike, caminho = CAMINHO_MOUNTINFO_PADRAO): ResultadoMontagens {
   let texto: string;
   try {
     texto = fs.readFileSync(caminho, "utf-8");
@@ -342,4 +347,24 @@ export function lerMontagensPosix(fs: MontesFsLike, caminho = "/proc/self/mounti
 export function escolheMontagemPrincipal<T extends { mount: string }>(volumes: T[]): T | null {
   if (volumes.length === 0) return null;
   return volumes.find((volume) => volume.mount === "/") ?? volumes[0] ?? null;
+}
+
+/**
+ * A fonte real, com o `/proc` de verdade. Vive AQUI e não no consumidor porque
+ * é este módulo que sabe o que é uma montagem: um `statfs` lançado sobre um
+ * caminho já desescapado, a ler a tabela do kernel. O motor de hardware chama
+ * esta função; os testes injetam outra, e o sandbox que carrega `hardware.ts`
+ * recebe um stub precisamente desta alça — nunca um acesso ao disco de quem
+ * corre a suite.
+ */
+export function lerMontagensReais(caminho = CAMINHO_MOUNTINFO_PADRAO): ResultadoMontagens {
+  return lerMontagensPosix(
+    {
+      readFileSync: (destino, codificacao) => fsReal.readFileSync(destino, codificacao),
+      // Lançar é uma resposta legítima do `statfs` (montagem entretanto
+      // desmontada, sem permissão): o módulo conta-a como «não medida».
+      statfsSync: (destino) => fsReal.statfsSync(destino),
+    },
+    caminho,
+  );
 }

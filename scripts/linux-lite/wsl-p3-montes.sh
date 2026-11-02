@@ -48,6 +48,39 @@ console.log("DISCO", JSON.stringify({
 }));
 JS
 
+# Terceira medição, e a que decide: a fonte que o PC Center usa HOJE
+# (`systeminformation.fsSize()`) funciona realmente em Linux, ou não? Sem esta
+# linha a escolha de `mountinfo` seria uma suposição. Não instala nada; usa a
+# dependência já declarada no `packages/core/package.json`.
+cat > "$BASE/si.js" <<'JS'
+const caminhoSi = process.argv[2];
+(async () => {
+  const t0 = Date.now();
+  try {
+    const si = require(caminhoSi);
+    const r = await si.fsSize();
+    console.log("SI", JSON.stringify({
+      ok: true,
+      ms: Date.now() - t0,
+      entradas: r.length,
+      volumes: r.map((e) => ({
+        mount: e.mount,
+        fs: e.type,
+        totalGiB: Math.round(e.size / 1024 ** 3),
+        usadoPct: e.use,
+      })),
+    }));
+  } catch (error) {
+    console.log("SI", JSON.stringify({
+      ok: false,
+      ms: Date.now() - t0,
+      motivo: String(error && error.code ? error.code : "") + " " + String(error && error.message ? error.message : error).split("\n")[0],
+    }));
+  }
+})();
+JS
+
 cd "$BASE"
 "$NODE" sonda.js
+"$NODE" si.js "$REPO/node_modules/systeminformation"
 rm -rf "$BASE"
