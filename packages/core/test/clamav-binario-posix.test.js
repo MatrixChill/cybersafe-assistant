@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   selecionaClamavBinario,
   diagnoseClamavBinary,
+  classifyClamavHealth,
   CLAMAV_BINARY_ENV,
 } from "../dist/clamav.js";
 
@@ -122,4 +123,29 @@ test("diagnóstico em Linux com ClamAV real resolve e não recusa nada", () => {
   assert.equal(d.resolved, BOM);
   assert.equal(d.resolvedSource, "explicit");
   assert.deepEqual(d.recusados, []);
+});
+
+const semMotor = { versionOutput: null, dbDir: null, dbFiles: null };
+
+test("o estado do motor diz «existe mas não é desta plataforma», não «não encontrado»", () => {
+  const { health } = classifyClamavHealth({
+    ...semMotor,
+    binarioRecusado: [{ nome: "clamscan.exe", motivo: "é um executável Windows (.exe)" }],
+  });
+  assert.equal(health.status, "unavailable");
+  assert.match(health.detail, /existe no disco mas não é motor desta plataforma/);
+  assert.match(health.detail, /clamscan\.exe é um executável Windows/);
+  assert.doesNotMatch(health.detail, /not found/, "«não encontrado» mandaria instalar o que já lá está");
+  assert.match(health.detail, /CYBERSAFE_CLAMSCAN_PATH/, "tem de dizer o remédio");
+});
+
+test("sem recusa, o texto continua «not found or failed» — Windows não mudou", () => {
+  const comErro = classifyClamavHealth({ ...semMotor, versionError: "spawn clamscan EACCES" });
+  assert.equal(comErro.health.status, "unavailable");
+  assert.equal(comErro.health.detail, "clamscan not found or failed: spawn clamscan EACCES");
+  assert.equal(
+    classifyClamavHealth({ ...semMotor, binarioRecusado: [] }).health.detail,
+    "clamscan not found or failed: unknown",
+    "lista vazia não é uma recusa inventada",
+  );
 });

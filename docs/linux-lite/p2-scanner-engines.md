@@ -131,19 +131,20 @@ o deixaria correr. Agora:
 | ponto | o que mudou |
 |---|---|
 | `selecionaClamavBinario(candidatos, plataforma, leitor)` | escolha por existência **e** por proveniência; o recusado sai com `motivo`, não silenciosamente |
-| `ClamavBridge.resolveBinaryPath()` | o pin explícito é verificado; recusado ⇒ segue para o PATH como se não fosse pin |
+| `ClamavBridge.resolveBinaryPath()` | o pin explícito é verificado; recusado ⇒ segue para o PATH como se não fosse pin, e traz os motivos consigo |
+| `classifyClamavHealth(… , binarioRecusado)` | o estado do motor distingue «não está» de «está e não serve»: `unavailable` com o motivo e o remédio, em vez de `clamscan not found or failed` |
 | `diagnoseClamavBinary()` | campo novo `recusados: {path, source, motivo}` — «existe mas não serve» deixa de ser dito como «não encontrado» |
 | Windows | `recusarBinarioNaPlataforma` devolve `null` em `win32`: a seleção continua só por existência e o `where` do DEV não mudou |
 
 Medido no clone isolado (host Windows, runner `node --test`):
-`packages/core/test/clamav-binario-posix.test.js` — 8 casos, todos passam: pin
+`packages/core/test/clamav-binario-posix.test.js` — 10 casos, todos passam: pin
 `.exe` recusado com o motivo, PE com nome POSIX recusado pela assinatura, sem
 bit de execução recusado, ELF executável escolhido, candidato recusado não tapa
-o seguinte, nada no disco ⇒ `null` sem invenção, Windows escolhe por nome, e o
-diagnóstico distingue «recusado» de «não encontrado». Os 75 testes dos
-ficheiros de seleção/resolução (`clamav-binario-posix`,
-`dist-clamav-binary-resolution`, `yara-classic-posix`, `yara-classic-engine`)
-passam no total.
+o seguinte, nada no disco ⇒ `null` sem invenção, Windows escolhe por nome, o
+diagnóstico distingue «recusado» de «não encontrado», e o `detail` do motor
+deixa de dizer «not found» a um binário que está lá. A classificação partilhada
+continua a dar exatamente o texto antigo quando não há recusa
+(`clamav-db.test.js`, sem alterações).
 
 ### A recusa medida em WSL2 com o leitor real
 
@@ -172,26 +173,33 @@ POSIX passa no «existe?» e só é apanhado pela assinatura — é isso que sep
 poderá mostrar: o mesmo caminho aparece como existente **e** recusado, em vez de
 simplesmente não encontrado.
 
-Regressão Windows corrida com esta alteração, no mesmo clone: `@cybersafe/core`
-1188 testes, 1156 passam, 0 falham, 31 saltados (era 1180/1148 antes dos 8
-casos novos); a família ClamAV do `@cybersafe/service` (14 ficheiros, incluindo
-`dist-clamav-pin-no-db-integration` e `dist-clamav-freshclam-resolve`) 116
-testes, 109 passam, 6 saltados, **1 falha** — e a falha é
-`scan-post-batch-no-double-clamav`, uma das 8 pré-existentes já documentadas em
+Regressão Windows corrida com estas duas alterações, no mesmo clone:
+`@cybersafe/core` 1190 testes, 1158 passam, 0 falham, 31 saltados (era
+1180/1148 antes dos 10 casos novos); a família ClamAV do `@cybersafe/service`
+(14 ficheiros, incluindo `dist-clamav-pin-no-db-integration` e
+`dist-clamav-freshclam-resolve`) 116 testes, 109 passam, 6 saltados, **1
+falha** — e a falha é `scan-post-batch-no-double-clamav`, uma das 8
+pré-existentes já documentadas em
 [`p1-process-listing.md`](./p1-process-listing.md), com o mesmo sintoma
 `clean → inconclusive`.
 
 ## Ainda não medido (não dar por feito)
 
-- A recusa ainda **não chega à janela**. `selecionaClamavBinario` e
-  `diagnoseClamavBinary` devolvem o motivo, mas o estado do motor que o ecrã lê
-  vem de `classifyClamavHealth`, que hoje só diz `clamscan not found or failed`.
-  «existe mas é um binário Windows» ainda se apresenta como «não encontrado» ao
-  utilizador até esse campo ser ligado.
-- O `EACCES` do **momento do `spawn`** continua colapsado no mesmo texto
-  genérico: um ficheiro que passa na seleção e falha ao lançar é reportado como
-  «not found or failed», não como «sem permissão». A recusa nova cobre a
-  seleção; não cobre essa segunda origem de erro.
+- O `EACCES`/`ENOEXEC` do **momento do `spawn`** de um binário que passou na
+  seleção continua colapsado em `clamscan not found or failed: …`
+  (`classifyClamavHealth`, `clamav.ts:2594`). A recusa por proveniência deixou
+  de cair nesse texto — um pin a um `.exe` agora diz «existe no disco mas não é
+  motor desta plataforma» e aponta o remédio — mas um ficheiro que parece bom e
+  falha ao lançar ainda é dito como «não encontrado».
+- O texto novo vai com o **nome do ficheiro, não o caminho** (o caminho
+  completo fica em `diagnoseClamavBinary`, que é local). É a mesma regra que já
+  protege o contexto da MATRIX (`matrixContext.ts:119`): texto livre que pode
+  levar um caminho de utilizador não sai para o modelo.
+- Não testado num ambiente gráfico: o `detail` chega ao ecrã pela linha técnica
+  de `ProtectionDetails.tsx:354` (`technical && sub?.detail`) e por
+  `ReportsPage.tsx:335`, mas falta ver isso numa janela Electron em Linux. A
+  origem (`ClamavBridge.health`) está medida por teste; o percurso até ao pixel,
+  não.
 - Não há ClamAV instalado neste WSL, portanto só está medida a **ausência**
   reportada com honestidade e a recusa do binário Windows; não há aqui uma
   análise real com `clamscan`/`clamd` nem prova de base de assinaturas fresca em

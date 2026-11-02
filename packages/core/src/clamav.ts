@@ -2407,6 +2407,19 @@ export interface ClamavProbeFacts {
    * `dbDir`/`dbFiles`, que se mantêm para compatibilidade.
    */
   candidates?: ClamavDbCandidate[];
+  /**
+   * Binários que ESTÃO no disco mas que esta plataforma não pode lançar como
+   * motor (`clamscan.exe` num host Linux, um PE sem bit de execução). Só tem
+   * valor quando nada de utilizável foi encontrado: com um motor escolhido, a
+   * recusa anterior não é uma falha.
+   *
+   * Vai aqui o nome do ficheiro, não o caminho: a regra do contexto da MATRIX
+   * (`app/src/lib/matrixContext.ts`) é não levar texto livre com caminhos de
+   * disco, que podem identificar o utilizador (`/mnt/c/Users/…`,
+   * `C:\Users\…`). O caminho completo fica no `diagnoseClamavBinary`, que é
+   * local e não é reexportado.
+   */
+  binarioRecusado?: ReadonlyArray<{ nome: string; motivo: string }>;
   /** Instante de referência para a frescura; default Date.now(). */
   now?: number;
   /** Idade máxima aceite das assinaturas. */
@@ -2592,6 +2605,24 @@ function classifyWithCandidates(facts: ClamavProbeFacts): { available: boolean; 
  */
 export function classifyClamavHealth(facts: ClamavProbeFacts): { available: boolean; health: EngineSubsystemHealth } {
   if (facts.versionOutput === null) {
+    // «Não encontrado» e «encontrado mas isto não é um binário desta
+    // plataforma» são factos diferentes com remédios diferentes. Dizer
+    // `not found` a um `clamscan.exe` apontado por pin levaria o utilizador a
+    // instalar o que já lá está, em vez de apontar o pin para o binário certo.
+    const recusado = facts.binarioRecusado ?? [];
+    if (recusado.length > 0) {
+      const primeiro = recusado[0];
+      const outros = recusado.length > 1 ? ` (+${recusado.length - 1} outro(s) recusado(s))` : "";
+      return {
+        available: false,
+        health: {
+          status: "unavailable",
+          detail:
+            `ClamAV existe no disco mas não é motor desta plataforma: ${primeiro.nome} ${primeiro.motivo}${outros}. ` +
+            "Instale o ClamAV do sistema (ex. apt install clamav) ou aponte CYBERSAFE_CLAMSCAN_PATH para um binário Linux.",
+        },
+      };
+    }
     return {
       available: false,
       health: { status: "unavailable", detail: `clamscan not found or failed: ${facts.versionError ?? "unknown"}` },
@@ -3272,13 +3303,24 @@ export class ClamavBridge {
    * é a única válida, e é aqui que tem de ser cumprida: um pin explícito é uma
    * decisão do operador/deploy e não pode perder para o que calhar no PATH.
    */
-  private async resolveBinaryPath(): Promise<string | null> {
+  private async resolveBinaryPath(): Promise<{
+    path: string | null;
+    recusados: Array<{ nome: string; motivo: string }>;
+  }> {
+    // Os recusados acumulam-se porque a saúde precisa de dizer PORQUE É que não
+    // há motor: «não encontrado» e «há um binário Windows aqui» têm remédios
+    // diferentes. A chave é o caminho — o pin volta a aparecer na lista de
+    // candidatos e não pode contar duas vezes.
+    const recusados = new Map<string, string>();
+
     // 1. Pin explícito (autoridade máxima). Sem ficheiro no disco, não serve —
     //    um pin fantasma não é aceite; e em POSIX um pin que aponta um `.exe`
     //    também não serve: não é o motor desta plataforma. Segue para o PATH.
     const pinned = process.env[CLAMAV_BINARY_ENV]?.trim();
-    if (pinned && leitorBinarioReal.isFile(pinned) && !recusarBinarioNaPlataforma(pinned, process.platform)) {
-      return pinned;
+    if (pinned && leitorBinarioReal.isFile(pinned)) {
+      const motivo = recusarBinarioNaPlataforma(pinned, process.platform);
+      if (!motivo) return { path: pinned, recusados: [] };
+      recusados.set(pinned, motivo);
     }
 
     // 2. PATH do processo. `where` no Windows mantém o comportamento de DEV.
@@ -3286,16 +3328,20 @@ export class ClamavBridge {
       try {
         const { stdout } = await execFileAsync("where", ["clamscan"], { timeout: 5_000, windowsHide: true });
         const first = stdout.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
-        if (first && existsSync(first)) return first;
+        if (first && existsSync(first)) return { path: first, recusados: [] };
       } catch {
         /* seguimos para as raízes conhecidas */
       }
     }
-    const { escolhido } = selecionaClamavBinario(
+    const escolha = selecionaClamavBinario(
       clamavBinaryCandidates(process.env, process.platform),
       process.platform,
     );
-    return escolhido?.path ?? null;
+    for (const recusado of escolha.recusados) recusados.set(recusado.path, recusado.motivo);
+    return {
+      path: escolha.escolhido?.path ?? null,
+      recusados: [...recusados].map(([caminho, motivo]) => ({ nome: path.basename(caminho), motivo })),
+    };
   }
 
   /** Limite de clamscans simultâneos em vigor (1 = o default global). */
@@ -3401,7 +3447,7 @@ export class ClamavBridge {
     // binário que vamos usar a sério. Correr `clamscan --version` pelo nome
     // dava `unavailable` a uma instalação que existe fora do PATH — e era
     // isso que tornava "está instalado" indistinguível de "não está".
-    const resolved = await this.resolveBinaryPath();
+    const { path: resolved, recusados } = await this.resolveBinaryPath();
     let versionOutput: string | null = null;
     let versionError: string | undefined;
     try {
@@ -3432,6 +3478,7 @@ export class ClamavBridge {
       dbDir: candidates?.[0]?.dir ?? null,
       dbFiles: null,
       candidates,
+      binarioRecusado: recusados,
     });
 
     const chosen = candidates ? selectDatabaseCandidate(candidates) : null;
