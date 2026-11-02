@@ -210,3 +210,12 @@ describe("scanner: a barra global é monotónica durante um scan real", () => {
     assert.equal(anterior, 100);
   });
 });
+
+test("terminal antigo com campos de lote residuais não apresenta uma etapa ativa", async () => {
+  const { scanEngineBatchElapsedSeconds } = await import("../src/lib/scanSession");
+  for (const status of ["completed", "cancelled", "failed"] as const) {
+    const terminal = stateOf({ status, filesInEngineScanned: 512, engineBatchStartedAt: MID_BATCH.startTime });
+    assert.equal(scanAnalysisStage(terminal).active, false);
+    assert.equal(scanEngineBatchElapsedSeconds(terminal, Date.parse(MID_BATCH.startTime) + 120000), null);
+  }
+});

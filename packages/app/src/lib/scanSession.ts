@@ -471,7 +471,7 @@ export type ScanAnalysisStage = {
 
 export function scanAnalysisStage(state: ScanState | null): ScanAnalysisStage {
   const total = state?.filesInEngineBatch ?? 0;
-  if (!Number.isFinite(total) || total <= 0) {
+  if (!state || isTerminalScanStatus(state.status) || !Number.isFinite(total) || total <= 0) {
     return { active: false, done: 0, total: 0, percent: null };
   }
   const done = Math.min(
@@ -486,10 +486,10 @@ export function scanAnalysisStage(state: ScanState | null): ScanAnalysisStage {
  * há batch em curso. É tempo de relógio, não uma estimativa de conclusão.
  */
 export function scanEngineBatchElapsedSeconds(
-  state: Pick<ScanState, "engineBatchStartedAt"> | null,
+  state: Pick<ScanState, "engineBatchStartedAt"> & Partial<Pick<ScanState, "status">> | null,
   now: number = Date.now(),
 ): number | null {
-  if (!state?.engineBatchStartedAt) return null;
+  if (!state?.engineBatchStartedAt || (state.status && isTerminalScanStatus(state.status))) return null;
   const started = Date.parse(state.engineBatchStartedAt);
   if (!Number.isFinite(started)) return null;
   return Math.max(0, Math.floor((now - started) / 1000));

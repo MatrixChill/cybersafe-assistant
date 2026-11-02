@@ -719,6 +719,8 @@ export interface ScanHistoryEntry {
   filesAnalyzed: number;
   /** Ignorados pela política de exclusões (nenhum motor os viu). */
   filesExcluded: number;
+  /** Razões agregadas das exclusões; sem caminhos e ausente no histórico legado. */
+  filesExcludedBy?: ExclusionReasonCount[];
   /** Não foi possível analisar (erro de leitura/motor). */
   filesFailed: number;
   /** Ficheiros analisados sem veredicto conclusivo de todos os motores aplicáveis. */

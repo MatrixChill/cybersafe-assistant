@@ -1,5 +1,5 @@
 import * as fs from "node:fs/promises";
-import type { InconclusiveEngineCount, ScanHistoryEntry, ScanHistoryPage, ScanHistoryStatus } from "@cybersafe/shared-types";
+import type { ExclusionReasonCount, InconclusiveEngineCount, ScanHistoryEntry, ScanHistoryPage, ScanHistoryStatus } from "@cybersafe/shared-types";
 import type { ExtendedScanState, InconclusiveReasonCount } from "./scan-manager.js";
 
 /**
@@ -86,8 +86,30 @@ export function historyFilesConsidered(state: ExtendedScanState): number {
   return nonNegativeInt(total);
 }
 
+function isHistoryExclusion(value: unknown): value is ExclusionReasonCount {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return ["extension", "filename", "path"].includes(item.reason as string)
+    && Number.isInteger(item.count) && (item.count as number) > 0
+    && (item.detail === undefined || (item.reason !== "path" && typeof item.detail === "string"
+      && item.detail.length <= 255 && !/[\\/:\x00-\x1f]/.test(item.detail)))
+    && Object.keys(item).every(key => ["reason", "detail", "count"].includes(key));
+}
+
+/** Only aggregate categories and safe policy tokens enter persistent history. */
+function historyExclusions(value: ExclusionReasonCount[] | undefined): ExclusionReasonCount[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(item => item && ["extension", "filename", "path"].includes(item.reason)
+    && Number.isInteger(item.count) && item.count > 0).map(({ reason, detail, count }) => ({
+      reason, count,
+      ...(reason !== "path" && typeof detail === "string" && detail.length <= 255
+        && !/[\\/:\x00-\x1f]/.test(detail) ? { detail } : {}),
+    }));
+}
+
 /** Mapeia o estado terminal real para a entrada do histórico. Sem limitação medida, o campo fica ausente. */
 export function toScanHistoryEntry(state: ExtendedScanState): HistoryEntryWithInconclusive {
+  const filesExcludedBy = historyExclusions(state.filesExcludedBy);
   return {
     id: state.id,
     type: state.type,
@@ -99,6 +121,7 @@ export function toScanHistoryEntry(state: ExtendedScanState): HistoryEntryWithIn
     filesConsidered: historyFilesConsidered(state),
     filesAnalyzed: nonNegativeInt(state.filesAnalyzed),
     filesExcluded: nonNegativeInt(state.filesExcluded),
+    ...(filesExcludedBy.length > 0 ? { filesExcludedBy } : {}),
     filesFailed: nonNegativeInt(state.filesFailed),
     ...(typeof state.filesInconclusive === "number" &&
       Number.isInteger(state.filesInconclusive) && state.filesInconclusive >= 0
@@ -134,6 +157,8 @@ function isScanHistoryEntry(value: unknown): value is ScanHistoryEntry {
     !Number.isFinite(entry.filesConsidered) ||
     !Number.isFinite(entry.filesAnalyzed) ||
     !Number.isFinite(entry.filesExcluded) ||
+    (entry.filesExcludedBy !== undefined && (!Array.isArray(entry.filesExcludedBy)
+      || !entry.filesExcludedBy.every(isHistoryExclusion))) ||
     !Number.isFinite(entry.filesFailed) ||
     (entry.filesInconclusive !== undefined &&
       (typeof entry.filesInconclusive !== "number" ||

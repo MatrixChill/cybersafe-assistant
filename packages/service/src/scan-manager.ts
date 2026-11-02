@@ -586,6 +586,13 @@ if (state.status === "running" || state.status === "queued") {
       const updated: ExtendedScanState = {
         ...current,
         ...updates,
+        // Terminal snapshots must not retain a live batch axis. The worker may
+        // still be draining after abort; its late updates are deliberately ignored.
+        ...(updates.status && TERMINAL.includes(updates.status) ? {
+          filesInEngineBatch: 0,
+          filesInEngineScanned: 0,
+          engineBatchStartedAt: undefined,
+        } : {}),
         revision,
         updatedAt: new Date().toISOString(),
       };
