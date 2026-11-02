@@ -90,7 +90,7 @@ feito.
 | Quarentena: recusas, montagem, restauro, permissões, auditoria em disco | medido em percursos validados; **não** declarada automática | `p3-quarentena-*.md` |
 | Volumes montados / armazenamento sem letras de unidade | medido e ligado ao motor; **deteção positiva com pen física ainda não medida** | `p3-montes-usb.md` |
 | Otimizar e firewall (UFW/firewalld/nftables) | **não validado** — nenhuma medição nesta branch | — |
-| Empacotamento `.deb` e `.AppImage` | construído e aberto em Linux; o binário do pacote arranca o serviço, abre janela e encerra com SIGTERM limpo (medido em WSLg) | `p4-empacotamento.md` |
+| Empacotamento `.deb` e `.AppImage` | construído e aberto em Linux; o serviço arranca e encerra limpo, mas até `34e879a` a janela empacotada abria **sem interface** (renderer não staged) | `p4-empacotamento.md` |
 | Conteúdo do dashboard **a partir do pacote** | **não validado** — a sonda lê o alvo CDP, não fotografa a janela empacotada | — |
 | Instalação do `.deb` por `apt` num sistema real | **não testado** | — |
 

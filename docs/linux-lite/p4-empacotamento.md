@@ -92,7 +92,7 @@ removido antes (`--limpar-perfil`):
 - 8 processos vivos, incluindo o motor: `…/resources/app.asar/node_modules/@cybersafe/service/dist/index.js`.
 - `[Electron] Serviço sinalizou service-ready via IPC.` e `[ServiceClient] Connected to pipe successfully! (ligação #1)` — a primeira vez que o serviço arranca a partir do pacote; antes disto falhava em `credencial do pipe indisponível` porque o `nlink=2` de uma diretoria POSIX recién-criada era lido como partilha.
 - `stat` confirma `secrets nlink=2` no diretório aceito, e o `--user-data-dir` dos filhos é `~/.config/cybersafe-assistant-linux-lite` — a raiz de dados própria do pacote (§9), não a do dev.
-- CDP do renderer devolveu o alvo `{type: "page", title: "CyberSafe Desktop", url: "file:///…/resources/…"}`: a janela abre a partir do asar.
+- CDP do renderer devolveu o alvo `{type: "page", title: "CyberSafe Desktop", url: "file:///…/resources/…"}`: existe uma página carregada do asar. Só isso — o conteúdo estava vazio, como mostra a secção «a janela empacotada estava VAZIA».
 - `[Electron] API local não arrancou (skipped): API não encontrada no artefacto` — ver §«API local HTTP fora do Linux Lite» abaixo; é escolha de âmbito, não falha.
 
 ### API local HTTP: fora do pacote, e porquê
@@ -139,3 +139,38 @@ a família) deixa de ser apresentado como prova de encerramento em lado nenhum.
 Lacuna que sobra, e não é pequena: a janela estar aberta e responder ao CDP não
 prova que o *conteúdo* do dashboard é o correto a partir do pacote. A captura de
 ecrã do empacotado ainda não faz parte desta sonda.
+
+## O CDP mentiu por omissão: a janela empacotada estava VAZIA
+
+Ao acrescentar a leitura do DOM à sonda (`cdp-shot.mjs`), o pacote de `f3ee956`
+respondeu:
+
+```
+DOM {"root":-1,"body":0,"texto":"","scripts":[]}
+EXCECOES 0 []
+```
+
+Sem `#root`, sem qualquer `<script>`, sem texto, e sem uma única exceção. A
+captura de ecrã pelo DevTools confirmou: um retângulo preto uniforme. Ou seja,
+tudo o que a secção acima afirmou de verdade — processo, socket, janela, alvo
+`file://` com título — era verdade sobre o *shell*, não sobre a interface. Um
+alvo CDP existe mesmo que a página não tenha nada.
+
+Causa, lida no código: o `vite build` do desktop produz apenas o shell
+(main + preload); o `packages/desktop/index.html` é `<body></body>` por origem, e
+é `scripts/stage-renderer.mjs` que compila `@cybersafe/app` e copia o renderer
+por cima do `dist/index.html` (linhas 21-39: build do desktop, build da app,
+`cpSync` e o `build-identity.json`). O `package-linux.mjs` nunca correu esse
+pré-passo, e o seu préflight só perguntava se `dist/index.html` **existia** — o
+que era sempre verdadeiro, vazio ou não.
+
+Correção em `34e879a`, toda ela no caminho Linux:
+
+- `construir()` passa a correr `node scripts/stage-renderer.mjs` antes do
+  electron-builder;
+- o préflight exige ver o contentor do React e o `src` do script dentro do
+  `index.html`, e recusa escrever um `.deb` de uma casca vazia.
+
+O `stage-renderer.mjs` é o mesmo do Windows e não foi alterado. A medição da
+reconstrução segue-se; enquanto não estiver na tabela, a linha do empacotamento
+não pode dizer «interface visível no pacote».
