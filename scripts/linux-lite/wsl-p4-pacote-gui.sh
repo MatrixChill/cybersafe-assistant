@@ -99,9 +99,27 @@ http.get({host:"127.0.0.1",port:p,path:"/json/list",timeout:8000},(r)=>{
 ' "$PORT" 2>&1 | head -8
 echo "rc_no_de_erro_acima=ok_se_imprimiu_alvos"
 
-echo "--- encerramento com SIGTERM ---"
-pkill -TERM -f "$PADRAO" 2>/dev/null; sleep 5
-echo "apos_SIGTERM_remanescentes=$(pgrep -c -f "$PADRAO" 2>/dev/null || echo 0)"
+echo "--- encerramento com SIGTERM APENAS no processo principal ---"
+# `pkill -TERM -f` apanhava TODA a família, incluindo o filho GPU do Chromium.
+# Matado o filho, o pai não encerra: aborta com `FATAL: GPU process isn't
+# usable. Goodbye.` e a shell reporta `Trace/breakpoint trap`. O
+# `remanescentes=0` dessa corrida media o colapso, não o encerramento (§15).
+# O pedido de sair é uma coisa por processo: SIGTERM no navegador, que é o que
+# o `app.quit()`/fechar a janela representa para o sinal.
+PRINCIPAL=""
+for p in $(pgrep -f "$PADRAO" 2>/dev/null); do
+  if ! tr -d '\0' < "/proc/$p/cmdline" 2>/dev/null | grep -q -- "--type="; then PRINCIPAL="$p"; break; fi
+done
+echo "processo_principal=${PRINCIPAL:-nenhum_encontrado}"
+if [ -n "$PRINCIPAL" ]; then
+  kill -TERM "$PRINCIPAL" 2>/dev/null
+  espera=0
+  while [ -d "/proc/$PRINCIPAL" ] && [ "$espera" -lt 15 ]; do sleep 1; espera=$((espera + 1)); done
+  echo "principal_saiu_em=${espera}s"
+  sleep 3
+  echo "apos_SIGTERM_remanescentes=$(pgrep -c -f "$PADRAO" 2>/dev/null || echo 0)"
+  echo "termo_do_log=$(tail -3 "$LOG" 2>/dev/null | tr "\n" " ")"
+fi
 limpar
-echo "POS_SIGTERM_LOG=$(tail -3 "$LOG" 2>/dev/null | tr "\n" " ")"
+echo "apos_KILL_remanescentes=$(pgrep -c -f "$PADRAO" 2>/dev/null || echo 0)"
 echo FIM
