@@ -167,3 +167,17 @@ Não declarar PASS sem output. Um teste não executado fica **NÃO EXECUTADO**, 
 - A chave Ed25519 de produção e o feed assinado continuam por provisionar.
 - O corpus YARA disponível é de teste.
 - A versão continua `0.1.11-internal.pap-r7.20261031`; não foi promovida para `0.2.0`.
+
+
+## Abertura e tray — aceitação nativa obrigatória
+
+Estado: **PENDENTE DE VM**, não coberto pelos testes com objetos de janela simulados.
+
+- Instalação normal: opção «Abrir o CyberSafe Assistant» marcada; concluir e confirmar janela visível, utilizável e em primeiro plano. Repetir desmarcando: não deve abrir.
+- Repetir após upgrade autorizado, preservando dados; o argumento `--updated` não deve equivaler a `--hidden`.
+- Com a janela minimizada, escondida pelo X, atrás de outra janela e já visível, fazer duplo clique no ícone do tray: restaurar/mostrar/focar a mesma janela.
+- Capturar menu do clique direito e confirmar a ação de abrir; manter o comportamento do clique simples.
+- Confirmar um único processo principal/instância (os subprocessos legítimos do Electron não contam como instâncias adicionais).
+- Durante encerramento, clicar não deve recriar a janela. Na inicialização, um pedido explícito deve sobreviver até a janela estar pronta.
+- Arranque automático autorizado com `--hidden`: manter oculto até pedido explícito. Não confundir este cenário com o primeiro arranque após instalação.
+- Guardar capturas antes/depois e registar versão/hash exatos da candidata; não instalar no computador pessoal para obter esta prova.
