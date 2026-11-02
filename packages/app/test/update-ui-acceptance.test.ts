@@ -314,3 +314,16 @@ describe("Atualizações — modal de confirmação (SSR)", () => {
     assert.match(html, /data-testid="app-update-dialog-changed"/);
   });
 });
+
+describe("Atualizações — política manual não promete desbloqueio automático", () => {
+  it("uma transferência manual explica o bloqueio permanente e não aguarda Authenticode", () => {
+    const html = mount(baseSnapshot({ status: "downloaded", manualDownloadOnly: true, canInstall: false }));
+    assert.match(html, /Instalação automática bloqueada nesta compilação/);
+    assert.doesNotMatch(html, /o botão fica ativo quando terminarem/);
+    assert.ok(buttonTag(html, "app-update-install").includes('disabled=""'));
+  });
+  it("antes de transferir não afirma ter autenticado um manifesto nem verificado bytes", () => {
+    const html = mount(baseSnapshot({ status: "idle", manualDownloadOnly: true }));
+    assert.doesNotMatch(html, /manifesto autenticado e SHA-256 verificado/);
+  });
+});

@@ -462,3 +462,14 @@ it('manual policy verifies bytes, reveals only a folder and never executes', asy
   assert.equal((await h.updater.install({confirmed:true, expectedVersion:release.raw.version})).ok,false);
   assert.equal(h.installCalls.length,0);
 });
+
+it('manual folder reveal rehashes the cache and refuses a post-download replacement', async () => {
+ const h=buildHarness({release:signedRelease(),manualDownloadOnly:true,publisherOk:false});
+ assert.equal((await h.updater.check()).ok,true);
+ assert.equal((await h.updater.download()).ok,true);
+ for(const [key,bytes] of h.fs.files) if(key.endsWith('.exe')) h.fs.files.set(key,new Uint8Array(bytes.map(b=>b^0xff)));
+ let reveals=0;
+ const result=await h.updater.revealVerifiedDownload(()=>reveals++);
+ assert.equal(result.ok,false);assert.equal(result.error,'integrity');
+ assert.equal(reveals,0);assert.equal(h.installCalls.length,0);
+});
