@@ -864,7 +864,7 @@ function AuthenticatedApp() {
       case "taskmanager":
         return <TaskManagerPage processes={processes} serviceConnected={serviceConnected} processesObservedAt={processesObservedAt} processTruth={processesTruth} aEnumerar={processesInFlight} onRefreshProcesses={refreshProcesses} diagnostic={processDiagnostic ?? undefined} onExplainProcess={explainProcess} />;
       case "monitor":
-        return <MonitorPage events={events} processes={processes} processesObservedAt={processesObservedAt} processTruth={processesTruth} serviceConnected={serviceConnected} connections={connections} protection={protection} quarantine={quarantine} />;
+        return <MonitorPage events={events} processes={processes} processesObservedAt={processesObservedAt} processTruth={processesTruth} serviceConnected={serviceConnected} connections={connections} protection={protection} quarantine={quarantine} plataforma={hardware?.system.platform ?? null} />;
       case "quarantine":
         // Rota antiga preservada: o tray (`app:navigate` → "quarantine") e
         // marcadores anteriores aterram na aba Quarentena de Ameaças — mesmo
@@ -1193,7 +1193,7 @@ function AuthenticatedApp() {
       <AIAssistant currentPage={page} context={matrixContext} processDiagnostic={processDiagnostic} processContext={processContext} explainRequest={processExplanation} explainIdentity={explicacaoIdentidade} />
 
       {showOnboarding && (
-        <OnboardingOverlay onDone={() => setShowOnboarding(false)} onSkip={() => setShowOnboarding(false)} />
+        <OnboardingOverlay plataforma={hardware?.system.platform ?? null} onDone={() => setShowOnboarding(false)} onSkip={() => setShowOnboarding(false)} />
       )}
     </div>
   );

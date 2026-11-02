@@ -10,6 +10,7 @@ import type {
   SecurityEvent,
   ProcessEnumerationTruth,} from "@cybersafe/shared-types";
 import { cn } from "@/lib/utils";
+import { camadaDeRedeLinux } from "@/lib/platformTruth";
 import { protectionStatusText } from "@/lib/protectionHealth";
 import { buildEventRows, startedGroupLabel } from "@/lib/eventRows";
 import { engineHealthPresentation } from "@/lib/engineHealthPresentation";
@@ -43,6 +44,12 @@ interface MonitorPageProps {
   connections: ConnectionSnapshot[];
   protection: ProtectionState | null;
   quarantine: QuarantineEntry[];
+  /**
+   * Plataforma publicada pelo serviço (`hardware.system.platform`). Só serve
+   * para não chamar «contenção» a uma lista de ligações observadas num sistema
+   * onde a app não contém nada. Sem leitura, o texto fica como está.
+   */
+  plataforma?: string | null;
 }
 
 // Traduz os tipos de evento para mensagens legíveis por qualquer pessoa.
@@ -201,7 +208,9 @@ export default function MonitorPage({
   connections,
   protection,
   quarantine,
+  plataforma = null,
 }: MonitorPageProps) {
+  const redeLinux = camadaDeRedeLinux(plataforma);
   const [activeCategory, setActiveCategory] = useState<EventCategory>("all");
   const filteredEvents = events.filter((ev) => {
     if (activeCategory === "all") return true;
@@ -470,9 +479,11 @@ export default function MonitorPage({
         <div className="flex items-center justify-between mb-6">
           <h3 className="font-mono font-semibold text-foreground flex items-center gap-2">
             <Globe className="w-4 h-4 text-primary" />
-            Camada de Contenção de Rede
+            {redeLinux?.titulo ?? "Camada de Contenção de Rede"}
           </h3>
-          <span className="text-xs font-mono text-muted-foreground">Contenção básica apenas</span>
+          <span className="text-xs font-mono text-muted-foreground">
+            {redeLinux?.nota ?? "Contenção básica apenas"}
+          </span>
         </div>
 
         <div className="space-y-2">
