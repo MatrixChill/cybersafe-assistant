@@ -61,12 +61,15 @@ const DEFAULT_CLAMAV_DB = 'C:/Users/caioc/.cybersafe-integration/pap-integration
 // de escrita intacto para o operador experimentar à mão.
 const ARGV = new Set(process.argv.slice(2));
 // --settings-proof exercises navigation only; never isolates/restores/deletes.
-const ORBITAL_CAPTURE = ARGV.has('--orbital-capture');
-const ORBITAL_PROOF = ARGV.has('--orbital-proof') || ORBITAL_CAPTURE;
+const ORBITAL_COMPARE = ARGV.has('--orbital-compare');
+const ORBITAL_FALLBACK_ONLY = ARGV.has('--orbital-fallback-proof');
+const ORBITAL_CAPTURE = ARGV.has('--orbital-capture') || ORBITAL_COMPARE;
+const ORBITAL_PROOF = ARGV.has('--orbital-proof') || ORBITAL_CAPTURE || ORBITAL_FALLBACK_ONLY;
 const VISUAL_PAGES_PROOF = ARGV.has('--visual-pages-proof');
 const WEBGL_FAILURE_PROOF = ARGV.has('--webgl-failure-proof');
+const UI_REPAIR_PROOF = ARGV.has('--ui-repair-proof');
 const APPEARANCE_PROOF = ARGV.has('--appearance-proof') || ORBITAL_PROOF;
-const SETTINGS_PROOF = ARGV.has('--settings-proof') || APPEARANCE_PROOF || VISUAL_PAGES_PROOF || WEBGL_FAILURE_PROOF;
+const SETTINGS_PROOF = ARGV.has('--settings-proof') || APPEARANCE_PROOF || VISUAL_PAGES_PROOF || WEBGL_FAILURE_PROOF || UI_REPAIR_PROOF;
 const INTERACTIVE_ONLY = ARGV.has('--interactive=only');
 const INTERACTIVE = INTERACTIVE_ONLY || ARGV.has('--interactive');
 const INTERACTIVE_MAX_MS = Number(process.env.CYBERSAFE_QUARANTINE_INTERACTIVE_MAX_MS || 30 * 60 * 1000);
@@ -276,6 +279,7 @@ deps.onStackReady = async ({ plan, spawned }) => {
   let cdp;
   const safeShot = async (name) => {
     try {
+      await cdp.evaluate(`Promise.allSettled(document.getAnimations().filter(a=>{const t=a.effect?.getComputedTiming();return t&&Number.isFinite(t.iterations)&&Number(t.duration)<=1000;}).map(a=>a.finished))`);
       const shot = await cdp.send('Page.captureScreenshot', { format: 'png' });
       fs.writeFileSync(path.join(evidence, `${name}.png`), Buffer.from(shot.data, 'base64'));
     } catch (error) {
@@ -334,6 +338,55 @@ deps.onStackReady = async ({ plan, spawned }) => {
 
     if (SETTINGS_PROOF) {
       await safeShot('dashboard-current-real');
+      if(UI_REPAIR_PROOF){
+        await clickSidebar('PC Center');
+        await until(()=>evaluate('Boolean([...document.querySelectorAll("button")].find(b=>b.textContent.includes("Visão Avançada")))'),'PC Center pronto');
+        await evaluate('[...document.querySelectorAll("button")].find(b=>b.textContent.includes("Visão Avançada")).click()');
+        facts.gauges=[];
+        for(const width of [1100,1440,1900]){
+          await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:1000,deviceScaleFactor:1,mobile:false});await timeout(300);
+          const gauges=await evaluate(`Array.from(document.querySelectorAll('svg:has(circle[stroke-dasharray])')).map(svg=>{const r=svg.getBoundingClientRect();return {width:r.width,height:r.height,viewBox:svg.getAttribute('viewBox')};})`);
+          await safeShot('pc-advanced-'+width);
+          assert.ok(gauges.length>=2,'indicadores reais presentes');
+          for(const gauge of gauges)assert.ok(Math.abs(gauge.width-gauge.height)<1&&gauge.width>=98,'indicador circular não pode ser comprimido/cortado: '+JSON.stringify(gauge));
+          facts.gauges.push({width,gauges});
+        }
+        await evaluate('[...document.querySelectorAll("button")].find(b=>b.textContent.includes("Visão Simples")).click()');
+        facts.pcSimpleScales=[];
+        for(const width of [900,1440])for(const scale of [1,1.25,1.5]){
+          await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:scale,mobile:false});await timeout(150);
+          assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth'),false);
+          await safeShot('pc-simple-'+width+'-'+scale);facts.pcSimpleScales.push({width,scale});
+        }
+        await clickSidebar('Configurações');
+        await until(()=>evaluate('Boolean(document.getElementById("settings-aparencia"))'),'aparência pronta');
+        facts.settingsLayout=await evaluate(`(()=>{const m=document.querySelector('[data-cs-main]');return {width:m.clientWidth,scrollWidth:m.scrollWidth};})()`);
+        assert.ok(facts.settingsLayout.scrollWidth<=facts.settingsLayout.width,'Configurações não deve criar scroll horizontal no painel');
+        await evaluate('document.querySelector("[data-cs-main]").scrollTop=0');await safeShot('settings-general-fixed');
+        facts.accents=[];
+        for(const label of ['Ciano','Verde Matrix','Azul','Roxo','Rosa','Âmbar','Vinho']){
+          await evaluate(`(()=>{const b=[...document.querySelectorAll('#settings-aparencia button')].find(b=>b.getAttribute('aria-label') === 'Cor de destaque: '+${JSON.stringify(label)});if(!b)throw Error('cor ausente');b.click();})()`);await timeout(100);
+          const colors=await evaluate(`(()=>{const s=getComputedStyle(document.documentElement);return {primary:s.getPropertyValue('--primary').trim(),resolved:getComputedStyle(document.querySelector('#settings-aparencia button')).borderColor,ok:s.getPropertyValue('--v2-ok').trim(),warn:s.getPropertyValue('--v2-warn').trim(),danger:s.getPropertyValue('--v2-danger').trim()};})()`);
+          facts.accents.push({label,...colors});
+        }
+        assert.equal(new Set(facts.accents.map(x=>x.primary)).size,7,'cores de destaque devem produzir valores distintos');
+        assert.equal(new Set(facts.accents.map(x=>x.ok)).size,1);assert.equal(new Set(facts.accents.map(x=>x.danger)).size,1);
+        assert.equal(new Set(facts.accents.map(x=>x.warn)).size,1);
+        await evaluate(`document.getElementById('settings-aparencia').scrollIntoView()`);await safeShot('settings-accent-fixed');
+        await cdp.send('Page.reload');
+        await until(()=>evaluate('Boolean(document.querySelector("[data-cs-sidebar=main]"))'),'cores após reload');
+        assert.equal(await evaluate('document.documentElement.dataset.accent'),'red-wine');
+        facts.accentPersisted=true;
+        await clickSidebar('Configurações');await until(()=>evaluate('Boolean(document.getElementById("settings-aparencia"))'),'materiais prontos');
+        facts.materials=[];
+        for(const [label,expected] of [['Vidro','liquid'],['Reduzido','light'],['Sólido','solid']]){
+          await evaluate(`document.querySelector('[aria-label="Material da interface: ${label}"]').click()`);
+          await until(()=>evaluate(`document.documentElement.dataset.v2Material===${JSON.stringify(expected)}`),'material aplicado');
+          await evaluate(`document.getElementById('settings-aparencia').scrollIntoView()`);await safeShot('settings-material-'+expected);
+          facts.materials.push({label,effective:await evaluate('document.documentElement.dataset.v2Material')});
+        }
+        fs.writeFileSync(path.join(evidence,'ui-repair-facts.json'),JSON.stringify(facts,null,2));return;
+      }
       if(WEBGL_FAILURE_PROOF){
         const injected=await cdp.send('Page.addScriptToEvaluateOnNewDocument',{source:`const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return /^webgl|experimental-webgl/.test(type)?null:original.call(this,type,...args);};`});
         await cdp.send('Page.reload');
@@ -410,7 +463,15 @@ deps.onStackReady = async ({ plan, spawned }) => {
           await timeout(500);
           facts.orbitalProposal = {webglScene:true,productionDefault:false};
           if(ORBITAL_CAPTURE){
-            const frames=path.join(evidence,'motion-frames');fs.mkdirSync(frames);
+            facts.motionComparison=[];
+            for(const variant of ORBITAL_COMPARE?['exterior','depth']:['exterior']){
+            if(ORBITAL_COMPARE)await evaluate(`document.querySelector('[data-orbital-select="${variant}"]').click()`);
+            await until(()=>evaluate('Boolean(document.querySelector(".three-scene canvas"))'),'canvas da variante');
+            const nodes=await evaluate(`(()=>{const root=document.querySelector('.brand-scene');const overlay=root.querySelector('.orbiting-core');return {count:root.querySelectorAll('.orbit-node').length,opacity:Number(getComputedStyle(overlay).opacity)};})()`);
+            assert.equal(nodes.count,4);assert.ok(nodes.opacity>0,'motores orbitais não podem ficar ocultos pela cena');
+            await safeShot('orbital-comparison-'+variant+'-start');
+            const suffix=ORBITAL_COMPARE?'-'+variant:'';
+            const frames=path.join(evidence,'motion-frames'+suffix);fs.mkdirSync(frames);
             let count=0;const times=[];
             const unsubscribe=cdp.on('Page.screencastFrame',frame=>{
               fs.writeFileSync(path.join(frames,String(count++).padStart(5,'0')+'.jpg'),Buffer.from(frame.data,'base64'));
@@ -418,11 +479,13 @@ deps.onStackReady = async ({ plan, spawned }) => {
               void cdp.send('Page.screencastFrameAck',{sessionId:frame.sessionId}).catch(()=>{});
             });
             await cdp.send('Page.startScreencast',{format:'jpeg',quality:80,maxWidth:960,maxHeight:675,everyNthFrame:4});
-            for(let part=0;part<6;part++)await timeout(11000);
+            for(let part=0;part<(ORBITAL_COMPARE?4:6);part++){await timeout(11000);if(ORBITAL_COMPARE)await safeShot('orbital-comparison-'+variant+'-'+((part+1)*11));}
             await cdp.send('Page.stopScreencast');unsubscribe();
-            fs.writeFileSync(path.join(evidence,'motion-frame-times.json'),JSON.stringify(times));
+            fs.writeFileSync(path.join(evidence,'motion-frame-times'+suffix+'.json'),JSON.stringify(times));
             assert.ok(count>30,'gravação precisa de frames reais');
             facts.motionCapture={frames:count,seconds:times.at(-1)-times[0],source:'Electron CDP screencast; cadence is recording cadence, not measured app FPS'};
+            facts.motionComparison.push({variant,...facts.motionCapture});
+            }
             for(const width of [900,1280])for(const scale of [1,1.25,1.5]){
               await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:scale,mobile:false});
               await timeout(250);await safeShot('orbital-layout-'+width+'-'+scale);
@@ -434,7 +497,7 @@ deps.onStackReady = async ({ plan, spawned }) => {
           await safeShot('orbital-v3-proposal-a');
           await timeout(1200);
           await safeShot('orbital-v3-proposal-b');
-          for (const seconds of [8,16,24,32,40,48,56,64]) {
+          for (const seconds of ORBITAL_FALLBACK_ONLY?[]:[8,16,24,32,40,48,56,64]) {
             await timeout(8000);
             await safeShot('orbital-v3-rotation-'+seconds);
           }
