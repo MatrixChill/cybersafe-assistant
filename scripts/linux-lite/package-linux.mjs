@@ -68,6 +68,53 @@ function lerCabeca(ficheiro, bytes = 4) {
 
 const sha256De = (ficheiro) => createHash("sha256").update(readFileSync(ficheiro)).digest("hex");
 
+const DEPENDENCIA_NATIVE = "better-sqlite3";
+
+/**
+ * Trocar o addon pelo binário do ABI do Electron.
+ *
+ * Medido: o `better-sqlite3` deixado pelo `npm install` em Linux tem
+ * `NODE_MODULE_VERSION 127` (o Node 22 da máquina), mas o processo da API é um
+ * filho do Electron (`ELECTRON_RUN_AS_NODE`) que exige 130 (Electron 33.4.11), e
+ * o `require` rebenta com `ERR_DLOPEN_FAILED`. Foi exatamente assim que o
+ * `.deb` de 0.1.11 ficou com uma janela de login sem backend: a API foi
+ * encontrada no pacote mas morreu ao abrir a base de utilizadores.
+ *
+ * O vendor publica o prebuild do Electron — `better-sqlite3-v<versão>-electron-
+ * v130-linux-x64.tar.gz`, medido `http 200` na release oficial — e é buscado
+ * pela ferramenta que o próprio pacote usa para se instalar. Por isso não há
+ * compilação, não há `g++` (medido: ausente neste ambiente), nem número de ABI
+ * inventado neste script.
+ */
+function prepararNativoParaElectron() {
+  const pastaNative = path.join(RAIZ, "node_modules", DEPENDENCIA_NATIVE);
+  if (!existsSync(path.join(pastaNative, "package.json"))) return { ok: false, porque: `falta node_modules/${DEPENDENCIA_NATIVE}` };
+  const prebuildCli = path.join(RAIZ, "node_modules", "prebuild-install", "bin.js");
+  if (!existsSync(prebuildCli)) return { ok: false, porque: "falta node_modules/prebuild-install (o instalador do próprio addon)" };
+  const electron = JSON.parse(readFileSync(path.join(RAIZ, "node_modules/electron/package.json"), "utf8")).version;
+  const troca = executar("node", [prebuildCli, "--runtime=electron", `--target=${electron}`, "--arch=x64", "--platform=linux"], { cwd: pastaNative });
+  if (!troca.ok) return { ok: false, porque: `prebuild-install --runtime=electron falhou: ${troca.saida.slice(-500)}` };
+  return { ok: true, porque: `addon trocado para electron ${electron}` };
+}
+
+/**
+ * Gate de ABI: não se lê um número de um ficheiro nem se confia no log do
+ * utilitário — carrega-se o módulo NO runtime que o vai usar e abre-se uma base
+ * real. O pipeline Windows tem gate da mesma espécie (secção «Rebuild nativo do
+ * pipeline» em `scripts/package-windows.mjs`, com o comentário de que «viajaria
+ * ABI errada em silêncio» sem ele); repeti-lo aqui é o que impede um `.deb`
+ * «construído com sucesso» e inutilizável.
+ */
+function gateAbiElectron() {
+  const bin = path.join(RAIZ, "node_modules/electron/dist/electron");
+  if (!existsSync(bin)) return { ok: false, porque: `falta ${path.relative(RAIZ, bin)}` };
+  const teste = "const D=require(process.argv[1]);const db=new D(':memory:');db.exec('CREATE TABLE t(x)');db.prepare('INSERT INTO t VALUES (?)').run(1);console.log('ABI_OK',process.versions.modules,process.versions.electron,db.prepare('SELECT x FROM t').get().x)";
+  const r = executar("env", [`ELECTRON_RUN_AS_NODE=1`, bin, "-e", teste, path.join(RAIZ, "node_modules", DEPENDENCIA_NATIVE)], { cwd: RAIZ });
+  const linha = (r.saida.match(/ABI_OK[^\n]*/) || ["sem_saida"])[0];
+  if (!r.ok || !linha.startsWith("ABI_OK")) return { ok: false, porque: `${DEPENDENCIA_NATIVE} não carregou no Electron-as-node (${linha})` };
+  return { ok: true, porque: linha };
+}
+
 /**
  * O `dist` do desktop TEM de conter o renderer, não só o shell.
  *
@@ -243,8 +290,63 @@ function materializarWorkspaces() {
   console.log(`MATERIALIZADAS ${JSON.stringify([...fecho].sort())}`);
 }
 
+/**
+ * Workspaces que têm de ser COMPILADOS antes de empacotar.
+ *
+ * É a mesma lista que o pipeline Windows usa (`BUILD_WORKSPACES` em
+ * `scripts/package-windows.mjs`), repetida de propósito: no Windows o motivo
+ * declarado era «o único workspace que o pipeline nunca reconstruía podia sair
+ * com um `dist` de uma alteração antiga». Em Linux era ainda pior — o `dist` do
+ * `api` simplesmente não existia, e o `startLocalApi` do pacote respondeu
+ * «API não encontrada no artefacto», ou seja, o `.deb` abria uma janela de login
+ * que não conseguia autenticar. Compilar por lista em vez de confiar no que a
+ * máquina tem é o que impede esse estado.
+ */
+const COMPILA = ["@cybersafe/shared-types", "@cybersafe/native-windows", "@cybersafe/core", "@cybersafe/service", "api"];
+
+/** A entrada que o `api-lifecycle` procura dentro do pacote. */
+const ENTRADA_API = path.join("node_modules", "api", "dist", "index.js");
+
+function compilarWorkspaces() {
+  for (const nome of COMPILA) {
+    const r = executar("npm", ["run", "build", "-w", nome], { cwd: RAIZ });
+    if (!r.ok) {
+      console.log(`COMPILACAO_FALHOU ${nome} rc=${r.codigo}\n${r.saida.slice(-1200)}`);
+      return { ok: false, porque: `build de ${nome} falhou` };
+    }
+    console.log(`compilado ${nome}`);
+  }
+  return { ok: true };
+}
+
+/**
+ * O pacote só serve se a API estiver dentro. `packages/desktop/src/api-lifecycle.ts:155-168`
+ * resolve `app.asar/node_modules/api/dist/index.js` e, sem ele, devolve
+ * `skipped` — a janela abre-se, mas `/auth/register` e `/auth/login` não existem.
+ */
+export function estadoApi(destDir) {
+  const entrada = path.join(destDir, ENTRADA_API);
+  return existsSync(entrada)
+    ? { comApi: true, porque: "api/dist/index.js presente no palco do pacote" }
+    : { comApi: false, porque: `falta ${ENTRADA_API} em ${path.relative(RAIZ, destDir)} — sem API o pacote não autentica` };
+}
+
 /** Constrói com a configuração Linux; `--publish never` não é negociável. */
 function construir(alvos) {
+  const compilado = compilarWorkspaces();
+  if (!compilado.ok) return { ok: false, codigo: 1, saida: compilado.porque };
+  const nativo = prepararNativoParaElectron();
+  if (!nativo.ok) {
+    console.log(`NATIVO_FALHOU ${nativo.porque} — nada foi escrito`);
+    return { ok: false, codigo: 1, saida: nativo.porque };
+  }
+  console.log(`addon ${nativo.porque}`);
+  const gate = gateAbiElectron();
+  if (!gate.ok) {
+    console.log(`GATE_ABI_FALHOU ${gate.porque} — nada foi escrito`);
+    return { ok: false, codigo: 1, saida: gate.porque };
+  }
+  console.log(`GATE_ABI ${gate.porque}`);
   // O staging do renderer faz parte do pacote, não é um luxo do Windows: o
   // `vite build` do desktop só produz o shell, cujo `index.html` é
   // `<body></body>`. Sem o pré-passo empacotou-se uma janela vazia — medido no
@@ -275,6 +377,15 @@ function construir(alvos) {
   // Vai por `--config`, não pelo YAML, para que a fonte continue a ser uma.
   const { version } = readProductVersion({ root: RAIZ });
   materializarWorkspaces();
+  // A mesma lógica da guarda do renderer, aplicada à peça que o ecrã de login
+  // precisa para poder autenticar: sem a entrada da API no palco, o
+  // `startLocalApi` do pacote devolve `skipped` e a janela é uma fachada.
+  const api = estadoApi(DESKTOP);
+  if (!api.comApi) {
+    console.log(`PALCO_SEM_API ${api.porque} — nada foi escrito`);
+    return { ok: false, codigo: 1, saida: `palco sem API: ${api.porque}` };
+  }
+  console.log(`api no pacote: ${api.porque}`);
   const args = [
     "--config",
     "electron-builder.linux-lite.yml",
