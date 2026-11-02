@@ -538,15 +538,46 @@ const handleAnalyze = async (pid: number) => {
     }
   }, [onRefreshProcesses]);
 
-  const handleKill = async () => {
+  /**
+   * Os dois pedidos de terminação são modos da MESMA operação segura, não dois
+   * mecanismos: `handleKill` é o pedido normal (SIGTERM) confirmado no modal e
+   * `forcarTerminacao` é o excecional (SIGKILL) com confirmação própria. Ambos
+   * passam por `executaTerminacao`, que é o único sítio onde o bloqueio é ligado
+   * e o único ponto onde o pedido individual é submetido.
+   */
+  const handleKill = () => executaTerminacao("sigterm");
+
+  /**
+   * A SEGUNDA operação, não o segundo clique na mesma. Só é alcançável depois de
+   * um SIGTERM pinado ter sido entregue sem produzir saída e só quando o serviço
+   * anunciou `sigkill` nos modos — daqui em diante, bilhete NOVO com o modo
+   * explícito, e o clique neste botão é a confirmação separada que o pedido
+   * excecional exige. O serviço recusa o modo se a plataforma não o cumprir: a
+   * UI não decide sozinha o que o backend pode fazer.
+   */
+  const forcarTerminacao = () => executaTerminacao("sigkill");
+
+  async function executaTerminacao(modo: "sigterm" | "sigkill") {
+    const target = killTarget;
+    const api = window.electronAPI;
     // O PID é o que foi congelado no clique. Não volta a ser derivado da lista —
     // era aí que o modal desaparecia quando o stub do Notepad saía do snapshot.
-    const target = killTarget;
-    if (!target || !terminationTicket.current) return;
+    if (modo === "sigterm") {
+      // Sem alvo e sem bilhete congelado não há pedido normal a submeter: aborta
+      // antes de qualquer IPC.
+      if (!target || !terminationTicket.current) return;
+    } else {
+      // A escalada exige `sigkill` anunciado pelo serviço, a ponte de preparação e
+      // um instante de criação pinado. Sem identidade confirmada: nenhum efeito.
+      if (!api?.prepareProcessTermination || !target || !forcaDisponivel.current) return;
+      if (typeof target.startedAt !== "string") {
+        setKillNotice({ message: "Terminação indisponível: o alvo não tem instante de criação confirmado.", ok: false });
+        return;
+      }
+    }
     const actionId = killActionId;
     const listContainsPid = () => processes.some((p) => p.pid === target.pid);
 
-    const api = window.electronAPI;
     if (!api) {
       setKillNotice({ message: KILL_UNAVAILABLE_ERROR, ok: false });
       setIsKilling(false);
@@ -564,16 +595,20 @@ const handleAnalyze = async (pid: number) => {
       return;
     }
 
+    // Único sítio que liga o bloqueio das duas operações. Uma segunda linha
+    // destas noutro handler era a trava dupla que o teste H4 procura.
     setIsKilling(true);
     setKillNotice(null);
-    traceKill("confirm", {
-      actionId,
-      source: killSource,
-      selectedPid: target.pid,
-      selectedName: target.name,
-      modalPid: target.pid,
-      handlerPid: target.pid,
-    });
+    if (modo === "sigterm") {
+      traceKill("confirm", {
+        actionId,
+        source: killSource,
+        selectedPid: target.pid,
+        selectedName: target.name,
+        modalPid: target.pid,
+        handlerPid: target.pid,
+      });
+    }
 
     let escalar = false;
     try {
@@ -583,22 +618,40 @@ const handleAnalyze = async (pid: number) => {
         pid: target.pid,
         gate: killRequestGate.current,
         kill: async () => {
-          const ticket=terminationTicket.current;
-          terminationTicket.current=null; // No retry after IPC uncertainty.
-          if(!ticket) return {success:false,status:"failed",pid:target.pid,error:"Confirmação ausente."};
-          return confirmIndividualTermination(api,ticket,target.pid,"sigterm");
+          // Os dois modos chegam aqui por um único ponto de submissão: o bilhete é
+          // obtido conforme o caso e confirmado logo abaixo, sempre pela mesma
+          // linha. `sigkill` prepara bilhete NOVO, nunca reutiliza o do SIGTERM.
+          let bilhete: typeof terminationTicket.current = null;
+          let recusa: string | null = null;
+          if (modo === "sigterm") {
+            bilhete = terminationTicket.current;
+            if (!bilhete) recusa = "Confirmação ausente.";
+          } else {
+            const prepared = await prepareIndividualTermination(api, { pid: target.pid, startedAt: target.startedAt!, mode: "sigkill" });
+            if (prepared?.ok) bilhete = prepared.ticket;
+            else recusa = prepared?.error ?? "Não foi possível preparar a terminação imediata.";
+          }
+          if (!bilhete) return { success: false, status: "failed" as const, pid: target.pid, error: recusa ?? "Confirmação ausente." };
+          terminationTicket.current = null; // No retry after IPC uncertainty.
+          return confirmIndividualTermination(api, bilhete, target.pid, modo);
         },
         refresh: refreshProcesses,
         onOutcome: (o) => {
-          // Um SIGTERM entregue que não produziu saída é o único caso em que a
-          // escalada é excecional: o processo existe e ignorou o pedido normal.
-          escalar = o.status === "timeout" && forcaDisponivel.current;
-          if (o.message) setKillNotice({ message: o.status === "killed" ? "Processo terminado pelo CyberSafe; saída confirmada." : escalar ? "O SIGTERM não produziu saída dentro do prazo; o processo continua vivo." : o.message, ok: o.success });
-          // Refetch the authoritative list. Never hide by PID alone: a new
-          // process may already have reused it after the confirmed object exited.
+          if (modo === "sigterm") {
+            // Um SIGTERM entregue que não produziu saída é o único caso em que a
+            // escalada é excecional: o processo existe e ignorou o pedido normal.
+            escalar = o.status === "timeout" && forcaDisponivel.current;
+            if (o.message) setKillNotice({ message: o.status === "killed" ? "Processo terminado pelo CyberSafe; saída confirmada." : escalar ? "O SIGTERM não produziu saída dentro do prazo; o processo continua vivo." : o.message, ok: o.success });
+            // Refetch the authoritative list. Never hide by PID alone: a new
+            // process may already have reused it after the confirmed object exited.
+          } else {
+            const motivo = o.status === "killed" ? "SIGKILL confirmado: o processo saiu." : o.message;
+            if (motivo) setKillNotice({ message: motivo, ok: o.success });
+          }
         },
         onFinish: () => {
           setIsKilling(false);
+          if (modo === "sigkill") return; // O SIGKILL fecha a seleção no `finally`.
           if (escalar) return; // O modal fica aberto a oferecer a segunda operação.
           // Só limpa ESTA seleção: se o utilizador escolheu outra linha entretanto
           // (kill demora até 12 s), apagar-lhe a escolha era o modal a sumir sózinho.
@@ -607,74 +660,36 @@ const handleAnalyze = async (pid: number) => {
       });
       // `listContainsPidAfter` lê o snapshot desta render — o refresh de
       // background ainda não cá chegou; serve para comparar select vs result.
-      traceKill("result", {
-        actionId,
-        source: killSource,
-        handlerPid: target.pid,
-        modalPid: target.pid,
-        ok: outcome.success,
-        status: outcome.status,
-        message: outcome.message,
-        listContainsPidAfter: listContainsPid(),
-      });
+      if (modo === "sigterm") {
+        traceKill("result", {
+          actionId,
+          source: killSource,
+          handlerPid: target.pid,
+          modalPid: target.pid,
+          ok: outcome.success,
+          status: outcome.status,
+          message: outcome.message,
+          listContainsPidAfter: listContainsPid(),
+        });
+      }
     } finally {
       // Rede de segurança, não máscara: se a entrega do desfecho falhar pelo
       // meio, o overlay continua garantido que fecha (nunca fica preso).
       setIsKilling(false);
-      // Exceto no único caso em que fica de propósito: um SIGTERM sem saída abre
-      // aqui a segunda operação, que precisa de uma confirmação própria.
-      if (escalar) setForcaOferecida(true);
-      else setKill({ type: "clearStale", actionId });
+      if (modo === "sigterm") {
+        // Exceto no único caso em que fica de propósito: um SIGTERM sem saída abre
+        // aqui a segunda operação, que precisa de uma confirmação própria.
+        if (escalar) setForcaOferecida(true);
+        else setKill({ type: "clearStale", actionId });
+      } else {
+        // A oferta é de uma utilização: seja qual for o desfecho, o bilhete SIGTERM
+        // original já foi consumido e a seleção fecha-se.
+        setForcaOferecida(false);
+        forcaDisponivel.current = false;
+        setKill({ type: "clearStale", actionId });
+      }
     }
-  };
-
-  /**
-   * A SEGUNDA operação, não o segundo clique na mesma. Só é alcançável depois de
-   * um SIGTERM pinado ter sido entregue sem produzir saída e só quando o serviço
-   * anunciou `sigkill` nos modos. daqui em diante: bilhete NOVO com o modo
-   * explícito, e o clique neste botão é a confirmação separada que o pedido
-   * excecional exige. O serviço recusa o modo se a plataforma não o cumprir — a
-   * UI não decide sozinha o que o backend pode fazer.
-   */
-  const forcarTerminacao = async () => {
-    const api = window.electronAPI;
-    const alvo = killTarget;
-    if (!api?.prepareProcessTermination || !alvo || !forcaDisponivel.current) return;
-    if (typeof alvo.startedAt !== "string") {
-      setKillNotice({ message: "Terminação indisponível: o alvo não tem instante de criação confirmado.", ok: false });
-      return;
-    }
-    setIsKilling(true);
-    setKillNotice(null);
-    try {
-      await runKillSequence({
-        pid: alvo.pid,
-        gate: killRequestGate.current,
-        kill: async () => {
-          const prepared = await prepareIndividualTermination(api, { pid: alvo.pid, startedAt: alvo.startedAt!, mode: "sigkill" });
-          if (!prepared?.ok)
-            return { success: false, status: "failed" as const, pid: alvo.pid, error: prepared?.error ?? "Não foi possível preparar a terminação imediata." };
-          terminationTicket.current = prepared.ticket;
-          const resultado = await confirmIndividualTermination(api, prepared.ticket, alvo.pid, "sigkill");
-          terminationTicket.current = null;
-          return resultado;
-        },
-        refresh: refreshProcesses,
-        onOutcome: (o) => {
-          if (o.message) setKillNotice({ message: o.status === "killed" ? "SIGKILL confirmado: o processo saiu." : o.message, ok: o.success });
-          else if (o.status === "killed") setKillNotice({ message: "SIGKILL confirmado: o processo saiu.", ok: true });
-        },
-        onFinish: () => setIsKilling(false),
-      });
-    } finally {
-      // A oferta é de uma utilização: seja qual for o desfecho, o bilhete SIGTERM
-      // original já foi consumido e a seleção fecha-se.
-      setIsKilling(false);
-      setForcaOferecida(false);
-      forcaDisponivel.current = false;
-      setKill({ type: "clearStale", actionId: killActionId });
-    }
-  };
+  }
 
   return (
     <div className="p-8 h-full flex flex-col space-y-6 animate-in fade-in duration-500 relative">
