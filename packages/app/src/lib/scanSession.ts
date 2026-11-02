@@ -319,6 +319,8 @@ export function normalizeScanState(raw: unknown): ScanState & Partial<ScanStateE
     inconclusiveByReason: asInconclusiveByReason(source.inconclusiveByReason),
     inconclusiveByEngine: asInconclusiveByEngine(source.inconclusiveByEngine),
     filesInEngineBatch: asOptionalNumber((source as { filesInEngineBatch?: unknown }).filesInEngineBatch),
+    filesInEngineScanned: asOptionalNumber((source as { filesInEngineScanned?: unknown }).filesInEngineScanned),
+    engineBatchStartedAt: asOptionalString((source as { engineBatchStartedAt?: unknown }).engineBatchStartedAt),
     filesExcluded: asOptionalNumber(source.filesExcluded),
     filesExcludedBy: asExcludedBy(source.filesExcludedBy),
     filesFailed: asOptionalNumber(source.filesFailed),
@@ -408,6 +410,8 @@ export function mergeScanState(
     // `keepMax` deixaria a UI presa em "20 ficheiros" para sempre — a mentira
     // que este campo existe para evitar. O snapshot mais recente manda.
     filesInEngineBatch: next.filesInEngineBatch,
+    filesInEngineScanned: next.filesInEngineScanned,
+    engineBatchStartedAt: next.engineBatchStartedAt,
     threatsFound: keepMax(current.threatsFound, next.threatsFound),
   };
 }
@@ -446,12 +450,15 @@ export function projectedAnalyzedCount(
  * pipeline global.
  *
  * O batch carrega ~1 GB de base e devolve N veredictos de uma vez: enquanto
- * decorre, `filesInEngineBatch` é a dimensão da etapa e `filesAnalyzed` é o que
- * o clamscan já reportou. É trabalho real e tem de ser visível — mas NÃO é
- * progresso do pipeline: nenhum desses ficheiros completou ainda os restantes
- * motores, e apresentá-lo na barra global era exactamente o que a fazia parecer
- * concluída e ficar presa durante a segunda passagem.
+ * decorre, `filesInEngineBatch` é a dimensão da etapa e
+ * `filesInEngineScanned` é o que o clamscan já confirmou. É trabalho real e tem
+ * de ser visível — mas NÃO é progresso do pipeline: nenhum desses ficheiros
+ * completou ainda os restantes motores, e apresentá-lo na barra global era
+ * exactamente o que a fazia parecer concluída e ficar presa durante a segunda
+ * passagem.
  *
+ * `filesAnalyzed` é o fallback legado (payloads antigos, onde o manager ainda
+ * reutilizava esse campo). O manager actual nunca o escreve durante o batch.
  * `done` é limitado a `total`: uma linha de progresso perdida ou um
  * `filesAnalyzed` de outro eixo nunca podem produzir uma etapa acima de 100%.
  */
@@ -467,8 +474,25 @@ export function scanAnalysisStage(state: ScanState | null): ScanAnalysisStage {
   if (!Number.isFinite(total) || total <= 0) {
     return { active: false, done: 0, total: 0, percent: null };
   }
-  const done = Math.min(Math.max(state?.filesAnalyzed ?? 0, 0), total);
+  const done = Math.min(
+    Math.max(state?.filesInEngineScanned ?? state?.filesAnalyzed ?? 0, 0),
+    total,
+  );
   return { active: true, done, total, percent: Math.floor((done / total) * 100) };
+}
+
+/**
+ * Tempo decorrido desde o início do batch de assinaturas, ou null quando não
+ * há batch em curso. É tempo de relógio, não uma estimativa de conclusão.
+ */
+export function scanEngineBatchElapsedSeconds(
+  state: Pick<ScanState, "engineBatchStartedAt"> | null,
+  now: number = Date.now(),
+): number | null {
+  if (!state?.engineBatchStartedAt) return null;
+  const started = Date.parse(state.engineBatchStartedAt);
+  if (!Number.isFinite(started)) return null;
+  return Math.max(0, Math.floor((now - started) / 1000));
 }
 
 /**
@@ -866,6 +890,7 @@ export function activeScanDetail(
   targetName?: string,
   filesInEngineBatch = 0,
   filesVerifiedInBatch = 0,
+  engineBatchElapsedSeconds?: number,
 ): string {
   switch (ui) {
     case "preparing":
@@ -885,12 +910,15 @@ export function activeScanDetail(
       // não começou. Dizer a verdade é melhor que dizer nada de diferente.
       if (filesInEngineBatch > 0) {
         const done = filesVerifiedInBatch ?? 0;
-        if (filesInEngineBatch === 1) {
-          return "O motor de assinaturas está a verificar 1 ficheiro de uma vez.";
+        const elapsed = typeof engineBatchElapsedSeconds === "number" && engineBatchElapsedSeconds >= 0
+          ? ` Há ${engineBatchElapsedSeconds} s.`
+          : "";
+        if (done > 0) {
+          return `Fase de assinaturas: ${done} de ${filesInEngineBatch} verificados pelo motor.${elapsed}`;
         }
-        return done > 0
-          ? `Fase de assinaturas: ${done} de ${filesInEngineBatch} verificados pelo motor.`
-          : `O motor de assinaturas está a verificar ${filesInEngineBatch} ficheiros de uma só vez.`;
+        return filesInEngineBatch === 1
+          ? `O motor de assinaturas está a preparar 1 ficheiro; ainda não devolveu o primeiro resultado.${elapsed}`
+          : `O motor de assinaturas está a preparar ${filesInEngineBatch} ficheiros de uma só vez; ainda não devolveu o primeiro resultado.${elapsed}`;
       }
       if (scope === "file") return "A carregar e verificar o conteúdo do ficheiro.";
       if (scope === "folder") return "A verificar os ficheiros encontrados na pasta.";

@@ -603,6 +603,17 @@ export interface ScanState {
    * só cresce quando o batch devolve. Zero quando não há batch a correr.
    */
   filesInEngineBatch?: number;
+  /**
+   * Quantos ficheiros o batch já confirmou como varridos, no MESMO eixo de
+   * `filesInEngineBatch`. É a prova por ficheiro publicada pelo clamscan.
+   *
+   * NÃO é `filesAnalyzed`: este último é o eixo dos resultados ACEITES pelo
+   * pipeline, e durante o batch ainda é 0. Misturar os dois fazia a UI mostrar
+   * 0/800 enquanto o motor já tinha verificado 9/800.
+   */
+  filesInEngineScanned?: number;
+  /** Início do batch de assinaturas em curso; ausente quando não há batch. */
+  engineBatchStartedAt?: string;
   /** Ficheiros que passaram pelo pipeline (analisados, excluídos ou falhados) */
   filesProcessed?: number;
   /** Ficheiros que chegaram efetivamente aos motores de análise aplicáveis */

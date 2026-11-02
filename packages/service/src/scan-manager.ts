@@ -849,7 +849,10 @@ const heartbeat = setInterval(() => {
       }
 
       const maxFiles = type === "quick" ? QUICK_SCAN_BUDGET : FULL_SCAN_MAX_FILES;
+      const preparingStarted = Date.now();
+      scanPerfLog("PHASE_BEGIN", id, "phase=preparing");
       const pathsToScan = await this.resolvePathsForScan(type, targetPath);
+      scanPerfLog("PHASE_END", id, `phase=preparing elapsedMs=${Date.now() - preparingStarted} roots=${pathsToScan.length}`);
       let scanned = 0;
       let analyzed = 0;
       let excluded = 0;
@@ -889,6 +892,7 @@ const heartbeat = setInterval(() => {
 
       // 1. Gather files
       const gatherStart = Date.now();
+      scanPerfLog("PHASE_BEGIN", id, "phase=gathering");
       const gatherStats = { failed: 0, failedByReason: {} as Record<FsErrorCategory, number> };
       this.updateScan(id, {
         phase: "gathering",
@@ -949,6 +953,7 @@ const heartbeat = setInterval(() => {
         id,
         `count=${totalFiles} budget=${maxFiles} type=${type} failed=${gatherStats.failed}`,
       );
+      scanPerfLog("PHASE_END", id, `phase=gathering elapsedMs=${Date.now() - gatherStart} selected=${totalFiles}`);
       if (totalFiles === 0) {
         // Explicit terminal state — a zero-file scan must never stay "running".
         //
@@ -996,7 +1001,13 @@ const heartbeat = setInterval(() => {
 
       // 2. Scan files
       const startTime = Date.now();
+      // Amostra do processo do serviço (não inclui o filho clamscan). Existe
+      // apenas com CYBERSAFE_DEBUG_SCAN=1; não decide estados nem veredictos.
+      const resourceCpuStart = process.cpuUsage();
+      const resourceRssStart = process.memoryUsage().rss;
       let lastEmit = 0;
+      let firstFileMs: number | null = null;
+      let slowestFileMs = 0;
       // Profiling DEV agregado (nunca por ficheiro, só com CYBERSAFE_DEBUG_SCAN=1).
       const perfEnabled = process.env.CYBERSAFE_DEBUG_SCAN === "1";
       let engineMs = 0;
@@ -1021,6 +1032,8 @@ const heartbeat = setInterval(() => {
         // exclusivos).
         let skippedExcluded = 0;
         let skippedZip = 0;
+        const preprocessStarted = Date.now();
+        scanPerfLog("PREPROCESS_BEGIN", id, `selected=${files.length}`);
         // Os ZIP continuam a ser um candidato proprio na decomposicao
         // (selected = candidatos + excluidos + zip), mas o ficheiro EXTERNO do
         // arquivo pode ser verificado no mesmo batch de ClamAV em vez de pagar
@@ -1064,6 +1077,11 @@ const heartbeat = setInterval(() => {
           }
           candidatos.push(file);
         }
+        scanPerfLog(
+          "PREPROCESS_END",
+          id,
+          `elapsedMs=${Date.now() - preprocessStarted} selected=${files.length} candidates=${candidatos.length} excluded=${skippedExcluded} zip=${skippedZip}`,
+        );
         // P1 — JANELA DE CANCEL DURANTE looksLikeZip (defesa em profundidade).
         //
         // O re-check de dentro do ciclo cobre um cancel que chega DURANTE um
@@ -1084,7 +1102,13 @@ const heartbeat = setInterval(() => {
           // ficheiros encontrados" com 0% e 0 f/s — descrevendo um trabalho que
           // ainda não tinha começado. Isto diz a verdade: estão N ficheiros
           // dentro do clamscan, e ainda não foi avaliado nenhum.
-          this.updateScan(id, { filesInEngineBatch: candidatos.length });
+          const batchStartedAt = new Date(prefetchStarted).toISOString();
+          scanPerfLog("PHASE_BEGIN", id, `phase=batch candidates=${candidatos.length}`);
+          this.updateScan(id, {
+            filesInEngineBatch: candidatos.length,
+            filesInEngineScanned: 0,
+            engineBatchStartedAt: batchStartedAt,
+          });
 
           // O clamscan vai dizendo, linha a linha, quantos ficheiros ja varreu.
           // Publicamos isso como o que e': ficheirosJA ANALISADOS pelo motor de
@@ -1103,16 +1127,25 @@ const heartbeat = setInterval(() => {
           let ultimoRelato = 0;
           const relatar = (n: number) => {
             if (n <= analisadosNoBatch) return;
-            analisadosNoBatch = n;
-            // Nao inundar o pipe: um evento por cada 1% ou por cada 100ms.
+            const primeiro = analisadosNoBatch === 0;
+            analisadosNoBatch = Math.min(n, candidatos.length);
+            if (primeiro) {
+              scanPerfLog(
+                "BATCH_FIRST_PROGRESS",
+                id,
+                `processed=${analisadosNoBatch} batch=${candidatos.length} elapsedMs=${Date.now() - prefetchStarted}`,
+              );
+            }
+            // Nao inundar o pipe: um evento por cada 100ms. O eixo GLOBAL
+            // (progress) nao e' escrito aqui: ele conta apenas resultados
+            // fechados pelo pipeline e continuaria a 0 durante todo o batch.
             const agora = Date.now();
             if (agora - ultimoRelato < 100 && n < candidatos.length) return;
             ultimoRelato = agora;
-            const pct = Math.min(99, Math.floor((n / Math.max(1, totalFiles)) * 100));
-            const atual = this.activeScans.get(id);
             this.updateScan(id, {
-              progress: Math.max(atual?.progress ?? 0, pct),
               filesInEngineBatch: candidatos.length,
+              filesInEngineScanned: analisadosNoBatch,
+              engineBatchStartedAt: batchStartedAt,
             });
           };
 
@@ -1129,7 +1162,11 @@ const heartbeat = setInterval(() => {
             // SEMPRE, mesmo em cancelamento ou excepção: um contador que fica
             // a dizer "20 ficheiros" quando nada está a correr é pior que
             // não o ter.
-            this.updateScan(id, { filesInEngineBatch: 0 });
+            this.updateScan(id, {
+              filesInEngineBatch: 0,
+              filesInEngineScanned: 0,
+              engineBatchStartedAt: undefined,
+            });
           }
           // O `onProgress` conta as linhas `OK`/`FOUND` do clamscan, e pode
           // omitir uma. O batch devolve UM veredicto terminal por ficheiro pedido,
@@ -1158,6 +1195,7 @@ const heartbeat = setInterval(() => {
             `spawned=${outcome.spawned} selected=${totalFiles} candidates=${candidatos.length} excluded=${skippedExcluded} zip=${skippedZip} outcomes=${String(outcome.files ?? "n/a")} analyzedInBatch=${analisadosNoBatch} elapsedMs=${Date.now() - prefetchStarted}` +
               (outcome.error ? ` error=${outcome.error}` : ""),
           );
+          scanPerfLog("PHASE_END", id, `phase=batch elapsedMs=${Date.now() - prefetchStarted} candidates=${candidatos.length}`);
         }
 
         // O ficheiro EXTERNO de cada ZIP tambem e verificado pelo ClamAV no
@@ -1178,6 +1216,7 @@ const heartbeat = setInterval(() => {
         if (this.isCancelled.has(id)) break;
 
         const file = files[i];
+        const iterationStarted = perfEnabled ? Date.now() : 0;
         this.archiveCoverageGaps.delete(id);
         // Fixture: verificação imediatamente antes do hand-off ao motor. O
         // objecto tem de continuar a ser, com identidade efectiva, o validado.
@@ -1323,6 +1362,12 @@ const heartbeat = setInterval(() => {
          }
 
         // Emit progress every 4 files, at least once per second, or on last file
+        if (perfEnabled) {
+          const iterationMs = Date.now() - iterationStarted;
+          if (firstFileMs === null) firstFileMs = iterationMs;
+          slowestFileMs = Math.max(slowestFileMs, iterationMs);
+        }
+
         if (i % 4 === 0 || i === files.length - 1 || Date.now() - lastEmit >= 1000) {
           lastEmit = Date.now();
           const elapsedSec = (Date.now() - startTime) / 1000;
@@ -1365,9 +1410,18 @@ const heartbeat = setInterval(() => {
         const gatherMs = Math.max(0, startTime - gatherStart);
         const overheadMs = Math.max(0, elapsedMs - engineMs);
         const perSec = elapsedMs > 0 ? Math.round((analyzed / (elapsedMs / 1000)) * 10) / 10 : 0;
-        console.log(`[ScanPerf] type=${type} files=${analyzed} excluded=${excluded} failed=${filesFailed} zip=${zipCount} elapsed=${Math.round(elapsedMs / 1000)}s gatherMs=${gatherMs} scanLoopMs=${elapsedMs} engine=${Math.round(engineMs / 1000)}s overheadMs=${overheadMs} avg=${analyzed > 0 ? Math.round(engineMs / analyzed) : 0}ms/file filesPerSec=${perSec}`);
+        console.log(`[ScanPerf] type=${type} files=${analyzed} excluded=${excluded} failed=${filesFailed} zip=${zipCount} elapsed=${Math.round(elapsedMs / 1000)}s gatherMs=${gatherMs} scanLoopMs=${elapsedMs} engine=${Math.round(engineMs / 1000)}s overheadMs=${overheadMs} firstFileMs=${firstFileMs ?? -1} slowestFileMs=${slowestFileMs} avg=${analyzed > 0 ? Math.round(engineMs / analyzed) : 0}ms/file filesPerSec=${perSec}`);
+        const cpu = process.cpuUsage(resourceCpuStart);
+        const rssEnd = process.memoryUsage().rss;
+        console.log(
+          `[ScanPerf] RESOURCE_SUMMARY elapsedMs=${elapsedMs} cpuMs=${Math.round((cpu.user + cpu.system) / 1000)} ` +
+            `rssStartMb=${Math.round(resourceRssStart / 1024 / 1024)} rssEndMb=${Math.round(rssEnd / 1024 / 1024)} ` +
+            `rssDeltaMb=${Math.round((rssEnd - resourceRssStart) / 1024 / 1024)}`,
+        );
       }
 
+      const finalizeStarted = Date.now();
+      scanPerfLog("PHASE_BEGIN", id, "phase=finalizing");
       const finalState = this.activeScans.get(id)!;
       if (finalState.status === "running") {
         // ── Confirmação terminal OPCIONAL (USB) ────────────────────────────
@@ -1434,6 +1488,12 @@ const heartbeat = setInterval(() => {
           });
         }
       }
+
+      scanPerfLog(
+        "PHASE_END",
+        id,
+        `phase=finalizing elapsedMs=${Date.now() - finalizeStarted} status=${this.activeScans.get(id)?.status ?? "?"}`,
+      );
 
     } catch (error) {
       // P1-4-F — O `catch` exterior também tem de respeitar o estado terminal.

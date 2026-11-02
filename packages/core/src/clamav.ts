@@ -885,8 +885,18 @@ const DEFAULT_SCAN_STARTUP_MS = 10_000;
  */
 const MAX_CAPTURED_OUTPUT = 8 * 1024 * 1024;
 
-/** Tecto do deadline de um batch, para que N grande não fique infinito. */
-const MAX_BATCH_TIMEOUT_MS = 600_000;
+/**
+ * Tecto do deadline de um batch, para que N grande não fique infinito.
+ *
+ * MEDIDO (2026-11-02, instalação real): um Quick Scan de 800 ficheiros levou
+ * 10 min 48 s. O tecto anterior de 600 s matou o clamscan nesse instante e os
+ * 23 ficheiros que ainda não tinham linha `OK` ficaram inconclusivos, apesar
+ * de o motor estar saudável. O tecto existe para um processo encravado, não
+ * para cortar um batch que ainda está a progredir. 30 min mantém a rede de
+ * segurança e deixa concluir o corpus observado; o cancelamento do utilizador
+ * continua a matar o processo imediatamente.
+ */
+const MAX_BATCH_TIMEOUT_MS = 30 * 60_000;
 /**
  * Tempo que damos a um processo morto para sair de facto depois de
  * `taskkill /T /F`. Passado isto, o outcome resolve como morto para o cap não

@@ -139,6 +139,17 @@ describe("scanner: a etapa não inventa números", () => {
     assert.equal(stage.percent, 100);
   });
 
+  test("a etapa usa a contagem do batch, não os veredictos já aceites", () => {
+    const state = stateOf({ filesInEngineScanned: 9, filesAnalyzed: 0, filesInEngineBatch: 800 });
+    assert.deepEqual(scanAnalysisStage(state), {
+      active: true,
+      done: 9,
+      total: 800,
+      percent: 1,
+    });
+    assert.equal(scanProgressPercent(state), 0);
+  });
+
   test("sem denominador real a barra fica indeterminada, mas a etapa continua honesta", () => {
     const state = stateOf({ filesTotal: undefined });
     assert.equal(state.filesTotal, undefined);
