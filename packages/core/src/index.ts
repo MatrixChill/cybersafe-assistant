@@ -12,6 +12,7 @@ export * from "./response.js";
 export * from "./process-termination-posix.js";
 export * from "./process-provider-posix.js";
 export * from "./mounts-posix.js";
+export * from "./usb-posix.js";
 export * from "./scoring.js";
 export * from "./signatures.js";
 export * from "./trust.js";

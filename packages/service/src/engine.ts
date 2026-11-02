@@ -101,6 +101,7 @@ import { createServiceLogWriters, shouldPersistEvent, formatScanLog, scanIdFromC
 import { UsbConfigStore, UsbProtectionMonitor } from "./usb-protection.js";
 import { UsbReadOnlyScanAdapter, criarConfirmacaoPresencaUsb } from "./usb-scan-adapter.js";
 import { criarDeteccaoUsbNativa } from "./usb-detection-adapter.js";
+import { criarDeteccaoUsbPosix } from "./usb-detection-adapter-posix.js";
 import { UsbProtectionRuntime, caminhoConfigUsb, motivoBloqueioUsbPolicy } from "./usb-protection-runtime.js";
 import { formatKillBlockedLine, type KillRequestKind } from "./logging.js";
 import type {
@@ -632,7 +633,11 @@ export class ProtectionEngineService {
     // identidade, e o adapter volta a enumerar para CONFIRMAR o alvo ANTES de
     // o scan declarar `completed` — as duas leem a mesma fonte, sem duplicar
     // o enumerador nativo.
-    const deteccaoUsb = criarDeteccaoUsbNativa();
+    // A fonte depende da plataforma; a política não muda uma vírgula. Em Linux não
+    // há CIM: o detetor nativo invocaria PowerShell para enumerar, e o kernel já
+    // diz o transporte em sysfs. O ramo `else` é a linha exata que estava aqui.
+    const deteccaoUsb =
+      process.platform === "linux" ? criarDeteccaoUsbPosix() : criarDeteccaoUsbNativa();
     this.usbAdapter = new UsbReadOnlyScanAdapter({
       scans: {
         startScan: (type, targetPath, options) => this.scanManager.startScan(type, targetPath, options),

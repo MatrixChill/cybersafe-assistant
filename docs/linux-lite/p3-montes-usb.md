@@ -139,6 +139,82 @@ Leitura honesta do que saiu:
    «libertar espaço neste volume», o que é inexecutável num `ro` — em Windows o
    mesmo raciocínio vale para um DVD/ISO montado ou uma partição protegida.
 
+## Deteção USB em Linux (`usb-posix.ts` + a porta do monitor)
+
+O pedido de análise de um volume já tem caminho feito no serviço:
+`usb-protection.ts` (o monitor), `usb-scan-adapter.ts` (força `readOnly: true`
+e recusa sem contrato de leitura pura) e a porta `PortaDeteccaoUsb`. O que
+faltava era a **fonte** em Linux: `engine.ts` chamava `criarDeteccaoUsbNativa()`
+sem perguntar a plataforma, e essa função enumera por CIM em PowerShell. Em
+Linux o resultado seria sempre uma falha de enumeração — e uma pen verdadeira
+nunca chegaria a aparecer. Por isso a linha passou a ser
+`process.platform === "linux" ? criarDeteccaoUsbPosix() : criarDeteccaoUsbNativa()`;
+o ramo Windows é a linha exata que lá estava.
+
+A regra espelha a do Windows — **armazenamento E transporte, nunca um atributo
+só** (um `DriveType = 2` isolado não chega; `removable` isolado também não):
+
+| Fato | Onde vive | Como é lido |
+|---|---|---|
+| Transporte USB | `readlink` de `/sys/block/<dev>` | um segmento `usb<N>` no caminho até à raiz do sysfs é o controlador; `usb1:1.0` (a interface) não conta |
+| Volume montado | `/proc/self/mountinfo` | join pelo `major:minor` do disco **e** das partições, com os pseudo-FS de `mounts-posix.ts` excluídos |
+| Identidade da inserção | `/sys/block/<dev>/device/serial` | com serial → `usb-serial:<serial>` / `sysfs-serial`; sem serial → `usb-index:<nome>` / `disk-index-fallback` |
+| Amovível | `/sys/block/<dev>/removable` | `1`/`0`; ausente é `null`, não `false` |
+
+Três decisões que este corte toma para não mentir:
+
+- **sem serial, sem auto-scan.** `disk-index-fallback` é a proveniência que o
+  monitor já recusa, porque `sdb` é reciclável entre inserções. Não inventei
+  identidade estável onde o kernel não a dá — passei a recusa para Linux em vez
+  de a contornar.
+- **`listarPendentes` não é implementado.** O estado de espera do Windows existe
+  porque um disco pode ganhar letra mais tarde, e o motivo que o monitor mostra
+  nomeia essa letra («a aguardar volume (letra) do Windows»). Em Linux um disco
+  sem volume não tem nada a aguardar por nós — montar seria ação privilegiada,
+  que o plano proíbe. Fica em `semVolume`, declarado.
+- **a raiz principal é a montagem mais curta.** Um bind de uma subpasta do mesmo
+  `major:minor` não representa o volume; ordenar por profundidade evita escolher
+  `/mnt/pen/docs` como raiz de análise.
+
+### Medido em Linux real, sem pen ligada
+
+Ambiente: WSL2, `Linux 6.6.114.1-microsoft-standard-WSL2`, uid 1000, Node
+22.23.4. Reproduzir:
+
+```bash
+wsl -e bash -lc 'S=/mnt/c/Users/caioc/.cybersafe-integration/qoder-linux-lite/repo/scripts/linux-lite; \
+  tr -d "\015" < $S/wsl-p3-usb.sh > /tmp/usb.sh && bash /tmp/usb.sh'
+```
+
+```text
+SYSBLOCK {"nome":"sdd","dev":"8:48","removivel":"0","gib":1024,"usb":false,"serie":null}
+SYSBLOCK {"nome":"sda","dev":"8:0","removivel":"0","gib":0.4,"usb":false,"serie":null}  (…sdb, sdc iguais)
+USB    {"ok":true,"motivo":null,"dispositivos":[],"semVolume":[],
+  "naoAtribuidos":["loop0"…"ram15","sda","sdb","sdc","sdd"],"ilegiveis":0,
+  "observados":[…, {"nomeBloco":"sdd","usb":false,"amovivel":false,"montagens":2}]}
+PORTA  {"ok":true,"semEstadoEspera":true,"dispositivos":[]}
+BYID   {"usb":[],"total":8}
+KERNEL 6.6.114.1-microsoft-standard-WSL2 | PLATAFORMA Linux | UID 1000
+```
+
+O que esta medição prova e o que não prova:
+
+1. **A leitura é real, não um zero inventado:** 28 nós de `/sys/block` lidos,
+   topologia de cada um obtida por `readlink`, `ilegiveis: 0`. `sdd` aparece com
+   `montagens: 2` — os dois pontos de montagem do mesmo `8:48` (`/` e
+   `/mnt/wslg/distro`), a mesma deduplicação que a secção dos volumes mediu.
+2. **«Não há USB» tem verificação independente:** `/dev/disk/by-id` tem 8
+   entradas e nenhuma contém `usb`. O veredicto do sysfs e o do udev coincidem.
+3. **Nada foi afirmado sobre uma pen.** Não há medição de deteção positiva, de
+   serial real, de `removable: 1` ou de uma análise `readOnly` de um volume
+   amovível. Isto precisa de hardware: ligar uma pen (ou passagem USB numa VM
+   Ubuntu/Mint) e voltar a correr a mesma sonda. Até lá, «a deteção USB de Linux
+   está implementada e testada contra árvores de sysfs representativas» é o que
+   se pode dizer — não «pen detetada e analisada».
+4. **A porta do monitor funciona em Linux:** `criarDeteccaoUsbPosix().listar()`
+   correu no `dist` compilado e devolveu a lista vazia sem lançar, com o estado
+   de espera declarado ausente (`semEstadoEspera: true`).
+
 ## Testes
 
 `packages/core/test/p3-montes-posix.test.js` — 11 casos, com a tabela real de
@@ -163,18 +239,53 @@ queda antiga para «o mais cheio» preservada quando não há nem uma nem outra)
 o volume só-leitura fora do «mais cheio» do aviso — em forma Linux e em forma
 Windows.
 
+`packages/core/test/p3-usb-posix.test.js` — 12 casos sobre uma árvore de sysfs em
+memória. Um nó de `/sys/block/<dev>` é **symlink e diretório ao mesmo tempo**,
+como em sysfs real; a primeira versão do fixture só era uma das coisas e os
+quatro casos de partição falharam por isso — não pelo código. Cobre: transporte
+pelo segmento `usb<N>` (e `usb1:1.0`, a interface, a não contar); pen com serial
+com raiz mais curta e `rootPaths` completas; sem serial → índice marcado como
+reciclável; não-USB em `naoAtribuidos` com a contagem de montagens verdadeira;
+USB sem volume em `semVolume`; a única montagem ser `tmpfs` e isso não fazer do
+disco um volume; pen montada como disco inteiro; disco ilegível contado sem apagar
+os outros; cada uma das duas tabelas em falta a falhar com motivo que a nomeia;
+`queue`/`device`/`holders` a não contarem como partições; `removable` ausente
+como `null` e não como `false`.
+
+`packages/service/test/p3-usb-detection-posix.test.js` — 8 casos que ligam o
+detetor ao contrato que já existia: a forma publicada é a da porta
+`PortaDeteccaoUsb`; não há `listarPendentes`; `ok: false` lança com o motivo em
+vez de devolver lista vazia; cada pedido lê fresco (a confirmação de presença não
+pode receber leitura velha); a confirmação terminal aceita o mesmo pen, recusa o
+pen ausente e recusa a identidade de índice; e o `UsbReadOnlyScanAdapter` arranca
+`custom` na raiz do detetor Linux sempre com `readOnly: true` e `confirmarTerminal`
+ligado. O ficheiro está inscrito na lista de `scripts.test` do `@cybersafe/service`.
+
 Regressão no clone isolado, depois de `disk.ts` e `hardware.ts` terem mudado
 win32, Node 26.3.0 — este corte **altera código partilhado com o Windows**, por
 isso os números abaixo são a prova, não uma nota de rodapé:
 
 | Suite | Resultado |
 |---|---|
-| `@cybersafe/core` | 1208 testes, 1176 passados, **0 falhas**, 31 `skip`, 1 `todo` |
+| `@cybersafe/core` | 1220 testes, 1188 passados, **0 falhas**, 31 `skip`, 1 `todo` |
 | `@cybersafe/app` | 2877 / 2877 |
 | `@cybersafe/desktop` | 645 / 645 |
-| typecheck `core` | limpo |
+| `@cybersafe/service` | 951 testes, 943 passados, **8 falhas** — ver o parágrafo seguinte |
+| typecheck `core` e build `service` | limpos |
 
-O salto de 1201 para 1208 testes são os 7 casos novos. A primeira corrida
+As 8 falhas do `service` **não vêm deste corte**, e isso foi medido em vez de
+afirmado: `p1-3-prefetch-isolation.test.js` falha 7 dos seus casos (`B tem de ler
+o SEU veredicto (clean), nunca o de A — obtido "inconclusive", regras:
+dangerous_file_extension,suspicious_location`) com o motor YARA real carregado
+(`[YARA] Scanner carregado (file). Regras: 1`). Revertido `engine.ts` para o
+estado do commit — `grep -c criarDeteccaoUsbPosix` a zero, rebuild limpo — os
+mesmos 7 casos falharam da mesma maneira. Ficam registadas como estado pré-existente
+da branch neste clone, não como regressão deste corte; a causa (regras de
+localização/extensão a disparar sobre os caminhos do fixture) não foi
+diagnosticada aqui.
+
+O salto de 1201 para 1208 testes foram os 7 casos do corte anterior; 1208 → 1220
+são os 12 casos de `p3-usb-posix.test.js`. A primeira corrida
 desta mudança **rebentou 7 testes Windows** (`p0-sensor-concurrency`,
 `p0-slow-read-ownership`, `pap-subprocess-budget`) com `Unexpected dependency
 node:fs`: esses sandboxes carregam `hardware.ts` num `vm` com lista fechada de
@@ -187,12 +298,17 @@ consulta a fonte POSIX» fixa que o caminho Windows não toca em `/proc`.
 
 ## Ainda não feito (não declarar como feito)
 
-- **O volume montado ainda não é alvo de scanner.** A lista chega correta ao
-  `DiskSnapshot` e portanto ao PC Center; escolher um volume e analisá-lo com
-  os motores disponíveis (§10) ainda não está ligado ao pedido de análise.
-- **Nenhum volume amovível foi medido.** A máquina da medição não tinha USB
-  ligado; não há leitura de `/sys/block/<dev>/removable` nem claims de
-  «unidade amovível detetada». A coluna `removable` não existe neste corte
-  exatamente por isso.
+- **O volume escolhido pelo utilizador ainda não é alvo de scanner.** Em Linux o
+  volume amovível já chega ao `UsbReadOnlyScanAdapter` pela porta do monitor (e os
+  testes fixam que esse caminho corre com `readOnly: true`), mas a lista de
+  montagens publicada no PC Center ainda não tem o gesto «analisar este volume»
+  ligado ao pedido de análise (§10). O que falta é a escolha em interface e o
+  pedido explícito, não a descoberta.
+- **A deteção positiva de USB não foi medida.** `/sys/block/<dev>/removable`,
+  `device/serial` e o join por `major:minor` são lidos e testados, e a máquina
+  real foi interrogada (28 nós, nenhum em USB, confirmado por `/dev/disk/by-id`);
+  falta a medição com uma pen ligada — deteção, serial real, `removable: 1` e uma
+  análise `readOnly` de um volume amovível. Sem hardware não há esse número, e não
+  se escreve um.
 - **Montar, formatar, reparar ou apagar:** nada implementado, nada proposto.
 - **Página Otimizar/Firewall (§11)** e quarentena/histórico (§9): por fazer.
