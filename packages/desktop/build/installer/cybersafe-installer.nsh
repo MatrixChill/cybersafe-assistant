@@ -381,9 +381,9 @@ Var CSSpaceState
 
     !insertmacro MUI_HEADER_TEXT "$(CS_WelcomeHeader)" ""
     !insertmacro CS_BeginPage "page-welcome.bmp"
-    ; Mostra o documento real de licencas, incluido no instalador. Nao ha texto
-    ; de licenca inventado nem um link remoto.
-    File "/oname=THIRD-PARTY-NOTICES.txt" "${PROJECT_DIR}\assets\licenses\THIRD-PARTY-NOTICES.txt"
+    ; O staging do electron-builder nao contem assets/licenses; o documento
+    ; revisto fica na raiz do repo e e lido no compile-time.
+    File "/oname=THIRD-PARTY-NOTICES.txt" "${BUILD_RESOURCES_DIR}\..\..\..\assets\licenses\THIRD-PARTY-NOTICES.txt"
     Call CS_CreateFonts
 
     ${NSD_CreateLabel} 0 0 1u 1u "01  /  BOAS-VINDAS"

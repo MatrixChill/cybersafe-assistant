@@ -44,7 +44,8 @@ test('o atalho do menu Iniciar é escolhido no ecrã e respeitado na instalaçã
 
 test('o botão de licença usa o documento real incluído no setup', () => {
   assert.ok(fs.existsSync(license), 'THIRD-PARTY-NOTICES.txt em falta');
-  assert.ok(nsh.includes('${PROJECT_DIR}' + '\\assets\\licenses\\THIRD-PARTY-NOTICES.txt'), 'caminho da licenca nao usa PROJECT_DIR');
+  assert.match(nsh, /File "\/oname=THIRD-PARTY-NOTICES\.txt" "\$\{BUILD_RESOURCES_DIR\}/);
+  assert.doesNotMatch(nsh, /File "\/oname=THIRD-PARTY-NOTICES\.txt" "\$\{PROJECT_DIR\}/);
   assert.match(nsh, /CS_LicenseBtn/);
   assert.equal((lang.match(/LangString CS_LicenseBtn /g) || []).length, 26);
 });

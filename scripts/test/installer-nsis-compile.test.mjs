@@ -8,12 +8,14 @@ const root=process.cwd();
 const compiler=path.join(process.env.LOCALAPPDATA??'', 'electron-builder/Cache/nsis/nsis-3.0.4.1/Bin/makensis.exe');
 test('production NSIS hooks compile against MUI without application payload or installation', {skip:!fs.existsSync(compiler)},()=>{
  const dir=fs.mkdtempSync(path.join(os.tmpdir(),'cybersafe-nsis-contract-'));
+ const appDir=path.join(dir,'app');
+ fs.mkdirSync(appDir,{recursive:true});
  const source=`Unicode true
 RequestExecutionLevel user
 Name "CyberSafe compile contract — not a candidate"
 OutFile "${dir}/contract.exe"
 !define BUILD_RESOURCES_DIR "${root}/packages/desktop/build"
-!define PROJECT_DIR "${root}"
+!define PROJECT_DIR "${appDir}"
 !define VERSION "0.0.0-contract"
 !define APP_FILENAME "CyberSafe-contract"
 !define PRODUCT_FILENAME "CyberSafe-contract"
