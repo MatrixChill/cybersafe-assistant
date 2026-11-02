@@ -143,7 +143,7 @@ export function UsbProtectionPanel() {
             Com a monitorização ligada, o serviço pede a análise das unidades USB ligadas depois disto —
             uma de cada vez, pela fila do motor, e só com o modo só-leitura provado. Não bloqueia, não ejeta,
             não impede o uso da unidade e não é proteção em tempo real: a lista de unidades é lida a
-            cada 5 s. O que já estava ligado quando se ativou não é analisado.
+            cada 5 s. O que já estava ligado quando se ativou não é analisado automaticamente; usa «Analisar esta unidade» para o fazer manualmente.
           </p>
         </div>
         <button
