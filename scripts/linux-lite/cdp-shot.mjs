@@ -48,6 +48,46 @@ if (!imagem) { console.log("CDP_SEM_DADOS"); process.exit(1); }
 fs.writeFileSync(saida, Buffer.from(imagem, "base64"));
 console.log(`SHOT_CDP_OK ${saida} bytes=${fs.statSync(saida).size} alvo=${(pagina.url || "").slice(0, 80)}`);
 
+// A imagem diz «fundo escuro»; não diz porquê. O mesmo canal responde às duas
+// perguntas que separam «HTML carregado, React não montou» de «montou mas está
+// vazio»: o que o DOM tem, e o que rebentou durante o arranque do renderer.
+await inspecionar(pagina.webSocketDebuggerUrl);
+
+async function inspecionar(urlWs) {
+  const excecoes = [];
+  const resultado = await new Promise((resolve, reject) => {
+    const ws = new WebSocket(urlWs);
+    const prazo = setTimeout(() => reject(new Error("timeout_inspecao")), 12000);
+    const pedir = (id, method, params) => ws.send(JSON.stringify({ id, method, params }));
+    ws.addEventListener("open", () => {
+      pedir(10, "Runtime.enable", {});
+      setTimeout(() => {
+        pedir(11, "Runtime.evaluate", {
+          expression: "JSON.stringify({root: document.querySelector('#root')?.childElementCount ?? -1, body: document.body?.childElementCount ?? -1, texto: (document.body?.innerText || '').replace(/\\s+/g,' ').slice(0,160), scripts: [...document.querySelectorAll('script')].map(s=>s.src||'(inline)').slice(0,6)})",
+          returnByValue: true,
+        });
+      }, 1500);
+    });
+    ws.addEventListener("message", (evento) => {
+      let m;
+      try { m = JSON.parse(String(evento.data)); } catch { return; }
+      if (m.method === "Runtime.exceptionThrown") {
+        const d = m.params?.exceptionDetails;
+        excecoes.push(`${d?.url || "?"}:${d?.lineNumber ?? "?"} ${d?.exception?.description || d?.text || "?"}`.slice(0, 300));
+      }
+      if (m.id === 11) {
+        clearTimeout(prazo);
+        ws.close();
+        resolve(m.result?.result?.value ?? "{\"erro\":\"sem_valor\"}");
+      }
+    });
+    ws.addEventListener("error", (e) => { clearTimeout(prazo); reject(new Error(String(e?.message || "erro_ws"))); });
+  });
+  console.log(`DOM ${resultado}`);
+  console.log(`EXCECOES ${excecoes.length} ${JSON.stringify(excecoes.slice(0, 4))}`);
+}
+
+
 function httpGetJson(url) {
   return new Promise((resolve, reject) => {
     import("node:http").then(({ get }) => {
