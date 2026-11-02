@@ -93,6 +93,13 @@ node scripts/release-signing.mjs --verify release/update-manifest.json \
   essa janela deixa instalações antigas sem verificação — é uma decisão do
   proprietário, não do build.
 
+### Recuperação por perda ou suspeita de compromisso
+
+- Suspender publicação/assinatura e revogar o segredo comprometido no environment; não gerar nem substituir pares existentes automaticamente. Guardar evidência sem copiar material privado para relatórios.
+- Se a chave anterior continuar íntegra e acessível, a rotação planeada exige aprovação do novo fingerprint e uma versão verificável pela chave antiga antes de assinar releases só com a nova.
+- Se a chave se perdeu ou está comprometida, o pin único impede recuperação automática de clientes antigos. Distribuir nova confiança apenas por instalador/manual independente revisto pelo proprietário; uma assinatura da chave comprometida não restaura confiança. O código atual não implementa multi-key nem revogação remota.
+- Recuperar backup só em ambiente seguro e autorizado, verificar a pública/fingerprint contra o registo aprovado, sem imprimir privada. Testar recuperação com fixtures isoladas; aprovação criptográfica não substitui a aprovação da candidata.
+
 ## Limites
 
 - Sem a chave aprovada, `release-trust.json` fica desativado e o updater

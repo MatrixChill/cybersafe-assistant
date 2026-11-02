@@ -64,8 +64,19 @@ Preparar corpus benigno isolado e, só nesta VM, uma pasta EICAR separada.
 - Análise rápida e profunda.
 - Confirmar ficheiros considerados/analisados/conclusivos/inconclusivos/excluídos.
 - Confirmar saúde de ClamAV, YARA, HashDB e motor nativo; não apresentar YARA de teste como cobertura real.
-- Registar tempo total e fases. A meta de cinco minutos para 800 ficheiros só é PASS com medição no artefacto instalado.
+- Registar tempo total e fases. O timeout de 30 minutos não comprova melhoria face aos 10 min 48 s anteriores; só uma comparação equivalente medida permite afirmar aceleração.
 - Confirmar que ficheiros não analisados não são contados como limpos.
+
+### Repetição curta dos 800 ficheiros — só pelo proprietário na VM
+
+1. Identificar candidata/SHA-256, versão, snapshot/recursos da VM, versões/data das bases e exclusões. Guardar inventário com hashes do mesmo corpus isolado de 800 ficheiros. Análise rápida tem orçamento, não garante cobertura de todo o disco; não substituir a prova por benchmark sintético.
+2. Ativar apenas no processo de ensaio CYBERSAFE_DEBUG_SCAN=1 e guardar logs locais. Registar clique→primeiro estado, preparação, descoberta, PREPROCESS_BEGIN/END, PHASE_BEGIN/END, BATCH_FIRST_PROGRESS, SCANMANAGER_BATCH_END, segundo percurso/ENGINE_PHASE, fecho e HISTORY_RECORD. Capturar UI durante lote e após terminal. Eventos ausentes são lacunas, não tempos inventados.
+3. Progresso do lote (filesInEngineScanned) não se soma a resultados globais. Registar filesTotal, filesScanned/filesProcessed, filesAnalyzed, exclusões, falhas e inconclusivos. No terminal não pode existir etapa/relógio de lote ativo; nenhuma contagem excede o total do seu âmbito. Distinguir ZIP externo das entradas internas.
+4. Conferir histórico após conclusão e reinício: terminal, contagens e razões agregadas de exclusão/inconclusivos, sem exportar caminhos pessoais. Não avaliado nunca significa limpo. Investigar os anteriores 23 inconclusivos e 7 excluídos sem exigir que desapareçam nem reduzir cobertura.
+5. Ensaios separados, em cópias: cancelar no lote e no segundo percurso; esperar drenagem e verificar por PID/início registados que não ficam filhos do ensaio órfãos. Novo scan só após libertação do slot. Prazo/falha controlados apenas no laboratório autorizado: nunca terminar processos pelo nome ou alterar relógio/proteções.
+6. RESOURCE_SUMMARY mede CPU/RSS do Node, não CPU ClamAV, disco ou fila RPC. Comparações indicam cache fria/quente, bases e recursos; sem equivalência não atribuir melhoria ao código.
+
+Falha adicional **não resolvida**: scan-post-batch-no-double-clamav.test.js recebeu inconclusive porque o YARA não abriu um alvo benigno da fixture. Diagnosticar no ambiente isolado; preservar a falha, não saltar a asserção, não converter erros em clean nem desligar o antivírus para obter verde.
 
 ## 5. Quarentena, restauro e relatório
 
@@ -103,6 +114,13 @@ Estado deste procedimento: **PREPARADO, NÃO EXECUTADO EM VM**. A sintaxe do hel
 - Confirmar que `KILL_TERMINATION_DISABLED=true` continua a recusar o caminho legado.
 - Repetir com a janela em segundo plano e com o serviço ocupado; não aceitar um freeze como sucesso.
 
+### USB e Dashboard — aceitação instalada
+
+- Pen presente na ativação: enumerada, baseline explicado e sem auto-scan. Manual com consentimento funciona sem reinserção, em read-only.
+- Nova inserção com opt-in válido: auto pode iniciar; Scanner ocupado mostra fila automática/causa e processa após libertar slot. Manual ocupado é recusado com causa: não há fila manual nesta implementação.
+- Cancelar só a análise USB própria. Remoção/reinserção sem duplicação, sem cancelar outra análise, sem escrita/ejeção/bloqueio do dispositivo. Sem opt-in não há análise automática.
+- Dashboard instalado: causas concretas; carregado/ativo, monitorização, cobertura limitada/desconhecida e serviço degradado são distintos. Quatro motores ativos não bastam para proteção completa.
+
 ## 7. MATRIX online
 
 Só com fornecedor real e credencial autorizada.
@@ -125,9 +143,9 @@ Exige OpenSSL local (ou `CYBERSAFE_TEST_OPENSSL`), gera TLS/Ed25519 efémeros, u
 Para o canal oficial, exigir chave pública de produção, fingerprint aprovado e feed assinado. Para upgrade com candidatas de teste, usar configuração explicitamente isolada e aprovada; nunca substituir `release-trust.json` de produção por material de fixture.
 
 - Feed de teste assinado, manifesto, tamanho e SHA-256.
-- Atualização aplicada, reinício e versão nova.
+- Modo atual: transferência verificada e abertura da pasta sem execução, instalação bloqueada. Aplicação manual/reinício só com autorização e segunda versão validada ou fixture isolada. Não é instalação automática comprovada.
 - Assinatura inválida, fingerprint errado e manifesto truncado: recusa fechada.
-- Rollback para a versão anterior sem perder dados.
+- Recuperação/reinstalação manual autorizada da versão anterior, sem perder dados; não afirmar rollback automático implementado.
 - `release-trust.json` só pode estar `enabled:true` com chave/fingerprint reais; nunca com fixture.
 
 ## 9. Upgrade, reparação e desinstalação
@@ -161,8 +179,9 @@ Não declarar PASS sem output. Um teste não executado fica **NÃO EXECUTADO**, 
 
 ## 12. Bloqueadores atuais
 
-- Não existe candidata integrada final; o setup V3 é uma **pré-visualização de design** a partir do `win-unpacked` existente.
-- Os BMPs V3 estão em `tmp-installer-preview/`, não em `packages/desktop/build/installer/`.
+- Não existe candidata do novo HEAD/tree: freeze/packaging bloqueados por aprovação e registo externo ausentes.
+- Hooks/bitmaps oficiais estão em packages/desktop/build/installer; compilação real dos hooks não é setup com payload nem aceitação visual. Capturas históricas/previews não validam o código atual.
+- Integração adicional Scanner 27/28: recusa de leitura YARA ainda por diagnosticar.
 - A assinatura Authenticode continua ausente.
 - A chave Ed25519 de produção e o feed assinado continuam por provisionar.
 - O corpus YARA disponível é de teste.

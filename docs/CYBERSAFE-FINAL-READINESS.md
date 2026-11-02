@@ -1,5 +1,51 @@
 # CyberSafe — intensive close / continuidade técnica A–K
 
+## Fecho técnico Windows — 2026-11-02, continuação após db8f863
+
+**Não é aprovação de Release.** Estado: **IMPLEMENTADO / TESTADO AUTOMATICAMENTE nos contratos abaixo; PENDENTE DE TESTE HUMANO e BLOQUEADO POR APROVAÇÃO para candidata/Release.** Existe ainda uma falha de integração Scanner/YARA, explicitamente não resolvida. As secções anteriores no tempo, abaixo deste checkpoint, são histórico e não aprovam este código.
+
+Ponto de partida preservado e já remoto: `db8f863668106c8b87f812c2bcf398156977dcfe`, tree `63301a47c63c99d5738a89732149fe95428c85e6`. Worktree autorizado: `freebuff-setup-final-20261102/repo`. Código fechado neste checkpoint: `7aa4c448b4cb8f21339355ee2584e1a01614eb41`; o pedido PENDING em `output/autonomous-close-20261102/review-request.json` identifica o HEAD/tree finais, incluindo documentação. Nenhuma aprovação anterior, incluindo 4069af1, é reutilizável.
+
+### Correções e provas
+
+- **Scanner — IMPLEMENTADO / TESTADO AUTOMATICAMENTE:** limpar conjuntamente `filesInEngineBatch`, `filesInEngineScanned` e `engineBatchStartedAt` em qualquer terminal. A UI também ignora os campos residuais de terminais legados. Histórico passa a persistir `filesExcludedBy` opcional, agregado, sem caminhos; validação independe da ordem de chaves JSON e recusa entradas inseguras. Razões dos inconclusivos mantidas. Regressões red→green registadas nos logs.
+- `filesInEngineScanned` é progresso dentro do lote, não resultados globais fechados; `filesScanned`/`filesProcessed` representam resultados processados, incluindo exclusões. `filesAnalyzed` não deve ser somado de novo ao batch nem lido como número de conclusivos. `filesTotal` é o denominador selecionado; o relógio de batch só descreve trabalho ativo. O timeout de 30 minutos foi preservado: não é prova de aceleração.
+- Instrumentação existente preservada: preparação/descoberta, PREPROCESS, primeira resposta de batch, SCANMANAGER_BATCH_END, motores por ficheiro, fecho e HISTORY_RECORD. RESOURCE_SUMMARY mede CPU/RSS do processo Node, não CPU do filho ClamAV, disco nem fila RPC. Não se acrescentaram medições inferidas. A repetição dos 800 ficheiros reais permanece exclusiva da VM.
+- **Falha aberta — NÃO RESOLVIDA:** integração adicional `scanner-final-extra.log`: **27/28**, não 28/28. `scan-post-batch-no-double-clamav.test.js`, caso dos seis ficheiros, espera `safe` para `d.txt` e recebe `inconclusive`. Diagnóstico de `scanFileOutcome`: YARA exit 1, `could not open file`, subprocesso terminado. Corpus YARA de fixture com `condition: false`; não se usou EICAR. Binário YARA direto reproduz a recusa para o conteúdo original; outros conteúdos benignos são lidos no mesmo ambiente. Numa leitura posterior o próprio Node recebeu UNKNOWN/open. Isto localiza a falha fora da contabilidade do Scanner, mas **não prova a origem da recusa nem exclui defeito do produto**. Não se alterou a fixture, não se saltou o teste, não se reduziu deteção nem se desligaram proteções. Exige diagnóstico/ensaio isolado antes de aprovação final.
+- **Gestor de Tarefas — TESTADO AUTOMATICAMENTE:** implementação 598c50b preservada. Novos casos prepare→confirm: idle; análise/fila entretanto ocupadas; saída natural; PID reutilizado; elegibilidade revogada; filho próprio; operação crítica; shutdown; autenticação perdida; read-only; ticket expirado/inválido; controlador encerrado. Confirm não reabre por PID; handle fecha uma vez e ticket é de uso único. **20/20**, com handles falsos, nenhum processo pessoal terminado. Prova com processo real: PENDENTE DE TESTE HUMANO.
+- **USB — TESTADO AUTOMATICAMENTE:** novo teste com runtime real prova enumeração baseline e análise manual read-only sem reinserção: runtime **20/20**; conjunto anterior **68/68** preservado, com sobreposição, não somar. Baseline não dispara auto; auto requer opt-in e pode enfileirar. Manual quando ocupado é recusado com causa, **não existe fila manual**. Monitor, consentimento e dispositivos não foram alterados.
+- **Dashboard — TESTADO AUTOMATICAMENTE:** **3/3**, incluindo produtor real `getProtectionState()` serializado em JSON, sem `init()`. Razões de degradação chegam ao veredito; cobertura desconhecida não vira proteção completa. Não é snapshot de uma instalação aprovada.
+- **NSIS — IMPLEMENTADO / TESTADO AUTOMATICAMENTE:** tema dos diálogos filhos/configuração, instalação por utilizador e progresso; callback SHOW é consumido pelo hook real `customInstallMode`, depois da licença opcional. Corrigida mensagem `0x401` (PBM_SETRANGE) para `0x2001` (PBM_SETBKCOLOR); nunca se altera posição/progresso por timer. Compilação real com toolchain NSIS 3.0.4.1 e recursos 3.4.1 fixados pelo builder, três configurações (per-user, licença, all-users), 26 idiomas: conjunto **15/15**, sem skips. Permanecem avisos 6001 do harness sem payload: 3 per-user/licença, 5 all-users; nenhum 6040. EXE de contrato não executado nem tratado como setup. Aparência, capturas reais e instalação continuam PENDENTES DE TESTE HUMANO. 2010836 era normalização de sintaxe, não correção visual comprovada.
+- **Atualizador — IMPLEMENTADO / TESTADO AUTOMATICAMENTE dentro do laboratório:** UX manual não promete desbloqueio automático nem afirma hash verificado antes do download. Cadeia ficheiro benigno real→produtor→assinador→cliente e cache adulterada antes de revelar pasta cobertas. **49/49** na cadeia existente e **27/27** no rerun com testes novos, sobrepostos; não somar como 76 únicos. HTTPS local, Ed25519, assinatura/hash inválidos, cancelamento e redirects permitidos cobertos; UI **57/57**, incluída na suíte final. Não existe feed público/upgrade instalado validado. `release-trust.json` continua disabled; `manualDownloadOnly`, BLOCKED_PUBLISHER e BLOCKED_INSTALLER mantidos. Sem chave de produção aprovada, sem execução automática e sem Authenticode declarado.
+- **Freeze — defeito demonstrado e corrigido:** exclusão genérica de pastas `build` omitira os hooks/bitmaps fonte em `packages/desktop/build`. Exceção estrita para esse diretório acrescenta 12 recursos ao inventário (1847 entradas neste checkpoint). Regressões de alteração/adição/remoção falharam antes e passaram depois; gate/autoridade/assets **48/48**. As caches geradas continuam excluídas. Isso fortalece o gate, não concede aprovação.
+
+### Verificação final e limites
+
+- Suíte da aplicação no marco final: **2899/2899**, zero skips/falhas; a evidência anterior 2895/2895 permanece distinta.
+- Serviço dirigido final: **53/53**; terminação final **20/20**, histórico final **17/17** sem `init()`; são conjuntos sobrepostos, não uma soma única.
+- Core dirigido: **27/27** (terminação segura, progresso/kill grace/error/death/lease). Workflows: **4/4**.
+- Builds shared-types/core/service e build da aplicação (`tsc -b && vite build`): exit 0. Aplicação mantém aviso de chunks >500 kB; não foi suprimido. Não equivale a build/payload oficial.
+- `git diff --check` e revisão dos deltas efetuados; nenhuma dependência npm, versão, trust ou chave de produção alterada. Inspeção heurística de linhas novas/caminhos sem indicadores de segredo; não é auditoria exaustiva. Licenças, YARA 4 ficheiros, ClamAV 45 ficheiros e seed 4 ficheiros/175916377 B verificados pelo preflight. Logs e códigos de saída em `output/autonomous-close-20261102/`.
+- **Limitação registada:** execução anterior completa de `r7-l3-history` passou 18 testes, mas dois casos antigos chamavam `engine.init()` e arrancaram scheduler/freshclam em TEMP isolado, com warnings. Não repetir no PC pessoal; a execução final filtrada 17/17 não inicializa proteção. Não foi instalação, teste humano ou prova de candidata.
+- Preflight offline: **exit 1**, zero inputs ausentes; bloqueio `approver-registry-missing` (`CYBERSAFE_APPROVERS_FILE` ausente). Freeze aprovado novo **NÃO GERADO**. Candidata/SHA do setup novo **NÃO GERADOS**. Não foram executados instaladores, VM, prova real800, terminação de processos pessoais, merge/tag/Release/upload ou limpeza de branches.
+
+### Git, PR e próximos gates
+
+Cinco commits de código nesta continuação, sem atribuição automática: `3ef22ed` Scanner/histórico; `8607f84` transições/USB/Dashboard; `5fba5ed` NSIS; `3fb5751` updater; `7aa4c44` cobertura do freeze. Commit documental posterior não altera as provas de código. A base remota continua db8f863; estes deltas locais ainda não foram publicados.
+
+Consulta remota read-only em 2026-11-02: main `21fefa69352516c188f99c665966d4443588aa2b`; integração `db8f863668106c8b87f812c2bcf398156977dcfe`; Linux `d8dbc36007144c545a35b39c1d343c2a93f1174b`. Os três ramos antigos consultados estão contidos na integração; main também é ancestral. Não é licença para eliminar; confirmar novamente no momento autorizado da limpeza. PR apenas **draft local**, em `output/autonomous-close-20261102/PR-DRAFT.md`, sem PR remoto aberto nesta continuação.
+
+Decisões humanas específicas:
+1. Diagnosticar a recusa YARA num ambiente isolado e fornecer resultado; nenhuma aprovação final deve ocultar esta falha.
+2. Confirmar a identidade pretendida: candidata interna atual ou promover versão/canal para 0.2.0. Alterar versão exige novo HEAD/tree/pedido.
+3. Rever o pedido PENDING final e, só quando adequado, fornecer registo externo de aprovadores e aprovação operacional real para um packaging interno; nunca preencher approvedBy/approvedAt por inferência.
+4. Após o pipeline concluir: proprietário testa/captura o setup e a lista de aceitação em `docs/VM-ACEITACAO-CANDIDATA.md`.
+5. Rever chave pública/fingerprint/feed já propostos e custódia/recuperação; decidir Authenticode separadamente. Não regenerar pares existentes. Sem aprovação, updater fica unconfigured/manual bloqueado.
+6. Autorizar separadamente push dos deltas, merge na main, limpeza de branches e publicação pública; nenhum destes passos é consequência automática da aprovação técnica.
+
+---
+
+
 ## Continuação Windows v0.2.0 — 2026-11-02 (integration/windows-v0.2.0)
 
 **BLOCKED_WITH_EVIDENCE, não é aprovação de Release.** Este checkpoint refere-se
