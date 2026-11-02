@@ -351,7 +351,11 @@ function verificarArtefactos() {
 function identidadeDoDeb(info) {
   if (!info.ok) return `DEB_IDENTIDADE DESCONHECIDO ${info.saida.slice(0, 200)}`;
   const campo = (nome) => {
-    const m = info.saida.match(new RegExp(`^${nome}:\\s*(.+)$`, "m"));
+    // O `dpkg-deb --info` escreve os campos do control COM UM ESPAÇO à frente
+    // (medido: um `^Version:` estrito devolveu `null` para um pacote cujo
+    // `Version: 0.1.2` estava mesmo lá). O `^\s*` é o que evita uma verificação
+    // que falha fechada para «desconhecido» em vez de mostrar o valor.
+    const m = info.saida.match(new RegExp(`^\\s*${nome}:\\s*(.+)$`, "m"));
     return m ? m[1].trim() : null;
   };
   let esperado = null;
@@ -361,15 +365,31 @@ function identidadeDoDeb(info) {
     esperado = null;
   }
   const obtido = campo("Version");
+  // O `Version:` de um `.deb` não pode levar mais do que um `-` (é o separador
+  // upstream/revision), por isso o fpm reescreve os restantes. Medido no pacote
+  // de `7ae8b24`: entrei `0.1.11-internal.pap-r7.20261031`, saiu no control
+  // `0.1.11~internal.pap~r7.20261031` — cada `-` virou `~`, os pontos ficaram.
+  // Comparar a literally teria chamado «errado» a um pacote certo; a regra vem
+  // dessa medição, não de uma suposição. (E é a semântica deb correta: `~`
+  // ordena ANTES de nada, pelo que uma pré-lançamento fica mais antiga que a
+  // versão final, exatamente como deve ser numa atualização.)
+  const normalizada = esperado ? esperado.replace(/-/g, "~") : null;
+  const forma =
+    obtido === null ? "ausente"
+      : obtido === esperado ? "literal"
+        : obtido === normalizada ? "fpm:-para~"
+          : "divergente";
   return `DEB_IDENTIDADE ${JSON.stringify({
     esperado,
     obtido,
-    versaoIgual: !!esperado && obtido === esperado,
+    forma,
+    versaoOk: forma === "literal" || forma === "fpm:-para~",
     // Os campos que só existem porque o YAML os declara: se algum for `null`
     // depois do `--config`, a fusão não foi profunda.
     homepage: campo("Homepage"),
     maintainer: campo("Maintainer"),
-    temDescricao: info.saida.includes("Description:"),
+    section: campo("Section"),
+    descricao: campo("Description"),
   })}`;
 }
 
