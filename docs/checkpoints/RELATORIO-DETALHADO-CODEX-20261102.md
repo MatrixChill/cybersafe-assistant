@@ -109,3 +109,19 @@ Não há prova de suíte completa atual, revisão final de segredos, candidata i
 8. Obter autorizações específicas para VM/instalação quando necessárias, trust de produção, aprovação visual, freeze, main, tag e Release. Continuar trabalho independente enquanto esses gates estiverem pendentes.
 
 O objetivo mantém-se: candidata interna funcional e verificável antes do acabamento visual e instalador definitivo.
+
+## Continuação funcional — marco 2 (2026-11-02)
+
+- `5126587`: Configurações organizadas em sete categorias; o teste novo passou e o typecheck passou. Interação real Electron ainda pendente.
+- `b26d71c`: contexto de motores e filtro Groq concluídos; evidência offline anterior preservada, sem repetição nesta etapa.
+- `a18aa21`: teste benigno real ClamAV guardado; não foi repetido.
+- `4788e66`: cancelamento durante abertura HTTP fecha a resposta e recusa prosseguimento. Regressão vermelha antes; 21 testes relacionados PASS e desktop typecheck PASS depois. Procedimento manual MATRIX em `docs/MATRIX-VALIDACAO-ONLINE-MANUAL.md`; online não executado.
+- `d7f0f4b`: restauro recusa consentimento não booleano antes de efeitos, evitando confiança automática por string truthy. Regressão vermelha antes; 7 testes relacionados PASS e build serviço PASS depois.
+- `225353b`: Otimizar apresenta respostas parciais sem undefined/NaN, valida nomes próprios dos catálogos. Regressão vermelha antes; 8 testes PASS e app typecheck PASS depois.
+- 20 testes adicionais da cadeia manifesto/Ed25519/SHA e estado/recarga das definições PASS. Fontes externas simuladas: não é atualização online real.
+- Builds app e desktop PASS. Avisos: chunks acima de 500 kB e opções Vite deprecated/invalid; ainda não resolvidos.
+- Branch Codex publicada por autorização: SHA remoto confirmado `225353bf85f7df39772a613912274173bc6670f9`; main permaneceu `21fefa69352516c188f99c665966d4443588aa2b`. Sem PR, merge, freeze, tag ou Release. Revisão dos 25 ficheiros commitados desde R7 não encontrou padrões reconhecíveis Groq/GitHub/chave privada; não é uma auditoria universal de segredos.
+- Preflight packaging: binários/bundle presentes; seed e registo de aprovadores pendentes. Tentativa de preparar seed com a cache oficial local recusada antes da criação do output por ausência de daily.cld. A cache tem daily.cvd; não foi renomeada nem foram alterados os pinos.
+- Probe Scanner existente: expectativa antiga para pasta vazia corrigida contra contrato explícito atual; exige failed, progresso 0 e erro exato de zero candidatos. Timer de 30 s limpo após terminal. Três cenários PASS em execução local, motor mínimo benigno; não prova desempenho completo, USB, instalação nem meta de cinco minutos.
+
+Próximo trabalho: integração conjunta de quarentena e exclusões; ensaio instalado do protocolo individual em VM autorizada; validação visual/teclado das categorias; seed oficial correspondente aos pinos; testes de upgrade entre candidatas. A candidata Windows instalável final ainda não foi produzida. Aprovações visuais, instalação/VM e cadeia de publicação mantêm-se separadas.
