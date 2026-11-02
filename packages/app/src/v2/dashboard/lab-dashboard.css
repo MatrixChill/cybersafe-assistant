@@ -897,3 +897,6 @@ html[data-v2-theme="belbete"] .cs-v2 .v2-dashboard .panel {
 .cs-v2 .v2-dashboard .activity-original pre:focus-visible { outline: 2px solid var(--v2-accent); outline-offset: 2px; }
 .cs-v2 .v2-dashboard .activity-body p { overflow-wrap: anywhere; }
 .cs-v2 .v2-dashboard .activity-original { margin-top: 0.4rem; font-size: 10px; }
+
+/* Isolated proposal: the CSS core remains the fallback, never a second visible logo. */
+.cs-v2 .v2-dashboard .brand-scene[data-orbital-proposal="true"]:has(.three-scene)>.orbiting-core{opacity:0}

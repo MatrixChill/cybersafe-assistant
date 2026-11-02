@@ -61,7 +61,8 @@ const DEFAULT_CLAMAV_DB = 'C:/Users/caioc/.cybersafe-integration/pap-integration
 // de escrita intacto para o operador experimentar à mão.
 const ARGV = new Set(process.argv.slice(2));
 // --settings-proof exercises navigation only; never isolates/restores/deletes.
-const APPEARANCE_PROOF = ARGV.has('--appearance-proof');
+const ORBITAL_PROOF = ARGV.has('--orbital-proof');
+const APPEARANCE_PROOF = ARGV.has('--appearance-proof') || ORBITAL_PROOF;
 const SETTINGS_PROOF = ARGV.has('--settings-proof') || APPEARANCE_PROOF;
 const INTERACTIVE_ONLY = ARGV.has('--interactive=only');
 const INTERACTIVE = INTERACTIVE_ONLY || ARGV.has('--interactive');
@@ -166,6 +167,7 @@ let evidenceDir;
 
 deps.spawn = (cmd, args, options) => {
   const env = { ...options.env };
+  if (ORBITAL_PROOF) env.VITE_CYBERSAFE_ORBITAL_PREVIEW = "1";
   const isServiceEntry = (arg) => /packages[\\/]service[\\/]dist[\\/]index\.js$/.test(String(arg));
   const service = args.some(isServiceEntry);
   const desktop = String(cmd).toLowerCase().endsWith('electron.exe');
@@ -352,6 +354,30 @@ deps.onStackReady = async ({ plan, spawned }) => {
           await timeout(200);
           assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'),false);
           await safeShot('appearance-scale-emulated-' + scale);
+        }
+        if (ORBITAL_PROOF) {
+          await cdp.send('Emulation.setDeviceMetricsOverride',{width:1280,height:900,deviceScaleFactor:1,mobile:false});
+          await selectValue('settings-motion','balanced');
+          await selectValue('settings-performance','balanced');
+          await evaluate(`(() => {const input=document.getElementById('settings-webgl');if(!input.checked)input.click();})()`);
+          await clickSidebar('Painel');
+          await until(() => evaluate(`Boolean(document.querySelector('[data-orbital-proposal="true"] .three-scene canvas'))`),'cena 3D da proposta',15000);
+          await timeout(500);
+          facts.orbitalProposal = {webglScene:true,productionDefault:false};
+          await safeShot('orbital-v3-proposal-a');
+          await timeout(1200);
+          await safeShot('orbital-v3-proposal-b');
+          await cdp.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
+          await until(()=>evaluate('document.documentElement.dataset.reduced === "true"'),'movimento reduzido efetivo');
+          facts.orbitalProposal.reducedMotion=true;
+          await safeShot('orbital-v3-reduced-motion');
+          await clickSidebar('Configurações');
+          await until(()=>evaluate('Boolean(document.getElementById("settings-webgl"))'),'configuração de fallback');
+          await evaluate(`(() => {const input=document.getElementById('settings-webgl');if(input.checked)input.click();})()`);
+          await clickSidebar('Painel');
+          await until(()=>evaluate('!document.querySelector(".three-scene") && Boolean(document.querySelector(".orbiting-core"))'),'fallback sem WebGL');
+          facts.orbitalProposal.cssFallback=true;
+          await safeShot('orbital-v3-css-fallback');
         }
         fs.writeFileSync(path.join(evidence,'appearance-facts.json'),JSON.stringify(facts,null,2));
         return;
