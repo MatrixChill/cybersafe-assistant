@@ -111,9 +111,12 @@ async function avaliar(corpo) {
   return r?.result?.value ?? "SEM_VALOR";
 }
 const estado = () => avaliar(`
-return JSON.stringify({titulo:document.title, h:els("h1,h2,h3").map(txt).slice(0,5), nav:els("nav a,nav button,aside a,aside button").map(txt).filter(Boolean).slice(0,16), linhas:els("table tbody tr").length, itens:els("li").length, campos:els("input").map((i)=>i.type||i.tagName).slice(0,8), principal:txt(document.querySelector("main")||document.body).slice(0,300)});
+return JSON.stringify({titulo:document.title, h:els("h1,h2,h3").map(txt).slice(0,5), nav:els("nav a,nav button,aside a,aside button").map(txt).filter(Boolean).slice(0,16), linhas:els("table tbody tr").length, itens:els("li").length, campos:els("input").map((i)=>i.type||i.tagName).slice(0,8), amostra:els("table tbody tr").slice(0,3).map((r)=>[...r.children].map(txt).join(" ~ ")).join(" | ").slice(0,260), principal:txt(document.querySelector("main")||document.body).slice(0,700)});
 `);
-const passo = (nome, valor) => console.log(`PASSO ${nome} ${String(valor).replace(/\s+/g, " ").slice(0, 300)}`);
+// 300 caracteres chegavam para saber «que vista é»; não para provar «que números
+// estão lá». O §4/§6 pede CPU/RAM/PID medidos, e um resumo truncado não mostra
+// se um painel está a ler ou a enfeitar com zeros.
+const passo = (nome, valor) => console.log(`PASSO ${nome} ${String(valor).replace(/\s+/g, " ").slice(0, 760)}`);
 async function capturar(nome) {
   try {
     const r = await sess.enviar("Page.captureScreenshot", { format: "png" });
@@ -159,6 +162,20 @@ return txt(btn)+" -> "+txt(document.body).slice(0,180);
 passo("apos_registo", await estado());
 await capturar("01-pos-registo");
 
+/**
+ * O assistente de boas-vindas (3 passos) aparece por cima da primeira vista.
+ * Medido na corrida de 9907c0f: «Gestor de Tarefas» e «MATRIX» saíram
+ * capturados COM o modal «Proteção em tempo real» à frente, o que faria uma
+ * leitura do `estado()` descrever o assistente em vez da vista. Fechar pelo
+ * botão que a pessoa usaria («Agora não»); sem modal, não faz nada.
+ */
+const fechar_assistente = () => avaliar(`
+const b=els("button,a,[role=button]").find((x)=>/agora n|dispensar|pular/i.test(txt(x)));
+if(!b) return "sem_modal";
+b.click(); await esperar(900); return "fechado:"+txt(b);
+`);
+passo("assistente", await fechar_assistente());
+
 // 3. se o registo não tiver autenticado, entrar com a mesma conta
 if (String(await estado()).includes("Inicie sessão")) {
   passo("entrar", await avaliar(`
@@ -173,14 +190,34 @@ if (String(await estado()).includes("Inicie sessão")) {
 }
 
 // 4. percorrer as vistas, clicando na navegação real
+//
+// Esperar um número fixo de segundos não é esperar: na corrida de 19:47 o
+// `estado()` de «Análise de Segurança» devolveu os títulos do PC Center e o de
+// «Monitor» devolveu os do Painel — as leituras estavam desalinhadas uma vista
+// atrás das capturas. Aqui pergunta-se até a assinatura de títulos mudar (ou o
+// nome da vista aparecer), com prazo; se não mudar, diz `sem_mudanca` em vez de
+// fingir que leu a vista certa.
+const titulos = () => avaliar(`return els("h1,h2,h3").map(txt).slice(0,6).join(" / ");`);
 let i = 3;
 for (const vista of VISTAS) {
+  const antes = await titulos();
   const r = await avaliar(`
   const el=porTexto("nav a,nav button,aside a,aside button,[role=navigation] a,[role=navigation] button,button,a",${JSON.stringify(vista)});
   if(!el) return "sem_item";
-  el.click(); await esperar(7000); return "clicado";
+  el.click(); return "clicado";
   `);
-  passo(`vista:${vista}`, `${r} | ${await estado()}`);
+  const depois = await avaliar(`
+  const alvo=${JSON.stringify(vista)}.toLowerCase();
+  const antes=${JSON.stringify(antes)};
+  for(let k=0;k<40;k++){
+    const h=els("h1,h2,h3").map(txt).slice(0,6).join(" / ");
+    if(h && (h.toLowerCase().includes(alvo.slice(0,10)) || h!==antes)) return "estavel:"+h;
+    await esperar(500);
+  }
+  return "sem_mudanca:"+(els("h1,h2,h3").map(txt).slice(0,6).join(" / "));
+  `);
+  const modal = await fechar_assistente();
+  passo(`vista:${vista}`, `${r} ${depois} ${modal !== "sem_modal" ? `[${modal}]` : ""}| ${await estado()}`);
   await capturar(`${String(i++).padStart(2, "0")}-${vista.toLowerCase().replace(/[^a-z0-9]+/g, "-")}`);
 }
 
