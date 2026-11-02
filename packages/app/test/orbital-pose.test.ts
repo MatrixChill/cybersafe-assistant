@@ -18,3 +18,11 @@ test('invalid or negative clocks preserve a finite static initial pose', () => {
     for (const ring of [0, 1] as const) assert.deepEqual(orbitalRingPose(time, ring), orbitalRingPose(0, ring));
   }
 });
+
+test('both comparison variants move their planes visibly within six seconds',()=>{
+  for(const variant of ['exterior','depth'] as const)for(const ring of [0,1] as const){
+    const a=new Vector3(0,0,1).applyEuler(new Euler(...orbitalRingPose(0,ring,variant)));
+    const b=new Vector3(0,0,1).applyEuler(new Euler(...orbitalRingPose(6,ring,variant)));
+    assert.ok(a.angleTo(b)>.25,`${variant} ring ${ring}: plane motion is too subdued`);
+  }
+});

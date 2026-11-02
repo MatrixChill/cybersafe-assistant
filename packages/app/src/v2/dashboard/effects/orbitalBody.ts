@@ -8,11 +8,12 @@ export function createOrbitalBody() {
     if (i === 0) face.moveTo(x, y); else face.lineTo(x, y);
   }
   face.closePath();
-  const geometry = new ExtrudeGeometry(face, {depth: .32, bevelEnabled: true, bevelSize: .045, bevelThickness: .045, bevelSegments: 3, steps: 1});
-  geometry.translate(0, 0, -.16);
+  const geometry = new ExtrudeGeometry(face, {depth: .42, bevelEnabled: true, bevelSize: .045, bevelThickness: .045, bevelSegments: 3, steps: 1});
+  geometry.translate(0, 0, -.21);
   // Opaque faces and bevels participate in the same depth buffer as both rings.
   const front = new MeshPhysicalMaterial({color:0x11738b,metalness:.6,roughness:.3,clearcoat:1,transparent:false,depthWrite:true,depthTest:true});
   const side = front.clone();
+  side.color.multiplyScalar(.65);
   side.roughness = .42;
   return new Mesh(geometry, [front, side]);
 }

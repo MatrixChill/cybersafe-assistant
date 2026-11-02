@@ -933,3 +933,15 @@ html[data-v2-theme="belbete"] .cs-v2 .v2-dashboard .panel {
 }
 
 .cs-v2 .v2-dashboard .brand-scene:has(.three-scene)>.orbiting-core{opacity:0}
+.cs-v2 .v2-dashboard .brand-scene:has(.three-scene)>.orbiting-core{opacity:1;z-index:3;pointer-events:none;}
+.cs-v2 .v2-dashboard .brand-scene:has(.three-scene)>.orbiting-core>img,
+.cs-v2 .v2-dashboard .brand-scene:has(.three-scene)>.orbiting-core>.orbital-path{visibility:hidden;}
+.cs-v2 .v2-dashboard .brand-scene:has(.three-scene) .orbit-node{opacity:.2;background:var(--v2-panel);width:24px;height:24px;font-size:9px;}
+.cs-v2 .v2-dashboard .brand-scene .particles{clip-path:ellipse(44% 43% at 50% 48%);pointer-events:none;}
+.orbital-comparison{position:absolute;z-index:4;bottom:-22px;left:0;right:0;display:flex;justify-content:center;gap:8px;}
+.orbital-comparison button{font-size:10px;padding:4px 8px;border:1px solid var(--v2-border);border-radius:var(--v2-control-radius);background:var(--v2-panel);color:var(--v2-muted);}
+.orbital-comparison button[aria-pressed="true"]{border-color:var(--v2-accent);color:var(--v2-text);}
+
+.cs-v2 .v2-dashboard .brand-scene[data-orbital-proposal="true"]:has(.three-scene)>.orbiting-core{opacity:1}
+.cs-v2 .v2-dashboard .brand-scene[data-orbital-proposal="true"] .scene-caption{bottom:24px}
+.cs-v2 .v2-dashboard .brand-scene[data-orbital-proposal="true"] .orbital-comparison{bottom:0}
