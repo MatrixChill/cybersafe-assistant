@@ -46,3 +46,14 @@ test("categorias têm destinos acessíveis sem remover controlos de proteção",
   }
   for (const label of ["Iniciar com o Windows", "Notificações", "Retomar proteção ao arrancar", "Consentimento da Matrix", "Sobre o CyberSafe"]) assert.ok(markup.includes(label), label);
 });
+
+
+test("aparência expõe movimento, desempenho e WebGL sem prometer GPU operacional", () => {
+  const markup = html();
+  for (const id of ["settings-motion", "settings-performance", "settings-webgl"]) {
+    assert.ok(markup.includes(`id="${id}"`));
+    assert.ok(markup.includes(`for="${id}"`));
+  }
+  assert.match(markup, /Movimento efetivo:/);
+  assert.match(markup, /disponibilidade é confirmada por cada cena/);
+});

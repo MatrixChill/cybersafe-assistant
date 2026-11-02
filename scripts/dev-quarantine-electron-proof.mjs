@@ -61,7 +61,8 @@ const DEFAULT_CLAMAV_DB = 'C:/Users/caioc/.cybersafe-integration/pap-integration
 // de escrita intacto para o operador experimentar à mão.
 const ARGV = new Set(process.argv.slice(2));
 // --settings-proof exercises navigation only; never isolates/restores/deletes.
-const SETTINGS_PROOF = ARGV.has('--settings-proof');
+const APPEARANCE_PROOF = ARGV.has('--appearance-proof');
+const SETTINGS_PROOF = ARGV.has('--settings-proof') || APPEARANCE_PROOF;
 const INTERACTIVE_ONLY = ARGV.has('--interactive=only');
 const INTERACTIVE = INTERACTIVE_ONLY || ARGV.has('--interactive');
 const INTERACTIVE_MAX_MS = Number(process.env.CYBERSAFE_QUARANTINE_INTERACTIVE_MAX_MS || 30 * 60 * 1000);
@@ -328,6 +329,34 @@ deps.onStackReady = async ({ plan, spawned }) => {
       await safeShot('dashboard-current-real');
       assert.equal(await clickSidebar('Configurações'), true);
       await until(() => evaluate(`Boolean(document.querySelector('nav[aria-label="Categorias das configurações"]'))`), 'categorias prontas');
+      if (APPEARANCE_PROOF) {
+        const selectValue = async (id, value) => evaluate(`(() => {
+          const element = document.getElementById(${JSON.stringify(id)});
+          Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value').set.call(element, ${JSON.stringify(value)});
+          element.dispatchEvent(new Event('change', {bubbles:true}));
+        })()`);
+        await selectValue('settings-motion', 'reduced');
+        await selectValue('settings-performance', 'economy');
+        await evaluate(`(() => {const input=document.getElementById('settings-webgl');if(input.checked)input.click();})()`);
+        await until(() => evaluate('document.documentElement.dataset.v2Performance === "economy" && document.documentElement.dataset.reduced === "true"'), 'perfil económico aplicado');
+        await cdp.send('Page.reload');
+        await until(() => evaluate('Boolean(document.querySelector("[data-cs-sidebar=main]"))'), 'sessão após reload');
+        await clickSidebar('Configurações');
+        await until(() => evaluate('Boolean(document.getElementById("settings-motion"))'), 'controlos após reload');
+        facts.appearancePersisted = await evaluate(`({movement:document.getElementById('settings-motion').value,performance:document.getElementById('settings-performance').value,webgl:document.getElementById('settings-webgl').checked,reduced:document.documentElement.dataset.reduced})`);
+        assert.deepEqual(facts.appearancePersisted,{movement:'reduced',performance:'economy',webgl:false,reduced:'true'});
+        await evaluate(`document.getElementById('settings-effects-title').scrollIntoView({block:'center'})`);
+        await safeShot('appearance-controls-persisted-real');
+        for (const scale of [1,1.25,1.5]) {
+          await cdp.send('Emulation.setDeviceMetricsOverride',{width:1000,height:800,deviceScaleFactor:scale,mobile:false});
+          await timeout(200);
+          assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'),false);
+          await safeShot('appearance-scale-emulated-' + scale);
+        }
+        fs.writeFileSync(path.join(evidence,'appearance-facts.json'),JSON.stringify(facts,null,2));
+        return;
+      }
+
       const ids = ['geral','aparencia','protecao','exclusoes','atualizacoes','matrix','avancado'];
       facts.settings = [];
       for (const id of ids) {

@@ -18,6 +18,7 @@ import { aboutIdentityLines, electronVersionFromUserAgent, formatBuildBadge, res
 import ExclusionsSection from "../components/ExclusionsSection";
 import { UpdatesSection } from "../components/updates/UpdatesSection";
 import { SurfaceHeroPreview } from "../components/visual/SurfaceHeroPreview";
+import { V2_MOVEMENT_ORDER, V2_MOVEMENT_LABELS, V2_PERFORMANCE_ORDER, V2_PERFORMANCE_LABELS } from "../v2/theme";
 import type { QuarantinePolicy } from "@cybersafe/shared-types";
 
 /** Eixo 1 - identidade: cores, raio e letra. */
@@ -114,7 +115,7 @@ export default function SettingsPage() {
   // Metadata do aviso local: o `sub` do token já emitido. Não é uma sessão
   // nova nem uma autorização — o DELETE continua a ser validado pelo servidor.
   const contaId = contaDoTokenDeSessao(tokenDeSessao());
-  const { identity, setIdentity, theme, setThemeMode, accent, setAccent, surface, setSurface } = useAppearance();
+  const { identity, setIdentity, theme, setThemeMode, accent, setAccent, surface, setSurface, prefs, setMovement, setPerformance, setWebgl, animate, lowPower, systemReduced, storageError } = useAppearance();
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -766,6 +767,37 @@ export default function SettingsPage() {
           escolhe Reduzido ou Sólido.
         </p>
       </section>
+        <section className="surface-elevated cyber-border rounded-xl p-6 space-y-4" aria-labelledby="settings-effects-title">
+          <h3 id="settings-effects-title" className="font-mono font-semibold text-foreground">Movimento e desempenho visual</h3>
+          <p className="text-sm text-muted-foreground">Ajusta os efeitos ao teu computador. O modo económico e a preferência do sistema por movimento reduzido têm prioridade sobre as animações.</p>
+          <div className="grid gap-4 sm:grid-cols-2">
+            <div>
+              <label htmlFor="settings-motion" className="block text-sm font-medium mb-2">Movimento</label>
+              <select id="settings-motion" value={prefs.movement} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground" onChange={event => {
+                const value = V2_MOVEMENT_ORDER.find(value => value === event.currentTarget.value);
+                if (value) setMovement(value);
+              }}>
+                {V2_MOVEMENT_ORDER.map(value => <option key={value} value={value}>{V2_MOVEMENT_LABELS[value]}</option>)}
+              </select>
+            </div>
+            <div>
+              <label htmlFor="settings-performance" className="block text-sm font-medium mb-2">Desempenho visual</label>
+              <select id="settings-performance" value={prefs.performance} className="w-full rounded-lg border border-border bg-background px-3 py-2 text-foreground" onChange={event => {
+                const value = V2_PERFORMANCE_ORDER.find(value => value === event.currentTarget.value);
+                if (value) setPerformance(value);
+              }}>
+                {V2_PERFORMANCE_ORDER.map(value => <option key={value} value={value}>{V2_PERFORMANCE_LABELS[value]}</option>)}
+              </select>
+            </div>
+          </div>
+          <label htmlFor="settings-webgl" className="flex items-center gap-3 text-sm">
+            <input id="settings-webgl" type="checkbox" checked={prefs.webgl} onChange={event => setWebgl(event.currentTarget.checked)} />
+            Permitir núcleo 3D com WebGL
+          </label>
+          <p className="text-xs text-muted-foreground">A disponibilidade é confirmada por cada cena. Sem WebGL, mantém-se a apresentação estática.</p>
+          <p role="status" className="text-sm text-muted-foreground">Movimento efetivo: {animate ? "ativo" : "reduzido ou desligado"}.{systemReduced ? " Movimento reduzido pedido pelo sistema." : lowPower ? " Perfil económico ativo." : ""}</p>
+          {storageError && <p role="alert" className="text-sm text-cyber-yellow">A preferência foi aplicada nesta sessão, mas não foi possível guardá-la para o próximo arranque.</p>}
+        </section>
       </div>
 
       <div id="settings-protecao" role="region" aria-labelledby="settings-protecao-title" tabIndex={-1} className="space-y-4 scroll-mt-32">
