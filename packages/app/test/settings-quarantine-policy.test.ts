@@ -35,3 +35,14 @@ describe("Configurações → quarentena automática", () => {
     assert.match(source, /consent\s*\}/);
   });
 });
+
+
+test("categorias têm destinos acessíveis sem remover controlos de proteção", () => {
+  const markup = html();
+  assert.match(markup, /aria-label="Categorias das configurações"/);
+  for (const id of ["geral","aparencia","protecao","exclusoes","atualizacoes","matrix","avancado"]) {
+    assert.ok(markup.includes(`href="#settings-${id}"`), id);
+    assert.ok(markup.includes(`id="settings-${id}"`), id);
+  }
+  for (const label of ["Iniciar com o Windows", "Notificações", "Retomar proteção ao arrancar", "Consentimento da Matrix", "Sobre o CyberSafe"]) assert.ok(markup.includes(label), label);
+});

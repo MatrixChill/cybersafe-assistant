@@ -316,7 +316,135 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      {/* === APARÊNCIA === */}
+      <nav aria-label="Categorias das configurações" className="flex flex-wrap gap-2">
+        <a href="#settings-geral" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Geral</a>
+        <a href="#settings-aparencia" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Aparência</a>
+        <a href="#settings-protecao" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Proteção</a>
+        <a href="#settings-exclusoes" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Exclusões</a>
+        <a href="#settings-atualizacoes" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Atualizações</a>
+        <a href="#settings-matrix" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">MATRIX e Privacidade</a>
+        <a href="#settings-avancado" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Avançado</a>
+      </nav>
+
+      <div id="settings-geral" role="region" aria-labelledby="settings-geral-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+        <h2 id="settings-geral-title" className="font-mono text-lg font-semibold text-foreground">Geral</h2>
+      <section className="surface-elevated cyber-border rounded-xl p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
+            <Power className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="font-mono font-semibold text-foreground">Iniciar com o Windows</h2>
+            <p className="text-xs text-muted-foreground">O CyberSafe inicia automaticamente quando o computador arranca</p>
+          </div>
+        </div>
+
+        <div className="space-y-4">
+          <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border">
+            <div>
+              <p className="text-sm font-mono text-foreground">Iniciar automaticamente</p>
+              <p className="text-xs text-muted-foreground mt-0.5">Abre o CyberSafe quando o Windows inicia</p>
+            </div>
+            <button
+              onClick={() => toggleAutoStart(!autoStart)}
+              className={cn(
+                "relative w-11 h-6 rounded-full transition-colors",
+                autoStart ? "bg-primary" : "bg-secondary",
+              )}
+            >
+              <div className={cn(
+                "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
+                autoStart ? "translate-x-5.5" : "translate-x-0.5",
+              )} />
+            </button>
+          </div>
+
+          {autoStart && (
+            <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border ml-4">
+              <div>
+                <p className="text-sm font-mono text-foreground">Iniciar minimizado</p>
+                <p className="text-xs text-muted-foreground mt-0.5">Começa em segundo plano sem mostrar a janela</p>
+              </div>
+              <button
+                onClick={() => toggleStartMinimized(!startMinimized)}
+                className={cn(
+                  "relative w-11 h-6 rounded-full transition-colors",
+                  startMinimized ? "bg-primary" : "bg-secondary",
+                )}
+              >
+                <div className={cn(
+                  "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
+                  startMinimized ? "translate-x-5.5" : "translate-x-0.5",
+                )} />
+              </button>
+            </div>
+          )}
+        </div>
+
+        <p className="text-xs text-muted-foreground mt-4 font-mono">
+          Requer que o CyberSafe esteja instalado no sistema. O registo no Windows é feito de forma segura.
+        </p>
+      </section>
+      <section className="surface-elevated cyber-border rounded-xl p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
+            <Bell className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="font-mono font-semibold text-foreground">Notificações</h2>
+            <p className="text-xs text-muted-foreground">Notificações do Windows para alertas de segurança importantes</p>
+          </div>
+        </div>
+
+        <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border">
+          <div>
+            <p className="text-sm font-mono text-foreground">Notificações do sistema</p>
+            <p className="text-xs text-muted-foreground mt-0.5">Avisos do Windows para ameaças detetadas e processos bloqueados</p>
+          </div>
+          <button
+            onClick={() => toggleNotifications(!notificationsEnabled)}
+            className={cn(
+              "relative w-11 h-6 rounded-full transition-colors",
+              notificationsEnabled ? "bg-primary" : "bg-secondary",
+            )}
+          >
+            <div className={cn(
+              "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
+              notificationsEnabled ? "translate-x-5.5" : "translate-x-0.5",
+            )} />
+          </button>
+        </div>
+
+        <p className="text-xs text-muted-foreground mt-4 font-mono">
+          Apenas alertas críticos ou elevados geram uma notificação nativa. Alertas de baixa prioridade aparecem apenas dentro da aplicação.
+        </p>
+      </section>
+      <section className="surface-elevated cyber-border rounded-xl p-6">
+        <div className="flex items-center gap-3 mb-6">
+          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
+            <Check className="w-5 h-5 text-primary" />
+          </div>
+          <div>
+            <h2 className="font-mono font-semibold text-foreground">Boas-vindas</h2>
+            <p className="text-xs text-muted-foreground">Reveja a introdução à aplicação a qualquer momento</p>
+          </div>
+        </div>
+
+        <button
+          onClick={() => window.dispatchEvent(new Event("cybersafe:open-onboarding"))}
+          className="px-5 py-2.5 bg-secondary text-foreground border border-border font-mono text-sm rounded-lg hover:border-primary/40 hover:bg-secondary/80 transition-all"
+        >
+          Reabrir boas-vindas
+        </button>
+
+        <p className="text-xs text-muted-foreground mt-4 font-mono">
+          O ecrã de boas-vindas só é mostrado automaticamente na primeira utilização.
+        </p>
+      </section>
+      </div>
+
+      <div id="settings-aparencia" role="region" aria-labelledby="settings-aparencia-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+        <h2 id="settings-aparencia-title" className="font-mono text-lg font-semibold text-foreground">Aparência</h2>
       <section className="surface-elevated cyber-border rounded-xl p-6 space-y-6">
         <div className="flex items-center gap-3">
           <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
@@ -638,8 +766,10 @@ export default function SettingsPage() {
           escolhe Reduzido ou Sólido.
         </p>
       </section>
+      </div>
 
-      {/* === QUARENTENA AUTOMÁTICA === */}
+      <div id="settings-protecao" role="region" aria-labelledby="settings-protecao-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+        <h2 id="settings-protecao-title" className="font-mono text-lg font-semibold text-foreground">Proteção</h2>
       <section data-settings-quarantine-policy className="surface-elevated cyber-border rounded-xl p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
@@ -700,103 +830,6 @@ export default function SettingsPage() {
           A preferência fica em protection-policy.json e é relida no arranque. Cada isolamento automático aparece na atividade e no histórico; uma falha não é escondida.
         </p>
       </section>
-
-      {/* === INICIAR COM O WINDOWS === */}
-      <section className="surface-elevated cyber-border rounded-xl p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
-            <Power className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <h2 className="font-mono font-semibold text-foreground">Iniciar com o Windows</h2>
-            <p className="text-xs text-muted-foreground">O CyberSafe inicia automaticamente quando o computador arranca</p>
-          </div>
-        </div>
-
-        <div className="space-y-4">
-          <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border">
-            <div>
-              <p className="text-sm font-mono text-foreground">Iniciar automaticamente</p>
-              <p className="text-xs text-muted-foreground mt-0.5">Abre o CyberSafe quando o Windows inicia</p>
-            </div>
-            <button
-              onClick={() => toggleAutoStart(!autoStart)}
-              className={cn(
-                "relative w-11 h-6 rounded-full transition-colors",
-                autoStart ? "bg-primary" : "bg-secondary",
-              )}
-            >
-              <div className={cn(
-                "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
-                autoStart ? "translate-x-5.5" : "translate-x-0.5",
-              )} />
-            </button>
-          </div>
-
-          {autoStart && (
-            <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border ml-4">
-              <div>
-                <p className="text-sm font-mono text-foreground">Iniciar minimizado</p>
-                <p className="text-xs text-muted-foreground mt-0.5">Começa em segundo plano sem mostrar a janela</p>
-              </div>
-              <button
-                onClick={() => toggleStartMinimized(!startMinimized)}
-                className={cn(
-                  "relative w-11 h-6 rounded-full transition-colors",
-                  startMinimized ? "bg-primary" : "bg-secondary",
-                )}
-              >
-                <div className={cn(
-                  "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
-                  startMinimized ? "translate-x-5.5" : "translate-x-0.5",
-                )} />
-              </button>
-            </div>
-          )}
-        </div>
-
-        <p className="text-xs text-muted-foreground mt-4 font-mono">
-          Requer que o CyberSafe esteja instalado no sistema. O registo no Windows é feito de forma segura.
-        </p>
-      </section>
-
-      {/* === NOTIFICAÇÕES === */}
-      <section className="surface-elevated cyber-border rounded-xl p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
-            <Bell className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <h2 className="font-mono font-semibold text-foreground">Notificações</h2>
-            <p className="text-xs text-muted-foreground">Notificações do Windows para alertas de segurança importantes</p>
-          </div>
-        </div>
-
-        <div className="flex items-center justify-between p-3 rounded-lg bg-secondary/50 border border-border">
-          <div>
-            <p className="text-sm font-mono text-foreground">Notificações do sistema</p>
-            <p className="text-xs text-muted-foreground mt-0.5">Avisos do Windows para ameaças detetadas e processos bloqueados</p>
-          </div>
-          <button
-            onClick={() => toggleNotifications(!notificationsEnabled)}
-            className={cn(
-              "relative w-11 h-6 rounded-full transition-colors",
-              notificationsEnabled ? "bg-primary" : "bg-secondary",
-            )}
-          >
-            <div className={cn(
-              "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
-              notificationsEnabled ? "translate-x-5.5" : "translate-x-0.5",
-            )} />
-          </button>
-        </div>
-
-        <p className="text-xs text-muted-foreground mt-4 font-mono">
-          Apenas alertas críticos ou elevados geram uma notificação nativa. Alertas de baixa prioridade aparecem apenas dentro da aplicação.
-        </p>
-      </section>
-
-      {/* === RETOMA AO ARRANCAR (opt-in separado da proteção viva) === */}
       <section className="surface-elevated cyber-border rounded-xl p-6">
         <div className="flex items-center gap-3 mb-6">
           <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
@@ -848,32 +881,20 @@ export default function SettingsPage() {
           Este interruptor não liga nem desliga a proteção agora. Ligar a proteção à mão não ativa esta opção; desligar à mão cancela-a. Uma pausa sem prazo também conta como OFF ao próximo arranque.
         </p>
       </section>
+      </div>
 
-      {/* === BOAS-VINDAS === */}
-      <section className="surface-elevated cyber-border rounded-xl p-6">
-        <div className="flex items-center gap-3 mb-6">
-          <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
-            <Check className="w-5 h-5 text-primary" />
-          </div>
-          <div>
-            <h2 className="font-mono font-semibold text-foreground">Boas-vindas</h2>
-            <p className="text-xs text-muted-foreground">Reveja a introdução à aplicação a qualquer momento</p>
-          </div>
-        </div>
+      <div id="settings-exclusoes" role="region" aria-labelledby="settings-exclusoes-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+        <h2 id="settings-exclusoes-title" className="font-mono text-lg font-semibold text-foreground">Exclusões</h2>
+      <ExclusionsSection />
+      </div>
 
-        <button
-          onClick={() => window.dispatchEvent(new Event("cybersafe:open-onboarding"))}
-          className="px-5 py-2.5 bg-secondary text-foreground border border-border font-mono text-sm rounded-lg hover:border-primary/40 hover:bg-secondary/80 transition-all"
-        >
-          Reabrir boas-vindas
-        </button>
+      <div id="settings-atualizacoes" role="region" aria-labelledby="settings-atualizacoes-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+        <h2 id="settings-atualizacoes-title" className="font-mono text-lg font-semibold text-foreground">Atualizações</h2>
+      <UpdatesSection />
+      </div>
 
-        <p className="text-xs text-muted-foreground mt-4 font-mono">
-          O ecrã de boas-vindas só é mostrado automaticamente na primeira utilização.
-        </p>
-      </section>
-
-      {/* === CONSENTIMENTO DA MATRIX === */}
+      <div id="settings-matrix" role="region" aria-labelledby="settings-matrix-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+        <h2 id="settings-matrix-title" className="font-mono text-lg font-semibold text-foreground">MATRIX e Privacidade</h2>
       <section data-settings-matrix-consent className="surface-elevated cyber-border rounded-xl p-6">
         <div className="flex items-center gap-3 mb-4">
           <div className="w-10 h-10 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center">
@@ -941,9 +962,10 @@ export default function SettingsPage() {
           <p role="status" className="text-xs text-cyber-yellow mt-3 font-mono">{consentimentoErro}</p>
         )}
       </section>
+      </div>
 
-      {/* Sobre o CyberSafe - identidade real da aplicação (P0-7). Nada é inventado:
-          fora de um build com carimbo, os valores aparecem como "desconhecida/desenvolvimento". */}
+      <div id="settings-avancado" role="region" aria-labelledby="settings-avancado-title" tabIndex={-1} className="space-y-4 scroll-mt-6">
+        <h2 id="settings-avancado-title" className="font-mono text-lg font-semibold text-foreground">Avançado</h2>
       <section className="surface-elevated cyber-border rounded-xl p-6">
         <h2 className="text-lg font-semibold text-foreground mb-1">Sobre o CyberSafe</h2>
         <p className="text-sm text-muted-foreground mb-4">CyberSafe Assistant - assistência de segurança pessoal para Windows.</p>
@@ -973,11 +995,7 @@ export default function SettingsPage() {
           </button>
         </div>
       </section>
-
-      <ExclusionsSection />
-
-      {/* === ATUALIZAÇÕES === */}
-      <UpdatesSection />
+      </div>
     </div>
   );
 }
