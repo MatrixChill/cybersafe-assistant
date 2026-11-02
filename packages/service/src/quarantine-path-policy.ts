@@ -60,3 +60,41 @@ export async function hasReparseFreePath(filePath: string): Promise<boolean> {
     return false;
   }
 }
+
+/**
+ * Normalização de um ponto de montagem. Não é a `norm` de cima: `norm` tira a
+ * barra final sem reserva, e em Linux a raiz É `/` — `norm('/')` produz `''`,
+ * que é exatamente o prefixo que faria «tudo está montado». Aqui a raiz
+ * continua a ser `/`. Sem case folding: em Linux `A` e `a` são montagens
+ * diferentes, e uma tabela de montagens lida com `/` não é um caminho Windows.
+ */
+const normMountPoint = (value: string): string => {
+  const semBarraFinal = value.replace(/\/+$/, '');
+  return semBarraFinal === '' ? '/' : semBarraFinal;
+};
+
+/**
+ * O caminho é um ponto de montagem? A resposta usa só igualdade EXATA, nunca
+ * prefixo, e isso é a razão de existir da função.
+ *
+ * Um ponto de montagem não é um ficheiro dentro do volume: é o volume. Mover
+ * `/media/utilizador/pen` para a quarentena não retira um ficheiro do disco —
+ * retira o disco do sistema, e um `rename` sobre ele ou arrasta a árvore toda
+ * ou falha consoante o que estiver montado por cima. O §10 acabou de permitir
+ * analisar um volume montado, por isso o produto passou a conhecer caminhos que
+ * são montagens; a política de quarentena tem de os recusar.
+ *
+ * Igualdade e não prefixo porque `/` está na tabela de qualquer máquina: uma
+ * comparação por prefixo diria que todo o ficheiro do mundo é uma montagem e
+ * desligava o isolamento. A proteção dos diretórios por cima de uma montagem
+ * vem de outra regra — o `isProtectedQuarantinePath` para as raízes de sistema,
+ * e o `EXDEV`/`EPERM` do próprio sistema de ficheiros para o resto.
+ *
+ * É uma função pura sobre uma tabela fornecida: a tabela lê-se no serviço (só
+ * em POSIX faz sentido), os testes entram com uma inventada.
+ */
+export function isMountPointPath(filePath: string, mountPoints: readonly string[]): boolean {
+  if (typeof filePath !== 'string' || !filePath.startsWith('/')) return false;
+  const candidato = normMountPoint(filePath);
+  return mountPoints.some((mount) => normMountPoint(mount) === candidato);
+}

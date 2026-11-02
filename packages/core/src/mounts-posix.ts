@@ -350,6 +350,63 @@ export function escolheMontagemPrincipal<T extends { mount: string }>(volumes: T
 }
 
 /**
+ * A tabela de montagens vista só pelos seus pontos de montagem, sem capacidade.
+ * `ok:false` significa que a tabela não foi lida; `ilegiveis > 0` significa que
+ * foi lida mas nem toda a linha foi interpretada — as duas coisas são a pergunta
+ * que um consumidor faz antes de agir sobre «este caminho não está montado».
+ */
+export interface ResultadoPontosDeMontagem {
+  ok: boolean;
+  /** Todos os pontos de montagem reportados, pseudo-FS incluídos, ordenados. */
+  montagens: string[];
+  /** Linhas existentes que o parser não interpretou — cobertura incompleta. */
+  ilegiveis: number;
+  reason: string | null;
+}
+
+/**
+ * Os pontos de montagem da máquina. É OUTRA pergunta que `lerMontagensPosix`,
+ * e por isso é outra função: aquela pergunta é «que armazenamento há aqui»,
+ * esta é «este caminho é o sítio onde um sistema de ficheiros está pendurado».
+ *
+ * A diferença materializa-se nos pseudo-FS. `proc`, `sysfs`, `tmpfs`, `devpts`
+ * não são discos, e com razão ficam de fora da lista de volumes; mas `/sys`,
+ * `/run` e `/mnt/wslg/distro` SÃO pontos de montagem, e é exatamente isso que
+ * quem vai mover um ficheiro precisa de saber. Filtrá-los aqui seria o defeito:
+ * responder «não é montagem» sobre um caminho que o kernel declara montagem.
+ *
+ * Não há `statfs` nesta função — medir capacidade de uma montagem do kernel é
+ * onde a primeira pergunta paga o seu preço, e aqui só interessa o caminho.
+ */
+export function lerPontosDeMontagem(
+  fs: Pick<MontesFsLike, "readFileSync">,
+  caminho = CAMINHO_MOUNTINFO_PADRAO,
+): ResultadoPontosDeMontagem {
+  let texto: string;
+  try {
+    texto = fs.readFileSync(caminho, "utf-8");
+  } catch (error: unknown) {
+    const detalhe = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      montagens: [],
+      ilegiveis: 0,
+      reason: `A tabela de montagens do sistema não pôde ser lida (${detalhe}).`,
+    };
+  }
+
+  const { entradas, ilegiveis } = parseMountinfo(texto);
+  return {
+    ok: true,
+    montagens: [...new Set(entradas.map((entrada) => entrada.mount))].sort(),
+    ilegiveis,
+    reason: ilegiveis > 0
+      ? `${ilegiveis} linha(s) de montagem não puderam ser interpretadas.`
+      : null,
+  };
+}
+
+/**
  * A fonte real, com o `/proc` de verdade. Vive AQUI e não no consumidor porque
  * é este módulo que sabe o que é uma montagem: um `statfs` lançado sobre um
  * caminho já desescapado, a ler a tabela do kernel. O motor de hardware chama
@@ -365,6 +422,21 @@ export function lerMontagensReais(caminho = CAMINHO_MOUNTINFO_PADRAO): Resultado
       // desmontada, sem permissão): o módulo conta-a como «não medida».
       statfsSync: (destino) => fsReal.statfsSync(destino),
     },
+    caminho,
+  );
+}
+
+/**
+ * A versão real da tabela de pontos de montagem. É síncrona porque quem a chama
+ * decide logo a seguir — e lê-se na altura da decisão, nunca em cache: as
+ * montagens mudam (uma pen é desmontada, um volume entra) e uma tabela velha é
+ * exatamente o tipo de facto obsoleto sobre o qual se toma uma ação difícil de
+ * desfazer. Entre esta leitura e o movimento pode sempre nascer uma montagem
+ * nova: a regra reduz esse risco, não o elimina, e é isso que se documenta.
+ */
+export function lerPontosDeMontagemReais(caminho = CAMINHO_MOUNTINFO_PADRAO): ResultadoPontosDeMontagem {
+  return lerPontosDeMontagem(
+    { readFileSync: (destino, codificacao) => fsReal.readFileSync(destino, codificacao) },
     caminho,
   );
 }
