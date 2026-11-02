@@ -781,13 +781,14 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
         </div>
       )}
 
-      {/* Main Grid: items-start mantém cada cartão na altura natural. Sem
-          isto, a grelha esticava Rede/Bateria para a altura do cartão vizinho. */}
+      {/* Main Grid: colunas independentes evitam lacunas sob cartões curtos.
+          Dentro de cada coluna, cada superfície mantém a altura natural. */}
       <div data-testid="pc-resource-overview" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
 
+        <div className="min-w-0 flex flex-col gap-6" data-testid="pc-capacity-connectivity">
         {/* CPU Card */}
         <div className="min-w-0 bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <Cpu className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Processador (CPU)</h2>
@@ -846,9 +847,14 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
             </div>
         </div>
 
+        {/* Disk Card — a mesma regra do Dashboard vive em StorageCard/lib/diskDisplay */}
+        <StorageCard disk={hardware.disk} />
+
+        </div>
+        <div className="min-w-0 flex flex-col gap-6">
         {/* RAM Card */}
         <div className="min-w-0 bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <MemoryStick className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Memória (RAM)</h2>
@@ -889,9 +895,63 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
             </div>
         </div>
 
+        {/* Network Card */}
+        <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Wifi className="w-5 h-5 text-primary" />
+                <h2 className="text-lg font-semibold">Rede</h2>
+              </div>
+              <span className="text-xs font-mono bg-secondary px-2 py-1 rounded text-muted-foreground">
+                {netReading.interfaceName ? `${netReading.interfaceName}${netReading.label ? ` · ${netReading.label}` : ""}` : netReading.label}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {netReading.rxSec != null || netReading.txSec != null ? (
+                <>
+                  <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-border">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-cyber-cyan/10 rounded-full">
+                        <ChevronDown className="w-5 h-5 text-cyber-cyan" />
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground uppercase block">Download</span>
+                        <span className="text-xl font-bold font-mono text-cyber-cyan">
+                          {netReading.rxSec != null ? formatBytes(netReading.rxSec) : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-border">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-primary/10 rounded-full">
+                        <ChevronUp className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground uppercase block">Upload</span>
+                        <span className="text-xl font-bold font-mono text-primary">
+                          {netReading.txSec != null ? formatBytes(netReading.txSec) : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground" title={netReading.hint ?? undefined}>{netReading.label}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        </div>
+        <div className="min-w-0 flex flex-col gap-6">
         {/* GPU Card */}
         <div className="min-w-0 bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <Monitor className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Gráficos (GPU)</h2>
@@ -995,63 +1055,6 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
           )}
         </div>
 
-      </div>
-      <div data-testid="pc-capacity-connectivity" className="mt-6 grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
-        {/* Disk Card — a mesma regra do Dashboard vive em StorageCard/lib/diskDisplay */}
-        <StorageCard disk={hardware.disk} />
-
-        {/* Network Card */}
-        <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-          <div className="flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Wifi className="w-5 h-5 text-primary" />
-                <h2 className="text-lg font-semibold">Rede</h2>
-              </div>
-              <span className="text-xs font-mono bg-secondary px-2 py-1 rounded text-muted-foreground">
-                {netReading.interfaceName ? `${netReading.interfaceName}${netReading.label ? ` · ${netReading.label}` : ""}` : netReading.label}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              {netReading.rxSec != null || netReading.txSec != null ? (
-                <>
-                  <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-border">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-cyber-cyan/10 rounded-full">
-                        <ChevronDown className="w-5 h-5 text-cyber-cyan" />
-                      </div>
-                      <div>
-                        <span className="text-xs text-muted-foreground uppercase block">Download</span>
-                        <span className="text-xl font-bold font-mono text-cyber-cyan">
-                          {netReading.rxSec != null ? formatBytes(netReading.rxSec) : "—"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-border">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-primary/10 rounded-full">
-                        <ChevronUp className="w-5 h-5 text-primary" />
-                      </div>
-                      <div>
-                        <span className="text-xs text-muted-foreground uppercase block">Upload</span>
-                        <span className="text-xl font-bold font-mono text-primary">
-                          {netReading.txSec != null ? formatBytes(netReading.txSec) : "—"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground" title={netReading.hint ?? undefined}>{netReading.label}</p>
-              )}
-            </div>
-          </div>
-        </div>
-
         {/* Battery Card (Conditionally Rendered) */}
         {batteryCardVisible && hardware.battery.status === "absent" ? (
           <div data-testid="battery-compact" className="bg-card cyber-border rounded-xl p-4 flex items-center gap-3">
@@ -1060,7 +1063,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
           </div>
         ) : batteryCardVisible && (
           <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <div className="flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1131,6 +1134,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* Saúde física: superfície própria FORA da grelha. Abrir os detalhes
@@ -1336,7 +1340,7 @@ export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceCo
 
       {/* Temperatures & Sensors */}
       <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
         <div className="flex items-center gap-2 mb-6">
           <Thermometer className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold">Temperaturas e Sensores</h2>
