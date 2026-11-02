@@ -1,5 +1,7 @@
 # Propostas para aprovação — Orbital V3 e setup
 
+Atualização posterior: o utilizador aprovou a variante B como direção principal do núcleo. Foi integrada e validada no percurso normal; o setup continua por aprovar. Estado atual e provas em [DECISAO-B-E-ESTADO-CANDIDATA-20261102.md](DECISAO-B-E-ESTADO-CANDIDATA-20261102.md). As secções seguintes preservam o histórico das propostas anteriores.
+
 Estado: propostas isoladas, não aprovadas. Não é uma candidata instalada. Capturas em `output/codex-review-20261102`, fora do Git; são janelas reais, não imagens geradas. As contas e métricas mostradas pertencem ao perfil sintético de ensaio.
 
 Atualização obrigatória da fase visual: [sistema adaptativo de desempenho](ORBITAL-V3-DESEMPENHO-ADAPTATIVO.md), com cinco perfis e controlo individual, sem alterar proteção. Requisito registado, ainda não implementado integralmente. [Análise das dez referências públicas](REFERENCIAS-VISUAIS-CYBERSAFE-20261102.md) distingue observações, limitações de acesso e propostas; não equivale a aprovação visual nem a medição de desempenho.
