@@ -1,5 +1,68 @@
 # CyberSafe — intensive close / continuidade técnica A–K
 
+## Continuação Windows v0.2.0 — 2026-11-02 (integration/windows-v0.2.0)
+
+**BLOCKED_WITH_EVIDENCE, não é aprovação de Release.** Este checkpoint refere-se
+à integração iniciada em `2010836245bd18d5054956ae4256b7be136fedad`; as secções
+abaixo são histórico de outras etapas/lanes, não descrevem o HEAD atual.
+
+### Setup: compilação agora demonstrada, aparência ainda pendente
+
+A toolchain NSIS 3.0.4.1 fixada pelo electron-builder foi obtida numa cache local
+em `output/finalization-20261102/toolchain`, com SHA-512 do app-builder-lib.
+Sem instalação global, sem alteração do PATH, sem executar os EXE produzidos.
+O teste existente aceita agora `ELECTRON_BUILDER_NSIS_DIR`, recusa um caminho
+explícito inválido em vez de saltar, guarda a compilação no projeto e limpa o
+contrato mesmo em falha. Usa UTF-8 e os mesmos idiomas do electron-builder.
+Compila os hooks de páginas e de atalhos; não compila o payload/extrator completo.
+
+Prova final: 4 páginas, 26 tabelas de idiomas, exit 0. Os avisos 6040 de idiomas
+vinham do harness de apenas um idioma: o teste falhou com a asserção nova e
+passou ao carregar os 26 idiomas reais. Permanecem 3 avisos 6001 de variáveis
+não atribuídas pelo harness sem instalação/launch; não foram suprimidos.
+Tema/branding: 11/11; contrato final NSIS: 1/1, zero skips.
+Log: `output/nsis-contract/compile.log`. Toolchain inválida: falha esperada,
+zero skips. Nenhuma destas provas equivale a instalação, execução ou aceitação visual.
+
+**Retificação de 2010836:** adicionar `0x` a SetCtlColors não corrige as cores.
+A comparação real dos dois snippets produziu EXE byte a byte iguais (38448 B,
+SHA-256 `4e9c02c782235a9bfd5cbd1c0ba977cc75e8f6641667654b8219ae4a43820b01`).
+O parser oficial NSIS lê ambos em base 16 e converte RGB para COLORREF.
+O commit é normalização de sintaxe, não correção visual demonstrada; não se
+reescreveu histórico. A aparência do setup continua pendente.
+Prova: `output/finalization-20261102/color-proof/comparison.json`.
+Fonte: https://raw.githubusercontent.com/nsis-dev/nsis/v304/Source/script.cpp
+
+### Atualizador e distribuição
+
+Atualizador GitHub existente: 13/13 nos testes dirigidos de redirects, trust
+fechada, compatibilidade de assinatura e HTTPS local (válido, assinatura
+adulterada, bytes adulterados, cancelamento). Chaves efémeras de ensaio,
+nenhuma credencial de produção. Cadeia manifesto/assinatura/somas/workflow:
+20/20. Não é prova de feed publicado nem de upgrade instalado.
+Trust continua disabled e sem chave pinada; transferência manual após trust
+aprovada, sem execução automática. Authenticode/VM/publicação não aprovados.
+
+Preflight offline: exit 1, zero inputs ausentes; ClamAV 45 ficheiros, seed 4
+ficheiros/175916377 B, YARA 4 ficheiros e licenças verificados. Bloqueia em
+`approver-registry-missing`; aprovação existente refere 4069af1 e não pode
+cobrir o código posterior. Não foi criado manifesto de aprovação nem candidata.
+Versão canónica preservada: `0.1.11-internal.pap-r7.20261031`, não v0.2.0 stable.
+
+Consulta read-only do remoto: main `21fefa69352516c188f99c665966d4443588aa2b`;
+integração remota `4069af1eafc45207871e6ff9026ef023c3cf341d`.
+Sem push, merge, tag, Release, eliminação de branches, instalação ou VM.
+Scanner/terminação/USB/Dashboard não sofreram alterações nesta continuação;
+os resultados de 2895 app, 12 serviço e 13 core são da execução anterior,
+não foram repetidos nem somados como testes novos.
+
+Próximos gates: aprovação do HEAD/tree exatos e registo externo de aprovadores;
+packaging oficial e payload; ensaios do proprietário na VM; aprovação de
+chave/feed e identidade v0.2.0; autorizações separadas de merge e publicação.
+
+---
+
+
 ## ESTADO ACTUAL — build894b426 medido, NSIS stock pendente de novo freeze
 
 **BLOCKED_WITH_EVIDENCE.** Codex aceitou894b426 em árvore isolada74ac108;
