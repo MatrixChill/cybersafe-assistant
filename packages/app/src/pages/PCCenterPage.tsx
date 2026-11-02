@@ -783,10 +783,10 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
 
       {/* Main Grid: items-start mantém cada cartão na altura natural. Sem
           isto, a grelha esticava Rede/Bateria para a altura do cartão vizinho. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+      <div data-testid="pc-resource-overview" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
 
         {/* CPU Card */}
-        <div className="self-stretch bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+        <div className="min-w-0 bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <Cpu className="w-5 h-5 text-primary" />
@@ -847,7 +847,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
         </div>
 
         {/* RAM Card */}
-        <div className="self-stretch bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+        <div className="min-w-0 bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <MemoryStick className="w-5 h-5 text-primary" />
@@ -890,7 +890,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
         </div>
 
         {/* GPU Card */}
-        <div className="self-stretch bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+        <div className="min-w-0 bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <Monitor className="w-5 h-5 text-primary" />
@@ -966,19 +966,20 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
               </div>
             )}
             {(hardware.gpu.gpus?.length ?? 0) > 1 && (
-              <div data-testid="gpu-detected-list" className="mt-3 space-y-1 border-t border-border pt-2">
+              <details data-testid="gpu-detected-list" className="mt-3 space-y-2 border-t border-border pt-3">
+                <summary className="cursor-pointer text-sm font-medium">Adaptadores gráficos ({hardware.gpu.gpus?.length})</summary>
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                   GPUs detetadas ({hardware.gpu.gpus?.length})
                 </span>
                 {(hardware.gpu.gpus ?? []).map((placa, idx) => (
-                  <div key={`${placa.model}-${idx}`} className="flex items-center justify-between gap-2 font-mono text-[11px]">
-                    <span className="min-w-0 truncate" title={placa.model}>{placa.model}</span>
+                  <div key={`${placa.model}-${idx}`} className="flex items-center justify-between gap-2 font-mono text-sm">
+                    <span className="min-w-0 break-words" title={placa.model}>{placa.model}</span>
                     <span className="whitespace-nowrap text-muted-foreground">
                       {placa.vramTotalMb ? `${(placa.vramTotalMb / 1024).toFixed(1)} GB` : "—"}
                     </span>
                   </div>
                 ))}
-              </div>
+              </details>
             )}
             </>
           ) : (
@@ -994,6 +995,8 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
           )}
         </div>
 
+      </div>
+      <div data-testid="pc-capacity-connectivity" className="mt-6 grid grid-cols-1 xl:grid-cols-2 gap-6 items-start">
         {/* Disk Card — a mesma regra do Dashboard vive em StorageCard/lib/diskDisplay */}
         <StorageCard disk={hardware.disk} />
 
@@ -1050,7 +1053,12 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
         </div>
 
         {/* Battery Card (Conditionally Rendered) */}
-        {batteryCardVisible && (
+        {batteryCardVisible && hardware.battery.status === "absent" ? (
+          <div data-testid="battery-compact" className="bg-card cyber-border rounded-xl p-4 flex items-center gap-3">
+            <Battery className="w-5 h-5 text-muted-foreground shrink-0" />
+            <div><h2 className="font-semibold">Energia · Não aplicável</h2><p className="text-sm text-muted-foreground">{batteryDisp.label}</p></div>
+          </div>
+        ) : batteryCardVisible && (
           <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
             <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <div className="flex flex-col">

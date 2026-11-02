@@ -173,3 +173,12 @@ describe("PC Center Simples — UNAVAILABLE global", () => {
     assert.doesNotMatch(html, />0%</);
   });
 });
+
+ test("advanced overview keeps natural card heights and compact absent energy", () => {
+ const html = renderToStaticMarkup(createElement(AdvancedView, {hardware:snapshot(), batteryOrigin:"LIVE"}));
+ assert.equal(html.includes("self-stretch"), false);
+ assert.ok(html.includes('data-testid="battery-compact"'));
+ assert.equal(html.includes('data-testid="battery-readout"'), false);
+ assert.ok(html.includes('data-testid="pc-resource-overview"'));
+ assert.ok(html.includes('data-testid="pc-capacity-connectivity"'));
+ });

@@ -353,6 +353,23 @@ deps.onStackReady = async ({ plan, spawned }) => {
           for(const gauge of gauges)assert.ok(Math.abs(gauge.width-gauge.height)<1&&gauge.width>=98,'indicador circular não pode ser comprimido/cortado: '+JSON.stringify(gauge));
           facts.gauges.push({width,gauges});
         }
+        facts.pcAdvancedLayouts=[];
+        for(const width of [900,1440])for(const scale of [1,1.25,1.5]){
+          await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:720,deviceScaleFactor:scale,mobile:false});
+          const layout=await evaluate(`(()=>{const m=document.querySelector('[data-cs-main]');m.scrollTop=0;return {width:m.clientWidth,scrollWidth:m.scrollWidth,height:m.clientHeight,scrollHeight:m.scrollHeight};})()`);
+          assert.ok(layout.scrollWidth<=layout.width,'PC Center advanced horizontal overflow');
+          await safeShot('pc-advanced-top-'+width+'-'+scale);
+          await evaluate(`(()=>{const m=document.querySelector('[data-cs-main]');m.scrollTop=m.scrollHeight;})()`);
+          await safeShot('pc-advanced-bottom-'+width+'-'+scale);
+          facts.pcAdvancedLayouts.push({viewportWidth:width,scale,...layout});
+          if(width===1440&&scale===1){
+            for(let offset=0,index=0;offset<layout.scrollHeight;offset+=Math.max(1,layout.height-60),index++){
+              await evaluate(`document.querySelector('[data-cs-main]').scrollTop=${offset}`);
+              await safeShot('pc-advanced-full-'+index);
+            }
+          }
+        }
+        await evaluate(`document.querySelector('[data-cs-main]').scrollTop=0`);
         await evaluate('[...document.querySelectorAll("button")].find(b=>b.textContent.includes("Visão Simples")).click()');
         facts.pcSimpleScales=[];
         for(const width of [900,1440])for(const scale of [1,1.25,1.5]){

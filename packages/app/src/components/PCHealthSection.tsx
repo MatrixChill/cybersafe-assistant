@@ -351,7 +351,7 @@ export default function PCHealthSection() {
 
   if (loading && !health) {
     return (
-      <div className="w-full h-40 animate-pulse bg-card cyber-border rounded-xl flex items-center justify-center">
+      <div className="w-full bg-card cyber-border rounded-xl p-6 flex items-center justify-center">
         <span className="text-sm text-muted-foreground font-mono">A recolher dados de saúde do Windows...</span>
       </div>
     );
