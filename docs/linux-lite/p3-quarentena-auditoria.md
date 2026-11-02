@@ -160,23 +160,45 @@ As duas plataformas: `test/p3-quarantine-audit-engine.test.js` sozinho dá
 
 As linhas de sucesso do isolamento e do restauro são código partilhado: o
 `engine.ts` deste clone é o mesmo que o Windows executa, por isso o §16 obriga a
-correr o suite do serviço no clone isolado. `npm test` em Windows, já com o
-`restoreQuarantine` alterado (990 = 987 anteriores + os 3 casos de restauro):
+correr o suite do serviço no clone isolado. Quatro corridas, uma por cada passo,
+com o `stdout` guardado em ficheiro e os números lidos de lá:
 
 ```
+# antes do corte (estado de 3b66934)
+ℹ tests 982
+ℹ pass 973
+ℹ fail 8
+ℹ skipped 1
+
+# linha de sucesso com o ...evidence + os 5 casos de auditoria (cd4d7c8)
+ℹ tests 987
+ℹ pass 978
+ℹ fail 8
+ℹ skipped 1
+
+# restoreQuarantine auditado + 3 casos
 ℹ tests 990
 ℹ pass 981
 ℹ fail 8
 ℹ skipped 1
+
+# 2 casos de confirmação (estado atual)
+ℹ tests 992
+ℹ pass 983
+ℹ fail 8
+ℹ skipped 1
 ```
 
-As oito falhas são o conjunto já conhecido como vermelho, listado nos cortes
-anteriores: sete de `p1-3-prefetch-isolation.test.js` e uma de
-`engine-batch-cache-lookup.test.js` («os 6 ficheiros do batch sao resolvidos pelo
-veredicto em cache…»). Nenhuma é de quarentena, nenhuma é nova, e o ficheiro
-deste corte está dentro das 978 passadas. O que esta corrida tinha de provar era
-que acrescentar campos à linha de sucesso não parte nenhum outro consumidor do
-`history.jsonl` — e não parte.
+O que torna esta série útil não é o último número: é o `fail 8` não se ter mexido
+enquanto dez casos eram acrescentados. As oito falhas são as mesmas nas quatro
+corridas e são o conjunto já conhecido como vermelho, listado nos cortes
+anteriores: sete de `p1-3-prefetch-isolation.test.js` (A, B, C, E, G, H, I) e uma
+de `engine-batch-cache-lookup.test.js` («os 6 ficheiros do batch sao resolvidos
+pelo veredicto em cache…»). Nenhuma é de quarentena, nenhuma é nova, e cada caso
+deste corte aparece entre as passadas. O que tinha de ser provado — que acrescentar
+campos à linha de sucesso, e escrever uma linha nova no restauro, não parte nenhum
+outro consumidor do `history.jsonl` — fica provado por as contagens de falhas serem
+idênticas antes e depois.
 
 ## Duas falhas que não eram deste corte, e um teste que ninguém corria
 
@@ -217,6 +239,40 @@ isso corre apenas em `npm run test:full` ou à mão. Foi ao juntá-lo ao grupo p
 medir a auditoria que as duas falhas apareceram. Não as atribuo a mim, e não as
 deixei passar: ficam corrigidas neste corte.
 
+## Quem chama o isolamento e o restauro
+
+A linha só vale se for a linha que a janela escreve. Em vez de o supor, fui dos
+botões ao `dispatch`, e o mapa saiu diferente do que a lista de canais sugeria:
+
+| Botão | Ponte | Canal | Chega a | Linha em `history.jsonl` |
+|---|---|---|---|---|
+| «Restaurar» de uma linha (QuarantinePage.tsx:400) e «Restaurar selecionados» (QuarantinePage.tsx:372) | `api.restoreQuarantine` | `quarantine.restore` (engine.ts:5345) | `restoreQuarantine` | `quarantine.restored` / `quarantine.restore.failed` com `fileName`, `sha256`, `artifactPath` — medido |
+| «Colocar em quarentena…» da página de Ameaças | `window.electronAPI.threatAction(id,"quarantine",sha256)` (ThreatsPage.tsx:89, via preload `service:threat-action`, main.ts:1642) | `threat.action` ramo `"quarantine"` | `requestQuarantine(analysis,"manual")` (engine.ts:5448) | `quarantine.added` com o `evidence` completo — **o mesmo método medido**, mais uma linha `threat.quarantined_manual` com `{id, timestamp}` (engine.ts:5451) |
+| — | — | `threat.action` ramo `"restore"` | `this.quarantine.restore` direto, sem passar pelo método | `threat.restored` com `{id, timestamp}` apenas (engine.ts:5423) |
+
+Três coisas ficaram claras e nenhuma delas era a que eu ia escrever:
+
+1. **O isolamento manual pedido fora da Quarentena já era auditado.** O ramo
+   `"quarantine"` do `threat.action` não inventa um movimento: chama
+   `requestQuarantine`, que é o método com o portão e com a linha de sucesso. A
+   janela de Ameaças e a deteção automática partilham portanto o mesmo registo — o
+   que não partilham é uma segunda linha, `threat.quarantined_manual`, que repete o
+   acontecimento com menos campos.
+2. **O ramo `"restore"` do `threat.action` não tem chamador nesta aplicação.** O
+   `preload` expõe-o com os três modos e o portão de leitura permite-o, mas o único
+   uso em `packages/app` é o `requestManualQuarantine` acima, que passa
+   `"quarantine"`. A pesquisa que o confirmou teve um falso positivo que vale
+   registar: `ThreatsPage.tsx` contém `threat.action` duas vezes, e nas duas é o
+   *campo* `action` de um `ThreatEvent` (`threat.action === "quarantined"`), não o
+   canal. Sem ler as linhas, o `grep` dizia que a página restaurava por aquele
+   caminho.
+3. **A MATRIX não é um quarto caminho.** `restore_quarantine` aparece em
+   `packages/app/src/lib/aiContextBuilder.ts:84`, mas dentro de
+   `FORBIDDEN_AI_ACTIONS` — é uma lista de ações proibidas à assistente, não uma
+   ferramenta implementada, e `isActionAllowedForAI` devolve `false` para qualquer
+   entrada. Não há, portanto, restauro nem isolamento iniciado por IA, e a
+   auditoria não tem de responder por esse modo de autorização.
+
 ## Ainda não é dito
 
 - **as duas metades da confirmação não correm no mesmo motor.** A linha de
@@ -226,19 +282,23 @@ deixei passar: ficam corrigidas neste corte.
   automático com a linha correspondente — não é afirmado aqui; a parte do scan
   automático é o que `recovery-security-pipeline.test.js` caso C mede pelos
   eventos, não pelo `history.jsonl`.
-- **não é o percurso completo.** A auditoria medida aqui começa em
-  `requestQuarantine`. O pedido que chega pelo IPC (`quarantine.ts`, canal do
-  `requestQuarantine` manual) continua por medir de ponta a ponta, incluindo o
-  que o `actions.log` escreve nesses pedidos — este ficheiro não afirma nada
-  sobre `<baseDir>/logs/actions.log`, só sobre `history.jsonl`.
-- **o restauro tem dois caminhos e só um nomeia o ficheiro.** A janela da
-  Quarentena usa `restoreQuarantine`, que agora fica no registo com `fileName`,
-  `sha256` e `artifactPath`. O outro, `threat.action` com `action:"restore"`
-  (`threat.action`, engine.ts:5423), continua a escrever `{type:"threat.restored", id, timestamp}`
-  — existe, mas um `id` opaco não diz que ficheiro voltou a existir. É a mesma
-  ação com dois nomes de tipo; deixei os dois como estão porque esta página não
-  mede o `threat.action` com restauro real, e mudar o tipo de uma linha que pode
-  estar a ser lida por outra coisa precisa de ser medido, não suposto.
+- **falta a outra metade do registo.** Os cortes anteriores mediram o movimento
+  pelos eventos; este mede o `history.jsonl`. O que continua por medir é o
+  `actions.log`: nenhum caso daqui afirma seja o que for sobre
+  `<baseDir>/logs/actions.log`, incluindo se o pedido manual vindo da página de
+  Ameaças fica lá escrito. Fica uma asserção negativa e exata — este ficheiro só
+  afirma coisas sobre `history.jsonl`.
+- **um acontecimento, duas linhas de espessuras diferentes.** O mapa em cima
+  deixa dois defeitos de registo vivos. O primeiro: o isolamento manual pedido na
+  página de Ameaças escreve `quarantine.added` (completa) **e**
+  `threat.quarantined_manual` (só `id`), pelo que quem ler o ficheiro à procura de
+  isolamentos tem de conhecer os dois tipos para não contar a meio. O segundo: o
+  ramo `"restore"` do `threat.action` continua a escrever `threat.restored` com
+  `{id, timestamp}` e sem `fileName`/`sha256`/`artifactPath`; hoje não tem chamador
+  na aplicação, mas tem contrato — o `preload` expõe-o, o portão de leitura
+  permite-o e o `shared-types` descreve-o. Deixei os dois como estão porque mudar o
+  tipo de uma linha que outra coisa pode estar a ler precisa de ser medido, não
+  suposto, e nenhum dos dois percursos é o que a janela da Quarentena usa.
 - **o que é eliminado não fica no registo.** `deleteQuarantine` (engine.ts:3508)
   não publica evento — comentário no código diz que reaproveitar «restored»
   mentiria sobre o que aconteceu ao ficheiro — e também não escreve linha. Não há
