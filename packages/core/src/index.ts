@@ -10,6 +10,7 @@ export * from "./network.js";
 export * from "./pipe-auth.js";
 export * from "./response.js";
 export * from "./process-termination-posix.js";
+export * from "./process-provider-posix.js";
 export * from "./scoring.js";
 export * from "./signatures.js";
 export * from "./trust.js";

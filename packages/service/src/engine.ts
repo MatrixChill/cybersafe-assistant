@@ -128,6 +128,7 @@ ProcessKillProtectionReason,
 import { hasDegradedProtections, ENGINE_DISPLAY_NAME, classifyProcessEnumerationError } from "@cybersafe/shared-types";
 import { RealtimeLossLedger } from "./realtime-loss.js";
 import type { KillProtectionContext, KillTargetInfo, PosixTerminationExpectation } from "@cybersafe/core";
+import { PosixProcessProvider } from "@cybersafe/core";
 
 const execFileAsync = promisify(execFile);
 
@@ -512,6 +513,13 @@ export class ProtectionEngineService {
   private readonly quarantine: QuarantineManager;
   private readonly watcher = new NativeWindowsWatcher();
   private readonly processMonitor = new ProcessMonitor();
+  /**
+   * Fornecedor de processos POSIX. O `ProcessMonitor` acima é o CIM do
+   * Windows: em Linux lança `spawn powershell.exe ENOENT`, e o Gestor de
+   * Tarefas ficava sem nenhuma linha. A enumeração escolhe a fonte por
+   * plataforma em `enumerateProcesses()`; em Windows nada muda.
+   */
+  private readonly posixProcessProvider = new PosixProcessProvider();
   private readonly etwConsumer = new EtwConsumer();
   private readonly wfpFilter = new WfpFilter();
   private readonly amsiProvider = new AmsiProvider();
@@ -1356,7 +1364,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // proteção não o volta a arrancar (e não contorna a guarda readonly).
 
       Promise.all([
-        this.processMonitor.list().then((p) => {
+        this.enumerateProcesses().then((p) => {
           const revisionBefore = this.processesRevision;
           this.processes = this.withoutTombstoned(p);
           // O restart da proteção pode apanhar um kill em curso: vale a mesma
@@ -3830,7 +3838,7 @@ if (processInfo.path) {
       this.processesEnumerating = (async () => {
         let falhou = false;
         try {
-          const fresh = await this.processMonitor.list();
+          const fresh = await this.enumerateProcesses();
           // Uma enumeração é uma FOTO. Um processo que nasce (ou que a UI mata)
           // enquanto ela corre não pode estar na foto, e overwrite simples
           // apagava do cache um processo VIVO — ou trazia de volta um morto.
@@ -3879,6 +3887,18 @@ if (processInfo.path) {
     }
     const { rows, servedFrom } = await this.processesEnumerating;
     return { processes: rows, truth: this.composeProcessesTruth(servedFrom) };
+  }
+
+  /**
+   * Fonte da foto de processos, escolhida em tempo de chamada: Windows mantém
+   * exatamente o `ProcessMonitor` de CIM de sempre; POSIX enumera `/proc`. A
+   * escolha por plataforma (e não por importação) é o que permite correr o
+   * mesmo ficheiro compilado nos dois sistemas sem importar APIs Windows no
+   * caminho Linux.
+   */
+  private async enumerateProcesses(): Promise<ProcessSnapshot[]> {
+    if (process.platform === "win32") return this.processMonitor.list();
+    return this.posixProcessProvider.list();
   }
 
   /**
