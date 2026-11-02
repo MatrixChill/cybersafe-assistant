@@ -45,7 +45,7 @@ import {
   encodeMessage,
   classifyKillTarget,  isAliasStubTarget,
   isProcessAlive,
-  killProcessTree,
+  killProcessPlatform,
   killTargetIdentity,
   KILL_REAP_DEADLINE_MS,
   KILL_REAP_INTERVAL_MS,
@@ -127,7 +127,7 @@ ProcessKillProtectionReason,
 } from "@cybersafe/shared-types";
 import { hasDegradedProtections, ENGINE_DISPLAY_NAME, classifyProcessEnumerationError } from "@cybersafe/shared-types";
 import { RealtimeLossLedger } from "./realtime-loss.js";
-import type { KillProtectionContext, KillTargetInfo } from "@cybersafe/core";
+import type { KillProtectionContext, KillTargetInfo, PosixTerminationExpectation } from "@cybersafe/core";
 
 const execFileAsync = promisify(execFile);
 
@@ -796,11 +796,19 @@ export class ProtectionEngineService {
   private killProbeMinIntervalMs = 500;
   /** Antes de quantas confirmações seguidas o CIM diz "não existe"? Um falhanço transitório não mata ninguém. */
   private killProbeConfirmations = 2;
-  /** Seam de teste: execução do taskkill (mesmo padrão do spawnImpl no core).
+  /** Seam de teste: execução da terminação (mesmo padrão do spawnImpl no core).
    *  P4: aceita `timeoutMs` para que o kill possa limitar a etapa ao orçamento
    *  global restante. `killProcessTree` no core já suporta `timeoutMs`, logo
-   *  esta é a única superfície que alarga — o core não muda. */
-  private readonly runTaskkill: (pid: number, options?: { timeoutMs?: number }) => Promise<KillProcessResult> = killProcessTree;
+   *  esta é a única superfície que alarga — o core não muda.
+   *  P1-LINUX: o alvo passa a ser `killProcessPlatform`. Em Windows é o MESMO
+   *  `killProcessTree`/`taskkill` de sempre; em POSIX envia SIGTERM com
+   *  revalidação por `/proc`, porque `taskkill` não existe e chamá-lo produziria
+   *  ENOENT apresentado como falha sem causa. O nome do campo mantém-se para não
+   *  partir os testes que o substituem. */
+  private readonly runTaskkill: (
+    pid: number,
+    options?: { timeoutMs?: number } & PosixTerminationExpectation,
+  ) => Promise<KillProcessResult> = killProcessPlatform;
   private connections: ConnectionSnapshot[] = [];
   private blockedHashes = new Set<string>();
   private blockedPaths = new Set<string>();
@@ -4058,7 +4066,10 @@ if (processInfo.path) {
             continue;
           }
           if (!isProcessAlive(child.pid)) continue;
-          const result = await this.runTaskkill(child.pid, { timeoutMs: step(ProtectionEngineService.KILL_TREE_CHILD_TIMEOUT_MS) });
+          const result = await this.runTaskkill(child.pid, {
+            timeoutMs: step(ProtectionEngineService.KILL_TREE_CHILD_TIMEOUT_MS),
+            esperadoNome: child.name,
+          });
           const stillThere = await this.killTargetStillAlive(child.pid, step(ProtectionEngineService.KILL_ALIAS_QUERY_TIMEOUT_MS));
           if (!stillThere && result.status !== "timeout") {
             killed.push(child.pid);
@@ -4347,11 +4358,17 @@ if (processInfo.path) {
       };
     }
 
+    // O log tem de descrever o que FOI executado. No Linux não existe
+    // `taskkill`: registar esse comando seria uma auditoria inventada, e a
+    // recusa do passo 1 provaria o contrário. Em Windows a linha fica byte a
+    // byte como sempre esteve.
+    const comandoTerminacao =
+      process.platform === "win32" ? `taskkill /F /T /PID ${pid}` : `kill(SIGTERM) PID=${pid}`;
     const logKillAttempt = (attempt: number, result: KillProcessResult) => {
       void fs
         .appendFile(
           path.join(this.logsDir, "actions.log"),
-          `[KILL] PID=${pid} | Name=${processInfo?.name ?? "unknown"} | Cmd=taskkill /F /T /PID ${pid}` +
+          `[KILL] PID=${pid} | Name=${processInfo?.name ?? "unknown"} | Cmd=${comandoTerminacao}` +
           ` | Attempt=${attempt} | Status=${result.status} | Exit=${result.exitCode ?? "n/a"}` +
           ` | Stdout="${oneLineLog(result.stdout)}" | Stderr="${oneLineLog(result.stderr)}"\n`,
           "utf-8",
@@ -4360,7 +4377,10 @@ if (processInfo.path) {
     };
 
     let attempt = 1;
-    let taskkill = await this.runTaskkill(pid, { timeoutMs: remaining() });
+    // `esperadoNome`: no POSIX é a segunda âncora de identidade (o `comm` de
+    // `/proc`); em Windows `killProcessTree` ignora o campo e o comportamento é
+    // o de sempre. Nome divergente = PID reutilizado = recusa antes do sinal.
+    let taskkill = await this.runTaskkill(pid, { timeoutMs: remaining(), esperadoNome: processInfo?.name });
     logKillAttempt(attempt, taskkill);
 
     // Retry com critério do SO, não do taskkill: o exit 255 nao distingue "ja
@@ -4382,7 +4402,7 @@ if (processInfo.path) {
       const retryDelay = Math.min(KILL_RETRY_DELAY_MS, Math.max(0, remaining()));
       await new Promise((resolve) => setTimeout(resolve, retryDelay));
       attempt += 1;
-      taskkill = await this.runTaskkill(pid, { timeoutMs: remaining() });
+      taskkill = await this.runTaskkill(pid, { timeoutMs: remaining(), esperadoNome: processInfo?.name });
       logKillAttempt(attempt, taskkill);
     }
 
