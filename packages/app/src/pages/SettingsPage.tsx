@@ -115,7 +115,7 @@ export default function SettingsPage() {
   // Metadata do aviso local: o `sub` do token já emitido. Não é uma sessão
   // nova nem uma autorização — o DELETE continua a ser validado pelo servidor.
   const contaId = contaDoTokenDeSessao(tokenDeSessao());
-  const { identity, setIdentity, theme, setThemeMode, accent, setAccent, surface, setSurface, prefs, setMovement, setPerformance, setWebgl, animate, lowPower, systemReduced, storageError } = useAppearance();
+  const { identity, setIdentity, theme, setThemeMode, accent, setAccent, surface, setSurface, prefs, setMovement, setPerformance, setWebgl, animate, lowPower, systemReduced, storageError, setEffect, effects, visualNotice, dismissVisualNotice } = useAppearance();
   const [autoStart, setAutoStart] = useState(false);
   const [startMinimized, setStartMinimized] = useState(false);
   const [notificationsEnabled, setNotificationsEnabled] = useState(true);
@@ -794,6 +794,10 @@ export default function SettingsPage() {
             <input id="settings-webgl" type="checkbox" checked={prefs.webgl} onChange={event => setWebgl(event.currentTarget.checked)} />
             Permitir núcleo 3D com WebGL
           </label>
+          {prefs.performance === 'custom' && <fieldset className="grid gap-3 sm:grid-cols-2"><legend className="text-sm font-medium mb-3">Efeitos personalizados</legend>
+            {([['core3d','Núcleo WebGL/3D'],['orbits','Órbitas animadas'],['particles','Partículas'],['glass','Transparências e Liquid Glass'],['blur','Blur de fundos'],['glow','Reflexos e brilho'],['transitions','Transições e animações']] as const).map(([key,label])=><label key={key} className="flex items-center gap-3 text-sm"><input id={'settings-effect-'+key} type="checkbox" checked={prefs.effects?.[key] ?? true} onChange={e=>setEffect(key,e.currentTarget.checked)}/>{label}{!effects[key] && (prefs.effects?.[key] ?? true) ? ' · reduzido nesta sessão' : ''}</label>)}
+          </fieldset>}
+          {visualNotice && <p role="status" className="text-sm text-muted-foreground">{visualNotice==='webgl-unavailable'?'O núcleo 3D não está disponível nesta sessão. Mantém-se a apresentação estática.':'Alguns efeitos foram reduzidos após instabilidade dos frames observada nesta sessão.'} <button type="button" onClick={dismissVisualNotice} className="underline">Dispensar aviso</button></p>}
           <p className="text-xs text-muted-foreground">A disponibilidade é confirmada por cada cena. Sem WebGL, mantém-se a apresentação estática.</p>
           <p role="status" className="text-sm text-muted-foreground">Movimento efetivo: {animate ? "ativo" : "reduzido ou desligado"}.{systemReduced ? " Movimento reduzido pedido pelo sistema." : lowPower ? " Perfil económico ativo." : ""}</p>
           {storageError && <p role="alert" className="text-sm text-cyber-yellow">A preferência foi aplicada nesta sessão, mas não foi possível guardá-la para o próximo arranque.</p>}

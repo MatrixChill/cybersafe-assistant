@@ -1,0 +1,12 @@
+/* Optional presentation only: security state colours and text remain intact. */
+html[data-effect-blur="false"] body * {backdrop-filter:none!important;-webkit-backdrop-filter:none!important;}
+html[data-effect-glass="false"] {--v2-material-blur:none;--v2-blur:none;}
+html[data-effect-glass="false"] .surface-elevated,
+html[data-effect-glass="false"] .cs-v2 .panel {background:var(--background)!important;backdrop-filter:none!important;}
+html[data-effect-glow="false"] .brand-scene img,
+html[data-effect-glow="false"] .brand-scene canvas {filter:none!important;}
+html[data-effect-glow="false"] .static-aurora {display:none;}
+html[data-effect-orbits="false"] .orbit-node {animation:none!important;}
+html[data-effect-transitions="false"] body *,
+html[data-reduced="true"] body * {animation:none!important;transition:none!important;scroll-behavior:auto!important;}
+.visual-adaptation-notice {position:absolute;z-index:3;bottom:18px;left:8px;right:8px;padding:8px;background:var(--background);color:var(--muted-foreground);border:1px solid var(--border);border-radius:var(--radius);font-size:11px;text-align:left;}

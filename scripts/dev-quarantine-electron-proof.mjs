@@ -367,6 +367,35 @@ deps.onStackReady = async ({ plan, spawned }) => {
           await safeShot('orbital-v3-proposal-a');
           await timeout(1200);
           await safeShot('orbital-v3-proposal-b');
+          for (const seconds of [5,10,15]) {
+            await timeout(5000);
+            await safeShot('orbital-v3-rotation-'+seconds);
+          }
+          facts.visualProfiles=[];
+          for(const profile of ['auto','high','balanced','economy','custom']) {
+            await clickSidebar('Configurações');
+            await until(()=>evaluate('Boolean(document.getElementById("settings-performance"))'),'perfil visual');
+            await selectValue('settings-performance',profile);
+            await until(()=>evaluate(`document.documentElement.dataset.v2Performance === ${JSON.stringify(profile)}`),'perfil aplicado');
+            await evaluate(`document.getElementById('settings-effects-title').scrollIntoView({block:'center'})`);
+            await safeShot('visual-profile-settings-'+profile);
+            if(profile==='custom') {
+              await evaluate(`document.querySelectorAll('[id^="settings-effect-"]').forEach(input=>{if(input.checked)input.click();})`);
+              await until(()=>evaluate('document.documentElement.dataset.effectCore3d === "false"'),'3D personalizado desligado');
+              await cdp.send('Page.reload');
+              await until(()=>evaluate('Boolean(document.querySelector("[data-cs-sidebar=main]"))'),'perfil personalizado após reload');
+              assert.equal(await evaluate('document.documentElement.dataset.effectCore3d'), 'false');
+            }
+            await clickSidebar('Painel');
+            await until(()=>evaluate('Boolean(document.querySelector(".brand-scene"))'),'painel no perfil');
+            if(profile==='economy'||profile==='custom')assert.equal(await evaluate('Boolean(document.querySelector(".three-scene canvas"))'),false);
+            await safeShot('visual-profile-dashboard-'+profile);
+            facts.visualProfiles.push({profile,core3d:await evaluate('Boolean(document.querySelector(".three-scene canvas"))')});
+          }
+          await clickSidebar('Configurações');
+          await until(()=>evaluate('Boolean(document.getElementById("settings-performance"))'),'repor perfil para movimento reduzido');
+          await selectValue('settings-performance','balanced');
+          await clickSidebar('Painel');
           await cdp.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-motion',value:'reduce'}]});
           await until(()=>evaluate('document.documentElement.dataset.reduced === "true"'),'movimento reduzido efetivo');
           facts.orbitalProposal.reducedMotion=true;

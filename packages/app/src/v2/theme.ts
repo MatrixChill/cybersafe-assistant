@@ -32,7 +32,24 @@ export type V2Theme =
 
 export type V2Material = "solid" | "light" | "frosted" | "liquid" | "advanced";
 export type V2Movement = "off" | "reduced" | "balanced" | "cinematic";
-export type V2Performance = "economy" | "balanced" | "high" | "auto";
+export type V2Performance = "economy" | "balanced" | "high" | "auto" | "custom";
+export interface VisualEffects { core3d:boolean; orbits:boolean; particles:boolean; glass:boolean; blur:boolean; glow:boolean; transitions:boolean }
+export const DEFAULT_VISUAL_EFFECTS: VisualEffects = {core3d:true,orbits:true,particles:true,glass:true,blur:true,glow:true,transitions:true};
+export function readVisualEffects(raw: unknown): VisualEffects {
+  const result = {...DEFAULT_VISUAL_EFFECTS};
+  if (raw && typeof raw === 'object') for (const key of Object.keys(result) as (keyof VisualEffects)[]) {
+    const value = (raw as Record<string,unknown>)[key];
+    if (typeof value === 'boolean') result[key] = value;
+  }
+  return result;
+}
+
+export function readVisualNoticeDismissals(): string[] {
+  try {const raw:unknown=JSON.parse(readRaw('cybersafe_visual_notices_v1')||'[]');return Array.isArray(raw)?raw.filter((x):x is string=>typeof x==='string'):[];}catch{return [];}
+}
+export function writeVisualNoticeDismissals(values:string[]): boolean {
+  return writeRaw('cybersafe_visual_notices_v1',JSON.stringify(values));
+}
 
 export interface V2Preferences {
   theme: V2Theme;
@@ -40,6 +57,7 @@ export interface V2Preferences {
   movement: V2Movement;
   performance: V2Performance;
   webgl: boolean;
+  effects?: VisualEffects;
 }
 
 /** Ordem de apresentação — é também a numeração «01 / IDENTIDADE» das Configurações. */
@@ -82,12 +100,13 @@ export const V2_MOVEMENT_LABELS: Record<V2Movement, string> = {
   cinematic: "Cinematográfico",
 };
 
-export const V2_PERFORMANCE_ORDER: readonly V2Performance[] = ["economy", "balanced", "high", "auto"];
+export const V2_PERFORMANCE_ORDER: readonly V2Performance[] = ["auto", "high", "balanced", "economy", "custom"];
 export const V2_PERFORMANCE_LABELS: Record<V2Performance, string> = {
   economy: "Económico",
   balanced: "Equilibrado",
-  high: "Qualidade elevada",
+  high: "Qualidade máxima",
   auto: "Automático",
+  custom: "Personalizado",
 };
 
 export const V2_PREFERENCES_KEY = "cybersafe_appearance_v2";
@@ -216,6 +235,7 @@ export function readV2Preferences(legacy: LegacyAppearance = readLegacyAppearanc
           movement: pick(parsed.movement, V2_MOVEMENT_ORDER, DEFAULT_V2_PREFERENCES.movement),
           performance: pick(parsed.performance, V2_PERFORMANCE_ORDER, DEFAULT_V2_PREFERENCES.performance),
           webgl: typeof parsed.webgl === "boolean" ? parsed.webgl : DEFAULT_V2_PREFERENCES.webgl,
+          ...(parsed.effects ? {effects:readVisualEffects(parsed.effects)} : {}),
         };
       }
     } catch {
@@ -261,6 +281,8 @@ export function logicalCpuCount(): number {
 }
 
 export interface V2Derived {
+  effects: VisualEffects;
+  maxFps: number;
   /** true = há movimento contínuo; falsos desligam órbitas, aurora e transições. */
   animate: boolean;
   /** true = o pedido permite WebGL; cada cena confirma ainda a disponibilidade. */
@@ -287,13 +309,17 @@ export function systemPrefersReducedMotion(): boolean {
  * quando a preferência do sistema mudava — os atributos do `<html>` ficavam a
  * descrever o estado anterior do sistema.
  */
-export function deriveV2Capabilities(p: V2Preferences, systemReduced?: boolean): V2Derived {
-  const cpus = logicalCpuCount();
-  const lowPower = p.performance === "economy" || (p.performance === "auto" && cpus > 0 && cpus <= 4);
+export function deriveV2Capabilities(p: V2Preferences, systemReduced?: boolean, runtime: {unstable?:boolean;webglAvailable?:boolean} = {}): V2Derived {
+  const lowPower = p.performance === "economy" || (p.performance === "auto" && runtime.unstable === true);
   const reduzido = systemReduced ?? systemPrefersReducedMotion();
+  const effects = p.performance === 'custom' ? readVisualEffects(p.effects) : {...DEFAULT_VISUAL_EFFECTS};
+  if (lowPower) for (const key of Object.keys(effects) as (keyof VisualEffects)[]) effects[key] = false;
+  if (reduzido || p.movement === 'off' || p.movement === 'reduced') {effects.orbits=false;effects.transitions=false;effects.particles=false;}
   return {
-    animate: !reduzido && p.movement !== "off" && p.movement !== "reduced" && !lowPower,
-    gpu: p.webgl && !lowPower,
+    effects,
+    maxFps: p.performance === 'high' ? 60 : 30,
+    animate: (effects.orbits || effects.transitions || effects.particles) && !reduzido && p.movement !== "off" && p.movement !== "reduced" && !lowPower,
+    gpu: p.webgl && effects.core3d && runtime.webglAvailable !== false && !lowPower,
     lowPower,
     renderDpr: p.performance === "high" ? 1.5 : 1,
     systemReduced: reduzido,
@@ -344,9 +370,9 @@ export function v2ToLegacy(p: V2Preferences, caps = deriveV2Capabilities(p), sys
  * Efeitos de eixo lidos do DOM. `applyV2Appearance` escreve atributos, não
  * decide cores: quem pinta é `src/v2/tokens.css` + `src/v2/bridge.css`.
  */
-export function applyV2Appearance(p: V2Preferences = readV2Preferences(), systemReduced?: boolean): void {
+export function applyV2Appearance(p: V2Preferences = readV2Preferences(), systemReduced?: boolean, effective?:V2Derived): void {
   const root = document.documentElement;
-  const caps = deriveV2Capabilities(p, systemReduced);
+  const caps = effective ?? deriveV2Capabilities(p, systemReduced);
   root.setAttribute("data-v2-theme", p.theme);
   root.setAttribute("data-v2-material", p.material);
   root.setAttribute("data-v2-movement", p.movement);
@@ -354,11 +380,12 @@ export function applyV2Appearance(p: V2Preferences = readV2Preferences(), system
   root.setAttribute("data-v2-webgl", String(caps.gpu));
   /* Os dois travões estruturais que o lab usa no CSS. */
   root.setAttribute("data-reduced", String(!caps.animate));
-  root.setAttribute("data-solid", String(p.material === "solid" || caps.lowPower));
+  root.setAttribute("data-solid", String(p.material === "solid" || !caps.effects.glass));
+  for (const [key,value] of Object.entries(caps.effects)) root.setAttribute('data-effect-'+key, String(value));
 }
 
 /** Aplica e tenta guardar. `false` = aplicada nesta sessão, não persistida. */
-export function writeV2Preferences(p: V2Preferences, systemReduced?: boolean): boolean {
-  applyV2Appearance(p, systemReduced);
+export function writeV2Preferences(p: V2Preferences, systemReduced?: boolean, effective?:V2Derived): boolean {
+  applyV2Appearance(p, systemReduced, effective);
   return writeRaw(V2_PREFERENCES_KEY, JSON.stringify(p));
 }

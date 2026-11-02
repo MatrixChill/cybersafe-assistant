@@ -12,6 +12,10 @@ import {
   type V2Performance,
   type V2Preferences,
   type V2Theme,
+  type VisualEffects,
+  readVisualEffects,
+  readVisualNoticeDismissals,
+  writeVisualNoticeDismissals,
 } from "../v2/theme";
 
 /**
@@ -50,6 +54,12 @@ interface AppearanceContextValue {
   setMovement: (movement: V2Movement) => void;
   setPerformance: (performance: V2Performance) => void;
   setWebgl: (webgl: boolean) => void;
+  setEffect: (effect:keyof VisualEffects, enabled:boolean) => void;
+  effects: VisualEffects;
+  maxFps:number;
+  reportWebgl: (available:boolean) => void;
+  visualNotice:string|null;
+  dismissVisualNotice:()=>void;
   resetPreferences: () => void;
   /** Derivados do eixo de desempenho e do sistema. */
   animate: boolean;
@@ -79,6 +89,26 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   const [accent, setAccentState] = useState<AccentMode>(() => loadAccent());
   const [systemReduced, setSystemReduced] = useState(() => systemPrefersReducedMotion());
   const [storageError, setStorageError] = useState(false);
+  const [webglAvailable,setWebglAvailable] = useState<boolean|undefined>(undefined);
+  const [unstable,setUnstable] = useState(false);
+  const [dismissed,setDismissed] = useState<string[]>(readVisualNoticeDismissals);
+  // One bounded visible sample per automatic session. No polling or hardware ranking.
+  useEffect(()=>{
+    if(prefs.performance!=='auto'||systemReduced||unstable)return;
+    let raf=0,last=0,count=0,slow=0,finished=false,start=performance.now();
+    const tick=(now:number)=>{
+      if(document.hidden){last=0;return;}
+      if(now-start<1500){raf=requestAnimationFrame(tick);return;}
+      if(now-start>12000){finished=true;return;}
+      if(last){const dt=now-last;if(dt>0&&dt<250){count++;if(dt>50)slow++;}}
+      last=now;
+      if(count>=180){finished=true;if(slow/count>.25)setUnstable(true);return;}
+      raf=requestAnimationFrame(tick);
+    };
+    const wake=()=>{cancelAnimationFrame(raf);last=0;start=performance.now();if(!document.hidden&&!finished)raf=requestAnimationFrame(tick);};
+    document.addEventListener('visibilitychange',wake);wake();
+    return()=>{cancelAnimationFrame(raf);document.removeEventListener('visibilitychange',wake);};
+  },[prefs.performance,systemReduced,unstable]);
 
   // `prefers-reduced-motion` pode mudar sem recarregar a página.
   useEffect(() => {
@@ -96,13 +126,21 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
    * `animate`/`gpu` e os atributos do `<html>` no valor anterior — e o efeito de
    * baixo, que depende de `caps`, nem voltava a correr.
    */
-  const caps = useMemo(() => deriveV2Capabilities(prefs, systemReduced), [prefs, systemReduced]);
+  const caps = useMemo(() => deriveV2Capabilities(prefs, systemReduced,{unstable,webglAvailable}), [prefs, systemReduced,unstable,webglAvailable]);
+  const reason = prefs.webgl && (prefs.performance!=='custom'||prefs.effects?.core3d!==false) && prefs.performance!=='economy' && webglAvailable===false ? 'webgl-unavailable' : prefs.performance==='auto'&&unstable ? 'frames-reduced' : null;
+  const visualNotice=reason&&!dismissed.includes(reason)?reason:null;
+  const reportWebgl=useCallback((available:boolean)=>setWebglAvailable(available),[]);
+  const dismissVisualNotice=useCallback(()=>{
+    if(!reason)return;
+    const next=[...new Set([...dismissed,reason])];setDismissed(next);
+    writeVisualNoticeDismissals(next);
+  },[reason,dismissed]);
 
   // Aplicar e persistir num só sítio. Duas escritas, uma por camada: os
   // atributos V2 e a projeção que as folhas de V1 ainda lêem. O resultado é
   // observado: `false` não se disfarça de sucesso, mostra-se como aviso.
   useEffect(() => {
-    const guardadoV2 = writeV2Preferences(prefs, systemReduced);
+    const guardadoV2 = writeV2Preferences(prefs, systemReduced, caps);
     const guardadoLegado = writeAppearance({ ...v2ToLegacy(prefs, caps), accent });
     setStorageError(!(guardadoV2 && guardadoLegado));
   }, [prefs, accent, caps, systemReduced]);
@@ -111,7 +149,8 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
   const setMaterial = useCallback((material: V2Material) => setPrefs((p) => ({ ...p, material })), []);
   const setMovement = useCallback((movement: V2Movement) => setPrefs((p) => ({ ...p, movement })), []);
   const setPerformance = useCallback((performance: V2Performance) => setPrefs((p) => ({ ...p, performance })), []);
-  const setWebgl = useCallback((webgl: boolean) => setPrefs((p) => ({ ...p, webgl })), []);
+  const setWebgl = useCallback((webgl: boolean) => {if(webgl)setWebglAvailable(undefined);setPrefs((p) => ({ ...p, webgl }));}, []);
+  const setEffect=useCallback((effect:keyof VisualEffects,enabled:boolean)=>{if(effect==='core3d'&&enabled)setWebglAvailable(undefined);setPrefs(p=>({...p,effects:{...readVisualEffects(p.effects),[effect]:enabled}}));},[]);
   const resetPreferences = useCallback(() => setPrefs({ ...DEFAULT_V2_PREFERENCES }), []);
 
   const legacy = useMemo(() => v2ToLegacy(prefs, caps), [prefs, caps]);
@@ -124,6 +163,12 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
       setMovement,
       setPerformance,
       setWebgl,
+      setEffect,
+      effects:caps.effects,
+      maxFps:caps.maxFps,
+      reportWebgl,
+      visualNotice,
+      dismissVisualNotice,
       resetPreferences,
       animate: caps.animate,
       gpu: caps.gpu,
@@ -150,7 +195,7 @@ export function AppearanceProvider({ children }: { children: ReactNode }) {
       accent,
       setAccent: setAccentState,
     }),
-    [prefs, setTheme, setMaterial, setMovement, setPerformance, setWebgl, resetPreferences, caps, systemReduced, storageError, legacy, accent],
+    [prefs, setTheme, setMaterial, setMovement, setPerformance, setWebgl, setEffect,reportWebgl,visualNotice,dismissVisualNotice,resetPreferences, caps, systemReduced, storageError, legacy, accent],
   );
 
   return <AppearanceContext.Provider value={value}>{children}</AppearanceContext.Provider>;
