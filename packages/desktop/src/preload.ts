@@ -68,9 +68,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   clearThreatEvents: () => invoke("service:clear-events"),
   scanFile: (filePath: string) => invoke("service:scan-artifact", filePath),
   scanFullSystem: () => invoke("service:scan-full-system"),
-  prepareProcessTermination: (selection: {pid:number;startedAt:string}) => {
+  prepareProcessTermination: (selection: {pid:number;startedAt:string;mode?:"sigterm"|"sigkill"}) => {
     if (!selection || !Number.isInteger(selection.pid) || typeof selection.startedAt!=="string") return Promise.reject(new Error("Seleção inválida"));
-    return invoke("service:prepare-process-termination", {pid:selection.pid,startedAt:selection.startedAt});
+    return invoke("service:prepare-process-termination", {pid:selection.pid,startedAt:selection.startedAt,...(selection.mode==="sigkill"?{mode:"sigkill"}:{})});
   },
   confirmProcessTermination: (ticket:string) => {
     if(typeof ticket!=="string" || ticket.length!==36) return Promise.reject(new Error("Confirmação inválida"));

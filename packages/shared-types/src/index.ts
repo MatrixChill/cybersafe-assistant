@@ -287,13 +287,27 @@ export interface ProcessKillResult {
 }
 
 /** Individual termination: the service owns a pinned handle until confirmation. */
-export interface ProcessTerminationSelection { pid: number; startedAt: string; }
+/**
+ * O sinal que o bilhete vai entregar. `sigterm` é o pedido normal; `sigkill`
+ * NÃO é uma variante do mesmo pedido — é uma operação separada, excecional e
+ * explicitamente confirmada, por isso é escolhida no `prepare` (o bilhete fica
+ * pinado a um modo) e nunca pode ser trocada no `confirm`.
+ */
+export type ProcessTerminationMode = "sigterm" | "sigkill";
+export interface ProcessTerminationSelection { pid: number; startedAt: string; mode?: ProcessTerminationMode; }
 export interface ProcessTerminationTarget extends ProcessTerminationSelection { name: string; }
 export type ProcessTerminationPreparation =
-  | { ok: true; ticket: string; target: ProcessTerminationTarget; expiresAt: number }
+  /**
+   * `mode` é o que este bilhete pinou; `modes` é o que esta plataforma sabe
+   * oferecer. Um Windows com apenas `["sigterm"]` não pode mostrar uma
+   * terminação forçada que não tem mecanismo para cumprir.
+   */
+  | { ok: true; ticket: string; target: ProcessTerminationTarget; expiresAt: number; mode: ProcessTerminationMode; modes: ProcessTerminationMode[] }
   | { ok: false; status: ProcessKillStatus; error: string; win32Code?: number };
 export interface ProcessTerminationResult extends ProcessKillResult {
   win32Code?: number;
+  /** O sinal que foi efetivamente pedido. `undefined` = antes de haver bilhete. */
+  signal?: ProcessTerminationMode;
   /**
    * O que prendeu realmente o objeto entre a preparação e o sinal.
    * `handle-signaled`: um handle do Windows aberto na preparação e sinalizado

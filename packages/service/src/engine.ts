@@ -24,6 +24,7 @@ import {
   VirusTotalClient,
   SafeProcessTermination,
   matchesSnapshotCreation,
+  modosTerminacao,
   createWindowsTerminationOpener,
   type TerminationIdentity,
   type TerminationLease,
@@ -126,6 +127,7 @@ ProcessKillProtectionReason,
   DefinitionsStatus,
   DefinitionsSourceStatus,
   DefinitionsSourceState,
+  ProcessTerminationMode,
 } from "@cybersafe/shared-types";
 import { hasDegradedProtections, ENGINE_DISPLAY_NAME, classifyProcessEnumerationError } from "@cybersafe/shared-types";
 import { RealtimeLossLedger } from "./realtime-loss.js";
@@ -4206,8 +4208,11 @@ if (processInfo.path) {
   }
 
   private nativeTerminationOpen: ReturnType<typeof createWindowsTerminationOpener> | null = null;
-  private openIndividualProcess(pid:number): TerminationLease {
-    if (process.platform !== "win32") return this.openIndividualProcessPosix(pid);
+  private openIndividualProcess(pid: number, mode: ProcessTerminationMode): TerminationLease {
+    if (process.platform !== "win32") return this.openIndividualProcessPosix(pid, mode);
+    // O controlador já recusou qualquer fora de `modosTerminacao("win32")`
+    // antes de chegar aqui; este throw é a cintura, não a porta.
+    if (mode !== "sigterm") throw new Error(`win32: modo «${mode}» indisponível; nenhum sinal foi enviado`);
     this.nativeTerminationOpen ??= createWindowsTerminationOpener();
     return this.nativeTerminationOpen(pid);
   }
@@ -4237,7 +4242,7 @@ if (processInfo.path) {
    * `btime` não há instante: lançar aqui devolve uma falha nomeada no `prepare`
    * em vez de um bilhete que não sabe o que comparar.
    */
-  private openIndividualProcessPosix(pid: number): TerminationLease {
+  private openIndividualProcessPosix(pid: number, mode: ProcessTerminationMode): TerminationLease {
     const cadeia = this.posixProcessProvider.cadeiaIdentia();
     if (!cadeia.ok) {
       throw new Error(`posix: fonte de identidade indisponível (${cadeia.motivo}); nenhum bilhete foi emitido`);
@@ -4249,6 +4254,8 @@ if (processInfo.path) {
     return abrirLeasePosixTerminacao(pid, {
       hz: constantes.hz,
       bootMs: constantes.bootMs,
+      // O sinal é fixado no lease, portanto o `confirm` não pode escolher outro.
+      signal: mode === "sigkill" ? "SIGKILL" : "SIGTERM",
       protegido: (identidade, caminho) => this.alvoProtegidoPosix(identidade, caminho),
     });
   }
@@ -4256,9 +4263,9 @@ if (processInfo.path) {
   private terminationController(): SafeProcessTermination {
     if (!this.individualTermination) {
       // Binding is lazy, after normal startup/readonly guards, never at import.
-      const open = (pid:number) => this.openIndividualProcess(pid);
+      const open = (pid: number, mode: ProcessTerminationMode) => this.openIndividualProcess(pid, mode);
       this.individualTermination = new SafeProcessTermination({
-        open, blocked: identity => this.terminationBlocked(identity),
+        open, modes: modosTerminacao(), blocked: identity => this.terminationBlocked(identity),
         audit: event => {
           void fs.appendFile(path.join(this.logsDir,"actions.log"), JSON.stringify({
             timestamp:new Date().toISOString(), action:"process.termination", ...event,

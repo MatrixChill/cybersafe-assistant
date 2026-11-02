@@ -181,6 +181,56 @@ morria no `prepare` por uma razão que não tinha nada a ver com o processo. A
 fonte POSIX passou a emitir o mesmo corte (`criacaoPosix`), e a conversão é
 lossless — `Date.parse` de `…3300000Z` e `…330Z` dá o mesmo milissegundo.
 
+### SIGTERM e SIGKILL como duas operações, medidas em Linux
+
+O objetivo pedia o pedido normal em SIGTERM e o SIGKILL como «operação separada,
+excecional e explicitamente confirmada». Isso só é verdade se o sinal estiver
+escolhido **antes** do bilhete existir, porque um `confirm {ticket}` que aceita
+um sinal novo é o mesmo bilhete a fazer duas operações diferentes.
+
+O contrato em `@cybersafe/shared-types`:
+
+| Campo | Onde | O que fixa |
+|---|---|---|
+| `mode?: "sigterm" \| "sigkill"` | `ProcessTerminationSelection` | o sinal que o `prepare` vai pinar; ausente = `sigterm` |
+| `mode` + `modes` | `ProcessTerminationPreparation` | o que **este bilhete** pinou e o que **esta plataforma** sabe oferecer |
+| `signal?` | `ProcessTerminationResult` | o sinal efetivamente pedido; `undefined` = antes de haver bilhete |
+| `modosTerminacao(plataforma)` | `@cybersafe/core` | o Windows anuncia `["sigterm"]`; POSIX anuncia os dois |
+
+Consequências que a interface não pode esconder:
+
+- `confirm` mantém aridade 1. Não existe parâmetro para trocar o sinal depois de
+  confirmar — verificado por teste (`controller.confirm.length === 1`).
+- A escalada é um **bilhete novo**: `prepare {pid, startedAt, mode:"sigkill"}` →
+  `confirm {novo ticket}`. O utilizador confirma o SIGKILL uma segunda vez, com
+  o nome do sinal no diálogo.
+- O botão de escalada só aparece quando o bilhete anunciou `sigkill` **e** o
+  pedido normal produziu `timeout`. Em Windows nenhuma das duas condições é
+  alcançável, por isso a UI nunca mostra ali um botão sem mecanismo.
+- A recusa de modo acontece antes de abrir seja o que for: nenhum lease, nenhum
+  bilhete, nenhum sinal (`aberturas.length === 0` nos testes).
+
+Medido em WSL2 a 2026-11-02 com `scripts/linux-lite/wsl-p1-sigkill.sh`
+(`Linux 6.6.114.1-microsoft-standard-WSL2 x86_64`, `node v22.23.4`, `uid=1000`,
+sem root, `hz=100`), contra um processo benigno criado pelo próprio probe
+(`bash -c 'trap "" TERM INT HUP; …'`) — o único cenário que distingue as duas
+operações é um alvo que **ignora** SIGTERM. Vida verificada por `/proc/<pid>/stat`:
+
+| caso | `prepare` | `confirm` | vivo depois? |
+|---|---|---|---|
+| SIGTERM num processo que o ignora | `ok`, `mode:sigterm` | `timeout`, `signal:"sigterm"`, **sem `confirmation`** | **sim** — e o `timeout` declara insucesso |
+| escalada SIGKILL com bilhete novo | `ok`, `mode:sigkill` | `killed`, `signal:"sigkill"`, `confirmation:"identity-reconfirmed"` | **não** |
+| plataforma a anunciar só `["sigterm"]` pede `sigkill` | recusa: «A terminação imediata (SIGKILL) não está disponível nesta plataforma; nenhum bilhete foi emitido e nenhum sinal foi enviado.» | — | sim |
+| modo mal formado (`"SIGKILL"`) | recusa: «Modo de terminação não reconhecido; nenhum bilhete foi emitido e nenhum sinal foi enviado.» | — | sim |
+
+Os quatro casos saíram `CONFORME` do probe, que compara o resultado do
+controlador com a vida lida no `/proc` — não com o que o código devolveu.
+
+Um detalhe honesto do primeiro caso: o `timeout` traz o `signal` mas **não** traz
+`confirmation`. A pinagem e o sinal aconteceram; a saída não aconteceu, e não há
+prova de terminação a declarar. É por isso que a UI mostra «o processo continua
+vivo» e oferece a escalada, em vez de um sucesso.
+
 ### O que ainda não funciona (sem fingir)
 
 - **O bilhete ainda não foi medido através do socket.** O que está medido acima é
@@ -196,8 +246,9 @@ lossless — `Date.parse` de `…3300000Z` e `…330Z` dá o mesmo milissegundo.
 - O `success:true` de `already-exited` significa «o objetivo não está em
   execução», não «o CyberSafe terminou-o»; a UI não o pode mostrar como
   terminado por si.
-- O SIGKILL como operação separada e explicitamente confirmada ainda não tem
-  pedido próprio no contrato — hoje só existe o pedido normal (SIGTERM).
+- A escalada por `SIGKILL` está medida ao nível do motor e do contrato, mas o
+  fluxo completo «SIGTERM ignora → modal oferece → segundo clique → bilhete
+  novo» ainda não foi percorrido na janela Electron de um desktop Linux.
 
 ### Regressão Windows corrida com esta alteração
 
@@ -219,3 +270,23 @@ ancestral de `freebuff/r7-final-integration-20261101`), devolvendo `failed`. O
 caminho Windows deste teste está, portanto, morto na origem, não por este
 trabalho Linux; a recusa continua a não ter efeito nenhum, que é o que o teste
 também afirma.
+
+### Regression corrida com os dois sinais (2026-11-02, host Windows, clone isolado)
+
+| suite | resultado |
+|---|---|
+| `@cybersafe/core` completa | 1180 testes, **1148 passam, 0 falham**, 31 skipped (inclui os 8 novos de `safe-process-termination-modes.test.js`) |
+| `@cybersafe/desktop` completa | 637 testes, **637 passam, 0 falham** (5 no ficheiro de terminação, incluindo o novo portão de modo fechado na ponte e o `mode` extraído no preload) |
+| `@cybersafe/app` — `individual-process-termination.test.ts` | 10 testes, 10 passam (prova POSIX aceite, sinal trocado recusado, oferta de `sigkill` só quando anunciada, modal de escalada) |
+| `@cybersafe/service` — `kill-contract` | 8 testes, 8 passam (o `killProcess` Windows continua fail-closed com `legacy-disabled`) |
+| typecheck | `shared-types`, `core`, `desktop`, `service` compilam; `@cybersafe/app` `tsc -b` sem erros |
+
+Omitir o que não é meu: a suite completa do `@cybersafe/service` termina com
+**8 falhas** em caminhos de scanner/definições (`p1-3-prefetch-isolation`,
+`scan-post-batch-no-double-clamav`, `engine-batch-cache-lookup` e outras, todas
+`expected "safe", got "inconclusive"`). A causa foi medida, não assumida:
+copiei o `engine.ts` alterado para fora, `git checkout HEAD --
+packages/service/src/engine.ts`, reconstruí o serviço e corri o mesmo ficheiro —
+7 das 11 falhas mantiveram-se. São, portanto, **anteriores a esta alteração**
+nesta cópia isolada, e continuam por diagnosticar. Nada nesta secção afirma que
+a suite do serviço está verde.

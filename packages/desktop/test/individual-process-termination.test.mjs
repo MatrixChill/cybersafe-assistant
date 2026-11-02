@@ -17,6 +17,22 @@ test('actual IPC registry rejects malformed requests and critical work before ca
  critical=false;prepare(null,{pid:12345,startedAt:'2026-10-30T08:00:00Z',path:'not forwarded'});assert.deepEqual(JSON.parse(JSON.stringify(calls[0])),['prepare',{pid:12345,startedAt:'2026-10-30T08:00:00Z'}]);
  confirm(null,token);assert.equal(calls[1][0],'confirm');
 });
+// O modo é validado, não interpolado: uma lista fechada, e um valor fora dela é
+// recusa — não um pedido silenciosamente reescrito. O clique do utilizador
+// nomeava um sinal, e trocar esse sinal na ponte seria a ponte a decidir.
+test('prepare refuses a mode outside the closed list instead of passing it through',()=>{
+ const handlers=new Map(),calls=[];
+ registerProcessTerminationIpc((c,h)=>handlers.set(c,h),{prepare:p=>calls.push(p),confirm:()=>({}),cancel:()=>({}),critical:()=>false});
+ const prepare=handlers.get('service:prepare-process-termination');
+ const base={pid:12345,startedAt:'2026-10-30T08:00:00Z'};
+ for(const mode of ['SIGKILL',{kill:true},'sigterm; pkill x',42,''])assert.equal(prepare(null,{...base,mode}).ok,false);
+ assert.equal(calls.length,0);
+ prepare(null,{...base,mode:'sigterm'});
+ prepare(null,{...base,mode:'sigkill'});
+ // Os dois modos válidos vão escritos no pedido: um `sigterm` explícito é a
+ // intenção do clique, não uma omissão que o serviço interpreta por defeito.
+ assert.deepEqual(JSON.parse(JSON.stringify(calls)),[{...base,mode:'sigterm'},{...base,mode:'sigkill'}]);
+});
 test('trusted-frame guard blocks foreign windows, remote documents and subframes for every termination channel',()=>{
  const frame={url:'file:///trusted/index.html'},contents={mainFrame:frame,isDestroyed:()=>false},handlers=new Map();let calls=0;
  registerProcessTerminationIpc((c,h)=>handlers.set(c,trustedIpcHandler(()=>contents,()=> 'file:///trusted/index.html',h)),{prepare:()=>calls++,confirm:()=>calls++,cancel:()=>calls++,critical:()=>false});
@@ -29,6 +45,12 @@ test('real preload exposes only fixed channels, strips extra input and never con
  const p={pid:12345,startedAt:'2026-10-30T08:00:00.0000000Z'};await bridge.prepareProcessTermination({...p,extra:'stripped'});await bridge.cancelProcessTermination(token);
  assert.deepEqual(JSON.parse(JSON.stringify(calls)),[['service:prepare-process-termination',p],['service:cancel-process-termination',token]]);
  await assert.rejects(()=>bridge.confirmProcessTermination('bad'));assert.equal(calls.length,2);await bridge.confirmProcessTermination(token);assert.equal(calls[2][0],'service:confirm-process-termination');
+ // A ponte só conhece um modo: `sigkill`. Outro valor é descartado e o pedido
+ // fica no sinal menos destrutivo, em vez de um sinal interpretado à jusante.
+ calls.length=0;await bridge.prepareProcessTermination({...p,mode:'SIGKILL'});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls[0])),['service:prepare-process-termination',p]);
+ await bridge.prepareProcessTermination({...p,mode:'sigkill',path:'/home/caioc/segredo'});
+ assert.deepEqual(JSON.parse(JSON.stringify(calls[1])),['service:prepare-process-termination',{...p,mode:'sigkill'}]);
 });
 
 test('all new termination channels remain denied in Windows readonly mode',async()=>{

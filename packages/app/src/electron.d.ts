@@ -82,7 +82,7 @@ export interface ElectronAPI {
   updateExclusions: (config: { rules: import("@cybersafe/shared-types").ExclusionRule[] }) => Promise<{ success: boolean; error?: string } | null>;
   clearThreatEvents: () => Promise<{ success: boolean }>;
   scanFile: (filePath: string) => Promise<FileScanResponse | null>;
-  prepareProcessTermination: (selection: {pid:number;startedAt:string}) => Promise<ProcessTerminationPreparation>;
+  prepareProcessTermination: (selection: {pid:number;startedAt:string;mode?:import("@cybersafe/shared-types").ProcessTerminationMode}) => Promise<ProcessTerminationPreparation>;
   confirmProcessTermination: (ticket:string) => Promise<ProcessTerminationResult>;
   cancelProcessTermination: (ticket:string) => Promise<{cancelled:boolean}>;
   killProcessTree: (pid: number) => Promise<ProcessKillResult>;

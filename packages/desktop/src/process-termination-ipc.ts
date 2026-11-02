@@ -1,4 +1,4 @@
-import type { ProcessTerminationSelection } from "@cybersafe/shared-types";
+import type { ProcessTerminationMode, ProcessTerminationSelection } from "@cybersafe/shared-types";
 type Handler = (_event: unknown, ...args: any[]) => unknown;
 interface Operations {
     prepare(selection: ProcessTerminationSelection): unknown;
@@ -10,11 +10,14 @@ export function registerProcessTerminationIpc(handle: (channel: string, handler:
     const ticket = (value: unknown): value is string => typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9]{4}-4[a-f0-9]{3}-[89ab][a-f0-9]{3}-[a-f0-9]{12}$/.test(value);
     handle("service:prepare-process-termination", (_event, selection: unknown) => {
         const p = selection as Partial<ProcessTerminationSelection> | null;
-        if (!p || !Number.isInteger(p.pid) || p.pid! <= 100 || p.pid! > 0xffffffff || typeof p.startedAt !== "string" || p.startedAt.length > 40 || !Number.isFinite(Date.parse(p.startedAt)))
+        // `mode` é lista fechada: o renderer não pode inventar um nome de sinal,
+        // só escolher entre os dois modos que o protocolo define.
+        const mode: ProcessTerminationMode | undefined = p?.mode === undefined || p.mode === "sigterm" || p.mode === "sigkill" ? p?.mode : undefined;
+        if (!p || !Number.isInteger(p.pid) || p.pid! <= 100 || p.pid! > 0xffffffff || typeof p.startedAt !== "string" || p.startedAt.length > 40 || !Number.isFinite(Date.parse(p.startedAt)) || (p.mode !== undefined && mode === undefined))
             return { ok: false, status: "failed", error: "Seleção de processo inválida." };
         if (ops.critical())
             return { ok: false, status: "protected", error: "Terminação indisponível durante operação crítica da aplicação." };
-        return ops.prepare({ pid: p.pid!, startedAt: p.startedAt });
+        return ops.prepare({ pid: p.pid!, startedAt: p.startedAt, ...(mode ? { mode } : {}) });
     });
     handle("service:confirm-process-termination", (_event, value: unknown) => {
         if (!ticket(value) || ops.critical())
