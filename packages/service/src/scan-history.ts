@@ -240,20 +240,23 @@ export class ScanHistory {
    */
   record(state: ExtendedScanState): Promise<void> {
     const run = async (): Promise<void> => {
+      const startedAt = Date.now();
+      let outcome = "ok";
       try {
         // Nunca regista um estado não terminal (defesa em profundidade:
         // quem chama já só chega aqui na transição terminal).
-        if (!isTerminalScanStatus(state.status)) return;
+        if (!isTerminalScanStatus(state.status)) { outcome = "skipped"; return; }
         const entry = toScanHistoryEntry(state);
         const existing = await this.readEntries();
         // Idempotente: no máximo uma linha por scanId, mesmo a
         // chamada duplicada (reinstalação, retry do caller).
-        if (existing.some((prior) => prior.id === entry.id)) return;
+        if (existing.some((prior) => prior.id === entry.id)) { outcome = "duplicate"; return; }
         await fs.appendFile(this.filePath, `${JSON.stringify(entry)}\n`, "utf8");
         if (existing.length + 1 > this.max) {
           await this.compact(existing.concat(entry));
         }
       } catch (error) {
+        outcome = "error";
         // Sem caminhos no log: a mensagem de erro do fs pode conter o
         // caminho do serviço (casa do utilizador).
         console.error(
@@ -261,6 +264,10 @@ export class ScanHistory {
             error instanceof Error ? error.name : "erro"
           }`,
         );
+      } finally {
+        if (process.env.CYBERSAFE_DEBUG_SCAN === "1") {
+          console.log(`[ScanPerf] HISTORY_RECORD scanId=${state.id} elapsedMs=${Date.now() - startedAt} outcome=${outcome}`);
+        }
       }
     };
     this.chain = this.chain.then(run, run);

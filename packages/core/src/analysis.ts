@@ -169,7 +169,9 @@ export class MalwareAnalyzer {
       yaraScanInconclusive ||
       (clamavVerdict !== "clean" && clamavVerdict !== "detected");
 
+    const signatureStarted = timing ? Date.now() : 0;
     const signatureMatch = this.deps.signatures.match(sha256);
+    if (timing) console.log(`[ScanPerf] ENGINE_PHASE engine=hashdb elapsedMs=${Date.now() - signatureStarted} outcome=${signatureMatch ? "match" : "clean"}`);
 
     // Canário dev-only (benigno): detetado por hash (conteúdo exato) ou por
     // conteúdo no cabeçalho já lido (robusto a newline/BOM do teste manual).
