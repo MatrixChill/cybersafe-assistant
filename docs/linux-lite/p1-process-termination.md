@@ -148,19 +148,74 @@ pelo próprio script e a morte verificada por `/proc`, não pela resposta:
 O `target` devolvido vem da releitura de `/proc` imediatamente antes do sinal: o
 `killed` acima é uma identidade confirmada, não um PID solto.
 
+### O bilhete do GUI em POSIX (medido, `3fd9179`)
+
+O ecrã não usa `killTree`: usa `process.termination.prepare` → `confirm`, cujo
+`open` era o abridor de handle do Windows. Em POSIX não existe `pidfd_open`
+exposto pelo Node, por isso o lease não pinha um objecto — pinha o `starttime`
+lido no momento em que a seleção é aceite e relê `/proc` antes de cada leitura,
+de cada decisão e antes do sinal. A garantia é mais fraca que um handle, e dizê-
+lo seria mentir sobre atomicidade: a resposta vem com
+`confirmation:"identity-reconfirmed"` (Windows continua `handle-signaled`).
+
+Medido em WSL2 com `scripts/linux-lite/wsl-p1-ticket-inproc.sh` — mesmo
+ambiente (`Linux 6.6.114.1-microsoft-standard-WSL2 x86_64`, `node v22.23.4`,
+`uid=1000`, sem root), `/proc` real, sinais reais, dois `sleep` benignos, morte
+verificada por `/proc`:
+
+| passo | resultado medido | efeito verificado |
+|---|---|---|
+| linha do ecrã | `startedAt:"2026-11-02T09:57:53.0900000Z"`, sete casas, `exactCreationStamp` não-nulo | — |
+| `prepare {pid,startedAt}` | `ok:true`, `target:{pid:450,name:"sleep"}` | nenhum sinal enviado |
+| `confirm {ticket}` | `success:true`, `status:"killed"`, `confirmation:"identity-reconfirmed"`, `scope:"single-process"` | PID 450 **morto**; irmão 451 **vivo** |
+| auditoria | `{pid:450,status:"killed",source:"user-confirmed"}` | — |
+| `confirm` repetido com o mesmo bilhete | `success:false`, `status:"failed"` | nenhum segundo sinal |
+| `prepare {pid:1}` | recusado antes do bilhete | PID 1 **vivo** |
+| `prepare` de um processo `root` (PID 101) | `status:"protected"` | sem efeito |
+| `prepare` com `starttime` adulterado numa casa | `status:"reused"` | alvo **vivo**, nenhum sinal |
+| `prepare {pid:4000099}` | `status:"already-exited"` | sem efeito, sem `process.killed` |
+
+Falta de formato que esta correção resolveu: `toISOString()` publica três
+decimais e `exactCreationStamp` exige as sete do CIM, por isso uma linha Linux
+morria no `prepare` por uma razão que não tinha nada a ver com o processo. A
+fonte POSIX passou a emitir o mesmo corte (`criacaoPosix`), e a conversão é
+lossless — `Date.parse` de `…3300000Z` e `…330Z` dá o mesmo milissegundo.
+
 ### O que ainda não funciona (sem fingir)
 
-- **O botão do GUI ainda não termina nada em Linux.** O ecrã usa o protocolo de
-  bilhete (`process.termination.prepare` → `confirm`), não o `killTree`. Medido:
-  `prepare` devolve `{ok:false,status:"protected",error:"Sessão não autenticada;
-  nenhuma terminação foi enviada."}` — sem bilhete e sem efeito. Dois motivos
-  separados: (1) o bilhete exige a sessão autenticada que só a aplicação
-  Electron tem, e um pedido por socket cru não a possui; (2) mesmo com sessão,
-  `SafeProcessTermination` recebe `openIndividualProcess`, o abridor de handle
-  do Windows. Falta um equivalente POSIX antes de anunciar o botão como
-  funcional.
+- **O bilhete ainda não foi medido através do socket.** O que está medido acima é
+  o `SafeProcessTermination` + lease POSIX com o predicado de proteção do
+  serviço, chamado diretamente. A viagem pelo pipe exige o handshake
+  `auth-hello`/`auth-challenge`/`auth-response`; a sonda em
+  `scripts/linux-lite/wsl-p1-ticket.sh` envia `{v:2}` (confirmado como número, e
+  `PIPE_AUTH_VERSION === 2` nos dois lados) e recebe «Versão do protocolo do
+  pipe não suportada». Causa ainda não encontrada — por isso o botão do GUI em
+  Linux está **implementado e medido ao nível do motor**, não **validado na
+  aplicação**. A validação real do percurso é a janela Electron num desktop
+  Linux, que continua por fazer.
 - O `success:true` de `already-exited` significa «o objetivo não está em
   execução», não «o CyberSafe terminou-o»; a UI não o pode mostrar como
   terminado por si.
 - O SIGKILL como operação separada e explicitamente confirmada ainda não tem
   pedido próprio no contrato — hoje só existe o pedido normal (SIGTERM).
+
+### Regressão Windows corrida com esta alteração
+
+No clone isolado, com as alterações de cima aplicadas: `@cybersafe/core`
+1159 testes, 1127 passam, 0 falham; `@cybersafe/service` compila (`tsc`) sem
+erros; o subconjunto de kill/processo do serviço
+(`auto-kill-guard`, `individual-process-termination`, `kill-blocked-log`,
+`kill-contract`, `p1-process-truth`, `process-truth-ttl`,
+`processes-list-contract`, `tp-f1-kill-disable`, `tp-f1-process-recovery`)
+58 testes, 57 passam, 1 falha.
+
+A falha é `tp-f1-process-recovery.test.js:80` —
+«PID reutilizado: foto antiga + CIM com outra identidade → reused, sem
+taskkill» — e espera `status:"reused"` de `engine.killProcess`, que a origem
+Windows já não deixa acontecer: `packages/service/src/engine.ts` da branch de
+origem tem `KILL_TERMINATION_DISABLED = true` (linha 769) e recusa no topo de
+`killProcess` com `reason:"legacy-disabled"` (linhas 4149-4158, commit `a542cb4`,
+ancestral de `freebuff/r7-final-integration-20261101`), devolvendo `failed`. O
+caminho Windows deste teste está, portanto, morto na origem, não por este
+trabalho Linux; a recusa continua a não ter efeito nenhum, que é o que o teste
+também afirma.
