@@ -61,9 +61,12 @@ const DEFAULT_CLAMAV_DB = 'C:/Users/caioc/.cybersafe-integration/pap-integration
 // de escrita intacto para o operador experimentar à mão.
 const ARGV = new Set(process.argv.slice(2));
 // --settings-proof exercises navigation only; never isolates/restores/deletes.
-const ORBITAL_PROOF = ARGV.has('--orbital-proof');
+const ORBITAL_CAPTURE = ARGV.has('--orbital-capture');
+const ORBITAL_PROOF = ARGV.has('--orbital-proof') || ORBITAL_CAPTURE;
+const VISUAL_PAGES_PROOF = ARGV.has('--visual-pages-proof');
+const WEBGL_FAILURE_PROOF = ARGV.has('--webgl-failure-proof');
 const APPEARANCE_PROOF = ARGV.has('--appearance-proof') || ORBITAL_PROOF;
-const SETTINGS_PROOF = ARGV.has('--settings-proof') || APPEARANCE_PROOF;
+const SETTINGS_PROOF = ARGV.has('--settings-proof') || APPEARANCE_PROOF || VISUAL_PAGES_PROOF || WEBGL_FAILURE_PROOF;
 const INTERACTIVE_ONLY = ARGV.has('--interactive=only');
 const INTERACTIVE = INTERACTIVE_ONLY || ARGV.has('--interactive');
 const INTERACTIVE_MAX_MS = Number(process.env.CYBERSAFE_QUARANTINE_INTERACTIVE_MAX_MS || 30 * 60 * 1000);
@@ -130,8 +133,10 @@ async function connectPage(port) {
   });
   let id = 0;
   const pending = new Map();
+  const listeners = new Map();
   ws.addEventListener('message', ({ data }) => {
     const msg = JSON.parse(data);
+    listeners.get(msg.method)?.(msg.params);
     const p = pending.get(msg.id);
     if (p) {
       pending.delete(msg.id);
@@ -154,7 +159,7 @@ async function connectPage(port) {
     if (r.exceptionDetails) throw new Error(r.exceptionDetails.text + ': ' + (r.exceptionDetails.exception?.description ?? ''));
     return r.result?.value;
   };
-  return { send, evaluate, close: () => ws.close() };
+  return { send, evaluate, on:(method,listener)=>{listeners.set(method,listener);return()=>listeners.delete(method);}, close: () => ws.close() };
 }
 
 const deps = realDeps();
@@ -329,6 +334,46 @@ deps.onStackReady = async ({ plan, spawned }) => {
 
     if (SETTINGS_PROOF) {
       await safeShot('dashboard-current-real');
+      if(WEBGL_FAILURE_PROOF){
+        const injected=await cdp.send('Page.addScriptToEvaluateOnNewDocument',{source:`const original=HTMLCanvasElement.prototype.getContext;HTMLCanvasElement.prototype.getContext=function(type,...args){return /^webgl|experimental-webgl/.test(type)?null:original.call(this,type,...args);};`});
+        await cdp.send('Page.reload');
+        await until(()=>evaluate('Boolean(document.querySelector(".visual-adaptation-notice"))'),'aviso de incompatibilidade WebGL');
+        assert.equal(await evaluate('Boolean(document.querySelector(".three-scene canvas"))'),false);
+        await safeShot('webgl-unavailable-real');
+        await evaluate('document.querySelector(".visual-adaptation-notice").click()');
+        await cdp.send('Page.reload');
+        await until(()=>evaluate('document.documentElement.dataset.v2Webgl === "false" && Boolean(document.querySelector(".brand-scene"))'),'fallback após reload');
+        assert.equal(await evaluate('Boolean(document.querySelector(".visual-adaptation-notice"))'),false);
+        await safeShot('webgl-notice-dismissal-persisted');
+        await cdp.send('Page.removeScriptToEvaluateOnNewDocument',{identifier:injected.identifier});
+        await cdp.send('Page.reload');
+        await until(()=>evaluate('Boolean(document.querySelector(".three-scene canvas"))'),'recuperação de WebGL após reabrir sessão');
+        await safeShot('webgl-recovered-real');
+        facts.webglFailure={injectedPlatformFailure:true,cssFallback:true,noticeDismissalSurvivesReload:true,recoveredAfterReload:true};
+        fs.writeFileSync(path.join(evidence,'webgl-failure-facts.json'),JSON.stringify(facts,null,2));
+        return;
+      }
+      if(VISUAL_PAGES_PROOF){
+        facts.visualPages=[];
+        for(const [label,id] of [['Painel','dashboard'],['Análise de Segurança','scanner'],['Gestor de Tarefas','taskmanager'],['PC Center','pccenter'],['Monitor em Tempo Real','monitor'],['Otimizar','optimize'],['Ameaças','threats'],['Configurações','settings']]){
+          assert.equal(await clickSidebar(label),true,`navegação ${label}`);
+          await timeout(600);
+          if(id==='dashboard'){
+            const dock=await evaluate(`(()=>{const slot=document.querySelector('[data-cs-matrix-dock]').getBoundingClientRect();const launcher=document.querySelector('[data-matrix-mode="docked"]').getBoundingClientRect();return {slot:{left:slot.left,right:slot.right,top:slot.top,bottom:slot.bottom},launcher:{left:launcher.left,right:launcher.right,top:launcher.top,bottom:launcher.bottom}};})()`);
+            assert.ok(dock.launcher.left>=dock.slot.left && dock.launcher.right<=dock.slot.right+1,'MATRIX encaixada não cobre conteúdo');
+            facts.matrixDock=dock;
+          }
+          for(const scale of [1,1.25,1.5]){
+            await cdp.send('Emulation.setDeviceMetricsOverride',{width:1100,height:820,deviceScaleFactor:scale,mobile:false});
+            await timeout(150);
+            assert.equal(await evaluate('document.documentElement.scrollWidth > innerWidth'),false,`overflow ${id} escala ${scale}`);
+            await safeShot('visual-page-'+id+'-scale-'+scale);
+          }
+          facts.visualPages.push({page:id,scalesEmulated:[1,1.25,1.5]});
+        }
+        fs.writeFileSync(path.join(evidence,'visual-pages-facts.json'),JSON.stringify(facts,null,2));
+        return;
+      }
       assert.equal(await clickSidebar('Configurações'), true);
       await until(() => evaluate(`Boolean(document.querySelector('nav[aria-label="Categorias das configurações"]'))`), 'categorias prontas');
       if (APPEARANCE_PROOF) {
@@ -364,11 +409,33 @@ deps.onStackReady = async ({ plan, spawned }) => {
           await until(() => evaluate(`Boolean(document.querySelector('[data-orbital-proposal="true"] .three-scene canvas'))`),'cena 3D da proposta',15000);
           await timeout(500);
           facts.orbitalProposal = {webglScene:true,productionDefault:false};
+          if(ORBITAL_CAPTURE){
+            const frames=path.join(evidence,'motion-frames');fs.mkdirSync(frames);
+            let count=0;const times=[];
+            const unsubscribe=cdp.on('Page.screencastFrame',frame=>{
+              fs.writeFileSync(path.join(frames,String(count++).padStart(5,'0')+'.jpg'),Buffer.from(frame.data,'base64'));
+              times.push(frame.metadata.timestamp);
+              void cdp.send('Page.screencastFrameAck',{sessionId:frame.sessionId}).catch(()=>{});
+            });
+            await cdp.send('Page.startScreencast',{format:'jpeg',quality:80,maxWidth:960,maxHeight:675,everyNthFrame:4});
+            for(let part=0;part<6;part++)await timeout(11000);
+            await cdp.send('Page.stopScreencast');unsubscribe();
+            fs.writeFileSync(path.join(evidence,'motion-frame-times.json'),JSON.stringify(times));
+            assert.ok(count>30,'gravação precisa de frames reais');
+            facts.motionCapture={frames:count,seconds:times.at(-1)-times[0],source:'Electron CDP screencast; cadence is recording cadence, not measured app FPS'};
+            for(const width of [900,1280])for(const scale of [1,1.25,1.5]){
+              await cdp.send('Emulation.setDeviceMetricsOverride',{width,height:900,deviceScaleFactor:scale,mobile:false});
+              await timeout(250);await safeShot('orbital-layout-'+width+'-'+scale);
+              assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth'),false);
+            }
+            fs.writeFileSync(path.join(evidence,'orbital-capture-facts.json'),JSON.stringify(facts,null,2));
+            return;
+          }
           await safeShot('orbital-v3-proposal-a');
           await timeout(1200);
           await safeShot('orbital-v3-proposal-b');
-          for (const seconds of [5,10,15]) {
-            await timeout(5000);
+          for (const seconds of [8,16,24,32,40,48,56,64]) {
+            await timeout(8000);
             await safeShot('orbital-v3-rotation-'+seconds);
           }
           facts.visualProfiles=[];
