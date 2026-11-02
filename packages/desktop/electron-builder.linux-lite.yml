@@ -60,6 +60,16 @@ extraMetadata:
   # diz «desktop shell» genérica; no Linux Lite o menu tem de dizer o que esta
   # edição é, sem tocar no ficheiro partilhado com o Windows.
   description: Assistente de segurança do CyberSafe para Linux (edição Linux Lite)
+  # `name` decide onde o Electron põe `userData` ANTES de qualquer `setName`.
+  # Medido no binário empacotado: o renderer arrancou com
+  # `--user-data-dir=$HOME/.config/@cybersafe/desktop` — o mesmo diretório do
+  # perfil de desenvolvimento — e a credência do pipe foi recusada
+  # («secrets … tem 2 ligações físicas (partilharia a credência com outra
+  # instalação)»). Um pacote que partilha raiz de dados com o dev viola o §9.
+  # O `main.ts` só chama `app.setName` dentro de `whenReady` (linhas
+  # 1809/1875), depois do `userData` já resolvido, por isso isto resolve-se
+  # aqui e não no código partilhado: nome de pacote próprio do Linux Lite.
+  name: cybersafe-assistant-linux-lite
 linux:
   # O electron-builder exige `author.email` para deduzir o Maintainer do .deb;
   # o projeto não declara email nenhum, e `linux.maintainer` é exatamente a

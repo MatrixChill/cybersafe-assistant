@@ -33,22 +33,29 @@ pgrep -a -f "$PADRAO" | head -8 || echo "nenhum (o processo não sobreviveu ao a
 sobreviventes=$(pgrep -c -f "$PADRAO" 2>/dev/null || echo 0)
 echo "processos_vivos=$sobreviventes"
 
-echo "--- ligação ao ecrã (fd para /tmp/.X11-unix) ---"
+echo "--- ligação ao ecrã ---"
+# Medir isto por `/proc/<pid>/fd` estava errado: uma ligação X11 é um socket
+# (`socket:[inode]`), não um caminho, e a verificação dava falso negativo. Lêem-se
+# os sockets unix do processo com `ss`, e procura-se X11 e Wayland — o WSLg expõe
+# os dois e o Electron escolhe um.
+pids=$(pgrep -f "$PADRAO" 2>/dev/null | tr '\n' ' ')
 ligou=0
-for p in $(pgrep -f "$PADRAO" 2>/dev/null); do
-  if ls -l "/proc/$p/fd" 2>/dev/null | grep -q '\.X11-unix'; then
-    echo "pid=$p tem_ligacao_ao_servidor_de_janela=sim"; ligou=1
-  fi
-done
-[ "$ligou" = 1 ] || echo "tem_ligacao_ao_servidor_de_janela=nao_ou_indireta"
+if command -v ss >/dev/null 2>&1; then
+  sockets=$(ss -x -a -p 2>/dev/null | grep -E '\.X11-unix|wayland' || true)
+  for p in $pids; do
+    if printf '%s\n' "$sockets" | grep -q "pid=$p,"; then
+      echo "pid=$p socket_de_servidor_de_janela=sim"; ligou=1
+    fi
+  done
+  [ "$ligou" = 1 ] || echo "socket_de_servidor_de_janela=nao_observado (ss viu 0 sockets destes pids)"
+else
+  echo "socket_de_servidor_de_janela=DESCONHECIDO (sem ss)"
+fi
 
 echo "--- CDP: alvos abertos pelo renderer ---"
-curl -s --max-time 6 "http://127.0.0.1:$PORT/json/list" > /tmp/cybersafe-pacote-cdp.json 2>/dev/null
-if [ -s /tmp/cybersafe-pacote-cdp.json ]; then
-  node -e 'const a=JSON.parse(require("fs").readFileSync("/tmp/cybersafe-pacote-cdp.json","utf8"));for(const t of a.slice(0,6))console.log(JSON.stringify({type:t.type,title:t.title,url:(t.url||"").slice(0,90)}))' 2>&1 | head -8
-else
-  echo "CDP_SEM_RESPOSTA porta=$PORT"
-fi
+# `curl` não existe neste host; a leitura anterior de «sem resposta» era do
+# binário em falta, não da aplicação. `fetch` do Node é o meio que aqui há.
+node -e 'const p=process.argv[1];fetch("http://127.0.0.1:"+p+"/json/list").then(r=>r.json()).then(a=>{if(!Array.isArray(a)){console.log("CDP_FORMATO_INESPERADO");return}for(const t of a.slice(0,6))console.log(JSON.stringify({type:t.type,title:t.title,url:(t.url||"").slice(0,90)}))}).catch(e=>console.log("CDP_ERRO",String(e&&e.message||e)))' "$PORT" 2>&1 | head -8
 
 echo "--- últimas linhas do log do pacote ---"
 grep -c . "$LOG" 2>/dev/null | sed 's/^/linhas_log=/'; tail -20 "$LOG" 2>/dev/null
