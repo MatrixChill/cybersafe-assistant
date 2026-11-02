@@ -249,7 +249,7 @@ Var CSSpaceState
     System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 35, *i 0x001A1507, i 4)'
     System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 36, *i 0x00F8F8ED, i 4)'
     System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 34, *i 0x001A1507, i 4)'
-    SetCtlColors $HWNDPARENT EDF8F8 07151A
+    SetCtlColors $HWNDPARENT 0xEDF8F8 0x07151A
   FunctionEnd
   Function CS_ProgressShow
     Call CS_ApplyFrame
@@ -266,7 +266,7 @@ Var CSSpaceState
     InitPluginsDir
     File "/oname=$PLUGINSDIR\button-primary.bmp" "${CS_ASSET_DIR}\button-primary.bmp"
     File "/oname=$PLUGINSDIR\button-secondary.bmp" "${CS_ASSET_DIR}\button-secondary.bmp"
-    SetCtlColors $HWNDPARENT EDF8F8 07151A
+    SetCtlColors $HWNDPARENT 0xEDF8F8 0x07151A
     GetDlgItem $0 $HWNDPARENT 1
     !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-primary.bmp"
     GetDlgItem $0 $HWNDPARENT 2
