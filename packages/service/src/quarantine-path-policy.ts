@@ -7,9 +7,21 @@ export interface QuarantinePathContext {
   env?: NodeJS.ProcessEnv;
 }
 
-const norm = (value: string): string => path.resolve(value).replace(/[\/]+$/, '').toLowerCase();
+// Linux: caminhos são sensíveis a maiúsculas; Windows mantém a normalização
+// case-insensitive histórica. A função é a única diferença entre plataformas.
+const isCaseInsensitivePlatform = (): boolean => process.platform !== 'linux';
+const norm = (value: string): string => {
+  const resolved = path.resolve(value).replace(/[\/]+$/, '');
+  return isCaseInsensitivePlatform() ? resolved.toLowerCase() : resolved;
+};
 const under = (candidate: string, root: string): boolean =>
   candidate === root || candidate.startsWith(`${root}${path.sep}`);
+
+/** Raízes de sistema fixas protegidas no Linux (nunca `/`, que anularia tudo). */
+export const LINUX_PROTECTED_ROOTS = [
+  '/usr', '/etc', '/boot', '/bin', '/sbin', '/lib', '/lib32', '/lib64', '/libx32',
+  '/run', '/sys', '/proc', '/dev',
+] as const;
 
 export function protectedQuarantineRoots(context: QuarantinePathContext): string[] {
   const env = context.env ?? process.env;
@@ -21,6 +33,7 @@ export function protectedQuarantineRoots(context: QuarantinePathContext): string
     env.ProgramData,
     context.baseDir,
     context.execPath ? path.dirname(context.execPath) : undefined,
+    ...(process.platform === 'linux' ? LINUX_PROTECTED_ROOTS : []),
   ].filter((value): value is string => typeof value === 'string' && value.trim().length > 0);
   return [...new Set(roots.map(norm))];
 }

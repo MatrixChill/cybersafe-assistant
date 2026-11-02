@@ -4925,12 +4925,41 @@ if (processInfo.path) {
     socket.once("close", cleanup);
   }
 
+  /**
+   * AF_UNIX: um ficheiro de socket sobrevive a um crash do motor e faria o
+   * `listen` falhar com EADDRINUSE. Só remove o ficheiro quando a sonda de
+   * conexão prova que NINGUÉM está à escuta; com listener vivo nada é
+   * apagado e o resultado do `listen` mantém o comportamento histórico.
+   */
+  private async clearStaleUnixSocket(socketPath: string): Promise<void> {
+    const live = await new Promise<boolean>((resolve) => {
+      const probe = net.connect(socketPath);
+      const finish = (value: boolean) => {
+        probe.removeAllListeners();
+        probe.destroy();
+        resolve(value);
+      };
+      probe.setTimeout(1000, () => finish(false));
+      probe.once("connect", () => finish(true));
+      probe.once("error", () => finish(false));
+    });
+    if (live) return;
+    try {
+      await fs.unlink(socketPath);
+    } catch {
+      // ENOENT (nada a limpar) ou EACCES — o `listen` reporta o resultado real.
+    }
+  }
+
   async startPipeServer(pipeName: string = PIPE_NAME) {
     if (this.pipeAuthRequired && (!this.pipeToken || !/^[a-f0-9]{64}$/.test(this.pipeToken))) {
       throw new Error("Credencial de autenticação do pipe ausente ou inválida");
     }
     if (!this.pipeAuthRequired) {
       console.warn("[Service] AVISO S4: DEV externo sem autenticação do pipe; não utilizar em produção.");
+    }
+    if (process.platform === "linux" && path.isAbsolute(pipeName)) {
+      await this.clearStaleUnixSocket(pipeName);
     }
     this.server = net.createServer((socket) => {
       if (this.pipeAuthRequired) this.authenticateClientSocket(socket);
