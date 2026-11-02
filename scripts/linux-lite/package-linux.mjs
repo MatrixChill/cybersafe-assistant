@@ -215,7 +215,9 @@ function verificarArtefactos() {
     const completo = path.join(SAIDA, nome);
     const bytes = statSync(completo).size;
     const hashes = sha256De(completo);
-    relatorio.push(`ARTEFACTO ${JSON.stringify({ nome, bytes, sha256: hashes.slice(0, 16) })}`);
+    // O `sha256` vai inteiro: um resumo de 16 caracteres serve para olhar para
+    // um log, não para documentar um artefacto que outra pessoa há de comparar.
+    relatorio.push(`ARTEFACTO ${JSON.stringify({ nome, bytes, sha256: hashes })}`);
     if (nome.endsWith(".deb")) {
       const info = executar("dpkg-deb", ["--info", completo]);
       // O `Depends:` é o que §14 pede documentado: é a lista que o `apt` exige.
