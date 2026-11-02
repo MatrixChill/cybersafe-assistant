@@ -116,16 +116,86 @@ Dois factos a não esconder:
   por `existsSync`, um ficheiro **chamado** `clamscan` num directório Windows
   seria aceite como motor sem qualquer verificação de formato ou bit de execução
   — é a mesma classe de defeito que o YARA tinha. Aqui não existia nenhum, por
-  isso o resultado foi `null`; **o endurecimento ainda não está feito** e fica
-  como trabalho aberto, com o critério já definido em
-  `recusaExecutavelPosix` (nome `.exe`, magic `MZ`, sem bit de execução).
+  isso o resultado foi `null`; **o critério de recusa é agora partilhado** —
+`packages/core/src/executavel-posix.ts` é a única definição (nome `.exe`, magic
+`MZ`, sem bit de execução, ilegível) e `recusaExecutavelPosix` passou a ser
+reexportado a partir de lá, sem mudar o que o YARA faz.
+
+### O mesmo critério aplicado ao ClamAV
+
+Antes, a escolha do `clamscan` só perguntava «existe no disco?». Em WSL isso
+chega: um `CYBERSAFE_CLAMSCAN_PATH` a apontar `/mnt/c/.../clamscan.exe`, ou um
+PE com nome POSIX, era aceite como motor e lançado — e a interop do WSL ainda
+o deixaria correr. Agora:
+
+| ponto | o que mudou |
+|---|---|
+| `selecionaClamavBinario(candidatos, plataforma, leitor)` | escolha por existência **e** por proveniência; o recusado sai com `motivo`, não silenciosamente |
+| `ClamavBridge.resolveBinaryPath()` | o pin explícito é verificado; recusado ⇒ segue para o PATH como se não fosse pin |
+| `diagnoseClamavBinary()` | campo novo `recusados: {path, source, motivo}` — «existe mas não serve» deixa de ser dito como «não encontrado» |
+| Windows | `recusarBinarioNaPlataforma` devolve `null` em `win32`: a seleção continua só por existência e o `where` do DEV não mudou |
+
+Medido no clone isolado (host Windows, runner `node --test`):
+`packages/core/test/clamav-binario-posix.test.js` — 8 casos, todos passam: pin
+`.exe` recusado com o motivo, PE com nome POSIX recusado pela assinatura, sem
+bit de execução recusado, ELF executável escolhido, candidato recusado não tapa
+o seguinte, nada no disco ⇒ `null` sem invenção, Windows escolhe por nome, e o
+diagnóstico distingue «recusado» de «não encontrado». Os 75 testes dos
+ficheiros de seleção/resolução (`clamav-binario-posix`,
+`dist-clamav-binary-resolution`, `yara-classic-posix`, `yara-classic-engine`)
+passam no total.
+
+### A recusa medida em WSL2 com o leitor real
+
+O teste injectado prova a regra; não prova que a regra vê o disco.
+`scripts/linux-lite/wsl-p2-clamav-proveniencia-medicao.mjs` corre a mesma
+seleção com `leitorBinarioReal` — `statSync`, `accessSync(X_OK)` e os dois
+primeiros bytes lidos do ficheiro — sobre ficheiros que existem mesmo. O binário
+Windows é **copiado e lido, nunca lançado**, e os ficheiros criados pela medição
+são apagados por ela própria.
+
+Ambiente medido: `Linux 6.6.114.1-microsoft-standard-WSL2 x86_64`,
+`node v22.23.4`, `uid=1000`, sem root.
+
+| candidato real | resultado medido |
+|---|---|
+| `/mnt/c/Windows/System32/notepad.exe` | recusado: «é um executável Windows (.exe)» |
+| os **mesmos bytes** copiados para `/tmp/cs-proveniencia-…-1` (sem extensão) | recusado: «é uma imagem PE de Windows (magic MZ)» |
+| script de shell com `0644` | recusado: «não tem permissão de execução» |
+| `/bin/true` | escolhido — um binário Linux não é collateral desta regra |
+| pin = notepad.exe, `PATH=""`, lista completa de candidatos | `escolhido: null`, recusado com o motivo |
+| `diagnoseClamavBinary` no disco real | `resolved: null`, `recusados` com o motivo, e `exists: true` na mesma linha |
+
+Os seis casos deram `CONFORME`. A segunda linha é a que importa: um PE com nome
+POSIX passa no «existe?» e só é apanhado pela assinatura — é isso que separa
+«está no disco» de «é o motor desta plataforma». A última linha é o que a UI
+poderá mostrar: o mesmo caminho aparece como existente **e** recusado, em vez de
+simplesmente não encontrado.
+
+Regressão Windows corrida com esta alteração, no mesmo clone: `@cybersafe/core`
+1188 testes, 1156 passam, 0 falham, 31 saltados (era 1180/1148 antes dos 8
+casos novos); a família ClamAV do `@cybersafe/service` (14 ficheiros, incluindo
+`dist-clamav-pin-no-db-integration` e `dist-clamav-freshclam-resolve`) 116
+testes, 109 passam, 6 saltados, **1 falha** — e a falha é
+`scan-post-batch-no-double-clamav`, uma das 8 pré-existentes já documentadas em
+[`p1-process-listing.md`](./p1-process-listing.md), com o mesmo sintoma
+`clean → inconclusive`.
 
 ## Ainda não medido (não dar por feito)
 
-
+- A recusa ainda **não chega à janela**. `selecionaClamavBinario` e
+  `diagnoseClamavBinary` devolvem o motivo, mas o estado do motor que o ecrã lê
+  vem de `classifyClamavHealth`, que hoje só diz `clamscan not found or failed`.
+  «existe mas é um binário Windows» ainda se apresenta como «não encontrado» ao
+  utilizador até esse campo ser ligado.
+- O `EACCES` do **momento do `spawn`** continua colapsado no mesmo texto
+  genérico: um ficheiro que passa na seleção e falha ao lançar é reportado como
+  «not found or failed», não como «sem permissão». A recusa nova cobre a
+  seleção; não cobre essa segunda origem de erro.
 - Não há ClamAV instalado neste WSL, portanto só está medida a **ausência**
-  reportada com honestidade; não há aqui uma análise real com `clamscan`/`clamd`
-  nem prova de base de assinaturas fresca em Linux.
+  reportada com honestidade e a recusa do binário Windows; não há aqui uma
+  análise real com `clamscan`/`clamd` nem prova de base de assinaturas fresca em
+  Linux.
 - Não há `yara`/`yarac` de Linux instalados neste WSL, portanto o caminho
   `origem: "sistema"` está provado por fixture e por código, **não** por um
   motor YARA real a correr em Linux. Medir isso exige `apt install yara` (ou
@@ -143,6 +213,7 @@ npm test -w @cybersafe/core
 node --test packages/core/test/yara-classic-posix.test.js
 
 # do lado WSL2 (cópia Linux em $HOME/cybersafe-linux-lite)
+wsl.exe -- bash -lc "tr -d '\015' < /mnt/c/…/scripts/linux-lite/wsl-p2-clamav-proveniencia.sh > /tmp/clamav-prov.sh && bash /tmp/clamav-prov.sh"
 wsl.exe -- bash -lc "tr -d '\015' < /mnt/c/…/scripts/linux-lite/wsl-p2-yara-linux.sh > /tmp/yara-linux.sh && bash /tmp/yara-linux.sh"
 wsl.exe -- bash -lc "tr -d '\015' < /mnt/c/…/scripts/linux-lite/wsl-p2-yara-contar.sh > /tmp/contar.sh && bash /tmp/contar.sh"
 ```

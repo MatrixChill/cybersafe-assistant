@@ -55,6 +55,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { firstDiagnosticLine } from "./response.js";
+import {
+  type LeitorBinario as LeitorBinarioYara,
+  leitorBinarioReal,
+  recusaExecutavelPosix,
+} from "./executavel-posix.js";
 
 /** Versão vendorizada (release oficial com binários win64 publicados). */
 export const YARA_CLASSIC_VERSION = "4.6.0";
@@ -173,65 +178,8 @@ export function nomesExecutaveisYara(platform: NodeJS.Platform = process.platfor
 const DIRECTORIOS_SISTEMA_POSIX = ["/usr/bin", "/usr/local/bin", "/snap/bin", "/opt/homebrew/bin"] as const;
 
 /** O que o resolutor sabe ler do disco; injectável para os testes não dependerem do host. */
-export interface LeitorBinarioYara {
-  isFile(candidato: string): boolean;
-  /** POSIX: o sistema tem permissão de execução sobre este ficheiro? */
-  executavel(candidato: string): boolean;
-  /** Primeiros dois bytes, ou `null` quando ilegível. */
-  magic(candidato: string): string | null;
-}
-
-export const leitorBinarioReal: LeitorBinarioYara = {
-  isFile: (candidato) => {
-    try {
-      return fs.statSync(candidato).isFile();
-    } catch {
-      return false;
-    }
-  },
-  executavel: (candidato) => {
-    try {
-      fs.accessSync(candidato, fs.constants.X_OK);
-      return true;
-    } catch {
-      return false;
-    }
-  },
-  magic: (candidato) => {
-    let fd: number | null = null;
-    try {
-      fd = fs.openSync(candidato, "r");
-      const buffer = Buffer.alloc(2);
-      const lidos = fs.readSync(fd, buffer, 0, 2, 0);
-      return lidos === 2 ? buffer.toString("latin1") : null;
-    } catch {
-      return null;
-    } finally {
-      if (fd !== null) {
-        try {
-          fs.closeSync(fd);
-        } catch {}
-      }
-    }
-  },
-};
-
-/**
- * Razão pela qual um candidato é recusada em POSIX, ou `null` quando é
- * utilizável. Cada recusa é uma razão de segurança/proveniência, não capricho:
- *   • `.exe`/`MZ` — é uma imagem Windows; correr um PE num host Linux significa
- *     usar um executável Windows como se fosse o motor Linux (e no WSL pode
- *     mesmo correr, pela interop).
- *   • sem bit de execução — não é um binário instalável utilizável; o spawn
- *     falharia com EACCES e o estado do motor sairia mentira.
- */
-export function recusaExecutavelPosix(candidato: string, magic: string | null, executavel: boolean): string | null {
-  if (/\.exe$/i.test(candidato)) return "é um executável Windows (.exe)";
-  if (magic === "MZ") return "é uma imagem PE de Windows (magic MZ)";
-  if (!executavel) return "não tem permissão de execução";
-  if (magic === null) return "não é legível";
-  return null;
-}
+export type { LeitorBinarioYara };
+export { leitorBinarioReal, recusaExecutavelPosix };
 
 /**
  * Directórios candidatos, por ordem de precedência: o caminho empacotado
