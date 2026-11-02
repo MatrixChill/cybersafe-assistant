@@ -31,6 +31,32 @@ if [ "${1:-}" = "--matar" ]; then
   echo "remanescentes_apos_kILL=$(pgrep -c -f "$PADRAO" 2>/dev/null || echo 0)"
   exit 0
 fi
+# `--observar [segundos]`: a pergunta que o SIGTERM não pode responder. Na corrida
+# de `f3ee956` o `apos_SIGTERM_remanescentes=0` parecia encerramento limpo, mas o
+# log terminava com `FATAL:gpu_data_manager_impl_private.cc GPU process isn't
+# usable. Goodbye.` e a shell reportou `Trace/breakpoint trap` no processo
+# principal: a janela pode ter morrido SOZINHA antes de qualquer sinal nosso.
+# Aqui não é enviado nenhum sinal — só se mede se e quando sobrevive.
+if [ "${1:-}" = "--observar" ]; then
+  LIMITE="${2:-90}"
+  limpar; sleep 1; rm -f "$LOG"
+  setsid "$B" --remote-debugging-port="$PORT" </dev/null >"$LOG" 2>&1 &
+  P=$!
+  t=0; vivos=1
+  while [ "$t" -lt "$LIMITE" ]; do
+    sleep 5; t=$((t + 5))
+    vivos=$(pgrep -c -f "$PADRAO" 2>/dev/null || echo 0)
+    echo "t=${t}s vivos=${vivos}"
+    [ "$vivos" -gt 0 ] || break
+  done
+  wait "$P" 2>/dev/null; rc=$?
+  echo "observar: limite=${LIMITE}s morreu_antes_de_esgotar=$([ "$vivos" -eq 0 ] && echo SIM || echo NAO) aos=${t}s"
+  echo "rc_do_processo_principal=${rc} (128+sinal: 133=SIGTRAP do FATAL do Chromium, 143=SIGTERM; 0 se o setsid fez fork e não exec)"
+  echo "--- marcos do log (sem stacks de node) ---"
+  grep -vE "^\s+at |node:internal" "$LOG" | tail -30
+  limpar
+  exit 0
+fi
 if [ "${1:-}" = "--limpar-perfil" ]; then
   rm -rf "$PERFIL"; echo "perfil_de_teste_removido=$PERFIL"
 fi
