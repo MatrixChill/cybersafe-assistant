@@ -1137,7 +1137,6 @@ function AuthenticatedApp() {
                 transition={{ duration: 0.2 }}
                 className="min-h-full"
               >
-                {import.meta.env.DEV&&page!=="dashboard"&&<p className="v2-migration-note" role="note">DEV · Apresentação desta página ainda em migração para o Design Lab V2. Funcionalidades existentes preservadas.</p>}
                 {renderPage()}
               </motion.div>
             </AnimatePresence>

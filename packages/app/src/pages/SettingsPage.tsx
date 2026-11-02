@@ -76,11 +76,11 @@ const SURFACE_OPTIONS: { id: SurfaceStyle; description: string; descricaoCurta: 
 
 /** Cor de destaque - afeta primary, ring, accent, sidebar. NUNCA altera cores semânticas. */
 const ACCENT_OPTIONS: { id: AccentMode; name: string; token: string }[] = [
-  { id: "cyan", name: "Ciano", token: "--cyber-cyan" },
+  { id: "cyan", name: "Ciano", token: "--cs-accent-cyan" },
   { id: "matrix-green", name: "Verde Matrix", token: "--cyber-green" },
   { id: "blue", name: "Azul", token: "--accent-blue" },
-  { id: "purple", name: "Roxo", token: "--cyber-purple" },
-  { id: "pink", name: "Rosa", token: "--cyber-pink" },
+  { id: "purple", name: "Roxo", token: "--cs-accent-purple" },
+  { id: "pink", name: "Rosa", token: "--cs-accent-pink" },
   { id: "amber", name: "Âmbar", token: "--cyber-yellow" },
   { id: "red-wine", name: "Vinho", token: "--accent-wine" },
 ];
@@ -307,7 +307,7 @@ export default function SettingsPage() {
   }
 
   return (
-    <div className="page-shell max-w-5xl animate-in fade-in slide-in-from-bottom-4 duration-700">
+    <div className="page-shell max-w-7xl animate-in fade-in slide-in-from-bottom-4 duration-700">
       <div>
         <h1 className="page-title text-2xl font-bold font-mono tracking-tight">
           Configurações
@@ -317,7 +317,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <nav aria-label="Categorias das configurações" className="flex flex-wrap gap-2 bg-background py-2">
+      <nav aria-label="Categorias das configurações" className="flex flex-wrap gap-2 py-2">
         <a href="#settings-geral" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Geral</a>
         <a href="#settings-aparencia" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Aparência</a>
         <a href="#settings-protecao" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Proteção</a>
@@ -584,6 +584,7 @@ export default function SettingsPage() {
                     <button
                       key={option.id}
                       type="button"
+                      aria-label={`Material da interface: ${SURFACE_LABELS[option.id]}`}
                       onClick={() => setSurface(option.id)}
                       aria-pressed={selected}
                       className={cn(
@@ -631,6 +632,7 @@ export default function SettingsPage() {
                     <button
                       key={option.id}
                       type="button"
+                      aria-label={`Cor de destaque: ${option.name}`}
                       onClick={() => setAccent(option.id)}
                       aria-pressed={selected}
                       className={cn(

@@ -395,8 +395,8 @@ function CircularGauge({ value, metric, size = 100, label, showFallback }: { val
   const colorClass = getUsageColor(metric, value);
 
   return (
-    <div className="relative flex flex-col items-center justify-center" style={{ width: size, height: size }}>
-      <svg className="transform -rotate-90 w-full h-full">
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 -rotate-90" style={{width:size,height:size}}>
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -415,7 +415,7 @@ function CircularGauge({ value, metric, size = 100, label, showFallback }: { val
           className={cn("fill-none transition-all duration-1000 ease-out", colorClass.replace("text-", "stroke-"))}
         />
       </svg>
-      <div className="absolute flex flex-col items-center justify-center">
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className={cn("text-xl font-bold font-mono", showFallback ? "text-muted-foreground" : colorClass)}>
           {showFallback ? "—" : `${Math.round(value)}%`}
         </span>
@@ -786,13 +786,13 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
       <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
 
         {/* CPU Card */}
-        <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+        <div className="self-stretch bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <Cpu className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Processador (CPU)</h2>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <CircularGauge value={cpuUsage.value ?? 0} metric="cpu" label={cpuUsage.value == null ? "N/A" : cpuUsage.state === "stale" ? "Última" : "Uso"} showFallback={cpuUsage.value == null} />
             <div className="flex flex-col gap-3 text-right min-w-0">
               <div>
@@ -847,13 +847,13 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
         </div>
 
         {/* RAM Card */}
-        <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+        <div className="self-stretch bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <MemoryStick className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Memória (RAM)</h2>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             {ramUsage.value !== null ? <CircularGauge value={ramUsage.value} metric="ram" label="Uso" /> : <span className="text-sm text-muted-foreground">{ramCardText}</span>}
             <div className="flex flex-col gap-3 text-right min-w-0">
               <div>
@@ -890,7 +890,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
         </div>
 
         {/* GPU Card */}
-        <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+        <div className="self-stretch bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
           <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <Monitor className="w-5 h-5 text-primary" />
@@ -899,7 +899,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
 
           {hardware.gpu && gpu !== "absent" ? (
             <>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <CircularGauge value={hardware.gpu.usagePercent ?? 0} metric="workload" label={hardware.gpu.usagePercent != null ? "Uso" : "N/A"} showFallback={hardware.gpu.usagePercent == null} />
               <div className="flex flex-col gap-3 text-right min-w-0">
                 <div>
@@ -1278,7 +1278,7 @@ export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceCo
   });
 
   return (
-    <div className="w-full h-full p-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 overflow-y-auto" {...devTraceAttrs}>
+    <div className="w-full p-6 space-y-6 animate-in fade-in slide-in-from-bottom-4" {...devTraceAttrs}>
       {/* Header com Toggle */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-card cyber-border rounded-xl p-6 relative overflow-hidden group">
         <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
