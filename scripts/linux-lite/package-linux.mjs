@@ -401,8 +401,11 @@ function deComEXE(resultado, rotulo) {
     linhas: linhas.length,
     exe: exes.length,
     amostraExe: exes.slice(0, 3),
-    // Lançadores listados por onde, não um booleano: o `.deb` medido não tinha
-    // nenhuma entrada em /usr/bin e o booleano mascarava isso como «false».
+    // Lançadores listados por onde, não um booleano. E «não está no arquivo»
+    // NÃO quer dizer «não existe no sistema»: medido no `postinst` do pacote, é
+    // ele que cria `/usr/bin/cybersafe-assistant-linux-lite`
+    // (`update-alternatives --install`, com queda em `ln -sf`) na instalação.
+    // Uma lista vazia aqui é o esperado para um `.deb` de Electron.
     usrBin: linhas.filter((l) => /\/usr\/bin\//.test(l)).slice(0, 3),
     temLauncher: linhas.some((l) => /usr\/bin\/cybersafe-assistant-linux-lite|AppRun/.test(l)),
     temDesktop: linhas.some((l) => /cybersafe-assistant-linux-lite\.desktop/.test(l)),

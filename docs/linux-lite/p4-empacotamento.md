@@ -63,8 +63,23 @@ que o leia. Não tem `MimeType`: sem `setAsDefaultProtocolClient` nem handler
 `open-url` no produto (grep em `packages/`), declará-lo seria anunciar ao
 ambiente gráfico uma capacidade que não existe.
 
-Lacuna medida: o `.deb` não cria entrada em `/usr/bin` (0 ocorrências no
-`data.tar`), portanto o lançador de menu funciona e o de consola não.
+Lacuna que eu julgava medida, e não era: o `dpkg-deb --contents` não mostra
+nenhuma entrada em `/usr/bin`, e eu escrevi isso como «o lançador de consola não
+existe». O `postinst` do próprio pacote (27 linhas, lido a `7ae8b24`) faz
+exatamente o contrário:
+
+```
+update-alternatives --install '/usr/bin/cybersafe-assistant-linux-lite' \
+  'cybersafe-assistant-linux-lite' '/opt/CyberSafe Assistant Linux Lite/cybersafe-assistant-linux-lite' 100 \
+  || ln -sf '/opt/CyberSafe Assistant Linux Lite/cybersafe-assistant-linux-lite' '/usr/bin/cybersafe-assistant-linux-lite'
+```
+
+Ou seja: a entrada é criada à INSTALAÇÃO, não faz parte do arquivo — a mesma
+classe de erro que a janela vazia de logo abaixo (ler o contentor em vez do
+conteúdo). O que fica por medir é a instalação real: se o `postinst` corre numa
+`apt install` num desktop Ubuntu/Mint, e se `/usr/bin/cybersafe-assistant-linux-lite`
+fica de pé depois disso. Continua `não validado`, mas como instalação por
+testar, não como falta de lançador.
 
 ## Conteúdo verificado
 
@@ -182,6 +197,80 @@ Correção em `34e879a` e `1d3b8ab`, toda ela no caminho Linux:
   `main.js` — e prova que o guarda dispara com o motivo nomeado. 6 testes, 6
   passes, medidos em Windows e em Linux.
 
-O `stage-renderer.mjs` é o mesmo do Windows e não foi alterado. A medição da
-reconstrução segue-se; enquanto não estiver na tabela, a linha do empacotamento
-não pode dizer «interface visível no pacote».
+O `stage-renderer.mjs` é o mesmo do Windows e não foi alterado.
+
+## A interface voltou: medido no pacote com o renderer dentro
+
+Ambiente: WSL2 · Ubuntu · uid 1000 · `DISPLAY=:0` · node v22 · pacote
+`linux-unpacked` construído a `1d3b8ab`, lido pela sonda CDP (`cdp-shot.mjs`).
+
+```
+{"type":"page","title":"CyberSafe Assistant — Painel de Segurança", ...}
+DOM {"root":2,"body":1,"texto":"CYBERSAFE Assistant CYBERSAFE Inicie sessão na
+     sua conta EMAIL SENHA Lembrar-me Entrar Não tem uma conta? Criar conta
+     Proteção local — o estado real aparece no ","scripts":
+     ["…resources/app.asar/dist/assets/index-Bt7R5Ual.js"]}
+EXCECOES 0 []
+SHOT_CDP_OK bytes=428844
+```
+
+Contra a mesma medição antes do staging (`root:-1`, `scripts:[]`, texto vazio,
+PNG de 4 713 bytes = retângulo preto): o `#root` tem 2 filhos, há um `<script>`
+carregado de dentro do `app.asar`, o texto é o ecrã real da aplicação, e a
+captura passou de 4 713 para 428 844 bytes. Zero exceções de consola, outra vez
+— o que confirma que a falha anterior era de conteúdo em falta, não de código
+partido. O título da janela também mudou: era `CyberSafe Desktop` (o shell),
+passou a `CyberSafe Assistant — Painel de Segurança` (o documento da app).
+
+Encerramento do mesmo pacote: `processo_principal=457`,
+`principal_saiu_em=3s`, `apos_SIGTERM_remanescentes=0`, última linha do log
+`[Electron] Processo do Serviço encerrou com código: 0`.
+
+O que isto NÃO diz: o que se mede é o ecrã de entrada, apresentado sem qualquer
+interação. O dashboard, a navegação e os painéis ficam detrás de uma sessão e
+continuo a não os ter lido a partir do pacote. E WSL2 não é uma instalação: a
+linha `.deb`/AppImage instalados mantém-se `não validado`.
+
+## Versão do pacote: a fonte única, e o `.deb` que provava o contrário
+
+Medido no pacote de `1d3b8ab`: o `.deb` chamava-se
+`CyberSafe Assistant Linux Lite-0.1.2-linux-amd64.deb` e o `control` dizia
+`Version: 0.1.2` — a versão interna do `packages/desktop/package.json`, que
+`app-version.mjs:17-19` declara explicitamente «não é identidade do produto».
+Dentro do mesmo ficheiro, o `__BUILD__` do renderer dizia
+`0.1.11-internal.pap-r7.20261031`. É a divergência de três fontes que esse
+módulo existe para evitar, a reproduzir-se no caminho Linux.
+
+`7ae8b24` passa a versão canónica por `--config.extraMetadata.version` (a fonte
+continua a ser uma; o YAML não é editado) e `f62e0bf` acrescenta
+`identidadeDoDeb()`, que lê o `control` de volta. Reconstrução (WSL2, mesmo
+ambiente):
+
+```
+DEB_IDENTIDADE {"esperado":"0.1.11-internal.pap-r7.20261031",
+  "obtido":"0.1.11~internal.pap~r7.20261031","forma":"fpm:-para~","versaoOk":true,
+  "homepage":"https://github.com/MatrixChill/cybersafe-assistant",
+  "maintainer":"CyberSafe Team","section":"utils",
+  "descricao":"Assistente de segurança do CyberSafe para Linux (edição Linux Lite)"}
+```
+
+Dois factos que não eram de saber: o fpm reescreve cada `-` extra em `~` (só um
+hífen é permitido, é o separador upstream/revision) — a comparação literal teria
+chamado errado a um pacote certo; e `~` ordena ANTES do fim de versão, pelo que
+uma pré-lançamento fica corretamente mais antiga que a versão final. O
+`Homepage`, o `Maintainer` e a `Description` do YAML continuam lá, portanto o
+`--config` da linha de comandos funde sem apagar o ficheiro. O mesmo verificador,
+apontado ao `.deb` antigo, diz `forma:"divergente"`, `versaoOk:false` — tem
+dentes dos dois lados.
+
+Artefactos desta corrida (`.exe`: 0 no `.deb` de 160 entradas; 0 `.exe` e 0
+`.dll` no `.AppImage` de 162 ficheiros, `AppRun` presente):
+
+| Artefacto | Bytes | SHA-256 |
+|---|---|---|
+| `CyberSafe Assistant Linux Lite-0.1.11-internal.pap-r7.20261031-linux-amd64.deb` | 81 744 388 | `256a27d0ef6b20e52444fa4ad464fff813cf6775541053f7c5eaedeb9a2e639f` |
+| `CyberSafe Assistant Linux Lite-0.1.11-internal.pap-r7.20261031-linux-x86_64.AppImage` | 119 518 841 | `980296a31202ebc6625d14459893b67b2e89a7a86b4f686c92e9bf5c4b27c135` |
+
+As linhas da tabela «Conteúdo verificado» lá em cima (`0.1.2`) são corridas
+anteriores, ultrapassadas por esta; mantêm-se porque registam o que foi medido,
+não o que hoje sairia.

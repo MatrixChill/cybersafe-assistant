@@ -90,8 +90,9 @@ feito.
 | Quarentena: recusas, montagem, restauro, permissões, auditoria em disco | medido em percursos validados; **não** declarada automática | `p3-quarentena-*.md` |
 | Volumes montados / armazenamento sem letras de unidade | medido e ligado ao motor; **deteção positiva com pen física ainda não medida** | `p3-montes-usb.md` |
 | Otimizar e firewall (UFW/firewalld/nftables) | **não validado** — nenhuma medição nesta branch | — |
-| Empacotamento `.deb` e `.AppImage` | construído e aberto em Linux; o serviço arranca e encerra limpo, mas até `34e879a` a janela empacotada abria **sem interface** (renderer não staged) | `p4-empacotamento.md` |
-| Conteúdo do dashboard **a partir do pacote** | **não validado** — a sonda lê o alvo CDP, não fotografa a janela empacotada | — |
+| Empacotamento `.deb` e `.AppImage` | construído e aberto em Linux; encerramento limpo (SIGTERM no processo certo, resíduo 0); a versão do pacote vem de `product-version.json` desde `7ae8b24` | `p4-empacotamento.md` |
+| Interface **a partir do pacote** | **medido** desde `34e879a`: `#root` com conteúdo, `<script>` do `app.asar`, texto do ecrã de entrada, 0 exceções, PNG de 428 kB (contra 4,7 kB de vazio antes do staging) | `p4-empacotamento.md` |
+| Dashboard e painéis **a partir do pacote** | **não validado** — ficam detrás de uma sessão, e nenhuma sessão foi aberta no pacote | — |
 | Instalação do `.deb` por `apt` num sistema real | **não testado** | — |
 
 ## Testes automatizados por plataforma
@@ -118,8 +119,10 @@ partir do pacote: para isso existe a sonda `wsl-p4-pacote-gui.sh`.
   `--no-sandbox` ao Electron. É uma bandeira de conveniência em WSLg, não uma
   configuração de produto; a sonda do pacote empacotado não passa nenhuma
   bandeira que desative proteções.
-- O `.deb` não cria entrada em `/usr/bin`; o `.desktop` aponta para o binário em
-  `/opt/...`, por isso o lançador de menu funciona e o de consola não.
+- O lançador de consola `/usr/bin/cybersafe-assistant-linux-lite` é criado pelo
+  `postinst` do `.deb` (com `update-alternatives` e queda em `ln -sf`), não faz
+  parte do arquivo — por isso `dpkg-deb --contents` não o mostra. Se a
+  instalação real o deixa de pé continua por medir numa VM Ubuntu/Mint.
 - `StartupWMClass` sai com o nome do produto (espaços incluídos), como o
   electron-builder faz; se corresponde ao `WM_CLASS` real só se mede com uma
   janela aberta por uma ferramenta que o leia — ainda não medido.
