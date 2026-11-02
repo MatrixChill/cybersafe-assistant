@@ -1079,7 +1079,7 @@ function AuthenticatedApp() {
 
           <main ref={mainScrollRef} data-cs-main="" className={cn("flex-1 overflow-y-auto relative min-w-0",
                 page!=="dashboard" && !isLiquid && !isCore && "cyber-grid"
-              )} data-presentation={page==="dashboard"?"lab-v2":"legacy"}
+              )} data-cs-page={page} data-presentation={page==="dashboard"?"lab-v2":"legacy"}
           >
             {mostraAvisoDeModoLimitado(bootPhase, bootReadiness) && (
               <div className="m-4 p-3 bg-secondary/40 border border-border text-muted-foreground text-xs font-mono rounded flex items-start gap-2">

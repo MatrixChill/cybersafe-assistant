@@ -900,3 +900,36 @@ html[data-v2-theme="belbete"] .cs-v2 .v2-dashboard .panel {
 
 /* Isolated proposal: the CSS core remains the fallback, never a second visible logo. */
 .cs-v2 .v2-dashboard .brand-scene[data-orbital-proposal="true"]:has(.three-scene)>.orbiting-core{opacity:0}
+
+/* Readable operational hierarchy; the protection message remains dominant. */
+.cs-v2 .v2-dashboard .protection-hero {gap:var(--v2-space-6);background:var(--v2-hero);}
+.cs-v2 .v2-dashboard .hero-copy {flex:1;min-width:0;max-width:62%;}
+.cs-v2 .v2-dashboard .hero-copy>p {font-size:13px;line-height:1.65;}
+.cs-v2 .v2-dashboard .hero-copy .eyebrow {font-size:10px;}
+.cs-v2 .v2-dashboard .hero-actions .button {font-size:12px;min-height:40px;}
+.cs-v2 .v2-dashboard .hero-actions .caption {font-size:11px;line-height:1.5;}
+.cs-v2 .v2-dashboard .protection-hero>.brand-scene {margin-right:0;min-width:200px;}
+.cs-v2 .v2-dashboard .scene-caption {font-size:9px;letter-spacing:1px;}
+.cs-v2 .v2-dashboard .engine-grid {align-items:stretch;gap:var(--v2-space-4);}
+.cs-v2 .v2-dashboard .engine-card {display:flex;flex-direction:column;padding:var(--v2-space-4) var(--v2-space-4) 0;background:var(--v2-panel);}
+.cs-v2 .v2-dashboard .engine-card h3 {font-size:16px;line-height:1.35;}
+.cs-v2 .v2-dashboard .engine-card>p {font-size:12px;line-height:1.5;}
+.cs-v2 .v2-dashboard .engine-top .badge {font-size:11px;white-space:normal;}
+.cs-v2 .v2-dashboard .engine-resource {font-size:11px;line-height:1.6;min-height:36px;margin-bottom:var(--v2-space-3);}
+.cs-v2 .v2-dashboard .engine-bottom {margin-top:auto;font-size:11px;min-height:44px;}
+.cs-v2 .v2-dashboard .dashboard-bottom {align-items:stretch;}
+.cs-v2 .v2-dashboard .dashboard-bottom .panel {min-height:0;}
+.cs-v2 .v2-dashboard .panel-foot {flex-wrap:wrap;gap:var(--v2-space-2);font-size:11px;}
+.cs-v2 .v2-dashboard .button:focus-visible,
+.cs-v2 .v2-dashboard .engine-bottom:focus-visible {outline:2px solid var(--v2-focus);outline-offset:3px;}
+@media(max-width:1050px){
+  .cs-v2 .v2-dashboard .dashboard-top {grid-template-columns:1fr;}
+  .cs-v2 .v2-dashboard .hero-copy {max-width:65%;}
+}
+@media(max-width:760px){
+  .cs-v2 .v2-dashboard .protection-hero {flex-direction:column;align-items:stretch;}
+  .cs-v2 .v2-dashboard .hero-copy {max-width:none;}
+  .cs-v2 .v2-dashboard .protection-hero>.brand-scene {width:100%;max-width:330px;align-self:center;}
+}
+
+.cs-v2 .v2-dashboard .brand-scene:has(.three-scene)>.orbiting-core{opacity:0}

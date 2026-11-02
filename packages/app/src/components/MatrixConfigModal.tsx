@@ -89,7 +89,7 @@ export function MatrixConfigModal({
       aria-modal="true"
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
     >
-      <div className="w-full max-w-md rounded-2xl border border-primary/30 bg-card p-6 shadow-2xl space-y-5">
+      <div data-cs-overlay="modal" className="w-full max-w-md rounded-2xl border border-primary/30 bg-card p-6 shadow-2xl space-y-5">
         {/* Cabeçalho */}
         <div className="flex items-center justify-between border-b border-border pb-3">
           <div className="flex items-center gap-2.5">

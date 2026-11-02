@@ -752,7 +752,7 @@ const handleAnalyze = async (pid: number) => {
 
                 return (
                   <Fragment key={process.pid}>
-                  <div className="grid grid-cols-12 gap-4 items-center p-3 rounded-lg hover:bg-secondary/50 border border-transparent hover:border-border transition-all group">
+                  <div data-process-row="" data-selected={isDetailOpen} className="grid grid-cols-12 gap-4 items-center p-3 rounded-lg hover:bg-secondary/50 border border-transparent hover:border-border transition-all group">
                     <div className="col-span-4 flex items-center gap-3 min-w-0">
                       <button
                         onClick={() => setDetail(isDetailOpen ? null : { pid: process.pid, startedAt: process.startedAt })}

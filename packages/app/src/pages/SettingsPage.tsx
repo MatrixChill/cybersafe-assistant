@@ -317,7 +317,7 @@ export default function SettingsPage() {
         </p>
       </div>
 
-      <nav aria-label="Categorias das configurações" className="sticky top-0 z-20 flex flex-wrap gap-2 bg-background py-2">
+      <nav aria-label="Categorias das configurações" className="flex flex-wrap gap-2 bg-background py-2">
         <a href="#settings-geral" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Geral</a>
         <a href="#settings-aparencia" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Aparência</a>
         <a href="#settings-protecao" className="rounded-lg border border-border px-3 py-2 text-sm text-foreground hover:border-primary focus-visible:outline focus-visible:outline-2 focus-visible:outline-primary">Proteção</a>

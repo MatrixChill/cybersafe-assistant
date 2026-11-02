@@ -437,7 +437,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
   }, [])
   // Modo do launcher (TP-MATRIX-DOCK). A posição antiga continua a ser lida; o
   // modo é um eixo novo, guardado à parte, que nasce em `floating`.
-  const [launcherMode, setLauncherModeState] = useState<MatrixMode>(() => parseStoredMode(safeReadLauncherMode()))
+  const [launcherMode, setLauncherModeState] = useState<MatrixMode>(() => parseStoredMode(safeReadLauncherMode(), safeReadPos() === null))
   const [dockHover, setDockHover] = useState(false)
   const [dockSlot, setDockSlot] = useState<Pos | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
@@ -1991,10 +1991,10 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
     const rect = el.getBoundingClientRect()
     const vp = viewport()
     return {
-      x: Math.round(rect.left + (rect.width - launcherSize.w) / 2),
+      x: Math.round(rect.left + Math.max(0, (rect.width - launcherFootprint.w) / 2)),
       bottom: Math.round(vp.h - rect.bottom),
     }
-  }, [launcherSize.w, viewport])
+  }, [launcherFootprint.w, viewport])
 
   // PAINEL LATERAL: publica a largura real do painel e um sinal no <html>
   // para a área principal ceder esse espaço (`[data-cs-main]` em index.css).
@@ -2216,7 +2216,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            className="absolute border border-primary/30 rounded-2xl bg-card/80 backdrop-blur-xl shadow-2xl flex flex-col overflow-hidden cyber-border"
+            data-cs-overlay="matrix" className="absolute border border-primary/30 rounded-2xl bg-card/80 backdrop-blur-xl shadow-2xl flex flex-col overflow-hidden cyber-border"
             style={{
               left: chatPlacement.left - origin.x,
               bottom: chatPlacement.bottom - origin.bottom,

@@ -81,7 +81,7 @@ const readingCopy: Record<ReadPhase, string> = {
 export default function LabDashboard(
   p: DashboardProps & { history: HistoryReading },
 ) {
-  const { animate } = useAppearance();
+  const { animate, effects } = useAppearance();
   const [details, setDetails] = useState(false),
     [control, setControl] = useState(false),
     [engine, setEngine] = useState<string | null>(null);
@@ -334,8 +334,8 @@ export default function LabDashboard(
         {engines.map((e) => (
           <SpotlightCard
             key={e.key}
-            intensity={animate ? 0.12 : 0}
-            borderGlow={animate ? 0.4 : 0}
+            intensity={animate && effects.glow ? 0.12 : 0}
+            borderGlow={animate && effects.glow ? 0.4 : 0}
             proximity={0}
             className="engine-card"
             data-engine={e.key}

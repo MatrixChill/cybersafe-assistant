@@ -1,0 +1,37 @@
+/* Shared treatment derived from the active theme, without status colour changes. */
+html {
+  --cs-overlay-fill:var(--v2-surface);
+  --cs-overlay-filter:var(--v2-material-blur);
+  --cs-overlay-edge:var(--v2-material-border);
+  --cs-overlay-elevation:var(--v2-panel-shadow);
+}
+.cs-v2 [data-cs-page]:not([data-cs-page="dashboard"]) {background-image:none;}
+.cs-v2 [data-cs-page] h1 {font-family:var(--v2-font-ui);letter-spacing:-.02em;line-height:1.25;}
+.cs-v2 [data-cs-page] :is(.text-\[10px\],.text-\[11px\]) {font-size:12px;line-height:1.5;}
+.cs-v2 [data-cs-page] :is(button,input,select,textarea):focus-visible {outline:2px solid var(--v2-focus);outline-offset:3px;}
+.cs-v2 [data-cs-page] :is(input,select,textarea) {min-height:36px;}
+.cs-v2 [data-cs-page] input[type="checkbox"],
+.cs-v2 [data-cs-page] input[type="radio"] {min-height:auto;}
+.cs-v2 [data-process-row] {background:var(--v2-panel);border-bottom-color:var(--v2-border);}
+.cs-v2 [data-process-row][data-selected="true"] {background:var(--v2-raised);border-color:var(--v2-accent);}
+.cs-v2 [data-row-detail] {display:grid;place-items:center;min-width:24px;min-height:28px;}
+.cs-v2 [data-cs-page="settings"] [role="region"] {scroll-margin-top:var(--v2-space-6);}
+.cs-v2 [data-cs-page="settings"] fieldset {padding:var(--v2-space-4);border:1px solid var(--v2-border);border-radius:var(--v2-card-radius);}
+.cs-v2 [data-cs-page="otimizar"] .row-note {font-size:13px;line-height:1.6;}
+.cs-v2 [data-cs-page="otimizar"] .row-list {background:var(--v2-panel);}
+.cs-v2 [data-cs-page="pccenter"] details {background:var(--v2-panel);}
+.cs-v2 [data-cs-page="monitor"] [role="log"] {background:var(--v2-panel);font-variant-numeric:tabular-nums;}
+.cs-v2 [data-cs-page="scanner"] [role="progressbar"] {min-height:8px;}
+.cs-v2 [data-cs-page] table {background:var(--v2-panel);font-variant-numeric:tabular-nums;}
+.cs-v2 [data-cs-overlay],.cs-v2 dialog {
+  background:var(--cs-overlay-fill);
+  backdrop-filter:var(--cs-overlay-filter);
+  border-color:var(--cs-overlay-edge);
+  box-shadow:var(--cs-overlay-elevation);
+}
+html[data-effect-glass="false"] .cs-v2 [data-cs-overlay],
+html[data-effect-glass="false"] .cs-v2 dialog {background:var(--v2-panel);backdrop-filter:none;}
+html[data-effect-glow="false"] .cs-v2 .spotlight-card {box-shadow:none;background-image:none;}
+@media(max-width:760px){
+  .cs-v2 [data-cs-page]:not([data-cs-page="dashboard"])>div {padding-left:var(--v2-space-4);padding-right:var(--v2-space-4);}
+}

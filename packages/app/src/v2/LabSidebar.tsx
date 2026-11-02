@@ -101,7 +101,8 @@ export default function LabSidebar({
           </div>
         ))}
       </nav>
-      <div className="sidebar-bottom">
+      <div data-cs-matrix-dock="" aria-hidden="true" style={{height:'var(--matrix-dock-slot-h, 0px)',flexShrink:0}} />
+      <div className="sidebar-bottom" data-cs-reserve="matrix">
         <div className="isolation">
           <span className="isolation-dot" />
           <span>
