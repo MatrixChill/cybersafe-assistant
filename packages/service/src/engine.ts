@@ -3435,10 +3435,13 @@ if (processInfo.path) {
   }
 
   async restoreQuarantine(id: string, trustAfterRestore = false) {
+    if (typeof trustAfterRestore !== "boolean") {
+      return { success: false, error: "Consentimento de confiança inválido; nenhum restauro executado." };
+    }
     const entry = this.quarantine.list().find((item) => item.id === id);
     const { success: restored, error } = await this.quarantine.restore(id, "desktop-ui");
     const success = restored === true;
-    if (success && trustAfterRestore && entry?.sha256) {
+    if (success && trustAfterRestore === true && entry?.sha256) {
       await this.allowHash(entry.sha256);
     }
     if (success) {
