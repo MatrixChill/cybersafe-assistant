@@ -2397,7 +2397,11 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       const entry = await this.quarantine.quarantine(analysis);
       if (!entry) throw new Error("Operação não confirmada");
       this.eventBus.publish("quarantine.added", "critical", `Colocado em quarentena ${analysis.fileName}`, entry);
-      void this.logHistory({type:"quarantine.added",entry,timestamp:new Date().toISOString()});
+      // A prova fica no registo em disco, não só no evento: as duas linhas de
+      // recusa já levam `authorization`, e uma auditoria onde só as falhas dizem
+      // quem autorizou não permite responder, dias depois, se um isolamento foi
+      // pedido pelo utilizador ou feito pelo motor.
+      void this.logHistory({ type: "quarantine.added", ...evidence, entry, timestamp: new Date().toISOString() });
       return true;
     } catch {
       this.eventBus.publish("quarantine.failed", "high", `Não foi possível confirmar o isolamento de ${analysis.fileName}. Verifique a quarentena e o ficheiro.`, evidence);
