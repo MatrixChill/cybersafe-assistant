@@ -2,6 +2,8 @@
 
 Estado: propostas isoladas, não aprovadas. Não é uma candidata instalada. Capturas em `output/codex-review-20261102`, fora do Git; são janelas reais, não imagens geradas. As contas e métricas mostradas pertencem ao perfil sintético de ensaio.
 
+Atualização obrigatória da fase visual: [sistema adaptativo de desempenho](ORBITAL-V3-DESEMPENHO-ADAPTATIVO.md), com cinco perfis e controlo individual, sem alterar proteção. Requisito registado, ainda não implementado integralmente. [Análise das dez referências públicas](REFERENCIAS-VISUAIS-CYBERSAFE-20261102.md) distingue observações, limitações de acesso e propostas; não equivale a aprovação visual nem a medição de desempenho.
+
 ## Núcleo Orbital V3
 
 Código: `943accb`. Reutiliza CoreScene, recursos oficiais, iluminação, gestão de WebGL e contexto de aparência existentes. Corrige na proposta uma limitação concreta: rodar um torus simétrico apenas no seu próprio eixo quase não altera o aspeto; agora os dois planos mudam independentemente, em sentidos/velocidades diferentes. O núcleo CSS é ocultado quando a cena WebGL da proposta existe, mantendo-o como fallback.
