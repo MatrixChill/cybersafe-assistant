@@ -26,3 +26,14 @@ test('aborted operation opens no connection', async () => {
   const controller=new AbortController();controller.abort();
   await assert.rejects(createGitHubReleaseOpener({open(){throw Error('unexpected network');}}).open(url,controller.signal),/cancelado/);
 });
+
+test('cancellation while awaiting headers closes the response and rejects before returning it', async () => {
+  const controller = new AbortController();
+  let aborted = 0;
+  const opener = createGitHubReleaseOpener({async open() {
+    controller.abort();
+    return {status:200,headers:{},body:[],abort(){aborted++;}};
+  }});
+  await assert.rejects(opener.open(url, controller.signal), error => error.kind === 'aborted');
+  assert.equal(aborted, 1);
+});
