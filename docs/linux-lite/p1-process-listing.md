@@ -116,21 +116,40 @@ sem spawn de processo externo — contra ~0,3–2 s de um CIM no Windows.
 
 ## O que ainda não funciona (sem fingir)
 
-A terminação **não está operacional no Linux** por duas razões independentes e
-ambas reais:
+Actualizado após `b0368de`. As duas razões que impediam a terminação em Linux
+foram tratadas e **medidas a funcionar**: `KILL_TERMINATION_DISABLED` deixou de
+ser aplicada às plataformas POSIX (a recusa passou a ser por cadeia de
+identidade, com o motivo nomeado) e o passo «a fonte é consultada ANTES de agir»
+usa agora `consultarFonteIdentidade` → `/proc` fora do Windows. `process.killTree`
+termina hoje um processo benigno real em WSL2 e recusa o PID 1 sem qualquer
+efeito — resultados e método em `p1-process-termination.md`, secção «Estado
+frente ao motor».
 
-1. `ProtectionEngineService.KILL_TERMINATION_DISABLED` é `true` sem olhar para a
-   plataforma, por isso `killProcess` recusa logo no início com
-   `status:"failed"` / razão `legacy-disabled`. É uma decisão do ramo Windows
-   (identidade revalidada mas ação não atómica) que não deve ser revertida por
-   mim; a sua revisão para POSIX tem de ser explícita e documentada, não um
-   efeito colateral.
-2. O passo «a fonte é consultada ANTES de agir, SEMPRE» chama
-   `queryCimProcesses`, que não tem equivalente POSIX ligado. Em Linux isso
-   daria `Identidade do processo não confirmada: a fonte CIM falhou` — recusa
-   correta, mas nenhuma ação.
+O que continua em falta:
 
-O módulo de terminação POSIX (`process-termination-posix.ts`, 16 testes + 8
-cenários ao vivo medidos em WSL2) já existe e está correto ao nível do
-processo; falta ligá-lo ao motor com uma fonte de revalidação `/proc` e decidir
-a porta de entrada do sinal. Próximo passo nessa ordem.
+1. **O botão do Gestor de Tarefas não usa `killTree`.** Usa o protocolo de
+   bilhete `process.termination.prepare`/`confirm`, cujo `open` é
+   `openIndividualProcess` — o abridor de handle do Windows. Medido: `prepare`
+   responde `Sessão não autenticada` a um pedido por socket cru e nunca chega ao
+   abridor. Enquanto o bilhete não tiver um equivalente POSIX, a terminação está
+   operacional ao nível do motor, **não** ao nível da GUI.
+2. SIGKILL como operação separada e explicitamente confirmada não tem pedido
+   próprio no contrato partilhado.
+
+## Falhas de teste pré-existentes que não são deste ramo
+
+A regressão Windows do pacote `@cybersafe/service` neste clone: **943 testes,
+935 passam, 8 falham**. As 8 falhas são todas da família de cache/prefetch do
+ClamAV (`p1-3-prefetch-isolation`, `engine-batch-cache-lookup`,
+`scan-post-batch-no-double-clamav`), com o mesmo sintoma: um veredicto `clean`
+em cache produz `inconclusive` em vez de `safe`, com as regras
+`dangerous_file_extension,suspicious_location` aplicadas ao ficheiro de
+temporário do teste. **Não são causadas pelas alterações Linux**: as mesmas 8
+reproduzem-se com o `engine.ts` de `HEAD` (revertido, recompilado e testado) e
+reproduzem-se isoladamente. Os suites de processo e terminação, corridos em
+separado neste clone Windows (`kill-contract`, `processes-list-contract`,
+`individual-process-termination`, `kill-blocked-log`, `auto-kill-guard`,
+`pid-reuse-real-identity`, `dev-windows-readonly`): **141 testes, 141 passam, 0
+falham** — incluindo o protocolo de bilhete, que é código Windows intocado.
+Fica registado como defeito do caminho de análise a reportar, não como efeito
+colateral deste trabalho.

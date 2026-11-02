@@ -127,20 +127,40 @@ com um `/proc` falso injectável, e em Linux real com o mesmo `/proc` falso; os
 cenários vivos correram só em Linux. O WSL2 **não** substitui a validação de um
 desktop Linux instalado.
 
-## Estado frente ao motor (o que este documento NÃO prova)
+## Estado frente ao motor (medido, não inferido)
 
-As medições acima são do **módulo de terminação**, chamado diretamente. O
-pedido `process.killTree` do motor **ainda não chega a este código em Linux**,
-por duas razões verificadas em `packages/service/src/engine.ts`:
+Desde `b0368de` o `process.killTree` **chega ao código POSIX em Linux**: a recusa
+deixou de ser uma bandeira de plataforma e a revalidação passou a usar a fonte
+despachada por plataforma (CIM no Windows, `/proc` no Linux).
 
-1. `KILL_TERMINATION_DISABLED = true` não olha para a plataforma, por isso
-   `killProcess` recusa no topo, com `status:"failed"` e razão `legacy-disabled`,
-   sem consultar ninguém.
-2. O passo «a fonte é consultada ANTES de agir» usa `queryCimProcesses`
-   (PowerShell/CIM). Em Linux a fonte falha e a recusa é correta
-   («identidade não confirmada»), mas não há ação.
+Medido em WSL2 com `scripts/linux-lite/wsl-p1-kill.sh` — `Linux
+6.6.114.1-microsoft-standard-WSL2 x86_64`, `node v22.23.4`, `uid=1000 (caioc)`,
+**sem root**, serviço compilado do clone isolado, dois `sleep` benignos criados
+pelo próprio script e a morte verificada por `/proc`, não pela resposta:
 
-Portanto: o botão de terminar no Linux Lite está **indisponível**, não
-funcional. A ligação precisa de uma fonte de revalidação `/proc` e de uma
-decisão explícita sobre a porta de entrada do sinal em POSIX — descrita e
-medida em `p1-process-listing.md`, secção «O que ainda não funciona».
+| pedido | resposta do motor | efeito verificado |
+|---|---|---|
+| `processes.list` | 95 processos | benigno presente: `name=sleep`, `user=caioc`, `path=/usr/lib/cargo/bin/coreutils/sleep`, `startedAt=2026-11-02T09:22:08.330Z` |
+| `killTree {pid:1}` | `status:"protected"`, `protectedReason:"system-pid"`, `success:false` | PID 1 **vivo**; log do serviço: `Blocked attempt to kill protected process PID: 1 (system-pid)` |
+| `killTree {pid:4000099}` (nunca existiu) | `status:"already-exited"`, `success:true` | sem directório `/proc`, nada sinalizado e **não** publicado `process.killed` |
+| `killTree {pid:439}` (benigno) | `status:"killed"`, `target:{name:"sleep",path:"/usr/lib/cargo/bin/coreutils/sleep"}` | PID 439 **morto**; o irmão PID 440, sobre o qual nada foi pedido, continuou vivo |
+
+O `target` devolvido vem da releitura de `/proc` imediatamente antes do sinal: o
+`killed` acima é uma identidade confirmada, não um PID solto.
+
+### O que ainda não funciona (sem fingir)
+
+- **O botão do GUI ainda não termina nada em Linux.** O ecrã usa o protocolo de
+  bilhete (`process.termination.prepare` → `confirm`), não o `killTree`. Medido:
+  `prepare` devolve `{ok:false,status:"protected",error:"Sessão não autenticada;
+  nenhuma terminação foi enviada."}` — sem bilhete e sem efeito. Dois motivos
+  separados: (1) o bilhete exige a sessão autenticada que só a aplicação
+  Electron tem, e um pedido por socket cru não a possui; (2) mesmo com sessão,
+  `SafeProcessTermination` recebe `openIndividualProcess`, o abridor de handle
+  do Windows. Falta um equivalente POSIX antes de anunciar o botão como
+  funcional.
+- O `success:true` de `already-exited` significa «o objetivo não está em
+  execução», não «o CyberSafe terminou-o»; a UI não o pode mostrar como
+  terminado por si.
+- O SIGKILL como operação separada e explicitamente confirmada ainda não tem
+  pedido próprio no contrato — hoje só existe o pedido normal (SIGTERM).
