@@ -2,7 +2,7 @@ import * as fs from "node:fs";
 import { execFileSync } from "node:child_process";
 
 import type { ProcessSnapshot } from "@cybersafe/shared-types";
-import { parseProcStat, parseProcStatusUids, type ProcFsLike } from "./process-termination-posix.js";
+import { criacaoPosix, parseProcStat, parseProcStatusUids, type ProcFsLike } from "./process-termination-posix.js";
 
 /**
  * Enumeração de processos em POSIX (Linux) — a fonte do Gestor de Tarefas
@@ -303,8 +303,12 @@ export function listPosixProcesses(
     // `startedAt` só existe quando HZ e boot são conhecidos. Ausência é
     // string vazia: a UI mostra «desconhecido» e a terminação recusa.
     const idadeSegundos = hz && bootMs !== null ? (agoraMs - bootMs) / 1000 - stat.starttime / hz : 0;
+    // O formato é o do contrato partilhado: 7 casas decimais, como o CIM
+    // publica. `exactCreationStamp` só aceita esse corte, e o bilhete de
+    // confirmação compara por ele — com 3 casas o botão morria no `prepare`
+    // por uma razão que não tem nada a ver com o processo.
     const startedAt = hz && bootMs !== null
-      ? new Date(bootMs + stat.starttime / hz * 1000).toISOString()
+      ? criacaoPosix(bootMs + stat.starttime / hz * 1000)?.startedAt ?? ""
       : "";
     const cpu = hz
       ? calcularCpuPercent(amostra, estado.amostras.get(pid), hz, Math.max(0, idadeSegundos)).cpu

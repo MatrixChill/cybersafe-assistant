@@ -292,7 +292,20 @@ export interface ProcessTerminationTarget extends ProcessTerminationSelection { 
 export type ProcessTerminationPreparation =
   | { ok: true; ticket: string; target: ProcessTerminationTarget; expiresAt: number }
   | { ok: false; status: ProcessKillStatus; error: string; win32Code?: number };
-export interface ProcessTerminationResult extends ProcessKillResult { win32Code?: number; confirmation?: "handle-signaled"; scope?: "single-process"; }
+export interface ProcessTerminationResult extends ProcessKillResult {
+  win32Code?: number;
+  /**
+   * O que prendeu realmente o objeto entre a preparação e o sinal.
+   * `handle-signaled`: um handle do Windows aberto na preparação e sinalizado
+   * sem nova consulta (Linux/POSIX não tem handle equivalente sem `pidfd`, e
+   * Node não expõe `pidfd_open`, por isso o caminho POSIX usa o outro valor).
+   * `identity-reconfirmed`: o `/proc` foi relido imediatamente antes do sinal e
+   * o `starttime` batia certo; é mais fraco do que um handle pinado e dizê-lo
+   * como `handle-signaled` seria uma mentira sobre atomicidade.
+   */
+  confirmation?: "handle-signaled" | "identity-reconfirmed";
+  scope?: "single-process";
+}
 export const PROCESS_TERMINATION_WAIT_MS = 2000;
 export const PROCESS_TERMINATION_TICKET_MS = 60000;
 

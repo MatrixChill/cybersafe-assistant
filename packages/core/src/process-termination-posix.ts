@@ -1,6 +1,7 @@
 import * as fs from "node:fs";
 
 import { killProcessTree, type KillProcessTreeOptions } from "./response.js";
+import type { TerminationIdentity, TerminationLease } from "./safe-process-termination.js";
 import type { KillProcessResult } from "@cybersafe/shared-types";
 
 /**
@@ -322,4 +323,131 @@ export async function killProcessPlatform(
     return killProcessTree(pid, options);
   }
   return terminatePosixProcess(pid, options);
+}
+
+/* ── bilhete de terminação (o pedido do ecrã, não só o primitivo) ──────────── */
+
+/** Unix→FILETIME: 1601-01-01 em relação a 1970-01-01, em milissegundos. */
+const DESLOCAMENTO_FILETIME_MS = 11_644_473_600_000;
+
+/**
+ * O contrato de identidade do motor compara o instante de criação como FILETIME
+ * de 100 ns, porque é isso que o CIM publica. Linux não tem FILETIME: o que
+ * existe é `boot + starttime/HZ`, com a resolução de 1/HZ (10 ms a HZ=100).
+ * Converter para milissegundos exatos e preencher os últimos quatro dígitos com
+ * zeros é o mesmo padding que o .NET faz no `Get-CimInstance` — os zeros são a
+ * unidade do kernel, não precisão medida. É por isso que esta função devolve
+ * também o ISO com 7 decimais: a linha do ecrã e o `creation` do bilhete têm de
+ * sair da mesma conversão, senão a comparação nunca bate certo.
+ */
+export function criacaoPosix(ms: number): { startedAt: string; creation: string } | null {
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+  const inteiro = Math.round(ms);
+  return {
+    startedAt: new Date(inteiro).toISOString().replace(/Z$/, "0000Z"),
+    creation: ((BigInt(inteiro) + BigInt(DESLOCAMENTO_FILETIME_MS)) * 10_000n).toString(),
+  };
+}
+
+export interface PosixTerminationLeaseOptions {
+  /** `CLK_TCK` medido (`getconf`). Sem ele não há instante nem bilhete. */
+  hz: number;
+  /** Instante do boot em ms, vindo de `/proc/stat btime`. */
+  bootMs: number;
+  proc?: ProcFsLike;
+  raizProc?: string;
+  self?: PosixSelfContext;
+  /** Sinal do pedido normal. SIGKILL continua uma operação à parte. */
+  signal?: PosixTerminationSignal;
+  signalImpl?: (pid: number, sinal: NodeJS.Signals | 0) => void;
+  /** Caminho do executável; `""` quando o kernel não o mostra a este UID. */
+  pathLeitura?: (pid: number) => string;
+  /** A proteção do serviço (PID próprio, ancestrais, componentes CyberSafe). */
+  protegido?: (identidade: PosixProcessIdentity, caminho: string) => boolean;
+}
+
+/**
+ * Lease POSIX para `SafeProcessTermination`.
+ *
+ * O lease do Windows pinia um handle de processo: entre a preparação e a
+ * confirmação não há pesquisa nenhuma, e um PID reutilizado é impossível por
+ * construção. Em POSIX sem `pidfd_open` (que o Node não expõe) não existe
+ * equivalente, por isso este lease faz o mais forte que a plataforma permite:
+ * fixa o `starttime` lido no momento em que a seleção foi aceite e, antes de
+ * cada leitura e do próprio sinal, relê `/proc` e compara. Instância diferente
+ * é `reused`, e o `confirmation` devolvido diz `identity-reconfirmed` em vez de
+ * mentir que foi um handle pinado.
+ */
+export function abrirLeasePosixTerminacao(
+  pid: number,
+  opcoes: PosixTerminationLeaseOptions,
+): TerminationLease {
+  const proc = opcoes.proc ?? (fs as unknown as ProcFsLike);
+  const raiz = opcoes.raizProc ?? RAIZ_PROC;
+  const self = opcoes.self ?? {
+    pid: process.pid, uid: process.getuid?.() ?? -1, euid: process.geteuid?.() ?? -1,
+  };
+  const sinal = opcoes.signal ?? "SIGTERM";
+  const enviar = opcoes.signalImpl ?? ((p: number, s: NodeJS.Signals | 0) => { process.kill(p, s); });
+  const lerPath = opcoes.pathLeitura ?? ((p: number) => {
+    try { return fs.readlinkSync(`${raiz}/${p}/exe`); } catch { return ""; }
+  });
+  const ler = () => readPosixProcessIdentity(pid, proc, raiz);
+  const instante = ler();
+  if (!instante) {
+    // O `prepare` pergunta por `exited()` antes de ler identidade: um PID que
+    // já não existe é respondido como «já saiu», não como falha opaca.
+    const morto: TerminationLease = {
+      confirmation: "identity-reconfirmed",
+      read: () => ({ pid, name: "", path: "", startedAt: "", creation: "", eligible: false, reason: "sem-identidade" }),
+      exited: () => true,
+      terminate: () => { throw new Error("posix: o processo já tinha saído; nenhum sinal foi enviado"); },
+      close: () => {},
+    };
+    return morto;
+  }
+  const pin = instante.starttime;
+  let fechado = false;
+
+  const identidadeAtual = (): TerminationIdentity => {
+    const atual = ler();
+    const caminho = atual ? lerPath(pid) : "";
+    if (!atual) {
+      return { pid, name: "", path: "", startedAt: "", creation: "", eligible: false, reason: "sem-identidade" };
+    }
+    const criada = criacaoPosix(opcoes.bootMs + atual.starttime / opcoes.hz * 1000);
+    const recusa = decidePosixTermination(atual, self, { esperadoStarttime: pin, esperadoNome: instante.comm });
+    const protegidoPeloServico = criada !== null && (opcoes.protegido?.(atual, caminho) ?? false);
+    return {
+      pid,
+      name: atual.comm,
+      path: caminho,
+      startedAt: criada?.startedAt ?? "",
+      creation: criada?.creation ?? "",
+      eligible: criada !== null && recusa === null && !protegidoPeloServico,
+      reason: recusa ?? (protegidoPeloServico ? "protegido" : criada === null ? "criacao-invalida" : undefined),
+    };
+  };
+
+  return {
+    confirmation: "identity-reconfirmed",
+    read: identidadeAtual,
+    exited: () => {
+      const atual = ler();
+      return !atual || atual.state === "X" || atual.state === "Z";
+    },
+    terminate: () => {
+      if (fechado) throw new Error("posix: o bilhete já tinha sido fechado; nenhum sinal foi enviado");
+      const atual = ler();
+      const recusa = decidePosixTermination(atual, self, { esperadoStarttime: pin, esperadoNome: instante.comm });
+      if (recusa) {
+        throw new Error(`posix: sinal recusado antes de enviar (${recusa}); nenhum efeito produzido`);
+      }
+      if (opcoes.protegido?.(atual!, lerPath(pid))) {
+        throw new Error("posix: o alvo é protegido pelo serviço; nenhum sinal foi enviado");
+      }
+      enviar(pid, sinal);
+    },
+    close: () => { fechado = true; },
+  };
 }

@@ -98,7 +98,7 @@ test("listPosixProcesses converte starttime em instante real e rss em MB", () =>
   assert.equal(linha.path, "/usr/bin/x");
   assert.equal(linha.commandLine, "/usr/bin/x --flag");
   assert.equal(linha.user, "caioc");
-  assert.equal(linha.startedAt, new Date(BOOT_MS + 10_000).toISOString());
+  assert.equal(linha.startedAt, new Date(BOOT_MS + 10_000).toISOString().replace(/Z$/, "0000Z"));
   assert.equal(linha.memoryMb, 2);
   assert.equal(linha.trusted, "neutral");
 });
@@ -215,7 +215,7 @@ test("consultarProcessosPosix devolve só a linha pedida e não mexe nas amostra
   const peloPid = consultarProcessosPosix(estado, "ProcessId=43", opcoes);
   assert.deepEqual(peloPid.map((l) => l.pid), [43]);
   assert.equal(peloPid[0].name, "cron");
-  assert.equal(peloPid[0].startedAt, new Date(BOOT_MS + 20_000).toISOString());
+  assert.equal(peloPid[0].startedAt, new Date(BOOT_MS + 20_000).toISOString().replace(/Z$/, "0000Z"));
   assert.deepEqual(consultarProcessosPosix(estado, "Name='sleep'", opcoes).map((l) => l.pid), [42]);
   assert.deepEqual(consultarProcessosPosix(estado, "ParentProcessId=1", opcoes).map((l) => l.pid), [43]);
   assert.deepEqual(consultarProcessosPosix(estado, "ProcessId=9999", opcoes), []);

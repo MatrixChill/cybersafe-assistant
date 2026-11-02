@@ -15,6 +15,13 @@ export interface TerminationLease {
     exited(): boolean;
     terminate(): void;
     close(): void;
+    /**
+     * Como este lease prende o objeto entre a preparação e o sinal. O lease do
+     * Windows deixa isto em `undefined` e recebe `"handle-signaled"`, que é o
+     * que ele faz. Um lease POSIX sem `pidfd` não pode dizer isso: relê a
+     * identidade instantes antes do sinal e tem de nomear esse facto.
+     */
+    confirmation?: Exclude<ProcessTerminationResult["confirmation"], undefined>;
 }
 export interface TerminationAudit {
     pid: number;
@@ -155,7 +162,7 @@ export class SafeProcessTermination {
                     return result = this.failure(identity.pid, "timeout");
                 await new Promise(resolve => setTimeout(resolve, 25));
             }
-            return result = { success: true, status: "killed", pid: identity.pid, confirmation: "handle-signaled", scope: "single-process" };
+            return result = { success: true, status: "killed", pid: identity.pid, confirmation: lease.confirmation ?? "handle-signaled", scope: "single-process" };
         }
         catch (error) {
             const code = (error as {

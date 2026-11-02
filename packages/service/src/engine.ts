@@ -26,6 +26,8 @@ import {
   matchesSnapshotCreation,
   createWindowsTerminationOpener,
   type TerminationIdentity,
+  type TerminationLease,
+  type PosixProcessIdentity,
   HardwareHealthEngine,
   ClamavBridge,
   CLAMAV_ENGINE_PROCESS_NAMES,
@@ -128,7 +130,7 @@ ProcessKillProtectionReason,
 import { hasDegradedProtections, ENGINE_DISPLAY_NAME, classifyProcessEnumerationError } from "@cybersafe/shared-types";
 import { RealtimeLossLedger } from "./realtime-loss.js";
 import type { KillProtectionContext, KillTargetInfo, PosixTerminationExpectation } from "@cybersafe/core";
-import { PosixProcessProvider } from "@cybersafe/core";
+import { PosixProcessProvider, abrirLeasePosixTerminacao } from "@cybersafe/core";
 
 const execFileAsync = promisify(execFile);
 
@@ -409,6 +411,9 @@ export function terminationBlockedMessage(code: string): string {
     case "scan-in-progress": return "Há uma análise em curso; a terminação de processos fica indisponível até terminar.";
     case "definitions-update-in-progress": return "Está a decorrer uma atualização de definições; tenta novamente quando terminar.";
     case "protected-or-identity-unconfirmed": return "O processo é protegido ou a identidade já não corresponde à instância selecionada.";
+    case "posix-sem-clk-tck": return "Terminação indisponível: sem CLK_TCK o instante de criação não é conversível; nenhum bilhete foi emitido.";
+    case "posix-sem-btime": return "Terminação indisponível: /proc/stat não publica btime, portanto não há instante de criação verificável.";
+    case "posix-proc-ilegivel": return "Terminação indisponível: /proc não é legível; o CyberSafe não emite confirmação sem fonte de identidade.";
     default: return "Terminação indisponível: " + code;
   }
 }
@@ -4184,6 +4189,13 @@ if (processInfo.path) {
     if (this.fileObservationReads > 0 || this.realtimeQueue.size > 0 || this.realtimeQueue.active > 0 || this.clamavPrefetches.size > 0) return "realtime-work-in-progress";
     if (this.scanAbortControllers.size > 0 || this.scanManager.getActiveScan()) return "scan-in-progress";
     if (this.updater.operationInProgress || gate.activeScans > 0 || gate.updatePending || gate.updateActive) return "definitions-update-in-progress";
+    // Em POSIX a cadeia é `/proc` + `getconf`. Se o instante não é conversível,
+    // o bilhete não tem nada para comparar — e um `reused` genético seria uma
+    // mentira sobre o alvo. Perguntar à fonte aqui dá a razão certa.
+    if (process.platform !== "win32") {
+      const cadeia = this.posixProcessProvider.cadeiaIdentia();
+      if (!cadeia.ok) return `posix-${cadeia.motivo}`;
+    }
     if (identity) {
       const cached = this.processes.find(p => p.pid === identity.pid);
       if (!cached || !matchesSnapshotCreation(cached.startedAt,identity.creation) ||
@@ -4194,9 +4206,51 @@ if (processInfo.path) {
   }
 
   private nativeTerminationOpen: ReturnType<typeof createWindowsTerminationOpener> | null = null;
-  private openIndividualProcess(pid:number) {
+  private openIndividualProcess(pid:number): TerminationLease {
+    if (process.platform !== "win32") return this.openIndividualProcessPosix(pid);
     this.nativeTerminationOpen ??= createWindowsTerminationOpener();
     return this.nativeTerminationOpen(pid);
+  }
+
+  /**
+   * O que o lease POSIX pergunta a `classifyKillTarget`: o `pid` sozinho já
+   * bastava no Windows porque lá o handle é a identidade; aqui o alvo é lido
+   * do `/proc` no instante da pergunta, portanto `ppid` e `path` existem e a
+   * proteção por ancestral/descendente/componente interno funciona de verdade.
+   * `ownChildPids` entra porque o contexto de proteção é construído a partir
+   * da cadeia vista no snapshot, e um filho nosso recém-nascido pode não estar
+   * nessa cadeia ainda.
+   */
+  private alvoProtegidoPosix(identidade: PosixProcessIdentity, caminho: string): boolean {
+    if (this.ownChildPids.has(identidade.pid)) return true;
+    return classifyKillTarget(
+      { pid: identidade.pid, ppid: identidade.ppid, name: identidade.comm, path: caminho },
+      this.killProtectionContext(),
+    ) !== null;
+  }
+
+  /**
+   * Bilhete POSIX. Em Windows o `open` pinha um handle de processo; em POSIX
+   * não há `pidfd_open` exposto pelo Node, por isso o lease fixa o `starttime`
+   * lido agora e relê `/proc` antes de cada decisão — e diz `identity-
+   * reconfirmed` em vez de fingir que foi um handle. Sem `CLK_TCK` ou sem
+   * `btime` não há instante: lançar aqui devolve uma falha nomeada no `prepare`
+   * em vez de um bilhete que não sabe o que comparar.
+   */
+  private openIndividualProcessPosix(pid: number): TerminationLease {
+    const cadeia = this.posixProcessProvider.cadeiaIdentia();
+    if (!cadeia.ok) {
+      throw new Error(`posix: fonte de identidade indisponível (${cadeia.motivo}); nenhum bilhete foi emitido`);
+    }
+    const constantes = this.posixProcessProvider.constantes();
+    if (!constantes || !constantes.hz || constantes.bootMs === null) {
+      throw new Error("posix: constantes do kernel indisponíveis; nenhum bilhete foi emitido");
+    }
+    return abrirLeasePosixTerminacao(pid, {
+      hz: constantes.hz,
+      bootMs: constantes.bootMs,
+      protegido: (identidade, caminho) => this.alvoProtegidoPosix(identidade, caminho),
+    });
   }
 
   private terminationController(): SafeProcessTermination {
