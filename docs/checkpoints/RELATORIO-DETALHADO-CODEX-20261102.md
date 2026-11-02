@@ -137,3 +137,13 @@ Próximo trabalho: integração conjunta de quarentena e exclusões; ensaio inst
 - O harness recusou quarantine.policy.get no perfil de fixture (limitação conhecida da allowlist). A página apresentou ausência de leitura nas Configurações; não foi ativada quarentena automática nem consentimento. O estado warn mostrado na aba Ameaças veio do snapshot do serviço, não de sucesso desse pedido recusado.
 
 Pendências reais: seed tecnicamente fechada; registo externo e aprovação final de fontes pendentes; ensaio instalado/VM, terminação individual real, upgrade entre candidatas, aceitação visual final e setup definitivo ainda pendentes. Não se criou instalador novo, freeze, main, tag, Release ou aprovação visual nesta etapa.
+
+## Marco funcional e propostas isoladas — continuação de 94d3b7e
+
+- `4cf84b7`: novo ensaio HTTPS real local da cadeia do updater, Ed25519 efémero, SHA-256, cache real, assinatura/bytes adulterados e cancelamento a 1024 bytes. 4 cenários PASS; inválido não descarrega, falhas sem cache residual. CA apenas no processo filho; zero instaladores/upgrade executados, trust de produção preservada.
+- `7d63ce8`: pipe real da quarentena com autenticação exigida; prova inválida recusada sem efeitos, depois isolamento/restauro byte-exact/manifesto reaberto/eliminação PASS. Não é UI empacotada; não se repetiu o ensaio Electron anterior.
+- `bad06e8`: helper VM benigno e procedimento de terminação individual preparados. Sintaxe PASS e falta de autorização recusada antes de efeitos. Não compilado/executado no PC pessoal; kill legado continua desativado.
+- `15f1f7c`: novos controlos de movimento/desempenho/WebGL nas Configurações ligados aos setters/persistência existentes. Teste novo falhou antes e passou depois. Typecheck PASS. Electron --appearance-proof confirmou persistência após reload e escalas emuladas sem overflow; não é DPI Windows nativo. Cleanup allDead=true.
+- `943accb`: proposta Orbital V3 DEV-only, dois planos independentes, sem núcleo CSS sobreposto. 2 testes geométricos PASS; Electron --orbital-proof confirmou WebGL/reduced-motion/fallback. Capturas reais; produção mantém visual anterior. Build app PASS, legenda de proposta ausente do bundle de produção. GPU não foi medida.
+- `5acb9cd`: estudo NSIS nativo separado compilado/executado. Ícone oficial, composição sem BMP, seleção de proposta exercitada; zero operações de instalação. Capturas e limites documentados. Não é setup final.
+- Revisão visual específica e evidência: `docs/REVISAO-VISUAL-ORBITAL-E-SETUP-20261102.md`. Capturas preservadas em output/codex-review-20261102. Aprovação visual da proposta pendente. Seed, freeze e BMPs não foram reimplementados nem aprovados por inferência.
