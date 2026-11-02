@@ -87,12 +87,45 @@ entra pela `PATH` com origem `sistema`; o override por ambiente não cai para a
 `PATH`; contrato Windows preservado; origens candidatas por plataforma; cada
 razão de recusa nomeada; a frase de procura; o diagnóstico de indisponibilidade.
 
+## ClamAV medido neste host (mesmo ambiente WSL2)
+
+Sonda: `scripts/linux-lite/wsl-p2-clamav-probe.sh`. Nada estava instalado
+(`clamscan`, `clamdscan`, `freshclam`, `clamconf` = AUSENTE). O que foi
+observado:
+
+| Observação | Resultado |
+|---|---|
+| `clamavBinaryName('linux')` | `clamscan` (sem `.exe`) — o nome já era sensível à plataforma |
+| candidatos com o ambiente real | 68; fontes `path` e `unix` |
+| candidatos dentro de `/mnt/c` | **56** (o `PATH` do WSL traz directórios Windows) |
+| `firstExistingClamavBinary` | `null` |
+| `ClamavBridge.isAvailable()` | `false` |
+| `ClamavBridge.health` | `{"status":"unavailable","detail":"clamscan not found or failed: spawn clamscan EACCES"}` |
+| `scanFile(ficheiro benigno)` | `{status:"unavailable", infected:null}` — **sem `clean`, sem lista vazia** |
+
+A última linha é o requisito cumprido para os dois motores: a ausência de motor
+produce recusa, não «limpo».
+
+Dois factos a não esconder:
+
+- O detalhe `spawn clamscan EACCES` não significa «não encontrado»: o `probe`
+  tenta o spawn por NOME e, sob interop do WSL, esbarra numa permissão. O estado
+  apresentado (`unavailable`) está certo; a *razão* é que está errada, porque
+  mistura ausência com falha de execução.
+- A lista de candidatos é dominada por caminhos `/mnt/c/...`. Como a escolha é
+  por `existsSync`, um ficheiro **chamado** `clamscan` num directório Windows
+  seria aceite como motor sem qualquer verificação de formato ou bit de execução
+  — é a mesma classe de defeito que o YARA tinha. Aqui não existia nenhum, por
+  isso o resultado foi `null`; **o endurecimento ainda não está feito** e fica
+  como trabalho aberto, com o critério já definido em
+  `recusaExecutavelPosix` (nome `.exe`, magic `MZ`, sem bit de execução).
+
 ## Ainda não medido (não dar por feito)
 
-- **ClamAV em Linux não foi medido nesta sessão.** O código já é sensível à
-  plataforma (`clamavBinaryName` devolve `clamscan` fora de Windows), mas não
-  há aqui resultado observado de detecção, de base de assinaturas ou de uma
-  análise real com `clamscan`/`clamd` neste host.
+
+- Não há ClamAV instalado neste WSL, portanto só está medida a **ausência**
+  reportada com honestidade; não há aqui uma análise real com `clamscan`/`clamd`
+  nem prova de base de assinaturas fresca em Linux.
 - Não há `yara`/`yarac` de Linux instalados neste WSL, portanto o caminho
   `origem: "sistema"` está provado por fixture e por código, **não** por um
   motor YARA real a correr em Linux. Medir isso exige `apt install yara` (ou
