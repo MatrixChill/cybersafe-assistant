@@ -2,22 +2,25 @@
 
 ## O que este corte fecha
 
-O §9 lista nove alíneas que a quarentena tem de respeitar. As três que faltavam
-medir — **Restauro**, **Destino existente** e **Permissões** — têm lógica que só
-significa alguma coisa em POSIX, e essa lógica nunca tinha sido exercitada fora
-de Windows:
+O §9 lista nove alíneas que a quarentena tem de respeitar. As quatro que faltavam
+medir — **Restauro**, **Destino existente**, **Permissões** e a parte de
+**Identidade do ficheiro** que passa pelos elos de link — têm lógica que só
+significa alguma coisa fora do caso mais simples, e essa lógica nunca tinha sido
+exercitada fora de Windows:
 
 | Alínea | O que tem de acontecer | Onde vive |
 |---|---|---|
 | Restauro | a entrada sobrevive ao processo, o ficheiro volta byte a byte, a cópia isolada e o registo desaparecem | `packages/core/src/response.ts:158` |
 | Destino existente | se já houver qualquer coisa no destino, o restauro recusa e não substitui | `response.ts:173-178` e `response.ts:217` |
 | Permissões | o isolado fica sem permissão nenhuma; o restaurado recebe o modo com que foi apanhado | `response.ts:191-199` e `response.ts:222` |
+| Identidade do ficheiro | um link simbólico ou um ficheiro com mais do que um nome não pode ser isolado nem restaurado | `response.ts:69-76` e `response.ts:96-97` |
 
-**Nenhuma linha de código de produção foi alterada.** O corte é um ficheiro de
-teste novo, `packages/core/test/p3-quarantine-restore-posix.test.js`, com quatro
-casos sobre o `QuarantineManager` real num diretório temporário próprio. O
-manager lê e escreve ficheiros de verdade — é exatamente isso que se quer medir,
-e é a razão por que não há mocks aqui.
+**Nenhuma linha de código de produção foi alterada.** O corte são dois
+ficheiros de teste novos, `p3-quarantine-restore-posix.test.js` (quatro casos) e
+`p3-quarantine-identity-guards.test.js` (três casos), ambos sobre o
+`QuarantineManager` real num diretório temporário próprio. O manager lê e escreve
+ficheiros de verdade — é exatamente isso que se quer medir, e é a razão por que
+não há mocks aqui.
 
 ## A sequência que está a ser provada
 
@@ -40,6 +43,37 @@ Dois detalhes que os casos vão buscar:
   a `0o000` antes de copiar** — a leitura passa a ser feita pelo descritor já
   aberto. É isto que a alínea «Permissões» quer dizer: o ficheiro está fechado
   para o sistema de ficheiros, não apenas escondido da interface.
+
+## Identidade do ficheiro: o que o `lstat` antes do movimento segura
+
+`quarantine()` começa com `lstat` e recusa logo se o caminho não for um ficheiro
+regular, for um link simbólico, ou tiver `nlink !== 1` (`response.ts:96-97`). O
+segundo ficheiro de testes mede esses três elos, porque nenhum dos testes já
+existentes os tocava — `recovery-quarantine.test.js` cobre o digest trocado, a
+falha do manifesto antes do movimento, a falha do `rename`, a falha do `chmod`
+depois do movimento e o destino alterado durante o movimento, mas sempre com
+ficheiros normais de um só nome.
+
+| Caso | O que é posto à prova | O que tem de ser verdade depois |
+|---|---|---|
+| link simbólico no caminho | `quarantine()` devolve `null` | o alvo continua com os bytes; o link continua a ser um link; zero entradas no manifesto |
+| link físico (`nlink === 2`) com o digest certo | `quarantine()` devolve `null` | os **dois** nomes continuam lá — a recusa só pode ter vindo do `nlink`, porque o digest e o tamanho batem certo |
+| link físico criado sobre a cópia já isolada | `restore()` devolve `success: false` | o destino não é escrito; a entrada continua recuperável |
+
+A razão de medir o `nlink` não é cosmética, e vale a pena dizê-la em claro:
+mover um ficheiro com dois nomes tira um nome do sítio e deixa o outro a apontar
+para exatamente os mesmos bytes. O manifesto teria o digest certo, o movimento
+teria acontecido, e o ficheiro malicioso continuaria alcançável pelo caminho de
+sempre — o oposto do que «isolado» quer dizer. O mesmo guarda aparece do outro
+lado, no `checkedSource` usado pelo restauro: se a cópia em quarentena passou a
+ter mais um nome, o restauro para antes de tocar em seja o que for.
+
+O terceiro elo do `lstat` — a segunda estatística que compara `size`, `mtimeMs`,
+`ctimeMs` e `ino` com a primeira — **não é alcançável a partir da API pública**,
+e diz-se aqui em vez de se fingir com um teste. As duas estatísticas acontecem
+dentro da mesma chamada serializada; o que as pode separar é um movedor
+concorrente, não um teste. Cobrir essa rama exigiria um ponto de injeção dentro
+do `QuarantineManager`, que este corte não abriu.
 
 ## Resultados medidos
 
@@ -65,6 +99,21 @@ afirmar `0o000` ou `0o640` numa partilha NTFS seria uma asserção sobre o que o
 sistema de ficheiros ignora. Ficam contados como não observáveis, com o motivo
 no próprio relatório. O que o Windows prova é que a ida-e-volta e a recusa de
 destino ocupado continuam a funcionar na plataforma que já os usava.
+
+Os três casos de identidade correm no mesmo Windows e **não precisam de skip**:
+a criação de links simbólicos e físicos foi permitida, por isso as guardas
+foram mesmo exercitadas, e o resultado diz que também em NTFS um elo não é
+isolado nem restaurado.
+
+```text
+✔ link simbólico: o isolamento recusa, e o alvo não é tocado (8.7019ms)
+✔ link físico (nlink 2): recusa mesmo com o digest certo, e nenhum nome desaparece (5.1161ms)
+✔ link físico sobre a cópia isolada: o restauro recusa e nada é movido (13.3849ms)
+ℹ tests 3
+ℹ pass 3
+ℹ fail 0
+ℹ skipped 0
+```
 
 ### WSL2 — 4 passam, sem skip
 
@@ -105,42 +154,63 @@ O terceiro e quarto caso são a mesma moeda: o isolado fica `0o000`, um
 `readFile` normal rebate com `EACCES`, e ainda assim o restauro consegue lê-lo e
 devolvê-lo com o modo `0o640` com que foi apanhado.
 
+Os três casos de identidade, no mesmo WSL2 e com o mesmo `TMPDIR` em ext4:
+
+```text
+1000
+ok 1 - link simbólico: o isolamento recusa, e o alvo não é tocado
+ok 2 - link físico (nlink 2): recusa mesmo com o digest certo, e nenhum nome desaparece
+ok 3 - link físico sobre a cópia isolada: o restauro recusa e nada é movido
+# tests 3
+# pass 3
+# fail 0
+# skipped 0
+```
+
 ## Regressão do `core` em Windows, e a falha que não é deste corte
 
 A suite completa do `core`, corrida com o glob do `package.json`
-(`node --test "test/**/*.test.js"`), com a máquina parada:
+(`node --test "test/**/*.test.js"`), com a máquina parada, depois de os dois
+ficheiros novos entrarem:
 
 ```text
-ℹ tests 1232
-ℹ suites 207
-ℹ pass 1197
-ℹ fail 1
+ℹ tests 1235
+ℹ pass 1201
+ℹ fail 0
 ℹ skipped 33
 ℹ todo 1
-✖ armazenamento — o PRIMEIRO snapshot já publica a leitura (21852.013ms)
-✖ a primeira leitura dos volumes é esperada e sai no primeiro snapshot (10569.3691ms)
 ```
 
-A contabilidade bate certo com zero impacto: `1228 → 1232` testes são os quatro
-novos; `1195 → 1197` passados são os dois casos observáveis em NTFS;
-`31 → 33` skip são os dois casos POSIX. A falha não é minha e foi provada como
-pré-existente, não assumida:
+A contabilidade bate certo com zero impacto nos testes que já existiam: `1228 →
+1235` são os sete novos; `1196 → 1201` passados são os cinco observáveis em NTFS
+(dois de restauro mais três de identidade); `31 → 33` skip são os dois casos de
+modo POSIX.
 
-| Corrida | Ficheiros | testes | pass | fail |
+Sobrou uma coisa que não é deste corte e que vale registar em vez de esconder.
+Das quatro corridas completas que tenho desta branch, `hardware-disk-first-read`
+falhou em duas e passou em duas:
+
+| Corrida | Ficheiros | testes | pass | `hardware-disk-first-read` |
 |---|---|---|---|---|
-| suite completa | 114 (sem o meu ficheiro) | 1228 | 1195 | **1** — a mesma falha |
-| suite completa | 115 (com o meu ficheiro) | 1232 | 1197 | **1** — a mesma falha |
-| `hardware-disk-first-read.test.js` sozinho | 1 | 2 | 2 | 0 |
+| suite completa, sem nenhum ficheiro novo | 114 | 1228 | 1195 | **falhou** (8,4 s) |
+| suite completa, só o do restauro | 115 | 1232 | 1197 | **falhou** (10,5 s) |
+| suite completa, os dois ficheiros | 116 | 1235 | 1201 | passou |
+| `hardware-disk-first-read.test.js` sozinho, uma corrida | 1 | 2 | 2 | passou |
 
-Reproduziu-se em duas corridas seguidas dentro do suite e desaparece quando o
-ficheiro corre isolado.
+Ou seja: falhou em duas das quatro corridas completas, passou na corrida
+isolada que fiz, e **não é do código nem dos testes deste corte** — a primeira
+linha da tabela é a prova, porque foi corrida exatamente sem os ficheiros novos.
+Não afiro estabilidade a uma única corrida isolada; o que digo é que a falha
+aparece com o suite inteiro em paralelo e com ou sem estes ficheiros, e não
+apareceu quando o ficheiro correu sozinho.
 
 ## O que fica como diagnóstico, não como ruído
 
 `test/hardware-disk-first-read.test.js` afirma que a primeira leitura dos
 volumes é **esperada com prazo de 4 s** para que a primeira fotografia do
-`HardwareHealthEngine` já diga a verdade medida. Dentro do suite paralelo o `get
-Snapshot` demora 8–10 s nessa leitura e o primeiro snapshot sai com
+`HardwareHealthEngine` já diga a verdade medida. Dentro do suite paralelo o
+`getSnapshot` demorou 8–10 s nessa leitura nas corridas em que falhou, e o
+primeiro snapshot saiu com
 «Ainda sem leitura do armazenamento desde o arranque.» — que é precisamente o
 sintoma que o teste foi escrito para apanhar, na altura em que o Dashboard e o PC
 Center ficavam presos nesse texto enquanto a Saúde do Windows mostrava o C: a
@@ -150,11 +220,10 @@ Duas leituras são possíveis e **nenhuma foi medida**: ou o prazo de 4 s é cur
 para o custo real de enumerar volumes num Windows com o sistema de ficheiros
 carregado — e nesse caso o produto também mostra «ainda sem leitura» a utilizador
 verdadeiro nos primeiros segundos — ou há contenção de CPU dentro do suite e o
-prazo
-é razoável. O que se sabe é o facto reprodutível: com o suite inteiro em
-paralelismo falha, isolado passa. Fica na lista de diagnósticos por prestar, ao
-lado do `sha256File` que corre sem limite antes do portal de tamanho e não
-observa cancelamento a meio da leitura.
+prazo é razoável. O que se sabe, medido, é a frequência: duas falhas em quatro
+corridas completas, zero na corrida isolada. Fica na lista de diagnósticos por
+prestar, ao lado do `sha256File` que corre sem limite antes do portal de tamanho
+e não observa cancelamento a meio da leitura.
 
 ## Ainda não é dito
 
@@ -171,8 +240,13 @@ observa cancelamento a meio da leitura.
   mas falha a apagar a fonte ou a reescrever o manifesto, devolve
   `success: true` **com** `error` e mantém a entrada. O primeiro caso prova que
   o caminho feliz não deixa `error`; não prova que a rama de recuperação funcione.
-- **identidade do ficheiro entre o pedido e o movimento**, e a auditoria do
-  percurso completo, continuam por medir.
+- **identidade entre as duas estatísticas do mesmo `lstat`.** O `quarantine()` faz
+  uma segunda estatística e compara `size`, `mtimeMs`, `ctimeMs` e `ino`; essa
+  rama só se ativa se outro processo mover o ficheiro a meio da chamada, e não é
+  alcançável pela API pública sem um ponto de injeção dentro do manager. Fica
+  declarada como não coberta, não como coberta de forma aproximada.
+- **auditoria do percurso completo**, com o `quarantine.ts` real e os eventos
+  publicados lado a lado com o movimento, continua por medir.
 - **ambiente**: tudo o que está em cima foi medido em Windows 10 e em WSL2 sem
   interface gráfica. §15 pede validação numa Ubuntu/Mint de desktop; uma montagem
   de pen USB continua por medir, e é o mesmo bloco de hardware que falta ao §10.
@@ -180,9 +254,11 @@ observa cancelamento a meio da leitura.
 ## Como voltar a correr
 
 ```bash
-# Windows (temporário em NTFS: 2 passam, 2 são skip)
+# Windows (temporário em NTFS: restauro 2 passam e 2 são skip; identidade 3 passam)
 cd packages/core && npm run build && node --test test/p3-quarantine-restore-posix.test.js
+node --test test/p3-quarantine-identity-guards.test.js
 
 # WSL2, com o temporário em ext4 e sem root — é isto que faz os casos de modo valerem
 cd /mnt/c/.../packages/core && TMPDIR=$HOME/tmp-cs node --test test/p3-quarantine-restore-posix.test.js
+TMPDIR=$HOME/tmp-cs node --test test/p3-quarantine-identity-guards.test.js
 ```
