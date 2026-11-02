@@ -126,3 +126,21 @@ Ambiente de desenvolvimento: os testes de unidade POSIX correram em Windows
 com um `/proc` falso injectável, e em Linux real com o mesmo `/proc` falso; os
 cenários vivos correram só em Linux. O WSL2 **não** substitui a validação de um
 desktop Linux instalado.
+
+## Estado frente ao motor (o que este documento NÃO prova)
+
+As medições acima são do **módulo de terminação**, chamado diretamente. O
+pedido `process.killTree` do motor **ainda não chega a este código em Linux**,
+por duas razões verificadas em `packages/service/src/engine.ts`:
+
+1. `KILL_TERMINATION_DISABLED = true` não olha para a plataforma, por isso
+   `killProcess` recusa no topo, com `status:"failed"` e razão `legacy-disabled`,
+   sem consultar ninguém.
+2. O passo «a fonte é consultada ANTES de agir» usa `queryCimProcesses`
+   (PowerShell/CIM). Em Linux a fonte falha e a recusa é correta
+   («identidade não confirmada»), mas não há ação.
+
+Portanto: o botão de terminar no Linux Lite está **indisponível**, não
+funcional. A ligação precisa de uma fonte de revalidação `/proc` e de uma
+decisão explícita sobre a porta de entrada do sinal em POSIX — descrita e
+medida em `p1-process-listing.md`, secção «O que ainda não funciona».

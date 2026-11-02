@@ -1,33 +1,38 @@
 set -u
-# Sincroniza a área de trabalho do Windows para o clone WSL, compila e mede.
-# Ficheiro em vez de linha de comando embutida: as três camadas de citação
-# (Git Bash -> wsl.exe -> bash -lc) já partiram variáveis em chamadas anteriores,
-# e uma medição com caminhos vazios não mede nada.
-S=/mnt/c/Users/caioc/.cybersafe-integration/qoder-linux-lite/repo
+# Sincroniza o clone WSL com a branch experimental, compila e mede.
+# Ficheiro em vez de linha de comando embutida: Git Bash -> wsl.exe -> bash
+# expande variáveis dentro de aspas duplas e já partiu o PATH e os caminhos da
+# chamada. Uma medição com caminhos vazios não mede nada.
 D="$HOME/cybersafe-linux-lite"
+RAMA=experimental/linux-lite-qoder
 export PATH="$HOME/.local/node/bin:$PATH"
 
-FICHEIROS="packages/core/src/process-provider-posix.ts packages/core/src/index.ts packages/service/src/engine.ts packages/core/test/process-provider-posix.test.js scripts/linux-lite/wsl-p1-listing.sh scripts/linux-lite/wsl-p1-diag.sh"
-for f in $FICHEIROS; do
-  if tr -d '\015' < "$S/$f" > "$D/$f.novo"; then
-    mv "$D/$f.novo" "$D/$f"
-    echo "sinc $f ok"
-  else
-    rm -f "$D/$f.novo"
-    echo "sinc $f FALHOU"
-  fi
-done
+echo "== estado do clone antes de sincronizar =="
+git -C "$D" rev-parse --abbrev-ref HEAD
+git -C "$D" log --oneline -1
+git -C "$D" status --porcelain
+echo "-- diff (o que é descartado são cópias minhas, já commitadas na origem) --"
+git -C "$D" diff --stat | tail -5
+
+git -C "$D" fetch origin "$RAMA" || { echo "FETCH_FALHOU"; exit 1; }
+git -C "$D" checkout "$RAMA" || { echo "CHECKOUT_FALHOU"; exit 1; }
+git -C "$D" reset --hard FETCH_HEAD || { echo "RESET_FALHOU"; exit 1; }
+echo "head_depois=$(git -C "$D" log --oneline -1)"
 
 cd "$D" || exit 1
 for pacote in @cybersafe/core @cybersafe/service; do
-  if npm run build -w "$pacote" > "/tmp/build-${pacote##*/}.log" 2>&1; then
+  nome=${pacote##*/}
+  if npm run build -w "$pacote" > "/tmp/build-$nome.log" 2>&1; then
     echo "build $pacote ok"
   else
     echo "build $pacote FALHOU"
-    tail -20 "/tmp/build-${pacote##*/}.log"
+    tail -25 "/tmp/build-$nome.log"
     exit 1
   fi
 done
+
+echo "== o serviço compilado tem o ramo POSIX? =="
+grep -c "posixProcessProvider" packages/service/dist/engine.js || echo "0 ocorrencias"
 
 echo "===================== DIAGNÓSTICO ====================="
 bash scripts/linux-lite/wsl-p1-diag.sh
