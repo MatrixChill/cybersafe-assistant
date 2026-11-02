@@ -90,8 +90,25 @@ feito.
 | Quarentena: recusas, montagem, restauro, permissões, auditoria em disco | medido em percursos validados; **não** declarada automática | `p3-quarentena-*.md` |
 | Volumes montados / armazenamento sem letras de unidade | medido e ligado ao motor; **deteção positiva com pen física ainda não medida** | `p3-montes-usb.md` |
 | Otimizar e firewall (UFW/firewalld/nftables) | **não validado** — nenhuma medição nesta branch | — |
-| Empacotamento `.deb` e `.AppImage` | construído e aberto em Linux; ver abaixo | `p4-empacotamento.md` |
+| Empacotamento `.deb` e `.AppImage` | construído e aberto em Linux; o binário do pacote arranca o serviço, abre janela e encerra com SIGTERM limpo (medido em WSLg) | `p4-empacotamento.md` |
+| Conteúdo do dashboard **a partir do pacote** | **não validado** — a sonda lê o alvo CDP, não fotografa a janela empacotada | — |
 | Instalação do `.deb` por `apt` num sistema real | **não testado** | — |
+
+## Testes automatizados por plataforma
+
+Medido em `c637a68`, cada número com o comando que o produziu:
+
+| Suite | Ambiente | Resultado |
+|---|---|---|
+| `node --import tsx --test packages/desktop/test/*.test.mjs` | WSL2 Ubuntu 26.04 | 646 testes, **644 pass, 0 fail, 2 skipped** |
+| `node --import tsx --test test/dev-windows-readonly-boundary.test.mjs` | Windows 10 (repo isolado) | 74 testes, 74 pass, 0 fail, **0 skipped** |
+
+Os dois saltos de Linux não são funcionalidade escondida: um é o caso de
+fronteira que só existe com semântica de caminho Windows (o guarda usa o `path`
+do anfitrião), o outro já estava marcado no próprio teste. No Windows o mesmo
+ficheiro corre os 74 casos todos — a gate é `path.sep === "\\"`, pelo que lá
+nenhum caso é saltado. A suite continua a não cobrir o GUI renderizado a
+partir do pacote: para isso existe a sonda `wsl-p4-pacote-gui.sh`.
 
 ## Limitações honestas
 
