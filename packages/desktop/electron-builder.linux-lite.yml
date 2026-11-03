@@ -55,6 +55,7 @@ npmRebuild: false
 # `author`. Vai em `extraMetadata`, portanto só existe no pacote Linux — o
 # `package.json` partilhado com o Windows não é tocado.
 extraMetadata:
+  license: MIT # Mesma licença declarada no package.json raiz; licenças de terceiros preservadas.
   homepage: https://github.com/MatrixChill/cybersafe-assistant
   # Vai para `Comment=` do `.desktop`. A descrição do `package.json` do desktop
   # diz «desktop shell» genérica; no Linux Lite o menu tem de dizer o que esta
