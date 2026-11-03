@@ -39,7 +39,8 @@ static int g_winHover = -1, g_winPress = -1;
 static RECT g_winBtn[3];
 static HICON g_appIcon = nullptr;
 
-static float S(float v){ return v * g_dpi / 96.0f; }
+static float g_ui = 1.0f;
+static float S(float v){ return v * g_dpi / 96.0f * g_ui; }
 
 static bool FileExistsW(const std::wstring& p){
   DWORD a = GetFileAttributesW(p.c_str());
@@ -298,6 +299,9 @@ static void Layout(HWND hwnd){
   RECT rc; GetClientRect(hwnd, &rc);
   g_buttons.clear();
   float W = (float)rc.right, H = (float)rc.bottom;
+  g_ui = fminf(W / 1120.0f, H / 720.0f);
+  if(g_ui < 1.0f) g_ui = 1.0f;
+  if(g_ui > 1.9f) g_ui = 1.9f;
   float bx = W * 0.536f, bw = S(232), bh = S(58), gap = S(18), by = H - S(268);
   float wbw = S(46), wbh = S(34), wgap = S(8);
   float wx = W - S(20) - wbw * 3 - wgap * 2;
