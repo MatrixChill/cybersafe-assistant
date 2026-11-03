@@ -1,3 +1,4 @@
+import { atomicWriteJsonSync } from "./atomic-json.js";
 import { installNavigationPolicy } from "./navigation-policy.js";
 import { installInitialWindowReveal } from "./window-foreground.js";
 import { readBuildIdentity } from "./build-identity.js";
@@ -171,8 +172,7 @@ function loadPreferences() {
 
 function savePreferences() {
   try {
-    fs.mkdirSync(path.dirname(settingsFilePath()), { recursive: true });
-    fs.writeFileSync(settingsFilePath(), JSON.stringify(preferences, null, 2), "utf8");
+    atomicWriteJsonSync(settingsFilePath(), preferences);
     return true;
   } catch {
     // O chamador pode reportar uma preferência que não pôde ser persistida.
