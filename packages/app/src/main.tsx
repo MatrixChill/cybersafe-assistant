@@ -17,6 +17,9 @@ import './v2/lab-sidebar.css'
 import './v2/dashboard/lab-dashboard.css'
 import './v2/dashboard/production-controls.css'
 import App from './App.tsx'
+import { lazy, Suspense } from 'react'
+const UpdaterLab = import.meta.env.DEV ? lazy(() => import('./components/updates/UpdaterLab')) : null
+const updaterLabRequested = import.meta.env.DEV && new URLSearchParams(window.location.search).get('lab') === 'updater'
 import { applyAppearance } from './lib/appearance'
 import { applyV2Appearance } from './v2/theme'
 // >>> CS-THEME-PROBE (medicao dev-only; remover junto com lib/themeProbe.ts) >>>
@@ -39,7 +42,7 @@ const root = document.getElementById('root');
 if (root) {
   const tree = (
     <StrictMode>
-      <App />
+      {updaterLabRequested && UpdaterLab ? <Suspense fallback={<p>A abrir laboratorio visual...</p>}><UpdaterLab /></Suspense> : <App />}
     </StrictMode>
   )
   createRoot(root).render(
