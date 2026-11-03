@@ -20,9 +20,11 @@ Guardar tudo em `C:\lab\evidence\<data>\`; nunca usar `output/` do repositório 
 $Installer = "C:\lab\CyberSafe-Assistant-<versao>-setup.exe"
 $Evidence  = "C:\lab\evidence\20261102"
 New-Item -ItemType Directory -Force $Evidence | Out-Null
-powershell -NoProfile -ExecutionPolicy Bypass `
+powershell -NoProfile `
   -File .\scripts\vm-acceptance-preflight.ps1 `
   -InstallerPath $Installer `
+  -ExpectedVersion "0.2.0-rc.1" `
+  -ExpectedSha256 "<SHA-256 aprovado para este artefacto>" `
   -OutFile (Join-Path $Evidence "00-preflight.json")
 ```
 

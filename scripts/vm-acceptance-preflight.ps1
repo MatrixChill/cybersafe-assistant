@@ -15,7 +15,8 @@
 param(
   [Parameter(Mandatory = $true)][string]$InstallerPath,
   [string]$OutFile = (Join-Path (Get-Location) "vm-acceptance-preflight.json"),
-  [string]$ExpectedVersion = "0.1.11-internal.pap-r7.20261031"
+  [Parameter(Mandatory = $true)][string]$ExpectedVersion,
+  [Parameter(Mandatory = $true)][ValidatePattern('^[a-fA-F0-9]{64}$')][string]$ExpectedSha256
 )
 
 $ErrorActionPreference = "Stop"
@@ -40,6 +41,8 @@ $product = Read-JsonFile $productVersionPath
 $trust = Read-JsonFile $trustPath
 $file = Get-Item -LiteralPath $installer
 $hash = Get-FileHash -LiteralPath $installer -Algorithm SHA256
+if ($hash.Hash -ne $ExpectedSha256) { throw "ARTIFACT_HASH_MISMATCH: SHA-256 divergente; interromper o ensaio antes da instalação." }
+if (-not $product -or $product.version -ne $ExpectedVersion) { throw "PRODUCT_VERSION_MISMATCH: versão canónica divergente; interromper o ensaio." }
 $signature = Get-AuthenticodeSignature -LiteralPath $installer
 $os = Get-CimInstance Win32_OperatingSystem
 $computer = Get-CimInstance Win32_ComputerSystem
@@ -140,7 +143,7 @@ $dir = Split-Path -Parent $OutFile
 if ($dir -and -not (Test-Path -LiteralPath $dir)) { New-Item -ItemType Directory -Path $dir | Out-Null }
 $utf8NoBom = New-Object System.Text.UTF8Encoding($false)
 [System.IO.File]::WriteAllText($OutFile, $json, $utf8NoBom)
-Write-Output "PREFLIGHT_OK $OutFile"
+Write-Output "PREFLIGHT_CAPTURED_NOT_INSTALLATION_APPROVAL $OutFile"
 Write-Output ("INSTALLER_SHA256=" + $hash.Hash)
 Write-Output ("SIGNATURE=" + $signature.Status)
 Write-Output ("EXISTING_INSTALLS=" + $installed.Count)
