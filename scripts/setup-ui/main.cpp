@@ -166,13 +166,13 @@ static void DrawOrbitals(Graphics& g, RectF box){
     float ct = cosf(tilt * 3.14159265f / 180.0f), st = sinf(tilt * 3.14159265f / 180.0f);
     double ang = g_phase * R.speed * 6.2831853 + R.off * 3.14159;
     for(int k = 0; k < 8; k++){
-      double a2 = ang - k * 0.045;
+      double a2 = ang - k * 0.020;
       float ex = R.rx * sc * (float)cos(a2), ey = R.ry * sc * (float)sin(a2);
       float px = c.X + ex * ct - ey * st;
       float py = c.Y + ex * st + ey * ct;
-      float rad = (k == 0 ? 3.4f : 2.6f - k * 0.26f) * sc;
+      float rad = (k == 0 ? 3.6f : 3.0f - k * 0.28f) * sc;
       if(rad <= 0.2f) continue;
-      int alpha = k == 0 ? 235 : (int)(130.0f * (1.0f - k / 8.0f));
+      int alpha = k == 0 ? 240 : (int)(150.0f * (1.0f - k / 9.0f));
       SolidBrush sb(Color((BYTE)alpha, 235, 255, 255));
       g.FillEllipse(&sb, px - rad, py - rad, rad * 2, rad * 2);
     }
