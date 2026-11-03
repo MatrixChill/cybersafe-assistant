@@ -200,6 +200,8 @@ def page_art(active: int) -> Image.Image:
     draw.text((14, 76), "ASSISTANT / WINDOWS", font=font(9, True), fill=CYAN + (235,))
     draw.text((14, 91), "SETUP  /  2026", font=font(8), fill=MUTED + (220,))
     image = step_rail(image, 14, 120, ["Boas-vindas", "Verificação", "Instalação", "Conclusão"], active)
+    # Native static counterpart of the updater identity, kept below the step rail.
+    image = orbital(image, 82, 260, 65, 19, 42, 46)
     # A restrained hero mark in the content field, behind native controls.
     image = glow(image, (385, 192, 520, 327), CYAN, 12, 34)
     draw = ImageDraw.Draw(image)
@@ -306,6 +308,18 @@ def render(out: Path) -> None:
         "sources": {name: hashlib.sha256((SOURCE / name).read_bytes()).hexdigest() for name in NAMES},
         "files": files,
         "logoTreatment": "alpha bounds crop, aspect-preserving downscale and composition; no redraw or recolour",
+        "orbitalPresentation": {
+            "mode": "static-native",
+            "webglRuntime": False,
+            "description": "Official symbol and static orbital illustration; not a live Three.js render",
+            "sharedSceneSources": {
+                name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+                for name in [
+                    "packages/app/src/v2/dashboard/effects/orbitalBody.ts",
+                    "packages/app/src/v2/dashboard/effects/orbitalPose.ts",
+                ]
+            },
+        },
         "paletteSource": "packages/app/src/index.css: CyberSafe Core dark",
     }
     (out / "branding-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
