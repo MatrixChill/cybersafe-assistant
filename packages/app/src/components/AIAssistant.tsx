@@ -8,6 +8,7 @@ import { X, Send, Sparkles, MessageSquare, StopCircle, RefreshCw, MoreHorizontal
 import { cn } from "@/lib/utils"
 import {
   answerLocalSecurityQuestion,
+  answerMatrixLocalQuestion,
   cancelLocalSecurityRequest,
   shouldDiscardLateAnswer,
   isLocalSecurityQuestion,
@@ -1423,7 +1424,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       // que chega tarde (cancelar/janela fechada) é descartado: sem late append.
       let respostaLocalDisponivel = false
       if (motivo === "seguranca-local") {
-        const answer = await answerLocalSecurityQuestion(
+        const answer = await answerMatrixLocalQuestion(
           trimmed,
           window.electronAPI ?? null,
           { signal: controller.signal },
