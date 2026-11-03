@@ -138,6 +138,11 @@ function novoMotor(baseDir) {
   const corpus = path.join(baseDir, 'benign-fixture.yar');
   writeFileSync(corpus, 'rule BatchBenign { condition: false }');
   engine.yara.rulesPath = corpus;
+  // This suite proves ClamAV cache ownership, not the installed YARA binary.
+  // Patch the real method on the SAME instance held by MalwareAnalyzer.
+  // Replacing engine.yara with a Proxy leaves analyzer.deps.yara unchanged.
+  engine.fixtureYaraCalls = 0;
+  engine.yara.scanFileOutcome = async () => { engine.fixtureYaraCalls++; return {status:"ok",matches:[],durationMs:0}; };
   motores.push(engine);
   return engine;
 }
@@ -153,6 +158,15 @@ async function escrever(dir, nomes, conteudo = "Texto controlado de teste R7.") 
 }
 
 describe("prefetch nao se repete por ficheiro (motor REAL, bridge injectado)", () => {
+  it("a falha YARA continua inconclusiva mesmo com ClamAV limpo em cache", async () => {
+    const dir=await mkTmp("cs-nodouble-yara-"); const engine=novoMotor(dir);
+    const files=await escrever(dir,["benign.txt"]); const counts=injectClamav(engine);
+    engine.yara.scanFileOutcome=async()=>({status:"unavailable",matches:[],durationMs:0});
+    await engine.prefetchClamav(files,"yara-unavailable");
+    const response=await engine.scanArtifact(files[0],"system-scanner",{skipVirusTotal:true,scanId:"yara-unavailable"});
+    assert.equal(response.results[0].verdict,"inconclusive");
+    assert.equal(counts.scanFileCalls,0,"no repeat ClamAV even when YARA fails");
+  });
   it("os 6 ficheiros do batch sao resolvidos pelo veredicto em cache, sem um unico scanFile", async () => {
     const dir = await mkTmp("cs-nodouble-a-");
     const engine = novoMotor(dir);
@@ -205,6 +219,7 @@ describe("prefetch nao se repete por ficheiro (motor REAL, bridge injectado)", (
       }
     }
 
+    assert.equal(engine.fixtureYaraCalls, 6, "the real analyzer boundary evaluated all six YARA fixtures");
     assert.equal(
       counts.scanFileCalls,
       0,
