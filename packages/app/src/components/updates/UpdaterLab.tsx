@@ -1,3 +1,4 @@
+import {UpdaterScene} from "./UpdaterScene";
 import { useState } from "react";
 import { UpdaterExperience } from "./UpdaterExperience";
 import {AppearanceProvider} from "../../contexts/AppearanceContext";
@@ -11,5 +12,11 @@ export default function UpdaterLab() {
   const [unknown, setUnknown] = useState(false);
   const [forceStatic,setForceStatic]=useState(false);
   const view: UpdaterWindowView = { phase, currentVersion: "0.2.0-rc.1", nextVersion: "0.2.0 (exemplo)", percent: phase === "downloading" && !unknown ? 64 : null, cancelable: phase === "downloading" || phase === "verifying", primaryAction: phase === "confirming"?"install":phase === "available" ? "download" : phase === "completed" ? "open" : phase === "error" ? "retry" : phase === "current" ? "check" : undefined, detail: phase === "error" ? "Exemplo: a verificação de integridade falhou. A instalação foi bloqueada." : undefined, notes: phase === "available" ? "Exemplo de notas da versão.\nMelhorias de estabilidade e organização da interface." : undefined };
+  if (new URLSearchParams(window.location.search).get("art") === "installer") {
+    return <AppearanceProvider><main style={{height:"100dvh",background:"var(--card)"}}>
+      <div id="installer-orbital-export" style={{width:"100%",height:"100%"}}><UpdaterScene phase="error" /></div>
+      <style>{`.updater-original-scene{height:100%;min-height:0}.updater-art-label{display:none}`}</style>
+    </main></AppearanceProvider>;
+  }
   return <AppearanceProvider><main className="updater-lab"><div className="updater-lab-controls"><label htmlFor="updater-demo-phase">Estado visual</label><select id="updater-demo-phase" value={phase} onChange={e => { setPhase(e.target.value as UpdaterPhase); setNotice(""); }}>{phases.map(p => <option key={p} value={p}>{updaterCopy[p].title}</option>)}</select><label><input type="checkbox" checked={unknown} onChange={e => setUnknown(e.target.checked)} /> Total desconhecido</label><label><input type="checkbox" checked={forceStatic} onChange={e=>setForceStatic(e.target.checked)}/> Sem WebGL (ensaio)</label><span role="status">{notice}</span></div><UpdaterExperience forceStatic={forceStatic} view={view} demo onAction={action => setNotice(`Ação demonstrativa: ${action}. Nada foi executado.`)} onCancel={() => setNotice("Cancelamento demonstrativo. Nenhuma operação real em curso.")} onClose={() => setNotice("Fecho demonstrativo. Use o separador do browser para sair.")} /></main></AppearanceProvider>;
 }
