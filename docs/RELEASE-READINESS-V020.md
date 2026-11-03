@@ -113,3 +113,18 @@ alterações desta fase e ambas precisam de reprodução dirigida antes do merge
 Estado global: **NO-GO** para publicação, **PASS** para a integração de código.
 O merge está feito, a árvore integrada compila e passa 2971 testes. Continuam
 por fechar: versão canónica, instalador, updater assinado, pacotes Linux e CI.
+
+## Consolidação no main
+
+| Campo | Valor |
+|---|---|
+| Merge | `release/v0.2.0-final-integration` → `main`, sem force-push |
+| `main` | `37b7821` (merge commit) |
+| Base anterior | `21fefa6` |
+| CI | **PASS** no run 41713660033, SHA `dcde0ca`; o merge commit ainda não tem execução própria |
+| Branches removidas | `integration/windows-v0.2.0`, `codex/updater-visual-20261103`, `freebuff/matrix-intelligence-v2-20261103` — todas comprovadamente contidas em `main` |
+| Branches mantidas | `main`; `release/v0.2.0-final-integration` (worktree ativo); `experimental/linux-lite` (edição experimental) |
+
+O código Windows, MATRIX e Linux coexiste em `main` com separação por plataforma.
+O instalador Orbital B e o updater continuam por validar; nada de distribuição
+foi publicado.
