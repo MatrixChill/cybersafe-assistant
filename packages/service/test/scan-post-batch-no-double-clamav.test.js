@@ -50,7 +50,7 @@
  * ZERO clamscan. ZERO EICAR. `init()` nunca é chamado: sem watcher, sem ETW,
  * sem handles de sistema. A baseDir é um tmpdir isolado.
  */
-import { describe, it, after } from "node:test";
+import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
@@ -60,6 +60,18 @@ import { writeFileSync } from "node:fs";
 
 import { ProtectionEngineService } from "../dist/engine.js";
 import { ScanManager } from "../dist/scan-manager.js";
+import { NativeEngineBridge } from "../dist/native-engine-bridge.js";
+
+// This is the ClamAV cache contract, not a native binary integration test.
+const originalNativeScan = NativeEngineBridge.scan;
+let nativeFixtureCalls = 0;
+before(() => {
+  NativeEngineBridge.scan = async () => {
+    nativeFixtureCalls++;
+    return {ok:true,result:{score:0,reasons:[]}};
+  };
+});
+after(() => { NativeEngineBridge.scan = originalNativeScan; });
 
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
@@ -167,10 +179,23 @@ describe("prefetch nao se repete por ficheiro (motor REAL, bridge injectado)", (
     assert.equal(response.results[0].verdict,"inconclusive");
     assert.equal(counts.scanFileCalls,0,"no repeat ClamAV even when YARA fails");
   });
+  it("a ausência nativa continua inconclusiva mesmo com ClamAV limpo em cache", async () => {
+    const dir=await mkTmp("cs-nodouble-native-"); const engine=novoMotor(dir);
+    const files=await escrever(dir,["benign.txt"]); const counts=injectClamav(engine);
+    const nativeFixture=NativeEngineBridge.scan;
+    try {
+      NativeEngineBridge.scan=async()=>({ok:false,result:null,failure:"unavailable"});
+      await engine.prefetchClamav(files,"native-unavailable");
+      const response=await engine.scanArtifact(files[0],"system-scanner",{skipVirusTotal:true,scanId:"native-unavailable"});
+      assert.equal(response.results[0].verdict,"inconclusive");
+      assert.equal(counts.scanFileCalls,0);
+    } finally { NativeEngineBridge.scan=nativeFixture; }
+  });
   it("os 6 ficheiros do batch sao resolvidos pelo veredicto em cache, sem um unico scanFile", async () => {
     const dir = await mkTmp("cs-nodouble-a-");
     const engine = novoMotor(dir);
     const scanId = "scan-1";
+    const nativeBefore=nativeFixtureCalls;
     const files = await escrever(dir, ["a.exe", "b.exe", "c.exe", "d.txt", "e.txt", "f.txt"]);
 
     // 3 detetados (provam que o veredicto em cache é USADO, não ignorado) e 3
@@ -219,6 +244,7 @@ describe("prefetch nao se repete por ficheiro (motor REAL, bridge injectado)", (
       }
     }
 
+    assert.equal(nativeFixtureCalls-nativeBefore,6,"native analyzer boundary is exercised without requiring scan-engine.exe");
     assert.equal(engine.fixtureYaraCalls, 6, "the real analyzer boundary evaluated all six YARA fixtures");
     assert.equal(
       counts.scanFileCalls,
