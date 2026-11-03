@@ -43,6 +43,24 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 | Merge para `main` | **BLOCKED** | requer gates verdes + autorização do proprietário |
 | Release pública | **BLOCKED** | depende do updater assinado e dos artefactos verificados |
 
+
+## Testes executados neste HEAD (evidência, não inferência)
+
+| Suite | Comando | Resultado |
+|---|---|---|
+| App (renderer/MATRIX) | `npm test -w @cybersafe/app` | **PASS 2971/2971** (HEAD `fc561bb`; app não foi alterada depois) |
+| API — política e tokens | `node --import tsx --test test/ai-policy.test.js test/ai-token-policy.test.js` | **PASS 20/20** |
+| Contrato de versão | `node --test scripts/test/product-version-coherence.test.mjs` | **PASS 3/3** |
+| Scripts/packaging | `npm run test:scripts` | **FAIL 1 de 454** — `linux-lite-package-renderer-guard` falha no agregado e **passa isolado**; suspeita de ordem/concorrência, não de código |
+| Desktop | `npm test -w @cybersafe/desktop` | **FAIL 1 de 683** — fixture de locks nativos do helper Windows; não tocado por esta integração |
+| Serviço | `npm test -w @cybersafe/service` | **NOT TESTED** — excedeu 120 s, execução interrompida |
+| Typecheck app/api | `tsc --noEmit` | **PASS** |
+| Build app | `npm run build -w @cybersafe/app` | **PASS** |
+| CI remoto | GitHub Actions | **NOT TESTED** — workflow passou a cobrir `release/**`, execução por confirmar |
+
+As duas falhas acima estão identificadas, não escondidas: nenhuma foi causada por
+alterações desta fase e ambas precisam de reprodução dirigida antes do merge.
+
 ## Riscos
 
 1. A árvore integrada está verde em app/serviço, mas o updater e o instalador
@@ -62,10 +80,11 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 
 ## Próximo passo técnico (ordem)
 
-1. Corrigir a divergência de versões para uma única versão canónica.
-2. Regressão do updater e do instalador no HEAD integrado.
-3. Pacotes Linux num ambiente com desktop nativo.
-4. CI sobre esta branch; depois merge e Release, com autorização.
+1. Reproduzir e fechar as duas falhas dirigidas (guarda Linux no agregado; fixture
+   de locks no desktop) e completar a suite do serviço.
+2. Handoff do Setup Orbital B para o NSIS, com estados reais.
+3. Regressão do updater com fixtures e falhas induzidas.
+4. Pacotes Linux num ambiente com desktop nativo; CI remoto; merge e Release.
 
 ## Declaração
 
