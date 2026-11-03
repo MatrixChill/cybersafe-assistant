@@ -25,10 +25,10 @@ export function mapUpdaterSnapshot(snapshot: AppUpdateSnapshot): UpdaterWindowVi
   const phases: Record<AppUpdateSnapshot["status"], UpdaterPhase> = { unconfigured: "unavailable", unsupported: "unavailable", idle: "idle", checking: "checking", "up-to-date": "current", available: "available", downloading: "downloading", verifying: "verifying", downloaded: "ready", deferred: "idle", installing: "installing", error: "error" };
   const status = snapshot.status;
   const primaryAction: UpdaterAction | undefined = status === "available" ? "download" : status === "downloaded" && snapshot.canInstall ? "install" : ["idle", "deferred", "up-to-date"].includes(status) ? "check" : status === "error" ? "retry" : undefined;
-  return {    
+  return {
 phase: phases[status], currentVersion: snapshot.installed.version, nextVersion: snapshot.latest?.version,
     percent: status === "downloading" && snapshot.progress ? progressInfo(snapshot.progress).percent : null,
     cancelable: status === "downloading" || status === "verifying", primaryAction, notes: snapshot.latest?.notes,
-    detail: snapshot.error ? errorCodeMessage(snapshot.error.code) : status === "downloaded" && !snapshot.canInstall ? "A instalação está bloqueada pelas condições de segurança." : status === "idle" || status === "deferred" ? "Nenhuma atualização em curso." : undefined  
+    detail: snapshot.error ? errorCodeMessage(snapshot.error.code) : status === "downloaded" && !snapshot.canInstall ? "A instalação está bloqueada pelas condições de segurança." : status === "idle" || status === "deferred" ? "Nenhuma atualização em curso." : undefined
 };
 }
