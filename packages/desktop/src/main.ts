@@ -1670,8 +1670,8 @@ function registerIpc(
 
   // ── Auto-Start IPC ──
   handle("app:get-auto-start", () => {
-    if (process.platform !== "win32") return { enabled: false, startMinimized: false };
-    const settings = app.getLoginItemSettings();
+    if (process.platform !== "win32" || !app.isPackaged || !perfil.autoStart) return { enabled: false, startMinimized: false };
+    const settings = app.getLoginItemSettings({ path: process.execPath });
     return {
       enabled: settings.executableWillLaunchAtLogin,
       startMinimized: settings.launchItems.some(item => item.enabled && item.args.includes("--hidden")),
@@ -1679,7 +1679,8 @@ function registerIpc(
   });
 
   handle("app:set-auto-start", (_event, config: { enabled: boolean; startMinimized: boolean }) => {
-    if (process.platform !== "win32") return { success: false };
+    if (process.platform !== "win32" || !app.isPackaged || !perfil.autoStart || fronteiraLeituraWindows.activo) return { success: false };
+    if (!config || typeof config.enabled !== "boolean" || typeof config.startMinimized !== "boolean") return { success: false };
     app.setLoginItemSettings({
       openAtLogin: config.enabled,
       path: process.execPath,

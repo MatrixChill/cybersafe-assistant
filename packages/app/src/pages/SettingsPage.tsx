@@ -151,17 +151,25 @@ export default function SettingsPage() {
     }
   }, []);
 
+  async function refreshAutoStart() {
+    const actual = await window.electronAPI?.getAutoStart?.();
+    setAutoStart(actual?.enabled ?? false);
+    setStartMinimized(actual?.startMinimized ?? false);
+  }
+
   async function toggleAutoStart(checked: boolean) {
-    setAutoStart(checked);
-    if (window.electronAPI?.setAutoStart) {
-      await window.electronAPI.setAutoStart({ enabled: checked, startMinimized });
+    try {
+      await window.electronAPI?.setAutoStart?.({ enabled: checked, startMinimized });
+    } finally {
+      await refreshAutoStart();
     }
   }
 
   async function toggleStartMinimized(checked: boolean) {
-    setStartMinimized(checked);
-    if (window.electronAPI?.setAutoStart) {
-      await window.electronAPI.setAutoStart({ enabled: autoStart, startMinimized: checked });
+    try {
+      await window.electronAPI?.setAutoStart?.({ enabled: autoStart, startMinimized: checked });
+    } finally {
+      await refreshAutoStart();
     }
   }
 
