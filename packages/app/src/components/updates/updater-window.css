@@ -21,3 +21,13 @@
 @media(max-width:700px){.updater-lab{padding:16px}.updater-header{padding:20px}.updater-body{grid-template-columns:1fr}.updater-art{min-height:190px}.updater-emblem{width:100px;height:100px}.updater-orbit{width:160px;height:160px}.updater-orbit-two{width:140px;height:140px}.updater-art-label{bottom:8px}.updater-content{padding:24px}.updater-footer{align-items:stretch;flex-direction:column;padding:24px}.updater-actions{justify-content:flex-end}.updater-demo{padding:10px 20px}}
 @media(prefers-reduced-motion:reduce){.updater-window *{animation:none!important;transition:none!important}}
 @media(prefers-reduced-transparency:reduce){.updater-window{background:var(--background)}}
+
+/* Original scene: constrained render area; no dashboard chrome or engine status. */
+.updater-original-scene {position:relative;min-height:290px;isolation:isolate;display:grid;place-items:center;overflow:hidden}
+.updater-original-scene .three-scene {position:absolute;inset:0}
+.updater-original-scene canvas {display:block;width:100%;height:100%}
+.updater-static-scene {display:grid;justify-items:center;gap:16px;color:var(--muted-foreground);font-size:12px}
+.updater-static-scene img {width:144px;height:144px;object-fit:contain}
+.updater-original-scene .updater-art-label {bottom:20px}
+.updater-window {max-width:860px}.updater-header {padding:18px 24px}.updater-body {grid-template-columns:260px minmax(0,1fr);min-height:330px}.updater-content {padding:32px 28px 28px 8px}.updater-content h1 {font-size:28px}.updater-footer {padding:18px 24px}.updater-versions {margin:20px 0}
+@media(max-width:700px){.updater-body {grid-template-columns:1fr}.updater-original-scene {min-height:220px}.updater-content {padding:24px}.updater-original-scene .updater-art-label {bottom:4px}}

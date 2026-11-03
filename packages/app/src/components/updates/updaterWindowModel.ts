@@ -1,12 +1,15 @@
 import type { AppUpdateSnapshot } from "@cybersafe/shared-types";
 import { errorCodeMessage, progressInfo } from "./appUpdateModel";
-export type UpdaterPhase = "idle" | "checking" | "available" | "downloading" | "verifying" | "preparing" | "installing" | "completed" | "error" | "current" | "unavailable" | "ready";
+export type UpdaterPhase = "authenticating" | "confirming" | "restarting" | "idle" | "checking" | "available" | "downloading" | "verifying" | "preparing" | "installing" | "completed" | "error" | "current" | "unavailable" | "ready";
 export type UpdaterAction = "check" | "download" | "install" | "retry" | "open";
 export interface UpdaterWindowView {
   phase: UpdaterPhase; currentVersion: string; nextVersion?: string; percent: number | null;
   cancelable: boolean; primaryAction?: UpdaterAction; detail?: string; notes?: string;
 }
 export const updaterCopy: Record<UpdaterPhase, { title: string; description: string; helper: string; security: string }> = {
+  authenticating: {title:"A verificar autenticidade",description:"A validar a origem e a assinatura do instalador.",helper:"Só prossiga após confirmação das verificações pelo atualizador.",security:"Autenticidade por confirmar"},
+  confirming: {title:"A aguardar a sua confirmação",description:"Reveja a atualização antes de autorizar a instalação.",helper:"Nada será instalado sem consentimento.",security:"A autorização será revalidada pelo atualizador"},
+  restarting: {title:"A aguardar reinício",description:"A instalação ainda precisa de confirmação após o arranque.",helper:"Siga a indicação do atualizador para reabrir a aplicação.",security:"Versão instalada ainda não confirmada"},
   idle: { title: "Atualizador CyberSafe", description: "Procure uma versão mais recente quando quiser.", helper: "Nenhuma atualização está em curso.", security: "Nenhuma transferência ou instalação em curso" },
   checking: { title: "A procurar atualizações", description: "A consultar a disponibilidade de uma nova versão do CyberSafe.", helper: "Pode continuar a utilizar a aplicação.", security: "Verificações de segurança ainda não concluídas" },
   available: { title: "Uma nova versão está disponível", description: "Reveja a versão e as novidades antes de descarregar.", helper: "A instalação requer a sua confirmação.", security: "O instalador será verificado após a transferência" },
@@ -22,7 +25,7 @@ export const updaterCopy: Record<UpdaterPhase, { title: string; description: str
 };
 /** Conservative adapter: the existing snapshot cannot prove preparation or post-boot completion. */
 export function mapUpdaterSnapshot(snapshot: AppUpdateSnapshot): UpdaterWindowView {
-  const phases: Record<AppUpdateSnapshot["status"], UpdaterPhase> = { unconfigured: "unavailable", unsupported: "unavailable", idle: "idle", checking: "checking", "up-to-date": "current", available: "available", downloading: "downloading", verifying: "verifying", downloaded: "ready", deferred: "idle", installing: "installing", error: "error" };
+  const phases: Record<AppUpdateSnapshot["status"], UpdaterPhase> = { unconfigured: "unavailable", unsupported: "unavailable", idle: "idle", checking: "checking", "up-to-date": "current", available: "available", downloading: "downloading", verifying: "verifying", downloaded: snapshot.canInstall?"confirming":"ready", deferred: "idle", installing: "installing", error: "error" };
   const status = snapshot.status;
   const primaryAction: UpdaterAction | undefined = status === "available" ? "download" : status === "downloaded" && snapshot.canInstall ? "install" : ["idle", "deferred", "up-to-date"].includes(status) ? "check" : status === "error" ? "retry" : undefined;
   return {
