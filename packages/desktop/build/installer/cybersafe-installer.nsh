@@ -267,7 +267,9 @@ Var CSSpaceState
     ${EndIf}
     GetDlgItem $0 $HWNDPARENT 1028
     ${If} $0 != 0
-      SetCtlColors $0 0x7EA4A8 0x07151A
+      ; Este e o static visivel (483x13) por baixo da pagina; pinta-se com
+      ; a cor de face do sistema e corta a arte escura.
+      ShowWindow $0 ${SW_HIDE}
     ${EndIf}
     ; Forca o non-client a repintar depois dos atributos DWM.
     System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i 0, i 0, i 0, i 0, i 0x37)'
@@ -302,6 +304,9 @@ Var CSSpaceState
   FunctionEnd
   Function CS_StyleFooter
     InitPluginsDir
+    ; Sem isto o File escreve no $OUTDIR corrente e o LoadImage falha,
+    ; deixando os botoes MUI com a placa branca do tema do sistema.
+    SetOutPath "$PLUGINSDIR"
     ; Extrair a superficie dos botoes nao e uma etapa da instalacao.
     SetDetailsPrint none
     File "/oname=$PLUGINSDIR\button-primary.bmp" "${CS_ASSET_DIR}\button-primary.bmp"
@@ -314,7 +319,16 @@ Var CSSpaceState
     !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-secondary.bmp"
     GetDlgItem $0 $HWNDPARENT 3
     !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-secondary.bmp"
-  FunctionEnd
+  
+    ; MUI ja pintou estes botoes antes do callback; sem invalidar,
+    ; o BS_BITMAP aplicado agora nao aparece.
+    GetDlgItem $0 $HWNDPARENT 1
+    System::Call 'user32::InvalidateRect(p $0, p 0, i 1)'
+    GetDlgItem $0 $HWNDPARENT 2
+    System::Call 'user32::InvalidateRect(p $0, p 0, i 1)'
+    GetDlgItem $0 $HWNDPARENT 3
+    System::Call 'user32::InvalidateRect(p $0, p 0, i 1)'
+FunctionEnd
   Function .onGUIEnd
     Call CSFreeButtonImages
   FunctionEnd
@@ -433,7 +447,7 @@ Var CSSpaceState
 
     ${NSD_CreateLabel} 0 0 1u 1u "01  /  BOAS-VINDAS"
     Pop $R9
-    !insertmacro CS_Place $R9 39 3 57 3
+    !insertmacro CS_Place $R9 39 3 57 6
     SetCtlColors $R9 0xC1D616 0x07151A
 
     ${NSD_CreateLabel} 0 0 1u 1u "$(CS_WelcomeTitle)"

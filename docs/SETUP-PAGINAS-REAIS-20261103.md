@@ -60,3 +60,24 @@ alteração global e não autorizada), pelo que 125%/150% continuam por validar 
 
 O NSIS não executa WebGL: a cena é uma captura estática. Nada foi assinado,
 congelado, instalado ou publicado. A RC1 LAB `497e634` permanece intacta.
+## Atualização — segunda ronda (HEAD seguinte)
+### Corrigido e verificado
+- Faixa branca: o static visível é o **1028** (483x13, por baixo da página), não o 1256.
+  O 1256 já estava oculto; agora ambos são ocultados e a faixa desapareceu nas capturas.
+- Rótulo «01 / BOAS-VINDAS»: tinha 6 px de altura (3% da área da página); passou a 6% e já não está cortado.
+- Navegação: o clique no botão «Instalar» chega ao handler e avança a página. Prova: marcador
+  temporário em `%TEMP%` criado pelo handler + título do cabeçalho a mudar de «Instalação» para
+  «Escolha uma opção de instalação». A instrumentação foi removida.
+- Progresso: a mudança de pasta e a extração dos bitmaps deixaram de aparecer como etapas.
+- Isolamento: cada execução usa `output/installer-pages/run-*` com `/D=` próprio e remove-o no fim;
+  o harness recusa caminhos fora de `output/installer-pages` e caminhos `Programs`/`AppData`.
+  Última execução: `existed install dir touched: False`.
+
+### Continua aberto
+- Botões do rodapé nas páginas MUI (modo, progresso, conclusão) mantêm a placa branca. Já têm
+  `SetOutPath "$PLUGINSDIR"` (o `File` escrevia no `$OUTDIR` corrente) e `InvalidateRect` após o
+  estilo, mas o `BS_BITMAP` aplicado depois do primeiro paint continua a não ser honrado.
+  As capturas de modo e conclusão ficaram byte-idênticas, o que prova que a repintura não bastou.
+- Página de modo sem tema e com sufixo inglês `(must run as admin)`. No instalador real o callback
+  vem de `customInstallMode` do electron-builder; o preview não o liga. Por validar no fluxo real.
+- Checkbox «Abrir o CyberSafe Assistant.» com contraste insuficiente.

@@ -1,5 +1,8 @@
 param([string]$ExePath, [string]$OutDir)
 $ErrorActionPreference = 'Stop'
+# Isolation guard: this harness must never point at a real installation.
+if ($OutDir -notlike '*\output\installer-pages*') { throw "refusing: OutDir outside output/installer-pages ($OutDir)" }
+if ($OutDir -like '*\Programs\*' -or $OutDir -like '*\AppData\*') { throw "refusing: OutDir looks like a production path ($OutDir)" }
 Add-Type -AssemblyName System.Drawing
 Add-Type @"
 using System;using System.Text;using System.Runtime.InteropServices;
@@ -21,7 +24,10 @@ public class Pages {
 }
 "@
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
-$p = Start-Process -FilePath $ExePath -ArgumentList "/D=$OutDir\installdir" -PassThru
+$runDir = Join-Path $OutDir ("run-" + (Get-Date -Format 'yyyyMMdd-HHmmss'))
+New-Item -ItemType Directory -Force -Path $runDir | Out-Null
+$installDir = Join-Path $runDir 'install'
+$p = Start-Process -FilePath $ExePath -ArgumentList "/D=$installDir" -PassThru
 $deadline = (Get-Date).AddSeconds(15)
 do { Start-Sleep -Milliseconds 300; $p.Refresh(); $h = $p.MainWindowHandle } while ($h -eq [IntPtr]::Zero -and (Get-Date) -lt $deadline)
 if ($h -eq [IntPtr]::Zero) { Stop-Process -Id $p.Id -Force; throw 'preview window not found' }
@@ -52,5 +58,7 @@ Next; Start-Sleep -Milliseconds 1400; Shot 'pages-2-mode.png'
 Next; Start-Sleep -Milliseconds 1400; Shot 'pages-3-config.png'
 Next; Start-Sleep -Milliseconds 900;  Shot 'pages-4-progress.png'
 Start-Sleep -Milliseconds 3600; Shot 'pages-5-finish.png'
-Stop-Process -Id $p.Id -Force
-Write-Output 'done'
+Stop-Process -Id $p.Id -Force -ErrorAction SilentlyContinue
+Start-Sleep -Milliseconds 300
+if (Test-Path $runDir) { Remove-Item -Recurse -Force $runDir }
+Write-Output ("isolated run dir removed: {0}; existed install dir touched: {1}" -f $runDir, (Test-Path $installDir))
