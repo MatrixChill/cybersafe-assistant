@@ -1,5 +1,7 @@
 # Continuidade — persistência e protocolo externo, 2026-11-03
 
+> Estado histórico substituído por [VALIDACAO-INSTALLER-EXTERNO-20261103.md](VALIDACAO-INSTALLER-EXTERNO-20261103.md): o executor externo e a reconciliação foram implementados e ensaiados com simulador benigno. Instalação real permanece pendente.
+
 Base 5430455; branch codex/final-v020-20261103. Commits b196fd9 (settings atómicos) e 25fb96f (diário de instalação).
 
 Implementado e testado: escrita num temporário exclusivo wx no diretório do destino, fsync antes de fechar e rename. Não existe delete/recreate do destino em caso de bloqueio Windows. Falhas em write/fsync/rename preservam o JSON anterior; temporários incompletos nunca são carregados como settings. O fsync do ficheiro não constitui garantia contra todas as falhas de hardware/controlador.
