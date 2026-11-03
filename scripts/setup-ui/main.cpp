@@ -23,7 +23,7 @@ static const Color kText(255, 237, 248, 248), kMuted(255, 126, 164, 168);
 struct Btn { RECT r; int id; const wchar_t* label; int icon; bool primary; bool enabled; };
 static std::vector<Btn> g_buttons;
 static int g_page = 0, g_hover = -1, g_focus = 0, g_dpi = 96;
-static Bitmap *g_scene = nullptr, *g_sceneSoft = nullptr, *g_lockup = nullptr;
+static Bitmap *g_scene = nullptr, *g_sceneSoft = nullptr, *g_lockup = nullptr, *g_symbol = nullptr;
 static void BuildSceneSoft(int w);
 static void BuildCore();
 static void DrawContain(Graphics& g, Bitmap* b, RectF box);
@@ -63,6 +63,7 @@ static bool LoadPng(const wchar_t* rel, Bitmap** out){
 static void LoadImages(){
   LoadPng(L"assets/branding/scene/orbital-b-scene.png", &g_scene);
   LoadPng(L"assets/branding/source/07_CyberSafe_horizontal_lockup.png", &g_lockup);
+  LoadPng(L"assets/branding/source/symbol.png", &g_symbol);
   BuildSceneSoft(960);
 }
 
@@ -129,55 +130,97 @@ static void BuildCore(){
   g_core = b;
 }
 
+struct V3 { float x, y, z; };
+static V3 RotX(V3 p, float a){ float c = cosf(a), s = sinf(a); return { p.x, p.y * c - p.z * s, p.y * s + p.z * c }; }
+static V3 RotY(V3 p, float a){ float c = cosf(a), s = sinf(a); return { p.x * c + p.z * s, p.y, -p.x * s + p.z * c }; }
+static V3 RotZ(V3 p, float a){ float c = cosf(a), s = sinf(a); return { p.x * c - p.y * s, p.x * s + p.y * c, p.z }; }
+
+// Same geometry as CoreScene: torus radii 1.45 / 1.75, camera z=7 fov 35,
+// ring pose from orbitalRingPose(phase, i, 'depth'), logo plane at z=0.265.
 static void DrawOrbitals(Graphics& g, RectF box){
   const float sc = fminf(box.Width / 960.0f, box.Height / 640.0f);
   const float offX = box.X + (box.Width - 960.0f * sc) / 2.0f;
   const float offY = box.Y + (box.Height - 640.0f * sc) / 2.0f;
   PointF c(offX + 480.0f * sc, offY + 320.0f * sc);
-  float pulse = 0.5f + 0.5f * sinf((float)g_phase * 0.7f);
+  const float f = 1014.9f * sc;
+  const float t = (float)g_phase;
+  const float twoPi = 6.2831853f;
+  const float gy = sinf(t * 0.30f) * 0.06f;
+  const float gx = cosf(t * 0.25f) * 0.04f;
+  const float zLogo = 0.265f;
 
-  { GraphicsPath hp; hp.AddEllipse(c.X - 196 * sc, c.Y - 196 * sc, 392 * sc, 392 * sc);
+  { GraphicsPath hp; hp.AddEllipse(c.X - 188 * sc, c.Y - 188 * sc, 376 * sc, 376 * sc);
     PathGradientBrush hb(&hp);
-    hb.SetCenterColor(Color((BYTE)(20 + 18 * pulse), 26, 205, 195));
+    hb.SetCenterColor(Color(40, 28, 205, 195));
     Color hs(0, 20, 180, 190); int n = 1; hb.SetSurroundColors(&hs, &n);
     g.FillPath(&hb, &hp); }
 
-  if(g_sceneSoft) DrawContain(g, g_sceneSoft, box);
+  struct Ring { float R, rx, ry, rz; BYTE r, gr, b; double speed; };
+  Ring rings[2];
+  rings[0] = { 1.45f, -0.55f + sinf(t * 0.24f) * 0.12f, fmodf(0.35f + t * 0.22f, twoPi), fmodf(t * 0.08f, twoPi), 92, 230, 237, 0.10 };
+  rings[1] = { 1.75f, 0.65f + cosf(t * 0.19f) * 0.16f, fmodf(-0.40f - t * 0.16f, twoPi), fmodf(-t * 0.11f, twoPi), 156, 149, 238, -0.08 };
 
-  GraphicsPath clip;
-  clip.AddEllipse(c.X - 240 * sc, c.Y - 205 * sc, 480 * sc, 410 * sc);
-  const float hx[6] = { 480, 615, 615, 480, 345, 345 };
-  const float hy[6] = { 168, 250, 395, 472, 395, 250 };
-  PointF hex[6];
-  for(int i = 0; i < 6; i++) hex[i] = PointF(offX + hx[i] * sc, offY + hy[i] * sc);
-  GraphicsPath hpath; hpath.AddPolygon(hex, 6);
-  clip.AddPath(&hpath, FALSE);
-  clip.SetFillMode(FillModeAlternate);
-  g.SetClip(&clip);
-
-  struct Rg { float rx, ry, tilt; BYTE r, gr, b; double speed, off; };
-  Rg rings[2] = {
-    { 220.0f, 187.0f, 22.0f, 150, 140, 255, 0.055, 0.0 },
-    { 197.0f, 142.0f, -18.0f, 45, 226, 214, 0.080, 1.0 }
+  auto project = [&](const Ring& R, float a, float& sx, float& sy, float& z){
+    V3 p = { R.R * cosf(a), R.R * sinf(a), 0.0f };
+    p = RotZ(p, R.rz); p = RotY(p, R.ry); p = RotX(p, R.rx);
+    p = RotY(p, gy); p = RotX(p, gx);
+    float den = 7.0f - p.z; if(den < 0.6f) den = 0.6f;
+    sx = c.X + p.x * f / den;
+    sy = c.Y - p.y * f / den;
+    z = p.z;
   };
-  for(int i = 0; i < 2; i++){
-    Rg& R = rings[i];
-    float tilt = R.tilt + 2.5f * sinf((float)g_phase * 0.30f + (float)i * 2.1f);
-    float ct = cosf(tilt * 3.14159265f / 180.0f), st = sinf(tilt * 3.14159265f / 180.0f);
-    double ang = g_phase * R.speed * 6.2831853 + R.off * 3.14159;
-    for(int k = 0; k < 8; k++){
-      double a2 = ang - k * 0.020;
-      float ex = R.rx * sc * (float)cos(a2), ey = R.ry * sc * (float)sin(a2);
-      float px = c.X + ex * ct - ey * st;
-      float py = c.Y + ex * st + ey * ct;
-      float rad = (k == 0 ? 3.6f : 3.0f - k * 0.28f) * sc;
-      if(rad <= 0.2f) continue;
-      int alpha = k == 0 ? 240 : (int)(150.0f * (1.0f - k / 9.0f));
-      SolidBrush sb(Color((BYTE)alpha, 235, 255, 255));
-      g.FillEllipse(&sb, px - rad, py - rad, rad * 2, rad * 2);
+
+  const int N = 120;
+  const float w0 = 0.026f * f / 7.0f;
+
+  for(int pass = 0; pass < 2; pass++){
+    if(pass == 1){
+      const float R = 0.95f, k = f / 7.0f;
+      PointF hex[6], back[6];
+      for(int i = 0; i < 6; i++){
+        float a = -1.5707963f + i * 1.0471976f;
+        hex[i] = PointF(c.X + cosf(a) * R * k, c.Y + sinf(a) * R * k);
+        back[i] = PointF(hex[i].X + 0.05f * k, hex[i].Y + 0.07f * k);
+      }
+      SolidBrush eb(Color(255, 5, 28, 40));
+      g.FillPolygon(&eb, back, 6);
+      LinearGradientBrush fb(PointF(c.X, c.Y - R * k), PointF(c.X, c.Y + R * k),
+                             Color(255, 13, 76, 102), Color(255, 4, 30, 46));
+      g.FillPolygon(&fb, hex, 6);
+      Pen edge(Color(255, 48, 126, 150), 1.5f * sc);
+      g.DrawPolygon(&edge, hex, 6);
+      if(g_symbol){
+        float sw = 1.8f * f / (7.0f - zLogo);
+        g.DrawImage(g_symbol, RectF(c.X - sw / 2, c.Y - sw / 2, sw, sw));
+      }
+    }
+    for(int i = 0; i < 2; i++){
+      Ring& R = rings[i];
+      for(int k = 0; k < N; k++){
+        float a0 = twoPi * k / N, a1 = twoPi * (k + 1) / N;
+        float x0, y0, z0, x1, y1, z1;
+        project(R, a0, x0, y0, z0);
+        project(R, a1, x1, y1, z1);
+        float zm = (z0 + z1) * 0.5f;
+        bool front = zm > zLogo;
+        if((pass == 1) != front) continue;
+        int alpha = (int)(120 + 135 * ((zm + 1.8f) / 3.6f));
+        if(alpha < 70) alpha = 70; if(alpha > 255) alpha = 255;
+        Pen pen(Color((BYTE)alpha, R.r, R.gr, R.b), front ? w0 : w0 * 0.85f);
+        g.DrawLine(&pen, x0, y0, x1, y1);
+      }
+      for(int sp = 0; sp < 6; sp++){
+        float a = (float)(t * R.speed * twoPi) - sp * 0.055f;
+        float sx, sy, z;
+        project(R, a, sx, sy, z);
+        if((pass == 1) != (z > zLogo)) continue;
+        float rad = (sp == 0 ? 3.2f : 2.5f - sp * 0.3f) * sc;
+        if(rad <= 0.2f) continue;
+        SolidBrush sb(Color((BYTE)(sp == 0 ? 240 : 135), 240, 255, 255));
+        g.FillEllipse(&sb, sx - rad, sy - rad, rad * 2, rad * 2);
+      }
     }
   }
-  g.ResetClip();
 }
 
 static GraphicsPath* RoundRectPath(RectF r, float rad){
