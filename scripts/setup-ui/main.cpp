@@ -10,6 +10,7 @@
 #include <shellapi.h>
 #include <stdio.h>
 #include <string>
+#include <cmath>
 #include <vector>
 using namespace Gdiplus;
 
@@ -24,10 +25,16 @@ static std::vector<Btn> g_buttons;
 static int g_page = 0, g_hover = -1, g_focus = 0, g_dpi = 96;
 static Bitmap *g_scene = nullptr, *g_sceneSoft = nullptr, *g_lockup = nullptr;
 static void BuildSceneSoft(int w);
+static void BuildCore();
 static void DrawContain(Graphics& g, Bitmap* b, RectF box);
 static int g_progress = 0;
 static bool g_openApp = true;
 static std::wstring g_note;
+static Bitmap *g_core = nullptr;
+static double g_phase = 0.0;
+static bool g_anim = true;
+static ULONGLONG g_last = 0;
+static int g_press = -1;
 
 static float S(float v){ return v * g_dpi / 96.0f; }
 
@@ -94,6 +101,83 @@ static void DrawContain(Graphics& g, Bitmap* b, RectF box){
   float sc = fminf(box.Width / iw, box.Height / ih);
   float w = iw * sc, h = ih * sc;
   g.DrawImage(b, RectF(box.X + (box.Width - w) / 2.0f, box.Y + (box.Height - h) / 2.0f, w, h));
+}
+
+static void BuildCore(){
+  if(!g_scene) return;
+  const int ox = 330, oy = 155, cw = 300, ch = 330;
+  Bitmap* b = new Bitmap(cw, ch, PixelFormat32bppARGB);
+  { Graphics gg(b);
+    gg.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    gg.DrawImage(g_scene, RectF(0, 0, (REAL)cw, (REAL)ch), ox, oy, cw, ch, UnitPixel); }
+  BitmapData bd; Rect rc(0, 0, cw, ch);
+  if(b->LockBits(&rc, ImageLockModeRead | ImageLockModeWrite, PixelFormat32bppARGB, &bd) == Ok){
+    const POINT poly[6] = { {150,10}, {288,94}, {288,242}, {150,320}, {12,242}, {12,94} };
+    for(int y = 0; y < ch; y++){
+      BYTE* row = (BYTE*)bd.Scan0 + (size_t)y * bd.Stride;
+      for(int x = 0; x < cw; x++){
+        bool in = false;
+        for(int i = 0, j = 5; i < 6; j = i++){
+          if(((poly[i].y > y) != (poly[j].y > y)) &&
+             (x < (poly[j].x - poly[i].x) * (y - poly[i].y) / (poly[j].y - poly[i].y) + poly[i].x)) in = !in;
+        }
+        if(!in) row[x * 4 + 3] = 0;
+      }
+    }
+    b->UnlockBits(&bd);
+  }
+  g_core = b;
+}
+
+static void DrawOrbitals(Graphics& g, RectF box){
+  const float sc = fminf(box.Width / 960.0f, box.Height / 640.0f);
+  const float offX = box.X + (box.Width - 960.0f * sc) / 2.0f;
+  const float offY = box.Y + (box.Height - 640.0f * sc) / 2.0f;
+  PointF c(offX + 480.0f * sc, offY + 320.0f * sc);
+  float pulse = 0.5f + 0.5f * sinf((float)g_phase * 0.7f);
+
+  { GraphicsPath hp; hp.AddEllipse(c.X - 196 * sc, c.Y - 196 * sc, 392 * sc, 392 * sc);
+    PathGradientBrush hb(&hp);
+    hb.SetCenterColor(Color((BYTE)(20 + 18 * pulse), 26, 205, 195));
+    Color hs(0, 20, 180, 190); int n = 1; hb.SetSurroundColors(&hs, &n);
+    g.FillPath(&hb, &hp); }
+
+  if(g_sceneSoft) DrawContain(g, g_sceneSoft, box);
+
+  GraphicsPath clip;
+  clip.AddEllipse(c.X - 240 * sc, c.Y - 205 * sc, 480 * sc, 410 * sc);
+  const float hx[6] = { 480, 615, 615, 480, 345, 345 };
+  const float hy[6] = { 168, 250, 395, 472, 395, 250 };
+  PointF hex[6];
+  for(int i = 0; i < 6; i++) hex[i] = PointF(offX + hx[i] * sc, offY + hy[i] * sc);
+  GraphicsPath hpath; hpath.AddPolygon(hex, 6);
+  clip.AddPath(&hpath, FALSE);
+  clip.SetFillMode(FillModeAlternate);
+  g.SetClip(&clip);
+
+  struct Rg { float rx, ry, tilt; BYTE r, gr, b; double speed, off; };
+  Rg rings[2] = {
+    { 220.0f, 187.0f, 22.0f, 150, 140, 255, 0.055, 0.0 },
+    { 197.0f, 142.0f, -18.0f, 45, 226, 214, 0.080, 1.0 }
+  };
+  for(int i = 0; i < 2; i++){
+    Rg& R = rings[i];
+    float tilt = R.tilt + 2.5f * sinf((float)g_phase * 0.30f + (float)i * 2.1f);
+    float ct = cosf(tilt * 3.14159265f / 180.0f), st = sinf(tilt * 3.14159265f / 180.0f);
+    double ang = g_phase * R.speed * 6.2831853 + R.off * 3.14159;
+    for(int k = 0; k < 8; k++){
+      double a2 = ang - k * 0.045;
+      float ex = R.rx * sc * (float)cos(a2), ey = R.ry * sc * (float)sin(a2);
+      float px = c.X + ex * ct - ey * st;
+      float py = c.Y + ex * st + ey * ct;
+      float rad = (k == 0 ? 3.4f : 2.6f - k * 0.26f) * sc;
+      if(rad <= 0.2f) continue;
+      int alpha = k == 0 ? 235 : (int)(130.0f * (1.0f - k / 8.0f));
+      SolidBrush sb(Color((BYTE)alpha, 235, 255, 255));
+      g.FillEllipse(&sb, px - rad, py - rad, rad * 2, rad * 2);
+    }
+  }
+  g.ResetClip();
 }
 
 static GraphicsPath* RoundRectPath(RectF r, float rad){
@@ -244,7 +328,7 @@ static void Paint(HWND hwnd, HDC hdc){
       float lh = lw * g_lockup->GetHeight() / g_lockup->GetWidth();
       g.DrawImage(g_lockup, RectF(W - S(56) - lw, S(74), lw, lh));
     }
-    DrawContain(g, g_sceneSoft, RectF(S(26), S(118), S(548), S(442)));
+    DrawOrbitals(g, RectF(S(26), S(118), S(548), S(442)));
 
     DrawTextAt(g, L"ASSISTANT  /  WINDOWS", RectF(S(56), H - S(122), S(400), S(22)), S(14), kText);
     DrawTextAt(g, L"SETUP  /  2026", RectF(S(56), H - S(96), S(300), S(20)), S(11), kMuted);
@@ -350,6 +434,8 @@ static void Paint(HWND hwnd, HDC hdc){
         if(b.enabled){
           Color c1(255,43,232,210), c2(255,26,196,176);
           if(hov){ c1 = Color(255,80,246,225); c2 = Color(255,34,214,192); }
+          bool pr = ((int)i == g_press);
+          if(pr){ c1 = Color(255,28,186,168); c2 = Color(255,18,158,140); }
           LinearGradientBrush gb(PointF(r.X,r.Y), PointF(r.X,r.GetBottom()), c1, c2);
           FillRound(g, r, S(10), gb);
         } else {
@@ -412,9 +498,14 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
   switch(msg){
     case WM_CREATE:
       Layout(hwnd);
+      if(g_anim){ g_last = GetTickCount64(); SetTimer(hwnd, 3, 33, nullptr); }
       return 0;
     case WM_SIZE:
       Layout(hwnd);
+      if(g_anim){
+        if(IsIconic(hwnd)) KillTimer(hwnd, 3);
+        else { g_last = GetTickCount64(); SetTimer(hwnd, 3, 33, nullptr); }
+      }
       InvalidateRect(hwnd, nullptr, FALSE);
       return 0;
     case WM_PAINT: {
@@ -440,6 +531,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       return 0;
     case WM_LBUTTONUP: {
       int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
+      g_press = -1;
       for(size_t i = 0; i < g_buttons.size(); i++){
         RECT r = g_buttons[i].r;
         if(x >= r.left && x < r.right && y >= r.top && y < r.bottom){
@@ -477,6 +569,13 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       } else if(wp == 2){
         KillTimer(hwnd, 2);
         Go(hwnd, 4);
+      } else if(wp == 3){
+        ULONGLONG now = GetTickCount64();
+        double dt = (double)(now - g_last) / 1000.0;
+        g_last = now;
+        if(dt > 0.25) dt = 0.25;
+        g_phase += dt;
+        InvalidateRect(hwnd, nullptr, FALSE);
       }
       return 0;
     case WM_NCHITTEST: {
@@ -492,6 +591,12 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       int x = GET_X_LPARAM(lp), y = GET_Y_LPARAM(lp);
       RECT rc; GetClientRect(hwnd, &rc);
       if(y < (int)S(52) && x > rc.right - (int)S(120)){ DestroyWindow(hwnd); return 0; }
+      for(size_t i = 0; i < g_buttons.size(); i++){
+        RECT r = g_buttons[i].r;
+        if(g_buttons[i].enabled && x >= r.left && x < r.right && y >= r.top && y < r.bottom){
+          g_press = (int)i; InvalidateRect(hwnd, nullptr, FALSE); break;
+        }
+      }
       break;
     }
     case WM_PRINTCLIENT: {
@@ -509,6 +614,9 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
 
 int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
   SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+  BOOL animPref = TRUE;
+  SystemParametersInfoW(0x1042, 0, &animPref, 0);
+  g_anim = animPref != FALSE;
   GdiplusStartupInput in;
   ULONG_PTR token;
   GdiplusStartup(&token, &in, nullptr);
