@@ -72,3 +72,15 @@ test('os diálogos filhos recebem o tema e o progresso nativo nunca é simulado'
   assert.doesNotMatch(nsh, /(?:SendMessage[^\n]+0x40[125]|CreateTimer|PBM_SETPOS)/,'no timer, position or range mutation');
   assert.match(nsh, /SendMessage \$mui\.InstFilesPage\.ProgressBar 0x2001/,'PBM_SETBKCOLOR, not PBM_SETRANGE');
 });
+
+
+test('preview labels are raised above the stretched artwork', () => {
+  const preview=fs.readFileSync(path.join(root,'scripts/prototypes/installer-native-preview.nsi'),'utf8');
+  for(const control of ['Heading','Body','Status']) assert.ok(preview.includes(`SetWindowLongW(p $${control},i -20,i 0)`),control);
+  assert.ok(preview.includes('SetWindowPos(p $Heading,p 0'),'heading raised last');
+});
+
+test('native preview state changes use opaque labels to erase previous text', () => {
+  const preview=fs.readFileSync(path.join(root,'scripts/prototypes/installer-native-preview.nsi'),'utf8');
+  for(const control of ['Heading','Body','Status']) assert.ok(preview.includes(`SetCtlColors $${control} ${control==='Status'?'9E9BFF':'EDF8F8'} 07151A`),control);
+});

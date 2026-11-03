@@ -12,6 +12,14 @@ class Branding(unittest.TestCase):
    for name,digest in m['orbitalPresentation']['sharedSceneSources'].items():
     self.assertEqual(digest,hashlib.sha256((ROOT/name).read_bytes()).hexdigest())
    self.assertFalse(m['orbitalPresentation']['webglRuntime'])
+   scene=m['orbitalPresentation']['sceneExport']
+   self.assertEqual(scene['file'],'assets/branding/scene/orbital-b-scene.png')
+   self.assertEqual(scene['sha256'],hashlib.sha256((ROOT/scene['file']).read_bytes()).hexdigest())
+   self.assertFalse(scene['liveAnimation'])
+   self.assertEqual(m['updaterDesign']['layout'], 'brand-orbital-left-content-right')
+   self.assertEqual(m['updaterDesign']['progress'], 'native-real-only')
+   for name,digest in m['updaterDesign']['sources'].items():
+    self.assertEqual(digest,hashlib.sha256((ROOT/name).read_bytes()).hexdigest())
    for name,digest in m['sources'].items():
     self.assertEqual(digest,hashlib.sha256((ROOT/'assets/branding/source'/name).read_bytes()).hexdigest())
    for name,size in [('page-welcome.bmp',(503,287)),('page-config.bmp',(503,287)),('installerHeader.bmp',(150,57)),('installerSidebar.bmp',(164,314)),('uninstallerSidebar.bmp',(164,314))]:
