@@ -40,3 +40,19 @@ test('integrated benchmark is incomplete if any required engine is missing or de
  const engine={clamav:{status:'active'},yara:{status:'active'},hashDb:{status:'active'},nativeEngine:{status:'degraded'}};
  assert.deepEqual(incompleteEngines({engine}),['nativeEngine']);engine.nativeEngine.status='active';assert.deepEqual(incompleteEngines({engine}),[]);assert.equal(incompleteEngines(null).length,4);
 });
+
+test('benchmark copies a real YARA corpus into its private base and records exact bytes',async()=>{
+ const {mkdtemp,writeFile,readFile,rm,mkdir}=await import('node:fs/promises');
+ const {tmpdir}=await import('node:os');const path=await import('node:path');
+ const {seedBenchmarkYara}=await import('../scanner-benchmark-metrics.mjs');
+ const root=await mkdtemp(path.join(tmpdir(),'cs-bench-yara-'));
+ try{
+  const source=path.join(root,'source.yar'),base=path.join(root,'base');await mkdir(base);
+  await writeFile(source,'rule benign { condition: false }');
+  const proof=await seedBenchmarkYara(source,base);
+  assert.equal(proof.bytes,32);assert.equal(proof.sha256.length,64);
+  assert.equal(await readFile(path.join(base,'definitions/yara/default.yar'),'utf8'),'rule benign { condition: false }');
+  assert.equal(await readFile(source,'utf8'),'rule benign { condition: false }');
+  await assert.rejects(()=>seedBenchmarkYara(root,base),/regular/);
+ }finally{await rm(root,{recursive:true,force:true});}
+});

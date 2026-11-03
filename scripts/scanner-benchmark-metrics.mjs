@@ -1,4 +1,4 @@
-import {readdir,readFile} from 'node:fs/promises';
+import {readdir,readFile,lstat,mkdir,writeFile} from 'node:fs/promises';
 import path from 'node:path';
 import {createHash} from 'node:crypto';
 
@@ -113,4 +113,16 @@ export async function waitForTerminal(manager, id, timeoutMs = 300_000) {
     }
     await new Promise(resolve => setTimeout(resolve,50));
   }
+}
+
+/** Opt-in local corpus, copied read-only from the source to the benchmark-owned base. */
+export async function seedBenchmarkYara(source,baseDir) {
+ const stat=await lstat(source);
+ if(!stat.isFile()||stat.isSymbolicLink()||stat.size<1||stat.size>4*1024*1024)throw Error('YARA corpus must be a bounded regular file');
+ const bytes=await readFile(source);
+ if(bytes.length!==stat.size)throw Error('YARA corpus changed during read');
+ const dir=path.join(baseDir,'definitions','yara');
+ await mkdir(dir,{recursive:true});
+ await writeFile(path.join(dir,'default.yar'),bytes,{flag:'wx'});
+ return {bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex'),source:'explicit-local-corpus; source unchanged'};
 }

@@ -17,7 +17,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import {parsePerfLogs, waitForTerminal, inventoryCorpus, incompleteEngines} from "./scanner-benchmark-metrics.mjs";
+import {parsePerfLogs, waitForTerminal, inventoryCorpus, incompleteEngines, seedBenchmarkYara} from "./scanner-benchmark-metrics.mjs";
 import AdmZip from "adm-zip";
 
 const FILE_COUNT = Number(process.env.BENCH_FILES ?? 300);
@@ -119,6 +119,7 @@ async function runReal(root) {
   let engine = null;
   try {
     const { ProtectionEngineService } = await import("../packages/service/dist/engine.js");
+    const yaraCorpus=process.env.BENCH_YARA_FILE?await seedBenchmarkYara(process.env.BENCH_YARA_FILE,baseDir):null;
     engine = new ProtectionEngineService(baseDir);
     await engine.init();
     const manager = engine.scanManager;
@@ -133,6 +134,7 @@ async function runReal(root) {
     const perSec = elapsedMs > 0 ? Math.round((state.filesScanned / (elapsedMs / 1000)) * 10) / 10 : 0;
     return {
       mode: "integrated",
+      yaraCorpus,
       state,
       elapsedMs,
       perSec,
