@@ -87,7 +87,7 @@ function makeEngine({ batchProgress = true, holdBatch = false } = {}) {
           await batchReleasePromise;
           if (ctrl.signal.aborted) return { spawned: true };
         }
-        for (let n = 1; n <= 765; n++) {
+        for (let n = 1; n <= filePaths.length; n++) {
           if (ctrl.signal.aborted) break;
           onProgress(n);
           callbacks.push({ scanId, n, afterCancel: ctrl.signal.aborted });
@@ -212,7 +212,7 @@ describe("scan-800-batch-765-remainder-35", () => {
     assert.equal(state.filesTotal, 800);
   });
 
-  it("processes the 35 eligible ZIP remainder after the 765-file batch resolves", async () => {
+  it("batches 765 regular files and 35 ZIP exteriors together before analyzing each ZIP", async () => {
     const regularPaths = fixturePaths.slice(0, 765);
     const remainderZipPaths = [];
     for (let i = 0; i < 35; i++) {
@@ -248,20 +248,18 @@ describe("scan-800-batch-765-remainder-35", () => {
     const id = await mgr.startScan("custom", tmp);
     const state = await waitTerminal(mgr, id);
 
-    assert.equal(engine.prefetchCalls.length, 2, "batch principal + batch dos ZIP externos");
-    assert.equal(engine.prefetchCalls[0].count, 765);
-    assert.deepEqual(engine.prefetchCalls[0].paths, regularPaths);
-    assert.equal(engine.prefetchCalls[1].count, 35, "os ZIP externos passam por UM batch, nunca por um clamscan cada");
-    assert.deepEqual(engine.prefetchCalls[1].paths, remainderZipPaths);
-    assert.equal(engine.callbacks.length, 765);
-    assert.equal(engine.callbacks.at(-1).n, 765);
+    assert.equal(engine.prefetchCalls.length, 1, "um único lote inclui os ZIP externos, sem clamscan por arquivo");
+    assert.equal(engine.prefetchCalls[0].count, 800);
+    assert.deepEqual(engine.prefetchCalls[0].paths, paths, "765 normais + 35 ZIP externos, sem perda ou duplicação");
+    assert.equal(engine.callbacks.length, 800);
+    assert.equal(engine.callbacks.at(-1).n, 800);
     assert.deepEqual(zipScanCalls, remainderZipPaths.map((zipPath) => ({ scanId: id, zipPath })));
     assert.equal(engine.scannedPaths.size, 800, "each outer candidate calls scanArtifact once");
     assert.deepEqual(batchStateAtArtifactScan, Array(35).fill(0), "remainder starts after batch is cleared");
     assert.deepEqual(prefetchSettledAtArtifactScan, Array(35).fill(true), "remainder starts after the batch promise resolves");
     assert.deepEqual(prefetchCleanupCountAtArtifactScan, Array(35).fill(0), "prefetch state remains owned until all scanArtifact calls finish");
     assert.equal(state.filesScanned, 800);
-    assert.equal(state.filesAnalyzed, 800, "765 batch + 35 individually analyzed, with no double count");
+    assert.equal(state.filesAnalyzed, 800, "765 regular files + 35 ZIP exteriors, with no double count");
     assert.equal(state.filesExcluded, 0);
     assert.equal(state.filesFailed, 0);
     assert.equal(state.threatsFound, 35, "simulated ZIP findings are included in final result");
