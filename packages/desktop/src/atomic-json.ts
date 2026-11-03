@@ -15,7 +15,16 @@ export function atomicWriteJsonSync(file: string, value: unknown, io: Pick<typeo
     io.writeFileSync(fd,content,'utf8');
     io.fsyncSync(fd);
     io.closeSync(fd); fd = undefined;
-    io.renameSync(temporary,file);
+    for(let attempt=0;;attempt++) {
+      try { io.renameSync(temporary,file);break; }
+      catch(error) {
+        const code=(error as NodeJS.ErrnoException).code;
+        if(attempt>=4||!['EPERM','EBUSY','EACCES'].includes(code??''))throw error;
+        // Windows scanners/indexers can briefly hold a no-delete share.
+        // Retry the same atomic replacement, never unlink the old destination.
+        Atomics.wait(new Int32Array(new SharedArrayBuffer(4)),0,0,10*(2**attempt));
+      }
+    }
     created = false;
   } finally {
     if (fd !== undefined) { try { io.closeSync(fd); } catch { /* preserve original failure */ } }
