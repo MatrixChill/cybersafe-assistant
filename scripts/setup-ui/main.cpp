@@ -39,11 +39,12 @@ static bool LoadPng(const wchar_t* rel, Bitmap** out){
   wchar_t exe[MAX_PATH];
   GetModuleFileNameW(nullptr, exe, MAX_PATH);
   std::wstring dir(exe);
-  size_t cut = dir.find_last_of(L"\\");
+  const wchar_t sep = static_cast<wchar_t>(92);
+  size_t cut = dir.find_last_of(sep);
   if(cut != std::wstring::npos) dir = dir.substr(0, cut);
-  std::wstring bases[3] = { L"", dir, dir + L"\..\.." };
+  std::wstring bases[3] = { L"", dir, dir + L"/../.." };
   for(int i = 0; i < 3; i++){
-    std::wstring full = bases[i].empty() ? std::wstring(rel) : bases[i] + L"\\" + rel;
+    std::wstring full = bases[i].empty() ? std::wstring(rel) : bases[i] + L"/" + rel;
     if(FileExistsW(full)){
       Bitmap* b = new Bitmap(full.c_str());
       if(b->GetLastStatus() == Ok){ *out = b; return true; }
@@ -53,8 +54,8 @@ static bool LoadPng(const wchar_t* rel, Bitmap** out){
   return false;
 }
 static void LoadImages(){
-  LoadPng(L"assets\branding\scene\orbital-b-scene.png", &g_scene);
-  LoadPng(L"assets\branding\source\07_CyberSafe_horizontal_lockup.png", &g_lockup);
+  LoadPng(L"assets/branding/scene/orbital-b-scene.png", &g_scene);
+  LoadPng(L"assets/branding/source/07_CyberSafe_horizontal_lockup.png", &g_lockup);
   BuildSceneSoft(960);
 }
 
