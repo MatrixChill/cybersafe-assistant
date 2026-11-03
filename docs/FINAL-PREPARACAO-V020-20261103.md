@@ -76,3 +76,6 @@ O commit d42c683 acrescenta o build do launcher e do simulador inerte antes da s
 Validação local dirigida: 3 testes da ponte de segurança e 5 ensaios de handoff aprovados, sem instalação. Revisão de padrões de segredos no diff: zero correspondências nos padrões inspecionados; não equivale a garantia universal.
 
 Resultado remoto confirmado: https://github.com/MatrixChill/cybersafe-assistant/actions/runs/41675848542 — success, código d42c6834055a6bf6cbad51a83ea93d4ce9b11295. Build dos workspaces aprovado; aplicação 2914/2914, desktop 673/673 (zero skips), handoff Windows 5/5. Todos os restantes passos dirigidos do workflow passaram. Log completo local: output/final-github-ci-success.log. Isto continua a ser build/testes em runner limpo, não instalação NSIS nem upgrade real. O commit documental seguinte regista esta evidência e não modifica os fontes inventariados.
+
+
+Precisão posterior do trace ClamAV: os processos do ZIP exterior e da entrada extraída eram prefetch batches de um ficheiro, não análise direta. Todas as oito observações ClamAV eram batch-cache. Ver CLAMAV-CUSTO-CARGA-20261103.md.
