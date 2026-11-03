@@ -31,7 +31,7 @@ const VERSAO = "9.9.9";
 /** `__BUILD__` como o Vite o imprime no bundle minificado. */
 const buildEmbutido = (versao) => `const B={version:"${versao}",buildId:"b-teste",commit:"0123456"};export default B;\n`;
 
-const HTML_CASCA = fs.readFileSync(path.join(RAIZ, "packages", "desktop", "dist", "index.html"), "utf8");
+const HTML_CASCA = fs.readFileSync(path.join(RAIZ, "packages", "desktop", "index.html"), "utf8");
 const HTML_STAGED = `<!doctype html>
 <html lang="pt-PT"><head><script type="module" crossorigin src="./assets/index-abc.js"></script></head>
 <body><div id="root"></div></body></html>

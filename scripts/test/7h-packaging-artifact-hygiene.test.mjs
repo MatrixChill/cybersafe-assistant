@@ -31,7 +31,14 @@ import * as url from "node:url";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
 const REPO_ROOT = path.resolve(HERE, "..", "..");
-const WIN_UNPACKED = path.join(REPO_ROOT, "packages", "desktop", "release", "win-unpacked");
+// Read-only inspection may target an existing, preserved candidate directory.
+const explicitCandidate = process.env.CYBERSAFE_TEST_CANDIDATE_DIR;
+const WIN_UNPACKED = explicitCandidate
+  ? path.join(path.resolve(explicitCandidate), "win-unpacked")
+  : path.join(REPO_ROOT, "packages", "desktop", "release", "win-unpacked");
+if (explicitCandidate && !fs.existsSync(path.join(WIN_UNPACKED,"resources","app.asar"))) {
+  throw new Error("Explicit candidate has no app.asar; refusing to skip its inspection");
+}
 const ASAR = path.join(WIN_UNPACKED, "resources", "app.asar");
 
 const hasArtifact = fs.existsSync(ASAR);
