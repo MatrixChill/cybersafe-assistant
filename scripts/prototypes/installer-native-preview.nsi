@@ -238,37 +238,37 @@ Function PreviewCreate
   Pop $Bg
   ${NSD_SetStretchedImage} $Bg "$PLUGINSDIR\preview.bmp" $BgImage
   System::Call 'user32::SetWindowPos(p $Bg,p 1,i 0,i 0,i 0,i 0,i 0x13)'
-  ${NSD_CreateLabel} 34% 49% 61% 10% "Preparar uma experiência CyberSafe"
+  ${NSD_CreateLabel} 34% 13% 61% 10% "Preparar uma experiência CyberSafe"
   Pop $Heading
   System::Call 'user32::SetWindowPos(p $Heading,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $Heading ${WM_SETFONT} $HeadingFont 1
-  SetCtlColors $Heading EDF8F8 transparent
-  ${NSD_CreateLabel} 34% 61% 60% 16% "Composição nativa com recursos oficiais.$\r$\nPré-visualização: não instala nem altera o Windows."
+  SetCtlColors $Heading EDF8F8 07151A
+  ${NSD_CreateLabel} 34% 27% 60% 16% "Composição nativa com recursos oficiais.$\r$\nPré-visualização: não instala nem altera o Windows."
   Pop $Body
   System::Call 'user32::SetWindowPos(p $Body,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $Body ${WM_SETFONT} $BodyFont 1
-  SetCtlColors $Body EDF8F8 transparent
-  ${NSD_CreateButton} 4% 31% 22% 6% "Visão geral"
+  SetCtlColors $Body EDF8F8 07151A
+  ${NSD_CreateButton} 34% 50% 27% 7% "Visão geral"
   Pop $Nav0
   System::Call 'user32::SetWindowPos(p $Nav0,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $Nav0 ${WM_SETFONT} $BodyFont 1
   ${NSD_OnClick} $Nav0 Select0
-  ${NSD_CreateButton} 4% 39% 22% 6% "Instalar"
+  ${NSD_CreateButton} 64% 50% 27% 7% "Instalar"
   Pop $Nav1
   System::Call 'user32::SetWindowPos(p $Nav1,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $Nav1 ${WM_SETFONT} $BodyFont 1
   ${NSD_OnClick} $Nav1 Select1
-  ${NSD_CreateButton} 4% 47% 22% 6% "Atualizar"
+  ${NSD_CreateButton} 34% 60% 27% 7% "Atualizar"
   Pop $Nav2
   System::Call 'user32::SetWindowPos(p $Nav2,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $Nav2 ${WM_SETFONT} $BodyFont 1
   ${NSD_OnClick} $Nav2 Select2
-  ${NSD_CreateButton} 4% 55% 22% 6% "Reparar"
+  ${NSD_CreateButton} 64% 60% 27% 7% "Reparar"
   Pop $Nav3
   System::Call 'user32::SetWindowPos(p $Nav3,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $Nav3 ${WM_SETFONT} $BodyFont 1
   ${NSD_OnClick} $Nav3 Select3
-  ${NSD_CreateButton} 4% 63% 22% 6% "Desinstalar"
+  ${NSD_CreateButton} 34% 70% 57% 7% "Desinstalar"
   Pop $Nav4
   System::Call 'user32::SetWindowPos(p $Nav4,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $Nav4 ${WM_SETFONT} $BodyFont 1
@@ -276,13 +276,21 @@ Function PreviewCreate
   ${NSD_CreateLabel} 34% 79% 61% 7% "ESTUDO VISUAL · nenhum progresso simulado"
   Pop $Status
   System::Call 'user32::SetWindowPos(p $Status,p 0,i 0,i 0,i 0,i 0,i 0x13)'
-  SetCtlColors $Status 9E9BFF transparent
-  ${NSD_CreateButton} 76% 86% 20% 9% "Fechar estudo"
+  SetCtlColors $Status 9E9BFF 07151A
+  ${NSD_CreateButton} 76% 87% 20% 9% "Fechar estudo"
   Pop $0
   System::Call 'user32::SetWindowPos(p $0,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   SendMessage $0 ${WM_SETFONT} $BodyFont 1
   !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-secondary.bmp"
   ${NSD_OnClick} $0 ClosePreview
+  ; WS_EX_TRANSPARENT let the artwork cover the heading on first paint.
+  ; Labels become opaque and are raised above the bitmap, in reverse order.
+  System::Call 'user32::SetWindowLongW(p $Heading,i -20,i 0)'
+  System::Call 'user32::SetWindowLongW(p $Body,i -20,i 0)'
+  System::Call 'user32::SetWindowLongW(p $Status,i -20,i 0)'
+  System::Call 'user32::SetWindowPos(p $Status,p 0,i 0,i 0,i 0,i 0,i 0x13)'
+  System::Call 'user32::SetWindowPos(p $Body,p 0,i 0,i 0,i 0,i 0,i 0x13)'
+  System::Call 'user32::SetWindowPos(p $Heading,p 0,i 0,i 0,i 0,i 0,i 0x13)'
   StrCpy $Mode "Boas-vindas"
   Call ModeSelect
   Call NavPaint
