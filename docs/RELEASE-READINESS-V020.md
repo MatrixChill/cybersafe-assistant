@@ -38,7 +38,7 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 | Instalador Orbital B | **NOT TESTED** | UI Win32 existe; handoff NSIS por fazer |
 | Updater GitHub | **BLOCKED** | Ed25519 + Authenticode ausentes (`docs/ASSINATURA-E-GITHUB-V020-20261103.md`) |
 | Pacotes Linux (.deb/.AppImage) | **NOT TESTED** | exige ambiente Linux nativo; WSL2 não equivale |
-| CI no HEAD final | **NOT TESTED** | `ci.yml` passou a cobrir `freebuff/**` e `release/**`; execução remota ainda não confirmada |
+| CI no HEAD final | **PASS** | run [41713660033](https://github.com/MatrixChill/cybersafe-assistant/actions/runs/41713660033) sobre `dcde0ca` |
 | Contrato de versão | **PASS** | `product-version.json` é a fonte canónica (`0.2.0-rc.1`); os `package.json` são versões internas. Guarda nova: `scripts/test/product-version-coherence.test.mjs` (3/3) |
 | Merge para `main` | **BLOCKED** | requer gates verdes + autorização do proprietário |
 | Release pública | **BLOCKED** | depende do updater assinado e dos artefactos verificados |
@@ -56,10 +56,20 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 | Serviço | `npm test -w @cybersafe/service` | **PASS no isolamento** (8/8 dirigido, incl. E e H). Suíte completa: 1007/1010, com a falha de batch atribuída à ausência de YARA no PATH (`engine-failed`), não ao código |
 | Typecheck app/api | `tsc --noEmit` | **PASS** |
 | Build app | `npm run build -w @cybersafe/app` | **PASS** |
-| CI remoto | GitHub Actions | **NOT TESTED** — workflow passou a cobrir `release/**`, execução por confirmar |
+| CI remoto | GitHub Actions | **PASS** — run 41713660033, SHA `dcde0ca` |
 
 As duas falhas acima estão identificadas, não escondidas: nenhuma foi causada por
 alterações desta fase e ambas precisam de reprodução dirigida antes do merge.
+
+## Pendências técnicas abertas
+
+- **YARA no teste de batch (`scan-post-batch-no-double-clamav`)**: falha por
+  ausência do binário `yara` no PATH — o veredicto limpo em cache é degradado
+  para `inconclusive (engine-failed)`, que é o comportamento correto do produto.
+  Tentei uma fixture determinística por Proxy sobre `engine.yara`; **não pegou**
+  (a interface real de avaliação não é `scan`/`scanFile`/`scanFiles`) e foi
+  revertida, sem deixar alterações. Próximo passo correto: injetar o motor no
+  construtor ou separar o teste unitário do teste de integração real.
 
 ## Bugs P0
 
