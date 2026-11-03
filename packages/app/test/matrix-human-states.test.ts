@@ -299,6 +299,8 @@ import { minimizeContextForAi } from ${JSON.stringify(urlModulo("src/lib/aiConte
 const setProviderState = (_value) => {};
 import { originDaResposta, motivoDoEncaminhamentoLocal, decisaoAposTentativaLocal, estadoDoMotivoLocal, estadoDoResultado, acrescentarMensagem, initialMatrixMessages, matrixRoutingStateLabel, devePedirAutorizacaoAntes, deveAutoEnviarExplicacao, promptDeExplicacaoDeProcesso } from ${JSON.stringify(urlModulo("src/lib/matrixConversation.ts"))};
 import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, consentValeParaAlvo, identidadeDeExplicacaoPerdida, limparAutorizacoesExpiradas, autorizacaoValida, autorizarAlvo, AMBITO_CONSENTIMENTO } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isLocalSecurityQuestion, shouldDiscardLateAnswer } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 import { alvoDePedido, descartarResposta, traceDePedido, estadoDoTransporte, bloqueioDeConsentimentoAplica, revalidarAntesDoEnvio, type MatrixRequestState, type IdentidadePedido } from ${JSON.stringify(urlModulo("src/lib/matrixRequestMachine.ts"))};
 const R = ((globalThis.__sSpies ??= { chamadas: [], traces: [], anexadas: [], stream: [], espera: [], ids: 0, timers: [], armados: [], seq: 0 }));
@@ -373,6 +375,7 @@ const setMode = () => {};
 const setInput = () => {};
 const setUpOpenState = () => {};
 const answerLocalSecurityQuestion = async () => (null);
+const answerMatrixLocalQuestion = async (_q: string, _b: any, _o: any) => (null);
 const cancelLocalSecurityRequest = (_c) => {};
 const processDiagnostic = { measuredAt: "2026-10-23T09:05:00.000Z", ram: { totalMb: 16384, usedMb: 12000, availableMb: 4384 }, cpuPercent: 37.5, topProcesses: [], trends: [], limitations: [], recommendations: [] };
 let processContext = ${JSON.stringify(c.contexto === undefined ? CONTEXTO_SINT : c.contexto)};

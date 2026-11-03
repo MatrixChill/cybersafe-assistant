@@ -452,6 +452,8 @@ async function correr(c: Cenario, { correrReenvio = true }: { correrReenvio?: bo
   const prelude = `
 import { deveAutoEnviarExplicacao, promptDeExplicacaoDeProcesso, devePedirAutorizacaoAntes } from ${JSON.stringify(urlModulo("src/lib/matrixConversation.ts"))};
 import { alvoDeExplicacao, consentValeParaAlvo, autorizacaoValida, isProcessQuestion, deveReenviarExplicacaoAposAutorizacao, identidadeDeExplicacaoPerdida, buildProcessLocalReply, buildIdentityLostReply } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 const R = ((globalThis.__mSpies ??= { abertos: [] as boolean[], locais: [] as any[], ofertas: [] as any[] }));
 const cancelLocalSecurityRequest = (_c: any) => {};
 const abortRef: any = { current: null };
@@ -773,12 +775,14 @@ async function correrEnvio(c: CasoEnvio) {
   const prelude = `
 import { originDaResposta, motivoDoEncaminhamentoLocal, decisaoAposTentativaLocal, estadoDoMotivoLocal, estadoDoResultado, acrescentarMensagem, promptDeExplicacaoDeProcesso } from ${JSON.stringify(urlModulo("src/lib/matrixConversation.ts"))};
 import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, buildIdentityLostReply, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, consentValeParaAlvo, autorizacaoValida, identidadeDeExplicacaoPerdida } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isLocalSecurityQuestion, shouldDiscardLateAnswer } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 const R = ((globalThis.__eSpies ??= { chamadas: [] as any[], anexadas: [] as any[] }));
 const useCallback = (fn: any) => fn;
 const window = { electronAPI: null };
 const cancelLocalSecurityRequest = (_c: any) => {};
 const answerLocalSecurityQuestion = async () => (${JSON.stringify(c.respostaLocal ?? null)});
+const answerMatrixLocalQuestion = async (_q: string, _b: any, _o: any) => (${JSON.stringify(c.respostaLocal ?? null)});
 const authHeaders = () => ({ Authorization: "Bearer fixture-de-teste" });
 const API_BASE = "http://127.0.0.1:59999";
 const PAGE_LABELS: any = { dashboard: "Painel", tasks: "Processos" };
@@ -1109,6 +1113,7 @@ import { minimizeContextForAi } from ${JSON.stringify(urlModulo("src/lib/aiConte
 const setProviderState = (_v: string) => {};
 import { deveAutoEnviarExplicacao, promptDeExplicacaoDeProcesso, devePedirAutorizacaoAntes, originDaResposta, motivoDoEncaminhamentoLocal, decisaoAposTentativaLocal, estadoDoMotivoLocal, estadoDoResultado, acrescentarMensagem } from ${JSON.stringify(urlModulo("src/lib/matrixConversation.ts"))};
 import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, buildIdentityLostReply, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, alvoParaConsentimento, consentValeParaAlvo, autorizacaoValida, identidadeDeExplicacaoPerdida, deveReenviarExplicacaoAposAutorizacao, revogarAlvo, autorizarAlvo, limparAutorizacoesExpiradas } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isLocalSecurityQuestion, shouldDiscardLateAnswer } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 import { alvoDePedido, descartarResposta, traceDePedido, bloqueioDeConsentimentoAplica, revalidarAntesDoEnvio } from ${JSON.stringify(urlModulo("src/lib/matrixRequestMachine.ts"))};
 import { decidirConsentimentoDeEnvio, mesmosCamposDeConsentimento, camposDeConsentimentoNoChat, codigoDeConsentimentoRecusado, mensagemDeConsentimento, subscreverRevogacaoDeConsentimento, notificarRevogacaoDeConsentimento, alvoUnicoCanonico, autorizacaoUnicaValida, camposDeAutorizacaoUnicaNoChat, pedirAutorizacaoUnica as pedirAutorizacaoUnicaReal } from ${JSON.stringify(urlModulo("src/lib/matrixExternalConsent.ts"))};

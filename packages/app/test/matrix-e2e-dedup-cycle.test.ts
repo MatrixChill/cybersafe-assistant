@@ -54,6 +54,8 @@ async function criar() {
   const prelude = `
 import { originDaResposta, motivoDoEncaminhamentoLocal, decisaoAposTentativaLocal, estadoDoMotivoLocal, estadoDoResultado, deveAutoEnviarExplicacao, promptDeExplicacaoDeProcesso, devePedirAutorizacaoAntes, acrescentarMensagem } from ${JSON.stringify(urlModulo("src/lib/matrixConversation.ts"))};
 import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, consentValeParaAlvo, autorizacaoValida, identidadeDeExplicacaoPerdida } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { alvoDePedido, descartarResposta, bloqueioDeConsentimentoAplica, revalidarAntesDoEnvio } from ${JSON.stringify(urlModulo("src/lib/matrixRequestMachine.ts"))};
 import { isLocalSecurityQuestion } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 
@@ -67,6 +69,7 @@ const authHeaders = () => ({ Authorization: "Bearer fixture-sem-segredo" });
 const offlineReply = (_t: string, _p: any) => ({ content: "offline", isOffTopic: false, isDanger: false });
 const shouldDiscardLateAnswer = (_i: any) => false;
 const answerLocalSecurityQuestion = async () => null;
+const answerMatrixLocalQuestion = async (_q: string, _b: any, _o: any) => (null);
 const cancelLocalSecurityRequest = (c: any) => { c?.abort(); };
 const setInput = (_t: string) => {};
 const setStreamed = (_v: string) => {};

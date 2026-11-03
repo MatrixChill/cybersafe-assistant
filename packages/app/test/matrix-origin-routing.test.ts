@@ -325,6 +325,8 @@ import { minimizeContextForAi } from ${JSON.stringify(urlModulo("src/lib/aiConte
 const setProviderState = (_value: string) => {};
 import { originDaResposta, motivoDoEncaminhamentoLocal, decisaoAposTentativaLocal, estadoDoMotivoLocal, estadoDoResultado, promptDeExplicacaoDeProcesso } from ${JSON.stringify(urlModulo("src/lib/matrixConversation.ts"))};
 import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, consentValeParaAlvo, autorizacaoValida, identidadeDeExplicacaoPerdida } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { acrescentarMensagem } from ${JSON.stringify(urlModulo("src/lib/matrixConversation.ts"))};
 import { isLocalSecurityQuestion } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 const R = ((globalThis.__matrixSpies ??= { chamadas: [] as any[], anexadas: [] as any[] }));
@@ -333,6 +335,7 @@ const window = { electronAPI: null };
 const cancelLocalSecurityRequest = (_c: any) => {};
 const shouldDiscardLateAnswer = (_i: any) => false;
 const answerLocalSecurityQuestion = async () => (${JSON.stringify(c.respostaLocal ?? null)});
+const answerMatrixLocalQuestion = async (_q: string, _b: any, _o: any) => (${JSON.stringify(c.respostaLocal ?? null)});
 const authHeaders = () => ({ Authorization: "Bearer fixture-de-teste" });
 const API_BASE = "http://127.0.0.1:59999";
 const PAGE_LABELS: any = { dashboard: "Painel", tasks: "Processos" };
@@ -495,4 +498,10 @@ test("sugestão elegível e pergunta escrita usam o MESMO fluxo: um único ponto
   // Minimização provada no payload REAL: sem consentimento, nem o contexto de
   // telemetria da página sai; com consentimento do alvo, sai o contrato integral.
   assert.equal(enviado.context, "", "telemetria da página não segue sem consentimento");
+});
+
+test("AIAssistant encaminha leituras de estado pelo módulo de tópicos", () => {
+  const fonte = readFileSync(new URL("../src/components/AIAssistant.tsx", import.meta.url), "utf8");
+  assert.match(fonte, /from "@\/lib\/matrixLocalTools"/, "o componente tem de usar o módulo de tópicos");
+  assert.match(fonte, /await answerMatrixLocalQuestion\(/, "a leitura local passa pela entrada única");
 });

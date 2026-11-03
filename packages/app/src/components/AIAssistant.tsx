@@ -7,11 +7,11 @@ import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Sparkles, MessageSquare, StopCircle, RefreshCw, MoreHorizontal, PanelLeft, PanelRight, Minimize2, Move, PinOff, Plus, KeyRound } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
-  answerLocalSecurityQuestion,
   cancelLocalSecurityRequest,
   shouldDiscardLateAnswer,
   isLocalSecurityQuestion,
 } from "@/lib/localSecurityReply"
+import { answerMatrixLocalQuestion } from "@/lib/matrixLocalTools"
 import { MatrixAvatar } from "./MatrixAvatar"
 import { useAuth } from "@/contexts/AuthContext"
 import { subscribeMatrixEscape } from "@/lib/matrixEscape"
@@ -45,7 +45,7 @@ import {
 } from "@/lib/matrixLauncherPosition"
 import type { ProcessIntelligenceContext } from "@cybersafe/shared-types"
 import type { ProcessDiagnostic, EstadoIdentidade } from "@/lib/processIntelligence"
-import { buildProcessLocalReply, buildIdentityLostReply, isProcessQuestion, perguntaApontaParaAlvo, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, alvoParaConsentimento, mesmoAlvo, rotuloDoProcessoEmCausa, consentValeParaAlvo, rotuloDeConsentimento, identidadeDeExplicacaoPerdida, deveReenviarExplicacaoAposAutorizacao, autorizarAlvo, revogarAlvo, autorizacaoValida, limparAutorizacoesExpiradas, AMBITO_CONSENTIMENTO, CAMPOS_AUTORIZADOS, CAMPOS_NUNCAS_AUTORIZADOS, type AlvoProcesso, type PendenteExplicacao, type AutorizacaoAlvo } from "@/lib/processMatrix"
+import { buildProcessLocalReply, buildIdentityLostReply, isProcessDiagnosticRequest, perguntaApontaParaAlvo, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, alvoParaConsentimento, mesmoAlvo, rotuloDoProcessoEmCausa, consentValeParaAlvo, rotuloDeConsentimento, identidadeDeExplicacaoPerdida, deveReenviarExplicacaoAposAutorizacao, autorizarAlvo, revogarAlvo, autorizacaoValida, limparAutorizacoesExpiradas, AMBITO_CONSENTIMENTO, CAMPOS_AUTORIZADOS, CAMPOS_NUNCAS_AUTORIZADOS, type AlvoProcesso, type PendenteExplicacao, type AutorizacaoAlvo } from "@/lib/processMatrix"
 import {
   lerConsentimento,
   criarConsentimento,
@@ -1281,7 +1281,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       stickToBottomRef.current = true
       cancelLocalSecurityRequest(abortRef.current)
       const questionId = ++questionGenerationRef.current
-      const processQuestion = isProcessQuestion(trimmed)
+      const processQuestion = isProcessDiagnosticRequest(trimmed)
       // O controlador nasce ANTES da identidade e fica capturado pela decisão:
       // ler `abortRef.current` mais tarde é ler o controlador de OUTRO pedido, que
       // é precisamente o que acontece depois de `resetConversation` ou de um novo
@@ -1423,7 +1423,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       // que chega tarde (cancelar/janela fechada) é descartado: sem late append.
       let respostaLocalDisponivel = false
       if (motivo === "seguranca-local") {
-        const answer = await answerLocalSecurityQuestion(
+        const answer = await answerMatrixLocalQuestion(
           trimmed,
           window.electronAPI ?? null,
           { signal: controller.signal },
