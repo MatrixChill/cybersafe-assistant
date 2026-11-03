@@ -57,15 +57,19 @@ const num = (value: number | null | undefined): number | null =>
 const gb = (value: number | null): string =>
   value === null ? "sem leitura" : `${Math.round(value * 10) / 10} GB`;
 
-const STALE_MS = 120_000;
+// Fontes com semânticas diferentes: hardware é amostrado a cada poucos segundos;
+// a proteção muda por acção do utilizador e chega pelo serviço. Um limite único
+// escondia leituras válidas de proteção ou dava hardware antigo como atual.
+const HARDWARE_STALE_MS = 120_000;
+const PROTECTION_STALE_MS = 300_000;
 
 /** Nunca apresenta leitura futura, inválida ou antiga como estado atual. */
-function freshness(timestamp: string | undefined, now: number): { ok: boolean; text: string } {
+function freshness(timestamp: string | undefined, now: number, limiteMs = HARDWARE_STALE_MS): { ok: boolean; text: string } {
   const at = timestamp ? new Date(timestamp).getTime() : Number.NaN;
   if (!Number.isFinite(at)) return { ok: false, text: "sem leitura válida" };
   const age = now - at;
   if (age < 0) return { ok: false, text: "leitura inválida (data futura)" };
-  if (age > STALE_MS) return { ok: false, text: `leitura antiga (há ${Math.round(age / 1000)} s)` };
+  if (age > limiteMs) return { ok: false, text: `leitura antiga (há ${Math.round(age / 1000)} s)` };
   return { ok: true, text: age <= 1000 ? "agora" : `há ${Math.round(age / 1000)} s` };
 }
 
@@ -112,7 +116,7 @@ const ENGINES = [
   ["Native", "nativeEngine"],
 ] as const;
 
-function protectionReply(protection: ProtectionState | null): string {
+function protectionReply(protection: ProtectionState | null, now: number): string {
   if (!protection) {
     return "Sem leitura da proteção — o estado é desconhecido. Confirma que o serviço CyberSafe está a correr.";
   }
@@ -127,8 +131,18 @@ function protectionReply(protection: ProtectionState | null): string {
     const engine = protection.engine[key];
     return engine ? `${label} ${engineStatusText(engine.status)}` : `${label} sem leitura`;
   });
+  const carimbo = (protection as unknown as { timestamp?: string; measuredAt?: string }).timestamp
+    ?? (protection as unknown as { measuredAt?: string }).measuredAt;
+  const idade = carimbo ? freshness(carimbo, now, PROTECTION_STALE_MS) : null;
+  const cabeca = idade
+    ? `Proteção: ${protectionStatusText(protection.status)} (${idade.text}).`
+    : `Proteção: ${protectionStatusText(protection.status)}.`;
+  const aviso = idade && !idade.ok
+    ? ["Aviso: este é o último estado conhecido e pode já não ser o atual."]
+    : [];
   return [
-    `Proteção: ${protectionStatusText(protection.status)}.`,
+    ...aviso,
+    cabeca,
     `· Tempo real: ${realtime ? realtime.text : "não lido (desconhecido)"}`,
     `· Motores: ${engines.join(" · ")}`,
     `· Nível: ${deriveProtectionLevel(protection.status, protection.engine)}`,
@@ -156,7 +170,7 @@ export async function answerMatrixLocalQuestion(
     const result = await Promise.allSettled([Promise.resolve().then(() => bridge.getProtectionState())]);
     if (options.signal?.aborted) return null;
     const first = result[0];
-    return { reply: protectionReply(first.status === "fulfilled" ? first.value : null) };
+    return { reply: protectionReply(first.status === "fulfilled" ? first.value : null, now) };
   }
   const result = await Promise.allSettled([Promise.resolve().then(() => bridge.getHardwareSnapshot())]);
   if (options.signal?.aborted) return null;

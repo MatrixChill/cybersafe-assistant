@@ -11,7 +11,7 @@ import {
   shouldDiscardLateAnswer,
   isLocalSecurityQuestion,
 } from "@/lib/localSecurityReply"
-import { answerMatrixLocalQuestion } from "@/lib/matrixLocalTools"
+import { answerMatrixLocalQuestion, classifyMatrixTopic } from "@/lib/matrixLocalTools"
 import { MatrixAvatar } from "./MatrixAvatar"
 import { useAuth } from "@/contexts/AuthContext"
 import { subscribeMatrixEscape } from "@/lib/matrixEscape"
@@ -45,7 +45,7 @@ import {
 } from "@/lib/matrixLauncherPosition"
 import type { ProcessIntelligenceContext } from "@cybersafe/shared-types"
 import type { ProcessDiagnostic, EstadoIdentidade } from "@/lib/processIntelligence"
-import { buildProcessLocalReply, buildIdentityLostReply, isProcessDiagnosticRequest, perguntaApontaParaAlvo, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, alvoParaConsentimento, mesmoAlvo, rotuloDoProcessoEmCausa, consentValeParaAlvo, rotuloDeConsentimento, identidadeDeExplicacaoPerdida, deveReenviarExplicacaoAposAutorizacao, autorizarAlvo, revogarAlvo, autorizacaoValida, limparAutorizacoesExpiradas, AMBITO_CONSENTIMENTO, CAMPOS_AUTORIZADOS, CAMPOS_NUNCAS_AUTORIZADOS, type AlvoProcesso, type PendenteExplicacao, type AutorizacaoAlvo } from "@/lib/processMatrix"
+import { buildProcessLocalReply, buildIdentityLostReply, isProcessDiagnosticRequest, isProcessListQuestion, perguntaApontaParaAlvo, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, alvoParaConsentimento, mesmoAlvo, rotuloDoProcessoEmCausa, consentValeParaAlvo, rotuloDeConsentimento, identidadeDeExplicacaoPerdida, deveReenviarExplicacaoAposAutorizacao, autorizarAlvo, revogarAlvo, autorizacaoValida, limparAutorizacoesExpiradas, AMBITO_CONSENTIMENTO, CAMPOS_AUTORIZADOS, CAMPOS_NUNCAS_AUTORIZADOS, type AlvoProcesso, type PendenteExplicacao, type AutorizacaoAlvo } from "@/lib/processMatrix"
 import {
   lerConsentimento,
   criarConsentimento,
@@ -1281,6 +1281,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       stickToBottomRef.current = true
       cancelLocalSecurityRequest(abortRef.current)
       const questionId = ++questionGenerationRef.current
+      const processListQuestion = isProcessListQuestion(trimmed)
       const processQuestion = isProcessDiagnosticRequest(trimmed)
       // O controlador nasce ANTES da identidade e fica capturado pela decisão:
       // ler `abortRef.current` mais tarde é ler o controlador de OUTRO pedido, que
@@ -1366,13 +1367,19 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       // máquina, e só vai ao fornecedor o que não tem motivo de intercepção. Antes
       // isto estavam cinco `if`s soltos e a resposta não dizia de onde vinha — que
       // era exactamente o defeito: um diagnóstico local parecia uma resposta de IA.
+      // O gate tem de usar a MESMA classificação que a resposta: o detector
+      // antigo exigia sujeito "PC" e deixava "Verifique aí o estado de proteção"
+      // e "Quanto armazenamento tenho?" sem rota local — a função nova nunca era
+      // chamada. `general` continua a não abrir este caminho.
+      const topicoLocal = classifyMatrixTopic(trimmed)
       const rota = {
         texto: trimmed,
         // O gate de consentimento só se aplica quando há MESMO contexto do alvo a
         // enviar. Discutir «processos» em geral é chat geral e não requer telemetria;
         // a marca de privacidade da mensagem usa a mesma decisão (`perguntaPrivada`).
         perguntaProcesso: processQuestion && anexarContexto,
-        perguntaSegurancaLocal: isLocalSecurityQuestion(trimmed),
+        perguntaSegurancaLocal: isLocalSecurityQuestion(trimmed)
+          || (topicoLocal !== null && topicoLocal !== "general"),
         identidadePerdida: identityLost,
         perigo: localReply.isDanger === true,
         foraDoTema: localReply.isOffTopic === true,
@@ -1410,6 +1417,15 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       // degradam o estado global da IA (que continua online para perguntas gerais).
       if (motivo === "sem-consentimento" || motivo === "identidade-perdida") {
         return responderLocal(localReply.content, true)
+      }
+      // Caso D: "Qual processo usa mais CPU?" é uma consulta à lista medida.
+      // Responde com o processo que as medições apontam — nunca com o que estiver
+      // selecionado — e sem tocar no fornecedor.
+      if (processListQuestion) {
+        const lista = processDiagnostic
+          ? buildProcessLocalReply(processDiagnostic, undefined, undefined)
+          : "Sem leitura de processos neste momento — não posso dizer qual está a consumir mais CPU."
+        return responderLocal(lista, false, true)
       }
       // Pedido perigoso ou fora do tema: responde-se localmente (nunca ao provider).
       if (motivo === "perigo") return responderLocal(localReply.content, processQuestion)

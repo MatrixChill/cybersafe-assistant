@@ -320,10 +320,24 @@ const PROCESS_EDUCATIONAL =
  * concreto. "O que fazer se um processo usa 100% de CPU?" é conselho geral: não
  * pode abrir o diagnóstico do processo que estiver selecionado.
  */
+const PROCESS_LIST =
+  /(?<![\p{L}\p{N}])((qual|quais|que)\s+(processo|programa)|(mais|maior)\s+(cpu|mem[oó]ria))(?![\p{L}\p{N}])/iu;
+
+/**
+ * "Qual processo usa mais CPU?" pede a LISTA medida, não o diagnóstico do alvo
+ * selecionado. Um alvo nomeado continua a ser diagnóstico (tratado antes).
+ */
+export function isProcessListQuestion(text: string): boolean {
+  if (!isProcessQuestion(text)) return false;
+  if (EXPLICIT_PROCESS_TARGET.test(text)) return false;
+  return PROCESS_LIST.test(text);
+}
+
 export function isProcessDiagnosticRequest(text: string): boolean {
   if (!isProcessQuestion(text)) return false;
   // Alvo nomeado (demonstrativo, PID ou "processo 1234") é sempre diagnóstico.
   if (EXPLICIT_PROCESS_TARGET.test(text)) return true;
+  if (PROCESS_LIST.test(text)) return false;
   return !PROCESS_EDUCATIONAL.test(text);
 }
 

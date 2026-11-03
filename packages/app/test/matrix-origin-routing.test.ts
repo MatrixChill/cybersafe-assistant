@@ -314,28 +314,43 @@ type Cenario = {
   isRetry?: boolean;
   /** `ok` = SSE concluído; `429`/`500` = erro do fornecedor. */
   fornecedor?: "ok" | "429" | "sem-conteudo";
+  /** Fluxo completo: módulo real de tópicos + bridge falsa. */
+  realLocal?: { protection: unknown; hardware: unknown };
+  /** Processos medidos, para a consulta de lista (Caso D). */
+  topProcess?: Array<Record<string, unknown>>;
 };
 
 async function correrCaso(c: Cenario) {
   const dir = mkdtempSync(tmpdir() + "/cybersafe-matrix-harness-");
   temporarios.push(dir);
   const fornecedor = c.fornecedor ?? "ok";
+  const janelaFake = c.realLocal
+    ? `{ electronAPI: { getProtectionState: async () => { chamadasLocais.protection += 1; return ${JSON.stringify(c.realLocal.protection)}; }, getHardwareSnapshot: async () => { chamadasLocais.hardware += 1; return ${JSON.stringify(c.realLocal.hardware)}; } } }`
+    : `{ electronAPI: null }`;
+  const declLocal = c.realLocal
+    ? 'import { answerMatrixLocalQuestion } from ' + JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts")) + ';'
+    : 'const answerMatrixLocalQuestion = async (_q: any, _b: any, _o: any) => (' + JSON.stringify(c.respostaLocal ?? null) + ');';
   const prelude = `
 import { minimizeContextForAi } from ${JSON.stringify(urlModulo("src/lib/aiContextBuilder.ts"))};
 const setProviderState = (_value: string) => {};
 import { originDaResposta, motivoDoEncaminhamentoLocal, decisaoAposTentativaLocal, estadoDoMotivoLocal, estadoDoResultado, promptDeExplicacaoDeProcesso } from ${JSON.stringify(urlModulo("src/lib/matrixConversation.ts"))};
 import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, consentValeParaAlvo, autorizacaoValida, identidadeDeExplicacaoPerdida } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
+import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { acrescentarMensagem } from ${JSON.stringify(urlModulo("src/lib/matrixConversation.ts"))};
 import { isLocalSecurityQuestion } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 const R = ((globalThis.__matrixSpies ??= { chamadas: [] as any[], anexadas: [] as any[] }));
 const useCallback = (fn: any) => fn;
-const window = { electronAPI: null };
+const chamadasLocais = { protection: 0, hardware: 0 };
+const window = ${janelaFake};
+(R as any).locais = chamadasLocais;
 const cancelLocalSecurityRequest = (_c: any) => {};
 const shouldDiscardLateAnswer = (_i: any) => false;
 const answerLocalSecurityQuestion = async () => (${JSON.stringify(c.respostaLocal ?? null)});
-const answerMatrixLocalQuestion = async (_q: string, _b: any, _o: any) => (${JSON.stringify(c.respostaLocal ?? null)});
+${declLocal}
+import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
 const authHeaders = () => ({ Authorization: "Bearer fixture-de-teste" });
 const API_BASE = "http://127.0.0.1:59999";
 const PAGE_LABELS: any = { dashboard: "Painel", tasks: "Processos" };
@@ -368,6 +383,7 @@ const setInput = (_v: string) => {};
 const setPhase = (_v: string) => {};
 const setMode = (_v: string) => {};
 const processDiagnostic: any = { measuredAt: "2026-10-22T20:00:00.000Z", ram: { totalMb: 16384, usedMb: 12000, availableMb: 4384 }, cpuPercent: 37.5, topProcesses: [], trends: [], limitations: [], recommendations: [] };
+if (${JSON.stringify(c.topProcess ?? null)}) (processDiagnostic as any).topProcesses = ${JSON.stringify(c.topProcess ?? null)};
 const processContext: any = ${JSON.stringify(c.processContext === undefined ? contextoProcesso : c.processContext)};
 const explainRequest: any = ${JSON.stringify(c.explainRequest ?? null)};
 const explainIdentity = "presente";
@@ -399,6 +415,7 @@ const anexarMensagem = (msg: any) => { const next = [...messagesRef.current, msg
   return {
     payload: (globalThis as any).__matrixSpies.chamadas.slice(),
     anexadas: modulo.anexadas() as Array<{ role: string; content: string; origin?: string; privateProcessData?: boolean }>,
+    locais: (globalThis as any).__matrixSpies.locais as { protection: number; hardware: number },
   };
 }
 
@@ -504,4 +521,63 @@ test("AIAssistant encaminha leituras de estado pelo módulo de tópicos", () => 
   const fonte = readFileSync(new URL("../src/components/AIAssistant.tsx", import.meta.url), "utf8");
   assert.match(fonte, /from "@\/lib\/matrixLocalTools"/, "o componente tem de usar o módulo de tópicos");
   assert.match(fonte, /await answerMatrixLocalQuestion\(/, "a leitura local passa pela entrada única");
+});
+
+// ── Os quatro casos no percurso real: mensagem → classificação → rota → IPC ──
+const protFixture = {
+  status: "protected",
+  protectionEnabled: true,
+  protectionPausedUntil: null,
+  engine: {
+    serviceRunning: true,
+    yara: { status: "active" },
+    hashDb: { status: "active" },
+    clamav: { status: "degraded" },
+    nativeEngine: { status: "active" },
+  },
+};
+const hwFixture = {
+  timestamp: new Date().toISOString(),
+  cpu: { usage: 12, usageStatus: "ok" },
+  ram: { usagePercent: 48, totalGb: 16, usedGb: 7.7 },
+  disk: { usagePercent: 74.5, totalGb: 500, usedGb: 372.5 },
+};
+
+test("Caso A no fluxo real: proteção responde local, sem fornecedor, em qualquer página", async () => {
+  const r = await correrCaso({
+    texto: "Verifique aí o estado de proteção.",
+    realLocal: { protection: protFixture, hardware: hwFixture },
+  });
+  assert.equal(r.payload.length, 0, "nenhum pedido ao fornecedor");
+  assert.equal(r.locais.protection, 1, "leu o estado de proteção");
+  assert.equal(r.locais.hardware, 0, "não leu hardware para uma pergunta de proteção");
+  const ultima = r.anexadas[r.anexadas.length - 1];
+  assert.equal(ultima.origin, "local");
+  assert.match(ultima.content, /YARA/);
+  assert.match(ultima.content, /ClamAV/);
+});
+
+test("Caso B no fluxo real: armazenamento responde local, sem fornecedor", async () => {
+  const r = await correrCaso({
+    texto: "Quanto armazenamento tenho?",
+    realLocal: { protection: protFixture, hardware: hwFixture },
+  });
+  assert.equal(r.payload.length, 0, "nenhum pedido ao fornecedor");
+  assert.equal(r.locais.hardware, 1, "leu hardware");
+  assert.equal(r.locais.protection, 0, "não leu proteção para uma pergunta de disco");
+  const ultima = r.anexadas[r.anexadas.length - 1];
+  assert.equal(ultima.origin, "local");
+  assert.match(ultima.content, /74\.5%/);
+  assert.match(ultima.content, /127\.5 GB livres de 500 GB/);
+});
+
+test("Caso D no fluxo real: lista de processos responde local com o processo medido", async () => {
+  const r = await correrCaso({
+    texto: "Qual processo utiliza mais CPU agora?",
+    topProcess: [{ pid: 4712, name: "compressor.exe", cpuPercent: 37.5, memoryMb: 220, startedAt: null }],
+  });
+  assert.equal(r.payload.length, 0, "nenhum pedido ao fornecedor");
+  const ultima = r.anexadas[r.anexadas.length - 1];
+  assert.equal(ultima.origin, "local");
+  assert.match(ultima.content, /compressor/i);
 });
