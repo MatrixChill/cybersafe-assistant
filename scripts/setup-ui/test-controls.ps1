@@ -15,6 +15,8 @@ public class Ctl {
 }
 "@
 function ClientW($h) { $r = New-Object Ctl+RECT; [void][Ctl]::GetClientRect($h, [ref]$r); return [int]$r.R }
+function ClientH($h) { $r = New-Object Ctl+RECT; [void][Ctl]::GetClientRect($h, [ref]$r); return [int]$r.B }
+function UiScale($h) { $u = [Math]::Min((ClientW $h) / 1120.0, (ClientH $h) / 720.0); if ($u -lt 1) { $u = 1 }; if ($u -gt 1.9) { $u = 1.9 }; return $u }
 function Shot($h, $name) {
   $r = New-Object Ctl+RECT; [void][Ctl]::GetClientRect($h, [ref]$r)
   if ($r.R -le 0 -or $r.B -le 0) { Write-Host 'shot skipped: no client area'; return }
@@ -25,10 +27,11 @@ function Shot($h, $name) {
 }
 function ClickBtn($h, $index) {
   $cw = ClientW $h
-  $x = [int]$cw - 151
-  if ($index -eq 1) { $x = [int]$cw - 97 }
-  if ($index -eq 2) { $x = [int]$cw - 43 }
-  $lp = [IntPtr]((28 -shl 16) -bor $x)
+  $u = UiScale $h
+  $x = [int]($cw - 151 * $u)
+  if ($index -eq 1) { $x = [int]($cw - 97 * $u) }
+  if ($index -eq 2) { $x = [int]($cw - 43 * $u) }
+  $lp = [IntPtr](([int](28 * $u) -shl 16) -bor $x)
   [void][Ctl]::PostMessage($h, 0x0200, [IntPtr]::Zero, $lp)
   [void][Ctl]::PostMessage($h, 0x0201, [IntPtr]1, $lp)
   [void][Ctl]::PostMessage($h, 0x0202, [IntPtr]::Zero, $lp)
