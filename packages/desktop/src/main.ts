@@ -49,6 +49,7 @@ import {
   validateAutomaticInput,
   validateInstallRequest,
 } from "./updater/bridge.js";
+import { startAutomaticChecks } from "./updater/automatic-checks.js";
 import { createProductionUpdater } from "./updater/production.js";
 import type { Updater } from "./updater/updater.js";
 import type { UpdaterResult } from "./updater/index.js";
@@ -98,6 +99,7 @@ let mainWindow: BrowserWindow | null = null;
 // Updater da aplicação (ver updater/bridge.ts). `null` até whenReady inicializar;
 // os handlers tratam `null` sem crash e sem `appUpdater!`.
 let appUpdater: Updater | null = null;
+let stopAutomaticChecks: (() => void) | null = null;
 let updateStateUnsub: (() => void) | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
@@ -1856,6 +1858,7 @@ if (!gotTheLock) {
       installedBuild: installedIdentity.build,
       installedCommit: installedIdentity.commit,
     });
+    stopAutomaticChecks = startAutomaticChecks(appUpdater);
     updateStateUnsub = appUpdater.onState((s) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:update-state", toAppUpdateSnapshot(s));
     });
@@ -1959,6 +1962,8 @@ app.on("before-quit", (event) => {
   });
   // updater: liberta o listener de estado (sem referência solta após sair).
   if (updateStateUnsub) { try { updateStateUnsub(); } catch { /* já removido */ } updateStateUnsub = null; }
+  stopAutomaticChecks?.();
+  stopAutomaticChecks = null;
   appUpdater = null;
   if (!app.isPackaged) {
     // Em `npm run dev`, o `concurrently -k` mata os restantes watchers
