@@ -81,3 +81,15 @@ congelado, instalado ou publicado. A RC1 LAB `497e634` permanece intacta.
 - Página de modo sem tema e com sufixo inglês `(must run as admin)`. No instalador real o callback
   vem de `customInstallMode` do electron-builder; o preview não o liga. Por validar no fluxo real.
 - Checkbox «Abrir o CyberSafe Assistant.» com contraste insuficiente.
+## Atualização — terceira ronda
+Tentada a estilização no callback **PRE**, antes do primeiro paint. Resultado: os botões das páginas
+MUI continuam com a placa do sistema; as capturas de modo, progresso e conclusão mantêm a placa branca.
+Conclusão técnica: `BS_BITMAP` + `BM_SETIMAGE` aplicados a botões do wizard que já existem não é
+honrado pelo controlo, em nenhuma das fases. A via correta é owner-draw com subclassing seguro e
+libertação de recursos GDI, ou manter os botões nativos e tematizar apenas o envolvente.
+
+A alteração do texto de `$RadioButtonLabel1` criou um rótulo duplicado em vez de substituir o texto
+do rádio; foi revertida. O sufixo inglês `(must run as admin)` continua aberto.
+
+Mantido: PRE/SHOW callbacks (sem efeito visual nos botões, sem regressão), tematização de
+checkboxes nativos via `CS_ThemeCheckboxes`, e os testes 14/14 + 3/3.

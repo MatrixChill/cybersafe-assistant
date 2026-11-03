@@ -71,6 +71,7 @@ Var CSSpaceState
 ; Expanded by electron-builder inside its install-mode function, AFTER any
 ; optional licence page has consumed its own one-shot MUI SHOW callback.
 !macro customInstallMode
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE CS_InstallModePre
   !define MUI_PAGE_CUSTOMFUNCTION_SHOW CS_InstallModeShow
 !macroend
 
@@ -80,6 +81,7 @@ Var CSSpaceState
   PageEx custom
     PageCallbacks CSConfigPre CSConfigLeave
   PageExEnd
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE CS_ProgressPre
   !define MUI_PAGE_CUSTOMFUNCTION_SHOW CS_ProgressShow
 !macroend
 
@@ -98,6 +100,7 @@ Var CSSpaceState
     !define MUI_FINISHPAGE_RUN
     !define MUI_FINISHPAGE_RUN_FUNCTION "StartApp"
   !endif
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE CS_FinishPre
   !define MUI_PAGE_CUSTOMFUNCTION_SHOW CS_FinishShow
   !insertmacro MUI_PAGE_FINISH
 !macroend
@@ -250,6 +253,31 @@ Var CSSpaceState
 !macro CS_Deferred
   ; Native frame: DWM dark caption and accent border. The OS still owns the
   ; minimise/close buttons, focus, Alt+F4 and accessibility; nothing is hidden.
+  Function CS_ThemeCheckboxes
+    Push $0
+    Push $1
+    Push $2
+    StrCpy $2 0
+    cs_cb_loop:
+      System::Call 'user32::FindWindowEx(p $HWNDPARENT, p r2, t "Button", p 0) p.r0'
+      ${If} $0 == 0
+        Goto cs_cb_done
+      ${EndIf}
+      System::Call 'user32::GetWindowLongW(p r0, i -16) i.r1'
+      IntOp $1 $1 & 0x0F
+      ${If} $1 == 2
+      ${OrIf} $1 == 3
+        System::Call 'uxtheme::SetWindowTheme(p r0, w "", w "")'
+        SetCtlColors $0 0xEDF8F8 0x07151A
+      ${EndIf}
+      StrCpy $2 $0
+      Goto cs_cb_loop
+    cs_cb_done:
+    Pop $2
+    Pop $1
+    Pop $0
+  FunctionEnd
+
   Function CS_ApplyFrame
     System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 20, *i 1, i 4)'
     System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 19, *i 1, i 4)'
@@ -273,6 +301,7 @@ Var CSSpaceState
     ${EndIf}
     ; Forca o non-client a repintar depois dos atributos DWM.
     System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i 0, i 0, i 0, i 0, i 0x37)'
+    Call CS_ThemeCheckboxes
   FunctionEnd
   !ifndef INSTALL_MODE_PER_ALL_USERS
   Function CS_InstallModeShow
@@ -284,9 +313,20 @@ Var CSSpaceState
     SetCtlColors $MultiUser.InstallModePage.AllUsers 0xEDF8F8 0x07151A
     SetCtlColors $MultiUser.InstallModePage.CurrentUser 0xEDF8F8 0x07151A
     SetCtlColors $RadioButtonLabel1 0xEDF8F8 0x07151A
+    System::Call 'uxtheme::SetWindowTheme(p $MultiUser.InstallModePage.AllUsers, w "", w "")'
+    System::Call 'uxtheme::SetWindowTheme(p $MultiUser.InstallModePage.CurrentUser, w "", w "")'
     Call CS_StyleFooter
   FunctionEnd
   !endif
+  Function CS_InstallModePre
+    Call CS_StyleFooter
+  FunctionEnd
+  Function CS_ProgressPre
+    Call CS_StyleFooter
+  FunctionEnd
+  Function CS_FinishPre
+    Call CS_StyleFooter
+  FunctionEnd
   Function CS_ProgressShow
     Call CS_ApplyFrame
     SetCtlColors $mui.InstFilesPage 0xEDF8F8 0x07151A
