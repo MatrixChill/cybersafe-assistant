@@ -1,151 +1,73 @@
-# RELEASE READINESS — CyberSafe v0.2.0
+# CyberSafe v0.2.0 — prontidão atual (3 novembro 2026)
 
-Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
-"Compila" não é "pronto"; um teste não executado nunca é PASS.
+Estados: PASS / FAIL / BLOCKED / NOT TESTED. Fonte de continuidade: main consolidado 78aff29341d99767dfb97b2ef458db810b049b00. Worktree: C:/Users/caioc/.cybersafe-integration/main-merge-20261103/repo. Versão canónica preservada: 0.2.0-rc.1, canal internal. As versões internas dos workspaces não foram alteradas.
 
-## Identidade
+## Windows — candidata preservada
 
-| Campo | Valor |
-|---|---|
-| Branch de integração | `release/v0.2.0-final-integration` |
-| Worktree | `C:/Users/caioc/.cybersafe-integration/release-v020-final-20261103/repo` |
-| Base MATRIX | `7de8b594be4c8269a6d7a51a481774664df063d3` (PASS, 2932 testes) |
-| Base Setup/Updater | `96ce399507dc76c0159c2496c9798d325def6c63` (contida na MATRIX) |
-| Linux Lite | `d8dbc36007144c545a35b39c1d343c2a93f1174b` (integrada) |
-| Windows integration | `d88031d263db01b35a3c889352e830fdde78e546` (já contida na MATRIX) |
-| `main` remoto | `21fefa69352516c188f99c665966d4443588aa2b` (contida na MATRIX) |
+PASS na inspeção offline; NOT TESTED na instalação desta candidata. O proprietário escolheu preparar apenas e executar os testes manualmente. Não foi acedida/iniciada VM, executado setup ou alterada a instalação pessoal nesta sessão.
 
-## Alterações incorporadas
+- Commit: 78aff29341d99767dfb97b2ef458db810b049b00; tree 75b60253663c491ef9640ed5086797d7a1cbf4e5.
+- Diretório original: packages/desktop/release/candidate-20261103-211243-99d72e39/.
+- Setup: CyberSafe Assistant-0.2.0-rc.1-candidate-20261103-211243-99d72e39-setup.exe.
+- Tamanho: 278767097 bytes.
+- SHA-256: c17111d553d75ef316ed81a062fa0ffed6b8c8827382b17618a9915a2896122b.
+- Blockmap: 290001 bytes; SHA-256 64eab1840a07eb453ecc148c4eec68e1f3fbdbdf79015ae8de40258105b7e370.
+- Identidade real: ProductName CyberSafe Assistant; Company CyberSafe Team; versão 0.2.0-rc.1; Authenticode NotSigned.
+- Payload extraído sem instalar: 424 ficheiros, todos idênticos por SHA-256 ao win-unpacked, zero ausentes/adicionais/divergentes. O aviso 7-Zip de dados após arquivo corresponde ao contentor executável; não se declarou corrupção nem instalação.
+- ASAR: 19951128 bytes, SHA-256 484599a9d7fa789966c0e0a480d35840dba3c069df7cbe38c597bc7e08756dad; package.version 0.2.0-rc.1, productName correto e appId com.cybersafe.assistant presente no main.
+- Higiene: 5/5 testes, sem skips, sobre a candidata explicitamente selecionada. Addon SQLite fora do ASAR; nenhum .env/SQLite/log/map proibido segundo os padrões do contrato. Audit-candidate-secrets encontrou zero correspondências, mas havia zero configurações .env locais comparáveis: não é prova de inexistência universal de segredos.
+- ClamAV 1.5.4: contrato oficial verifyClamavBundle aplicado ao payload extraído PASS, 45 ficheiros verificados, fonte correspondente e licenças presentes. Hashes/tamanhos da seed main.cvd/daily.cld/bytecode.cvd conferidos. YARA 4.6.0: 4/4 entradas do VENDOR conferidas. scan-engine.exe e cybersafe-update-launcher.exe presentes e inventariados.
+- Freeze original preservado: 1978 entradas, digest 3b3ee410e5d092461a2d13115aed049cf9e6e8089c18e060d85bb495d7fbed78; manifesto local SHA-256 da7c2cd44f122ea107ab665eb0dc0cd99b85341623766c935888e348143fdcdf. Nenhuma nova aprovação foi emitida. Alterações atuais de teste/lock/configuração não são cobertas por esse freeze para um novo build Windows.
 
-- MATRIX: classificador de tópicos, gate da rota local, lista de processos (Caso D),
-  frescura por fonte, guard de diagnóstico. Testes: 2932/2932 no HEAD base.
-- Linux Lite: 127 ficheiros, +13 829 linhas (docs, guardas de plataforma, scripts
-  WSL, isolamento de dev, empacotamento). Integrado com 2 conflitos resolvidos.
-- Windows: ascendência registada; nenhum commit em falta.
-- Conflitos resolvidos: `packages/service/src/engine.ts` (remoção dos vetos de fila
-  + cadeia POSIX) e `packages/app/src/pages/PCCenterPage.tsx` (layout novo em
-  colunas; o bloco Linux era a versão anterior).
+Roteiro específico: VALIDACAO-MANUAL-CANDIDATA-78AFF29.md. NSIS existente é o motor escolhido; a iteração visual Orbital B não substitui esta candidata nem condiciona o primeiro ensaio funcional.
 
-## Estado por componente
+## Correções e testes desta continuidade
 
-| Componente | Estado | Evidência / razão |
+| Área | Estado | Evidência |
 |---|---|---|
-| MATRIX (base 7de8b59) | **PASS** | suite app 2971/2971 no HEAD integrado; política de tokens adaptativa e persona revista |
-| Merge Linux ↔ MATRIX | **PASS (merge)** | 2 conflitos, ambos resolvidos e revistos |
-| Árvore integrada — typecheck | **PASS** | `tsc --noEmit` limpo após `tsc -b` de shared-types, core, native-windows e service |
-| Árvore integrada — suite | **PASS** | **2971/2971** testes, 0 falhas |
-| Build da app integrada | **PASS** | `npm run build -w @cybersafe/app` concluído |
-| Instalador Orbital B | **NOT TESTED** | UI Win32 existe; handoff NSIS por fazer |
-| Updater GitHub | **BLOCKED** | Ed25519 + Authenticode ausentes (`docs/ASSINATURA-E-GITHUB-V020-20261103.md`) |
-| Pacotes Linux (.deb/.AppImage) | **NOT TESTED** | exige ambiente Linux nativo; WSL2 não equivale |
-| CI no HEAD final | **PASS** | run [41713660033](https://github.com/MatrixChill/cybersafe-assistant/actions/runs/41713660033) sobre `dcde0ca` |
-| Contrato de versão | **PASS** | `product-version.json` é a fonte canónica (`0.2.0-rc.1`); os `package.json` são versões internas. Guarda nova: `scripts/test/product-version-coherence.test.mjs` (3/3) |
-| Merge para `main` | **BLOCKED** | requer gates verdes + autorização do proprietário |
-| Release pública | **BLOCKED** | depende do updater assinado e dos artefactos verificados |
+| Fixture batch/ClamAV | PASS | Falha inicial reproduzida; usa scanFileOutcome na mesma instância YARA do analyzer. O runner limpo revelou dependência adicional do Native; resposta isolada só na fixture. Casos negativos preservam inconclusivos quando YARA ou Native faltam. Nenhum código de motor alterado. |
+| Contratos CI atuais | PASS local | 23/23, zero skips: cache Scanner, binding de plataforma e guardas de renderer/API Linux. |
+| Serviço, regressão ampla | PASS | npm test -w @cybersafe/service terminou 0: agregado principal 1011 PASS/1 SKIP e segmento adicional 12 PASS; total observado 1023 PASS/1 SKIP. Execução anterior ao último ajuste da fixture Native; depois disso os 23 casos dirigidos passaram. |
+| Isolamento runtime Windows | PASS | 8/8; não alteradas quarentena/definições/histórico pessoais pelo ensaio. Escritas externas da aplicação instalada não são atribuídas automaticamente à suíte. |
+| Updater dirigido | PASS unitário/integração laboratorial | 165 PASS, 0 FAIL, 2 SKIP em 167 casos. Não aprova NSIS nem atualização instalada. |
+| MATRIX/app | PASS na base integrada | 2971/2971 no CI da base 78aff29; não foi reconstruída nem alterada nesta sessão. Ver CI atual no checkpoint final. |
+| CI base | PASS | https://github.com/MatrixChill/cybersafe-assistant/actions/runs/41717125705 — SHA 78aff29341d99767dfb97b2ef458db810b049b00. |
+| CI primeira tentativa atual | FAIL corrigido | 41723890569: fixture supunha Native instalado no runner limpo. Corrigido em e1170cd sem enfraquecer produção. |
 
+## Linux Lite — experimental
 
-## Testes executados neste HEAD (evidência, não inferência)
+Os quatro artefactos antigos foram localizados em /home/caioc/cybersafe-linux-lite/packages/desktop/release-linux (0.1.2 e 0.1.11-internal.pap-r7.20261031), inventariados e preservados. O projeto Qoder não foi modificado.
 
-| Suite | Comando | Resultado |
-|---|---|---|
-| App (renderer/MATRIX) | `npm test -w @cybersafe/app` | **PASS 2971/2971** (HEAD `fc561bb`; app não foi alterada depois) |
-| API — política e tokens | `node --import tsx --test test/ai-policy.test.js test/ai-token-policy.test.js` | **PASS 20/20** |
-| Contrato de versão | `node --test scripts/test/product-version-coherence.test.mjs` | **PASS 3/3** |
-| Scripts/packaging | `npm run test:scripts` | **PASS 446/459, 0 falhas** após construir o renderer; guarda isolada 6/6 |
-| Desktop | `npm test -w @cybersafe/desktop` | **PASS** no ficheiro de handoff (1 pass, 2 skip) após `npm run build:native` |
-| Serviço | `npm test -w @cybersafe/service` | **PASS no isolamento** (8/8 dirigido, incl. E e H). Suíte completa: 1007/1010, com a falha de batch atribuída à ausência de YARA no PATH (`engine-failed`), não ao código |
-| Typecheck app/api | `tsc --noEmit` | **PASS** |
-| Build app | `npm run build -w @cybersafe/app` | **PASS** |
-| CI remoto | GitHub Actions | **PASS** — run 41713660033, SHA `dcde0ca` |
+Novo build isolado: /home/caioc/cybersafe-main-lab-78aff29, clone Linux de main via bundle (o ponteiro .git Windows não é utilizável diretamente pelo Git Linux). Código c7ab85ac4951774c38ab9172ad9c238ee0fb411d; commits seguintes só alteram testes/CI/documentação. Node 22.23.4 já existente em ~/.local/node, npm 10.9.9, Electron 33.4.11, WSL2 Ubuntu x86_64, uid 1000, sem sudo. Não foi executado o bootstrap antigo: aponta para branch/caminho históricos e altera configuração global Git. Não foi preciso reinstalar Node.
 
-As duas falhas acima estão identificadas, não escondidas: nenhuma foi causada por
-alterações desta fase e ambas precisam de reprodução dirigida antes do merge.
+Defeito comprovado: npm ci limpo não instalava @rolldown/binding-linux-x64-gnu porque a entrada não existia no lockfile. Foi acrescentada a versão já exigida 1.0.0-rc.10 com URL/integrity oficiais do registry; metadados do binding Windows foram completados sem mudar a versão. Nova instalação limpa confirmou LINUX_BINDING_OK e o build passou. Licença MIT do projeto propagada ao control Debian; licenças de terceiros mantidas.
 
-## Pendências técnicas abertas
+| Artefacto atual | Bytes | SHA-256 |
+|---|---:|---|
+| CyberSafe Assistant Linux Lite-0.2.0-rc.1-linux-amd64.deb | 81792786 | 1e35fe8348b4e781f8764ff30dbdc67b0fd784b66b04f342dc4753eda519e62a |
+| CyberSafe Assistant Linux Lite-0.2.0-rc.1-linux-x86_64.AppImage | 119580477 | 145b4c92a65caf4ff2b42d2acabcac8043fcfcea1d5f4426a902951863bb2e90 |
 
-- **YARA no teste de batch (`scan-post-batch-no-double-clamav`)**: falha por
-  ausência do binário `yara` no PATH — o veredicto limpo em cache é degradado
-  para `inconclusive (engine-failed)`, que é o comportamento correto do produto.
-  Tentei uma fixture determinística por Proxy sobre `engine.yara`; **não pegou**
-  (a interface real de avaliação não é `scan`/`scanFile`/`scanFiles`) e foi
-  revertida, sem deixar alterações. Próximo passo correto: injetar o motor no
-  construtor ou separar o teste unitário do teste de integração real.
+PASS build/packaging WSL: .deb amd64, versão Debian 0.2.0~rc.1 (normalização fpm), MIT, desktop/ícone presentes; AppImage com AppRun e zero EXE/DLL na árvore extraída. ASAR Linux: 3617 entradas, zero EXE/DLL, API incluída, versão e licença corretas. SQLite do PACOTE carregado através de app.asar no executável Electron-as-node: ABI 130, Electron 33.4.11, CREATE/INSERT/SELECT em memória = 42. A primeira sonda apontava incorretamente à pasta unpacked sem as dependências do ASAR; corrigida a sonda, sem mudança do produto. Autenticação real por socket Unix: 9/9 PASS em diretório temporário próprio, sem ações destrutivas.
 
-## Bugs P0
+NOT TESTED: GUI instalada em distribuição Linux desktop nativa, integração de menu/tray/autostart e compatibilidade GPU/sandbox. WSL/ABI/socket não aprovam esses percursos. A edição continua experimental.
 
-- **Encerrado — escrita externa, não da suíte.** A pasta real muda sem testes a
-  correr: `logs/security-events.log` cresceu 620 bytes em 8 s, com a aplicação
-  instalada a correr (7 processos `CyberSafe Assistant` desde as 15:18). O teste
-  comparava a árvore inteira, incluindo logs que a instalação escreve de
-  contínuo, e por isso atribuía à suíte uma escrita de terceiros.
-  Correção: o teste passa a provar isolamento nas áreas que a suíte pode tocar
-  (`quarantine/`, `definitions/`, `history.jsonl`, `scans.jsonl`) e recusa, antes
-  de escrever, qualquer raiz que aponte para o perfil real (teste H). Nenhuma
-  verificação de segurança foi removida.
+## Artefactos preparados e proveniência
 
-## Riscos
+Diretório Windows acessível: C:/Users/caioc/.cybersafe-integration/main-merge-20261103/repo/output/distribution-LAB-0.2.0-rc.1/.
+Contém cópias verificadas dos dois pacotes Linux, setup Windows e blockmap, SHA256SUMS real e provenance.json. Os originais Windows não mudaram. O primeiro build Linux desta sessão, anterior ao ajuste de licença/lock, foi preservado em release-linux/archive-first-78aff29 no clone WSL.
 
-1. A árvore integrada está verde em app/serviço, mas o updater e o instalador
-   não foram exercitados neste HEAD.
-2. Versões divergentes entre pacotes impedem uma Release coerente.
-3. Linux Lite toca `AIAssistant.tsx`, `App.tsx` e `service/engine.ts` — precisa de
-   regressão completa antes de qualquer merge para `main`.
-4. O updater não pode ser publicado sem chaves; publicar sem elas seria uma
-   falsa promessa de atualização.
+Evidência local em output/: candidate-78aff29-payload.json, components.json, vendor-integrity.json, clamav-contract.json (todos com prefixo candidate-78aff29-), hygiene.log, secrets.json/md; linux-existing-inventory.log, linux-final-build.log, linux-final-runtime-v2.log, main-service-regression.log, main-updater-directed.log, main-runtime-isolation.log e main-ci-contracts-fixed.log. Logs brutos não são publicados.
 
-## Bloqueadores externos (um único conjunto)
+## Gates finais
 
-- **Chaves Ed25519 de release** e respetivo manifesto assinado.
-- **Certificado Authenticode** (ou decisão explícita de publisher).
-- **Ambiente Linux com desktop nativo** para instalar `.deb` e correr o AppImage.
-- **Autorização** para merge em `main` e publicação da Release.
-
-## Próximo passo técnico (ordem)
-
-1. Reproduzir e fechar as duas falhas dirigidas (guarda Linux no agregado; fixture
-   de locks no desktop) e completar a suite do serviço.
-2. Handoff do Setup Orbital B para o NSIS, com estados reais.
-3. Regressão do updater com fixtures e falhas induzidas.
-4. Pacotes Linux num ambiente com desktop nativo; CI remoto; merge e Release.
-
-## Declaração
-
-Estado global: **NO-GO** para publicação, **PASS** para a integração de código.
-O merge está feito, a árvore integrada compila e passa 2971 testes. Continuam
-por fechar: versão canónica, instalador, updater assinado, pacotes Linux e CI.
-
-## Consolidação no main
-
-| Campo | Valor |
+| Requisito | Estado |
 |---|---|
-| Merge | `release/v0.2.0-final-integration` → `main`, sem force-push |
-| `main` | `37b7821` (merge commit) |
-| Base anterior | `21fefa6` |
-| CI | **PASS** no run 41713660033, SHA `dcde0ca`; o merge commit ainda não tem execução própria |
-| Branches removidas | `integration/windows-v0.2.0`, `codex/updater-visual-20261103`, `freebuff/matrix-intelligence-v2-20261103` — todas comprovadamente contidas em `main` |
-| Branches mantidas | `main`; `release/v0.2.0-final-integration` (worktree ativo); `experimental/linux-lite` (edição experimental) |
+| Integridade candidata Windows LAB | PASS |
+| Instalação/arranque/tray/Scanner/quarentena/desinstalação desta candidata | NOT TESTED — proprietário fará manualmente |
+| Ed25519 e Authenticode públicos | BLOCKED — sem identidade/chaves aprovadas; ambos os gates false |
+| Atualização real A→B, reinício e SQLite | BLOCKED — dois artefactos e confiança LAB autorizados ainda necessários |
+| Pacotes Linux experimentais e hashes | PASS em WSL; desktop nativo NOT TESTED |
+| Novo freeze para futura candidata Windows | BLOCKED até fechar árvore e obter aprovação exata; não necessário para preservar/ensaiar a candidata 78aff29 já aprovada |
+| Release pública/tag | BLOCKED — não criada; requer testes, identidade e aprovação próprios |
 
-O código Windows, MATRIX e Linux coexiste em `main` com separação por plataforma.
-O instalador Orbital B e o updater continuam por validar; nada de distribuição
-foi publicado.
-
-## Instalador Windows — decisão e bloqueio real
-
-**Decisão:** manter o NSIS existente como instalador funcional e a Orbital B como
-UI aprovada a integrar depois. Não se constrói um segundo motor de instalação nem
-se simula progresso enquanto o NSIS trabalha.
-
-**Estado:** não foi produzido instalador nesta sessão. O gate de packaging
-(`node scripts/package-windows.mjs --check`) recusa a candidata por inputs
-externos em falta:
-
-| Falta | Como se resolve |
-|---|---|
-| `vendor/clamav/VENDOR.json`, `clamscan.exe`, `source/` | `node scripts/vendor-clamav.mjs` (download oficial + verificação) |
-| seed ClamAV | `node scripts/prepare-clamav-seed.mjs --source <cache oficial> --out <pasta>` |
-| registo de aprovadores | definir `CYBERSAFE_APPROVERS_FILE` |
-| `renderer:@cybersafe/desktop/dist`, binários nativos, dists dos workspaces | `npm run build:all` + `npm run build:native` (feitos no worktree de release) |
-
-Sem estes inputs o script termina com código 1 **antes** de empacotar: não há
-artefacto, checksum nem Release para apresentar. Isto é um bloqueio de
-provisionamento, não uma lacuna de código.
+main é a linha principal. Remotas inventariadas: main, release/v0.2.0-final-integration, experimental/linux-lite. A release branch tem zero commits exclusivos contra main, mas o worktree contém output/ não versionado: não foi removida nem desassociada. Nenhuma nova branch, tag ou Release foi criada. Nenhuma confiança pública foi ativada. Não há declaração de rollback automático nem de resolução do benchmark histórico de 594 s.
