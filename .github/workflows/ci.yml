@@ -5,7 +5,7 @@ name: ci
 # nem mede o payload. Esses gates são locais/Windows com freeze aprovado.
 on:
   push:
-    branches: [main, "pap/**", "codex/**"]
+    branches: [main, "pap/**", "codex/**", "freebuff/**", "release/**"]
   pull_request:
     branches: [main]
 

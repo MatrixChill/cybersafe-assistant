@@ -28,6 +28,28 @@ export const AI_CONFIG = (() => {
   };
 })();
 
+/**
+ * Política de tokens por complexidade. O limite fixo de 400 cortava explicações
+ * técnicas a meio e obrigava o utilizador a pedir «explica melhor» várias vezes;
+ * um limite único alto desperdiçaria em perguntas curtas. O teto continua
+ * explícito (custo controlado), apenas deixa de ser o mesmo para tudo.
+ */
+const TOKEN_POLICY = { simples: 400, normal: 700, tecnico: 1100, teto: 1400 } as const;
+
+const PEDIDO_TECNICO =
+  /(?<![\p{L}\p{N}])(explica|explicar|detalha|detalhe|como funciona|porque|por que|an[áa]lise|analise|diagn[óo]stico|diagnostico|passo a passo|arquitetura|diferen[çc]a|compara|compara[çc][ãa]o)(?![\p{L}\p{N}])/iu;
+
+export function resolveMaxTokens(input: { messages?: Array<{ content?: unknown }> } = {}): number {
+  const texto = (input.messages ?? [])
+    .map((m) => (typeof m?.content === "string" ? m.content : ""))
+    .join(" ")
+    .slice(-2000);
+  const tecnico = PEDIDO_TECNICO.test(texto);
+  const longo = texto.length > 220;
+  const base = tecnico ? TOKEN_POLICY.tecnico : longo ? TOKEN_POLICY.normal : TOKEN_POLICY.simples;
+  return Math.min(TOKEN_POLICY.teto, Math.max(TOKEN_POLICY.simples, base));
+}
+
 export let aiEnabled = AI_CONFIG.apiKey.length > 0;
 
 // Nunca logamos a chave — apenas provider/modelo (sem segredos).
@@ -57,7 +79,7 @@ REGRA DE OURO — RESPONDE PRIMEIRO AO QUE FOI PEDIDO:
 - Se ele disser "resumido", "curto", "só...", "mais nada", obedece estritamente ao que foi pedido.
 
 COMPRIMENTO — REGRA RÍGIDA:
-- Por defeito: MÁXIMO 1 a 3 frases. Uma pergunta simples = uma resposta curta. NUNCA mais de 4 frases sem pedido explícito de detalhe.
+- Perguntas simples: 1 a 3 frases. Perguntas técnicas, diagnósticos ou pedidos de explicação: o detalhe necessário (até ~8 frases), sem encher nem repetir. Nunca truncar uma explicação a meio só para caber numa frase.
 - Nunca listes "8 motivos", "5 dicas" ou listas longas por iniciativa própria. Se tiveres vários pontos, escolhe os 1-2 mais relevantes.
 - Expande APENAS quando o utilizador pedir explicitamente ("detalha", "explica mais", "passo a passo", "relatório completo").
 - NUNCA respondas com tabelas, headings markdown ou listas numeradas em perguntas simples. Responde em prosa curta.
@@ -411,7 +433,7 @@ export async function chatCompletion(
         model: AI_CONFIG.model,
         messages: messages as any,
         temperature: AI_CONFIG.temperature,
-        max_tokens: AI_CONFIG.maxTokens,
+        max_tokens: resolveMaxTokens({ messages }),
       },
       { timeout: AI_REQUEST_TIMEOUT_MS, signal },
     );
@@ -486,7 +508,7 @@ export async function streamChatCompletion(
         model: AI_CONFIG.model,
         messages: messages as any,
         temperature: AI_CONFIG.temperature,
-        max_tokens: AI_CONFIG.maxTokens,
+        max_tokens: resolveMaxTokens({ messages }),
         stream: true,
       },
       { signal: AbortSignal.any([controller.signal, configurationAbort.signal]) },

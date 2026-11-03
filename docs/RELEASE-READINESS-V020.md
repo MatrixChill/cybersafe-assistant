@@ -30,7 +30,7 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 
 | Componente | Estado | Evidência / razão |
 |---|---|---|
-| MATRIX (base 7de8b59) | **PASS** | suite app 2932/2932, typecheck e build limpos |
+| MATRIX (base 7de8b59) | **PASS** | suite app 2971/2971 no HEAD integrado; política de tokens adaptativa e persona revista |
 | Merge Linux ↔ MATRIX | **PASS (merge)** | 2 conflitos, ambos resolvidos e revistos |
 | Árvore integrada — typecheck | **PASS** | `tsc --noEmit` limpo após `tsc -b` de shared-types, core, native-windows e service |
 | Árvore integrada — suite | **PASS** | **2971/2971** testes, 0 falhas |
@@ -38,8 +38,8 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 | Instalador Orbital B | **NOT TESTED** | UI Win32 existe; handoff NSIS por fazer |
 | Updater GitHub | **BLOCKED** | Ed25519 + Authenticode ausentes (`docs/ASSINATURA-E-GITHUB-V020-20261103.md`) |
 | Pacotes Linux (.deb/.AppImage) | **NOT TESTED** | exige ambiente Linux nativo; WSL2 não equivale |
-| CI no HEAD final | **NOT TESTED** | workflow não correu sobre esta branch |
-| Consistência de versão | **FAIL** | root `0.1.1`, desktop `0.1.2`, app `0.1.2`, api/service `0.1.1` |
+| CI no HEAD final | **NOT TESTED** | `ci.yml` passou a cobrir `freebuff/**` e `release/**`; execução remota ainda não confirmada |
+| Contrato de versão | **PASS** | `product-version.json` é a fonte canónica (`0.2.0-rc.1`); os `package.json` são versões internas. Guarda nova: `scripts/test/product-version-coherence.test.mjs` (3/3) |
 | Merge para `main` | **BLOCKED** | requer gates verdes + autorização do proprietário |
 | Release pública | **BLOCKED** | depende do updater assinado e dos artefactos verificados |
 

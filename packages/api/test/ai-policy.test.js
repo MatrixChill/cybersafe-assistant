@@ -79,8 +79,9 @@ describe("Matrix — política de respostas (não depende do LLM)", () => {
 describe("Matrix — política de brevidade (anti-palestra)", () => {
   const system = buildMessages([{ role: "user", content: "oi" }], "", "").find((m) => m.role === "system")?.content ?? "";
 
-  test("define limite rígido de 1-3 frases por defeito", () => {
-    assert.match(system, /MÁXIMO 1 a 3 frases/i);
+  test("mantém respostas curtas no simples e permite detalhe no técnico", () => {
+    assert.match(system, /Perguntas simples: 1 a 3 frases/i);
+    assert.match(system, /técnicas, diagnósticos ou pedidos de explicação/i);
   });
 
   test("proíbe listas longas por iniciativa", () => {
