@@ -23,6 +23,9 @@ export function parsePerfLogs(rows) {
     initializationMs: null,
     phases: [],
     clamavSpawnCalls: 0,
+    // Wall duration, not CPU. Cached verdict lookup excludes these processes.
+    clamavChildWallMs: {loadProof: null, scan: null},
+    arbiterWaitMs: null,
     resources: null,
     clamavSources: {batchCache: 0, direct: 0},
     zipMs: 0,
@@ -35,6 +38,13 @@ export function parsePerfLogs(rows) {
   };
   for (const row of rows) {
     const line = row.line;
+    const child = /^\[ScanPerf\] CLAMAV_CHILD_TERMINAL scanId=(\S+) .*elapsedMs=(\d+)/.exec(line);
+    if (child) {
+      const kind = child[1] === 'load-proof' ? 'loadProof' : 'scan';
+      summary.clamavChildWallMs[kind] = (summary.clamavChildWallMs[kind] ?? 0) + Number(child[2]);
+    }
+    const slot = /^\[ScanPerf\] CLAMAV_SLOT_ACQUIRE_END .*elapsedMs=(\d+)/.exec(line);
+    if (slot) summary.arbiterWaitMs = (summary.arbiterWaitMs ?? 0) + Number(slot[1]);
     const phase = /^\[ScanPerf\] PHASE_END .*phase=(\w+) elapsedMs=(\d+)/.exec(line);
     if (phase) summary.phases.push({phase:phase[1],elapsedMs:Number(phase[2])});
     if (line.startsWith('[ScanPerf] CLAMSCAN_SPAWN_CALL_BEGIN ')) summary.clamavSpawnCalls++;

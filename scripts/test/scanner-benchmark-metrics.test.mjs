@@ -56,3 +56,17 @@ test('benchmark copies a real YARA corpus into its private base and records exac
   await assert.rejects(()=>seedBenchmarkYara(root,base),/regular/);
  }finally{await rm(root,{recursive:true,force:true});}
 });
+
+test('separates child wall time and arbiter wait from cached verdict lookup',()=>{
+ const result=parsePerfLogs([
+  '[ScanPerf] CLAMAV_SLOT_ACQUIRE_END scanId=s result=granted priority=user elapsedMs=17 active=1',
+  '[ScanPerf] CLAMAV_CHILD_TERMINAL scanId=load-proof pid=12 code=0 killed=false deathUnconfirmed=false elapsedMs=6500',
+  '[ScanPerf] CLAMAV_CHILD_TERMINAL scanId=s pid=13 code=0 killed=false deathUnconfirmed=false elapsedMs=6200',
+  '[ScanPerf] ENGINE_PHASE engine=clamav elapsedMs=0 source=batch-cache outcome=clean',
+ ].map(line=>({line})));
+ assert.deepEqual(result.clamavChildWallMs,{loadProof:6500,scan:6200});
+ assert.equal(result.arbiterWaitMs,17);
+ assert.equal(result.engines.clamav.totalMs,0);
+ assert.equal(parsePerfLogs([]).arbiterWaitMs,null);
+ assert.deepEqual(parsePerfLogs([]).clamavChildWallMs,{loadProof:null,scan:null});
+});

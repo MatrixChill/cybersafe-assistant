@@ -504,11 +504,9 @@ describe("800 = 728 batch + 66 excluidos + 6 zip, sem double count", () => {
     assert.equal(state.progress, 100);
 
     // A decomposição, com nomes: nenhum ficheiro sem causa.
-    assert.equal(engine.prefetchCalls.length, 2, "batch principal + batch dos ZIP externos");
-    assert.equal(engine.prefetchCalls[0].count, 728, "o batch recebe só os 728 candidatos");
+    assert.equal(engine.prefetchCalls.length, 1, "um batch conjunto preserva normais e ZIP externos");
+    assert.equal(engine.prefetchCalls[0].count, 734, "728 candidatos + 6 ZIP externos no mesmo processo");
     assert.equal(engine.prefetchCalls[0].scanId, id, "o batch tem de ter o scanId do scan");
-    assert.equal(engine.prefetchCalls[1].count, 6, "o segundo batch cobre os 6 ficheiros externos de ZIP");
-    assert.equal(engine.prefetchCalls[1].scanId, id, "o batch dos ZIP pertence ao mesmo scan");
     assert.equal(engine.counts.hits, 734, "os 728 + os 6 ZIP externos são resolvidos pelo cache do batch");
     assert.equal(
       engine.counts.misses,

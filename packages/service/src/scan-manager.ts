@@ -1132,9 +1132,12 @@ const heartbeat = setInterval(() => {
         // MEDIDO (scan-cancel-prefetch-window.test.js, teste 2): sem esta
         // verificação, o segundo teste era RED — prefetchClamav era chamado
         // após o último looksLikeZip com o scan já cancelado.
+        // Same outer-file coverage in one process; ZIP contents still follow
+        // scanZipWithSafety and its independent bounded extraction checks.
+        const batchPaths = [...candidatos, ...zipOuterPaths];
         if (this.isCancelled.has(id)) {
           scanPerfLog("PREFETCH_CANCELLED_BEFORE_START", id, `candidatos=${candidatos.length}`);
-        } else if (candidatos.length > 0) {
+        } else if (batchPaths.length > 0) {
           const prefetchStarted = Date.now();
           // O batch demora ~7,6 s (carrega ~1 GB de base) e devolve TUDO de uma
           // vez. Sem publicar o count, a UI ficava 7 s a dizer "A verificar os
@@ -1144,7 +1147,7 @@ const heartbeat = setInterval(() => {
           const batchStartedAt = new Date(prefetchStarted).toISOString();
           scanPerfLog("PHASE_BEGIN", id, `phase=batch candidates=${candidatos.length}`);
           this.updateScan(id, {
-            filesInEngineBatch: candidatos.length,
+            filesInEngineBatch: batchPaths.length,
             filesInEngineScanned: 0,
             engineBatchStartedAt: batchStartedAt,
           });
@@ -1167,22 +1170,22 @@ const heartbeat = setInterval(() => {
           const relatar = (n: number) => {
             if (n <= analisadosNoBatch) return;
             const primeiro = analisadosNoBatch === 0;
-            analisadosNoBatch = Math.min(n, candidatos.length);
+            analisadosNoBatch = Math.min(n, batchPaths.length);
             if (primeiro) {
               scanPerfLog(
                 "BATCH_FIRST_PROGRESS",
                 id,
-                `processed=${analisadosNoBatch} batch=${candidatos.length} elapsedMs=${Date.now() - prefetchStarted}`,
+                `processed=${analisadosNoBatch} batch=${batchPaths.length} elapsedMs=${Date.now() - prefetchStarted}`,
               );
             }
             // Nao inundar o pipe: um evento por cada 100ms. O eixo GLOBAL
             // (progress) nao e' escrito aqui: ele conta apenas resultados
             // fechados pelo pipeline e continuaria a 0 durante todo o batch.
             const agora = Date.now();
-            if (agora - ultimoRelato < 100 && n < candidatos.length) return;
+            if (agora - ultimoRelato < 100 && n < batchPaths.length) return;
             ultimoRelato = agora;
             this.updateScan(id, {
-              filesInEngineBatch: candidatos.length,
+              filesInEngineBatch: batchPaths.length,
               filesInEngineScanned: analisadosNoBatch,
               engineBatchStartedAt: batchStartedAt,
             });
@@ -1196,7 +1199,7 @@ const heartbeat = setInterval(() => {
 
           let outcome: { spawned: boolean; error?: string; files?: number };
           try {
-            outcome = await this.engine.prefetchClamav(candidatos, id, relatar);
+            outcome = await this.engine.prefetchClamav(batchPaths, id, relatar);
           } finally {
             // SEMPRE, mesmo em cancelamento ou excepção: um contador que fica
             // a dizer "20 ficheiros" quando nada está a correr é pior que
@@ -1237,18 +1240,6 @@ const heartbeat = setInterval(() => {
           scanPerfLog("PHASE_END", id, `phase=batch elapsedMs=${Date.now() - prefetchStarted} candidates=${candidatos.length}`);
         }
 
-        // O ficheiro EXTERNO de cada ZIP tambem e verificado pelo ClamAV no
-        // `scanArtifact` do loop principal. Verificá-lo num unico batch evita
-        // um processo por arquivo (cada cold start carrega ~1 GB de base); o
-        // conteudo continua a ser analisado por `scanZipWithSafety`. O cache e'
-        // por scanId e faz merge, por isso nao substitui o batch principal.
-        if (zipOuterPaths.length > 0 && !this.isCancelled.has(id)) {
-          try {
-            await this.engine.prefetchClamav?.(zipOuterPaths, id);
-          } catch {
-            // Sem batch, o loop cai no clamscan unitario do scanArtifact.
-          }
-        }
       }
 
       for (let i = 0; i < files.length; i++) {
