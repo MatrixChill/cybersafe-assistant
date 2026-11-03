@@ -50,6 +50,9 @@ jobs:
       - name: YARA clássico e proveniência
         run: node --test packages/core/test/yara-classic-engine.test.js packages/core/test/yara-engine-provenance.test.js
 
+      - name: Contratos Linux e cache do Scanner sem dependência de YARA no PATH
+        run: node --test scripts/test/platform-build-bindings.test.mjs scripts/test/linux-lite-package-renderer-guard.test.mjs scripts/test/linux-lite-package-api-guard.test.mjs packages/service/test/scan-post-batch-no-double-clamav.test.js
+
       - name: Suíte da aplicação e integração visual do atualizador
         run: npm test -w @cybersafe/app
 
