@@ -29,7 +29,7 @@ A Opção B exigiria um launcher autenticado, ciclo UAC/NSIS, transferência de 
 
 ## Evidência e verificações
 - Preview Electron 1020x740: núcleo original B animado, quatro motores ausentes, transferência demo e rodapé legíveis.
-- Toggle Sem WebGL (ensaio): fallback estático observado. É fallback forçado; não é ensaio de driver ausente.
+- Toggle Sem WebGL (ensaio): fallback estático observado. É fallback forçado; não é ensaio de driver ausente. Tentativas adicionais com switches Chromium de desativação 3D não deram prova de WebGL indisponível neste runtime: a cena continuou visível. Esse ensaio NÃO foi contabilizado como PASS.
 - Preview 560x740: disposição em coluna e núcleo enquadrado; conteúdo usa scroll vertical. Não constitui matriz completa de DPI/monitores.
 - Erro e ação Tentar novamente observados; apenas mensagem demonstrativa, sem tentativa de instalar.
 - Testes app completos: 2910 aprovados (incluem os três novos de cena/estados, mais regressões orbitais existentes).
