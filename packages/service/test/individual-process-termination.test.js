@@ -14,11 +14,11 @@ function service() {
 test('service vetoes only critical work, untrusted pipe, startup and definitions updates',()=>{
  const oldReadonly=process.env.CYBERSAFE_DEV_WINDOWS_READONLY,oldFixture=process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN;
  delete process.env.CYBERSAFE_DEV_WINDOWS_READONLY;delete process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN;
- try{assert.equal(service().terminationBlocked(),null);for(const change of [{criticalRpcOperations:1},{pipeAuthRequired:false},{pipeToken:undefined},{disposed:true},{isShuttingDown:true},{startupStateValue:'starting'},{updater:{operationInProgress:true}},{clamDatabaseGate:{state:{activeScans:1}}}]){const s=service();Object.assign(s,change);assert.ok(s.terminationBlocked(),JSON.stringify(change));}
+ try{assert.equal(service().terminationBlocked(),null);for(const change of [{criticalRpcOperations:1},{pipeAuthRequired:false},{pipeToken:undefined},{disposed:true},{isShuttingDown:true},{startupStateValue:'starting'}]){const s=service();Object.assign(s,change);assert.ok(s.terminationBlocked(),JSON.stringify(change));}
  // P0: realtime file work and the global scan are independent of an individual
  // handle-based termination. They must not hold the user in "aguarda alguns
  // segundos" indefinitely; protected/identity gates below still apply.
- for(const allowed of [{realtimeQueue:{size:3,active:1}},{fileObservationReads:2},{clamavPrefetches:new Map([['scan',{}]])},{scanAbortControllers:new Map([['scan',{}]]),scanManager:{getActiveScan:()=>({id:'scan'})}}]){const s=service();Object.assign(s,allowed);assert.equal(s.terminationBlocked(),null,JSON.stringify(allowed));}}
+ for(const allowed of [{realtimeQueue:{size:3,active:1}},{fileObservationReads:2},{updater:{operationInProgress:true}},{clamDatabaseGate:{state:{activeScans:1,updatePending:true,updateActive:true}}}, {clamavPrefetches:new Map([['scan',{}]])},{scanAbortControllers:new Map([['scan',{}]]),scanManager:{getActiveScan:()=>({id:'scan'})}}]){const s=service();Object.assign(s,allowed);assert.equal(s.terminationBlocked(),null,JSON.stringify(allowed));}}
  finally{if(oldReadonly===undefined)delete process.env.CYBERSAFE_DEV_WINDOWS_READONLY;else process.env.CYBERSAFE_DEV_WINDOWS_READONLY=oldReadonly;if(oldFixture===undefined)delete process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN;else process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN=oldFixture;}
 });
 test('legacy tree request stays refused without taskkill',async()=>{const s=service();s.runTaskkill=()=>{throw Error('must never run')};assert.equal((await s.killProcess(12345)).success,false)});

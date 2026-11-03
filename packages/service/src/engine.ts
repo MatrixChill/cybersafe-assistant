@@ -4082,7 +4082,6 @@ if (processInfo.path) {
   private criticalRpcOperations = 0;
 
   private terminationBlocked(identity?: TerminationIdentity): string | null {
-    const gate = this.clamDatabaseGate.state;
     // Cada causa tem o seu codigo: a UI nao pode dizer "operacao critica" a quem
     // so precisa de saber que a sessao nao esta autenticada ou que ha um scan a
     // correr. O bloqueio mantem-se exatamente o mesmo; so a RAZAO fica nomeada.
@@ -4098,7 +4097,6 @@ if (processInfo.path) {
     // no confirm, e o alvo protegido continua recusado por classifyKillTarget.
     // Manter estes dois vetos transformava qualquer fila activa numa recusa
     // indefinida de terminar uma aplicação benigna (P0 medido no Notepad).
-    if (this.updater.operationInProgress || gate.activeScans > 0 || gate.updatePending || gate.updateActive) return "definitions-update-in-progress";
     if (identity) {
       const cached = this.processes.find(p => p.pid === identity.pid);
       if (!cached || !matchesSnapshotCreation(cached.startedAt,identity.creation) ||
