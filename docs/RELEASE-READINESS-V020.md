@@ -128,3 +128,24 @@ por fechar: versão canónica, instalador, updater assinado, pacotes Linux e CI.
 O código Windows, MATRIX e Linux coexiste em `main` com separação por plataforma.
 O instalador Orbital B e o updater continuam por validar; nada de distribuição
 foi publicado.
+
+## Instalador Windows — decisão e bloqueio real
+
+**Decisão:** manter o NSIS existente como instalador funcional e a Orbital B como
+UI aprovada a integrar depois. Não se constrói um segundo motor de instalação nem
+se simula progresso enquanto o NSIS trabalha.
+
+**Estado:** não foi produzido instalador nesta sessão. O gate de packaging
+(`node scripts/package-windows.mjs --check`) recusa a candidata por inputs
+externos em falta:
+
+| Falta | Como se resolve |
+|---|---|
+| `vendor/clamav/VENDOR.json`, `clamscan.exe`, `source/` | `node scripts/vendor-clamav.mjs` (download oficial + verificação) |
+| seed ClamAV | `node scripts/prepare-clamav-seed.mjs --source <cache oficial> --out <pasta>` |
+| registo de aprovadores | definir `CYBERSAFE_APPROVERS_FILE` |
+| `renderer:@cybersafe/desktop/dist`, binários nativos, dists dos workspaces | `npm run build:all` + `npm run build:native` (feitos no worktree de release) |
+
+Sem estes inputs o script termina com código 1 **antes** de empacotar: não há
+artefacto, checksum nem Release para apresentar. Isto é um bloqueio de
+provisionamento, não uma lacuna de código.
