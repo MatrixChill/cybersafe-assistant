@@ -8,21 +8,36 @@
     "button-primary.bmp": "fa038ccd34109ee4b30519bce2de7344b918eebd0708ff93255c12680a319b1d",
     "button-secondary.bmp": "9c99780124b8c76fed913ddac747e94004783eed28cba46b7362afdb97d038ff",
     "installerHeader.bmp": "3ed202acd5c49a50bf6ea72763ef2a032974d025f2efbb4eb8cd841dfe3ec97f",
-    "installerSidebar.bmp": "9e46844355a1e67d79f9c21044dd2cb94abca5304246b5d190b3f253c0ed6b18",
-    "page-config.bmp": "495ff71d5f67d2c3cefce5749337f3f8737f21de6e6748476fff53f7806c3f51",
-    "page-welcome.bmp": "741a612d2999fe0f86dab21343d1d9667a6c5ac19c2cacc1baff5923f480bd74",
-    "preview.bmp": "ab4bb7a57044c9b251942b27046467a223ab32e28ef80e00b0e2193693c350d6",
-    "uninstallerSidebar.bmp": "9e46844355a1e67d79f9c21044dd2cb94abca5304246b5d190b3f253c0ed6b18"
+    "installerSidebar.bmp": "f8ee8f61940e111a501befe4c8d14c181150835c78e2ecb89475ba7142ef1af2",
+    "page-config.bmp": "df0a1afebe071e91451eb90bfdc1e4878b17e8895081fe7fdc14261ff58b121f",
+    "page-welcome.bmp": "df0a1afebe071e91451eb90bfdc1e4878b17e8895081fe7fdc14261ff58b121f",
+    "preview.bmp": "fff3dbf2d7738093e1a72620594e64bb69f0be6ca9d484ce3e0de1420fc5856c",
+    "uninstallerSidebar.bmp": "f8ee8f61940e111a501befe4c8d14c181150835c78e2ecb89475ba7142ef1af2"
   },
   "logoTreatment": "alpha bounds crop, aspect-preserving downscale and composition; no redraw or recolour",
   "orbitalPresentation": {
     "mode": "static-native",
     "webglRuntime": false,
-    "description": "Official symbol and static orbital illustration; not a live Three.js render",
+    "description": "Static capture of the updater Orbital B scene, keyed and cropped; no live WebGL in NSIS",
+    "sceneExport": {
+      "file": "assets/branding/scene/orbital-b-scene.png",
+      "sha256": "b3b218ebd1d16c09054c401fc0db65f1d6c88a532449ed70d7aa8c8b08d68443",
+      "renderer": "UpdaterScene/CoreScene WebGL, single frame",
+      "liveAnimation": false,
+      "composition": "background keyed, alpha bounds crop, aspect-preserving downscale; no redraw"
+    },
     "sharedSceneSources": {
       "packages/app/src/v2/dashboard/effects/orbitalBody.ts": "742966ff37cd3da194c0351f3642c9ba40a86d3fd304c6a6e6b028f8563ba20d",
       "packages/app/src/v2/dashboard/effects/orbitalPose.ts": "ee57357c55aa5be1665c265aac57ccc365c103b3501d0425ce6ada36cdc9b5dd"
     }
   },
-  "paletteSource": "packages/app/src/index.css: CyberSafe Core dark"
+  "paletteSource": "packages/app/src/index.css: CyberSafe Core dark",
+  "updaterDesign": {
+    "layout": "brand-orbital-left-content-right",
+    "progress": "native-real-only",
+    "sources": {
+      "packages/app/src/components/updates/UpdaterWindow.tsx": "62c77985b3e847374bf6989b2d2a09f9fdedb04e68b0ae925b402f597a7ec903",
+      "packages/app/src/components/updates/updater-window.css": "7864354c1590fd050898fd04a62c31d194bec3d56debfbb1ef6992f822129595"
+    }
+  }
 }

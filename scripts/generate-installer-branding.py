@@ -25,6 +25,8 @@ INK = (237, 248, 248)
 MUTED = (126, 164, 168)
 LINE = (31, 75, 79)
 NAMES = ("02_CyberSafe_simbolo.png", "07_CyberSafe_horizontal_lockup.png")
+SCENE = ROOT / "assets" / "branding" / "scene" / "orbital-b-scene.png"
+SCENE_BG = (16, 35, 49)
 
 
 def font(size: int, bold: bool = False) -> ImageFont.FreeTypeFont:
@@ -159,6 +161,47 @@ def orbital(image: Image.Image, cx: int, cy: int, rx: int, ry: int, symbol_w: in
     return image
 
 
+def scene_export(max_w: int, max_h: int) -> Image.Image | None:
+    """Real static capture of the updater Orbital B WebGL scene.
+
+    The export carries a flat render background. It is keyed against that
+    exact colour, cropped to content and scaled without redraw, so it
+    composites into the native surface instead of showing a rectangle.
+    Returns None when the export is absent; callers keep the vector fallback.
+    """
+    if not SCENE.exists():
+        return None
+    source = Image.open(SCENE).convert("RGB")
+    pixels = []
+    for r, g, b in source.getdata():
+        distance = max(abs(r - SCENE_BG[0]), abs(g - SCENE_BG[1]), abs(b - SCENE_BG[2]))
+        pixels.append((r, g, b, min(255, distance * 10)))
+    keyed = Image.new("RGBA", source.size)
+    keyed.putdata(pixels)
+    bounds = keyed.getchannel("A").point(lambda a: 255 if a > 24 else 0).getbbox()
+    if bounds:
+        keyed = keyed.crop(bounds)
+    keyed.thumbnail((max_w, max_h), Image.Resampling.LANCZOS)
+    return keyed
+
+
+def hero(image: Image.Image, cx: int, cy: int, box_w: int, box_h: int) -> Image.Image:
+    """Orbital B hero: the real exported scene, or the vector fallback."""
+    scene = scene_export(box_w, box_h)
+    if scene is None:
+        return orbital(image, cx, cy, box_w // 2, box_h // 8, box_w // 3, box_h // 2)
+    image = glow(
+        image,
+        (cx - box_w // 2 - 8, cy - box_h // 2 - 8, cx + box_w // 2 + 8, cy + box_h // 2 + 8),
+        CYAN,
+        10,
+        30,
+    )
+    layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
+    layer.alpha_composite(scene, (cx - scene.width // 2, cy - scene.height // 2))
+    return Image.alpha_composite(image, layer)
+
+
 def step_rail(image: Image.Image, x: int, y: int, labels: list[str], active: int) -> Image.Image:
     layer = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(layer)
@@ -183,7 +226,7 @@ def page_art(active: int) -> Image.Image:
     image = linear(w, h, (8, 31, 37), (4, 13, 17))
     image = glow(image, (255, -40, 560, 210), CYAN, 13, 42)
     image = glow(image, (305, 180, 570, 360), VIOLET, 10, 38)
-    image = panel(image, (176, 9, 493, 278), 64)
+    image = panel(image, (176, 9, 493, 278), 255)
     # Left glass rail, kept darker than the content surface.
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -199,9 +242,13 @@ def page_art(active: int) -> Image.Image:
     draw = ImageDraw.Draw(image)
     draw.text((14, 76), "ASSISTANT / WINDOWS", font=font(9, True), fill=CYAN + (235,))
     draw.text((14, 91), "SETUP  /  2026", font=font(8), fill=MUTED + (220,))
-    image = step_rail(image, 14, 120, ["Boas-vindas", "Verificação", "Instalação", "Conclusão"], active)
-    # Native static counterpart of the updater identity, kept below the step rail.
-    image = orbital(image, 82, 260, 65, 19, 42, 46)
+    # Same split composition as UpdaterWindow: brand, orbital hero, content.
+    # Do not burn a fake verification/progress state into the artwork.
+    image = hero(image, 82, 172, 150, 108)
+    draw = ImageDraw.Draw(image)
+    draw.text((22, 239), "CYBERSAFE / ORBITAL B", font=font(7, True), fill=MUTED + (220,))
+    draw.line((14, 257, 154, 257), fill=LINE + (160,), width=1)
+    draw.text((23, 267), "INSTALAÇÃO WINDOWS", font=font(7), fill=CYAN_SOFT + (220,))
     # A restrained hero mark in the content field, behind native controls.
     image = glow(image, (385, 192, 520, 327), CYAN, 12, 34)
     draw = ImageDraw.Draw(image)
@@ -219,8 +266,7 @@ def sidebar_art() -> Image.Image:
     draw = ImageDraw.Draw(image)
     draw.text((14, 74), "ASSISTANT / WINDOWS", font=font(8, True), fill=CYAN + (230,))
     draw.text((14, 88), "SETUP  /  2026", font=font(7), fill=MUTED + (220,))
-    image = step_rail(image, 14, 116, ["Boas-vindas", "Instalação", "Conclusão"], 1)
-    image = orbital(image, 82, 232, 62, 25, 66, 80)
+    image = hero(image, 82, 200, 146, 110)
     draw = ImageDraw.Draw(image)
     draw.line((13, 299, 151, 299), fill=LINE + (130,), width=1)
     draw.text((14, 303), "CYBERSAFE  /  CORE", font=font(6, True), fill=MUTED + (190,))
@@ -244,6 +290,8 @@ def preview_art() -> Image.Image:
     image = linear(w, h, (8, 31, 38), (3, 11, 16))
     image = glow(image, (430, -80, 1000, 500), CYAN, 18, 70)
     image = glow(image, (450, 260, 1000, 700), VIOLET, 12, 60)
+    # The native content surface matches opaque labels so state changes erase cleanly.
+    ImageDraw.Draw(image).rectangle((260, 0, w, h), fill=BG + (255,))
     # Left rail and right content field.
     overlay = Image.new("RGBA", image.size, (0, 0, 0, 0))
     draw = ImageDraw.Draw(overlay)
@@ -260,18 +308,19 @@ def preview_art() -> Image.Image:
     draw.text((26, 106), "ASSISTANT  /  WINDOWS", font=font(10, True), fill=CYAN + (240,))
     draw.text((26, 123), "SETUP  /  2026", font=font(8), fill=MUTED + (225,))
     draw.line((25, 146, 233, 146), fill=LINE + (125,), width=1)
-    draw.text((26, 158), "PERCURSO", font=font(8, True), fill=MUTED + (225,))
+    image = hero(image, 130, 300, 226, 170)
+    draw = ImageDraw.Draw(image)
+    draw.text((42, 435), "CYBERSAFE / ORBITAL B", font=font(9, True), fill=MUTED + (225,))
     draw.line((26, 526, 233, 526), fill=LINE + (100,), width=1)
     draw.text((26, 531), "ESTUDO NATIVO  /  SEM PAYLOAD", font=font(7, True), fill=VIOLET + (170,))
-    image = orbital(image, 650, 182, 196, 78, 138, 166)
+    # Content remains clear for the real native controls, as in the updater.
     # Bottom light sweep, deliberately behind the native footer.
     draw = ImageDraw.Draw(image)
-    draw.rounded_rectangle((292, 278, 886, 516), radius=10, fill=BG + (255,), outline=LINE + (120,), width=1)
+    draw.rounded_rectangle((292, 255, 886, 555), radius=10, fill=BG + (255,), outline=LINE + (120,), width=1)
     sweep = Image.new("RGBA", image.size, (0, 0, 0, 0))
-    ImageDraw.Draw(sweep).arc((380, 360, 1040, 740), 200, 318, fill=CYAN + (50,), width=2)
+    ImageDraw.Draw(sweep).arc((380, 340, 1040, 720), 200, 318, fill=CYAN + (50,), width=2)
     image = Image.alpha_composite(image, sweep.filter(ImageFilter.GaussianBlur(2)))
     draw = ImageDraw.Draw(image)
-    draw.text((296, 520), "CYBERSAFE  /  NÚCLEO VISUAL  /  SETUP", font=font(7, True), fill=CYAN_SOFT + (110,))
     image.putpixel((w - 1, h - 1), BG + (255,))
     return image.convert("RGB")
 
@@ -311,7 +360,14 @@ def render(out: Path) -> None:
         "orbitalPresentation": {
             "mode": "static-native",
             "webglRuntime": False,
-            "description": "Official symbol and static orbital illustration; not a live Three.js render",
+            "description": "Static capture of the updater Orbital B scene, keyed and cropped; no live WebGL in NSIS",
+            "sceneExport": {
+                "file": SCENE.relative_to(ROOT).as_posix(),
+                "sha256": hashlib.sha256(SCENE.read_bytes()).hexdigest(),
+                "renderer": "UpdaterScene/CoreScene WebGL, single frame",
+                "liveAnimation": False,
+                "composition": "background keyed, alpha bounds crop, aspect-preserving downscale; no redraw",
+            } if SCENE.exists() else None,
             "sharedSceneSources": {
                 name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
                 for name in [
@@ -321,6 +377,15 @@ def render(out: Path) -> None:
             },
         },
         "paletteSource": "packages/app/src/index.css: CyberSafe Core dark",
+        "updaterDesign": {
+            "layout": "brand-orbital-left-content-right",
+            "progress": "native-real-only",
+            "sources": {
+                name: hashlib.sha256((ROOT / name).read_bytes()).hexdigest()
+                for name in ["packages/app/src/components/updates/UpdaterWindow.tsx",
+                             "packages/app/src/components/updates/updater-window.css"]
+            },
+        },
     }
     (out / "branding-manifest.json").write_text(json.dumps(manifest, indent=2) + "\n", encoding="utf-8")
 
