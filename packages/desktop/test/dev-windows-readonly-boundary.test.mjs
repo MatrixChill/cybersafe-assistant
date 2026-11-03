@@ -688,7 +688,7 @@ describe("registo real com efeitos duplados", () => {
     const evento = { sender: contents, senderFrame: frame };
     // Sem política, o canal de efeito chega ao handler (comportamento de antes).
     void canais.get("app:set-auto-start")(evento, { enabled: true, startMinimized: false });
-    assert.equal(efeitos.filter((e) => e[0] === "loginItem").length, 1, "off: o handler do main corre como antes");
+    assert.equal(efeitos.filter((e) => e[0] === "loginItem").length, 0, "DEV não escreve no autostart, mesmo sem a política adicional");
 
     // (b) modo ligado: a MESMA função real, com a política do módulo injetada.
     canais.clear();

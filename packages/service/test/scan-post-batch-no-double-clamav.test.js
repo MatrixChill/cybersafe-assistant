@@ -200,7 +200,7 @@ describe("prefetch nao se repete por ficheiro (motor REAL, bridge injectado)", (
           `${file}: a regra known_malware tem de aparecer (regras: ${entrada.rulesTriggered.join(",")})`,
         );
       } else {
-        assert.equal(entrada.verdict, "safe", `${file}: um veredicto limpo em cache é safe`);
+        assert.equal(entrada.verdict, "safe", `${file}: um veredicto limpo em cache é safe; resultado=${JSON.stringify(entrada)}`);
         assert.ok(!entrada.rulesTriggered.includes("known_malware"));
       }
     }

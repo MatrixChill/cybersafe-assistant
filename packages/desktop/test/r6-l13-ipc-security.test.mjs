@@ -29,7 +29,7 @@ function fixture(packaged = false) {
   const frame = { url: expected };
   const contents = { mainFrame: frame, isDestroyed: () => false };
   const sandbox = {
-    ipcRegistered: false, isQuitting: false,
+    ipcRegistered: false, isQuitting: false, perfil: {autoStart: packaged}, fronteiraLeituraWindows: {activo:false},
     ipcMain: { handle(channel, handler) { assert.ok(!handlers.has(channel)); handlers.set(channel, handler); } },
     mainWindow: { webContents: contents },
     app: { isPackaged: packaged, setLoginItemSettings(config) { effects.push(["settings", config]); } },
@@ -177,7 +177,7 @@ test("remote main-frame document cannot use sensitive methods exposed by the act
 });
 
 test("prototype keys in IPC arguments do not pollute prototypes at tested desktop boundary", async () => {
-  const f = fixture();
+  const f = fixture(true);
   const {api} = bridge(f);
   const payload = JSON.parse('{"limit":5,"__proto__":{"r6l13Polluted":true},"constructor":{"prototype":{"r6l13Polluted":true}},"enabled":true,"startMinimized":false}');
   assert.equal(Object.prototype.r6l13Polluted, undefined);
