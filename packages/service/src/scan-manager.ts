@@ -385,6 +385,38 @@ export function allocateQuickScanCandidates(
 // Full Scan cap
 const FULL_SCAN_MAX_FILES = 50000;
 
+/**
+ * Árvores do kernel que não são armazenamento, em POSIX.
+ *
+ * O que obriga a podar não é performance: `/proc/kcore` é um ficheiro REGULAR
+ * cujo tamanho declarado é o espaço de endereçamento do kernel (ordem de
+ * dezenas de TB), e `MalwareAnalyzer.analyze` calcula o SHA-256 do ficheiro
+ * ANTES do portão de tamanho (`core/src/analysis.ts:73` e `:77`). Uma análise
+ * de `/` ficaria presa nesse `await`; o cancelamento é verificado ENTRE
+ * ficheiros, não dentro de uma leitura que não termina. `/dev/*` e FIFOs já não
+ * chegam ao leitor (o `entry.isFile()` e o `lstat().isFile()` do motor excluem
+ * dispositivos de caracteres) — o que restava eram os regulares falsos do
+ * procfs.
+ */
+export const RAIZES_DO_KERNEL_POSIX = ["/proc", "/sys", "/dev", "/run"] as const;
+
+/**
+ * Comparação EXATA, não por nome: podar `proc` em qualquer profundidade tiraria
+ * do utilizador o seu `~/projetos/proc`. A interface do kernel só é aquela
+ * quando está na raiz, e é só isso que este predicado reconhece.
+ *
+ * Em `win32` devolve sempre `false` — o caminho Windows não passa por aqui, e
+ * a poda não é uma preferência do Linux Lite: é a diferença entre dois sistemas
+ * de ficheiros.
+ */
+export function eRaizDoKernelPosix(
+  caminho: string,
+  plataforma: NodeJS.Platform = process.platform,
+): boolean {
+  if (plataforma === "win32") return false;
+  return (RAIZES_DO_KERNEL_POSIX as readonly string[]).includes(caminho);
+}
+
 export class ScanManager {
   private activeScans = new Map<string, ExtendedScanState>();
   /**
@@ -1759,6 +1791,9 @@ const heartbeat = setInterval(() => {
     if (this.isCancelled.has(scanId)) return;
     if (filesList.length >= budget) return;
     if (depth > maxDepth) return;
+    // Mesma poda do walk completo: a raiz do Quick Scan em Linux pode ser o
+    // diretório pessoal, mas a regra não deve depender disso.
+    if (eRaizDoKernelPosix(dir)) return;
 
     try {
       const stat = await fs.stat(dir).catch((error) => {
@@ -1849,6 +1884,11 @@ const heartbeat = setInterval(() => {
   ) {
     if (this.isCancelled.has(scanId)) return;
     if (filesList.length >= maxFiles) return;
+    // Andar por `/` não é andar por um volume: as árvores do kernel ficam de
+    // fora (ver `eRaizDoKernelPosix`). Um alvo que seja SÓ uma delas recolhe
+    // zero ficheiros e cai no ramo «Nenhum ficheiro para analisar» — fracasso,
+    // nunca um «limpo» que não foi lido.
+    if (eRaizDoKernelPosix(dir)) return;
 
     try {
       const stat = await fs.stat(dir).catch((error) => {

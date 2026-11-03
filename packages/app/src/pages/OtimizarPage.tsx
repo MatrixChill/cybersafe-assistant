@@ -35,7 +35,9 @@ import {
   fraseProgresso,
   grupoDe,
   interpretaFirewall,
+  linhasDaPlataforma,
   marcarRevisaoManual,
+  notaDaPlataforma,
   ORDEM_SECOES,
   progressoDe,
   resumoEstado,
@@ -259,22 +261,33 @@ export default function OtimizarPage({
     ? MOTORES.filter((chave) => protecao.motores?.[chave]?.status === "active").length
     : null;
 
-  const progresso = useMemo(() => progressoDe(cartoes), [cartoes]);
+  /* O catálogo é uma projeção pela plataforma PUBLICADA pelo serviço, não pelo
+     aspeto dos caminhos: sem leitura não se adivinha e a página fica como é.
+     Em Linux caem as duas linhas que só o Windows sabe responder — e com elas
+     desaparece o botão, porque não há ponte para `getWindowsHealth()` aqui. */
+  const plataformaServico = hardware?.system?.platform;
+  const visiveis = useMemo(
+    () => linhasDaPlataforma(cartoes, plataformaServico),
+    [cartoes, plataformaServico],
+  );
+  const notaPlataforma = notaDaPlataforma(plataformaServico);
+
+  const progresso = useMemo(() => progressoDe(visiveis), [visiveis]);
   const porSecao = useMemo(() => {
     const secoes: Record<OptimizeSecao, OptimizeCartao[]> = {
       verificacoes: [], manutencao: [], manuais: [],
     };
-    for (const cartao of cartoes) secoes[secaoDe(cartao)].push(cartao);
+    for (const cartao of visiveis) secoes[secaoDe(cartao)].push(cartao);
     return secoes;
-  }, [cartoes]);
+  }, [visiveis]);
   const progressoVerificacoes = useMemo(
     () => progressoDe(porSecao.verificacoes),
     [porSecao],
   );
 
   /** Problemas comprovados = medição de falha, não contagem de opiniões. */
-  const problemasComprovados = cartoes.filter((c) => grupoDe(c) === "problemas").length;
-  const porVerificar = cartoes.filter(elegivelParaVerificacaoRapida);
+  const problemasComprovados = visiveis.filter((c) => grupoDe(c) === "problemas").length;
+  const porVerificar = visiveis.filter(elegivelParaVerificacaoRapida);
 
   /** Só com uma medição a fase pode vestir o tom de concluído. */
   const tomFase = progresso.vistos >= progresso.total && progresso.falhados === 0
@@ -650,6 +663,11 @@ export default function OtimizarPage({
                 </span>
               </div>
               <p className="row-meta mt-1 max-w-[92ch]">{ROTULO_SECAO[secao].descricao}</p>
+              {/* A lacuna diz-se em vez de se calar: no Linux não há leitor de
+                  firewall neste corte, e «não lida» não pode virar «desligada». */}
+              {secao === "verificacoes" && notaPlataforma && (
+                <p role="note" className="row-note mt-1 max-w-[92ch]">{notaPlataforma}</p>
+              )}
             </div>
 
             {linhas.length === 0 ? (

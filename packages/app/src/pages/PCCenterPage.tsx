@@ -20,6 +20,7 @@ import {
   Zap,
   ShieldAlert,
   HelpCircle,
+  FileSearch,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cpuUsageDisplay } from "@/lib/cpuUsage";
@@ -53,6 +54,7 @@ import {
   diskUnavailableText,
   diskUsagePercentText,
   diskVolumeRows,
+  diskVolumeScanActions,
   formatGb,
   formatPercent,
   safeNumber,
@@ -74,6 +76,14 @@ interface PCCenterPageProps {
    * `null`/ausente em produção; nunca derivado de um ref dentro de `useMemo`.
    */
   devTraceConnection?: DevTraceConnection | null;
+  /**
+   * Pedir a análise de um volume montado (§10). A página NÃO dispara análise
+   * nenhuma: entrega o caminho ao mesmo funil que o Dashboard usa
+   * (`pendingScan` → Scanner), onde a seleção espera confirmação explícita.
+   * Sem este callback a lista de unidades não mostra ações — é a linha que o
+   * Windows continua a ver hoje.
+   */
+  onAnalisarVolume?: (mount: string) => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -174,9 +184,24 @@ export function diskReadProvenance(disk: DiskSnapshot, nowMs: number): string {
  * (capacidade, usado, livre, percentagem), com as partições reservadas do
  * sistema identificadas como tal em vez de contarem como discos de trabalho.
  */
-function StorageCard({ disk }: { disk: DiskSnapshot }) {
+// Exportado para que o gesto «Analisar» seja provado em SSR sem depender do
+// comutador simple/advanced; o uso em produção continua a ser este ficheiro.
+export function StorageCard({
+  disk,
+  platform,
+  onAnalisarVolume,
+}: {
+  disk: DiskSnapshot;
+  platform?: string | null;
+  onAnalisarVolume?: (mount: string) => void;
+}) {
   const primary = disk.primary;
   const rows = diskVolumeRows(disk);
+  // As ações são a MESMA lista de volumes na MESMA ordem: ambas vêm de
+  // `disk.volumes`, por isso `acoes[i]` pertence a `rows[i]`. Um `Map` keyed na
+  // montagem não era seguro — a montagem é o rótulo que se mostra, não uma
+  // chave única garantida pelo contrato.
+  const acoes = diskVolumeScanActions(disk, platform);
   // Atividade = outra aquisição (PDH) e outro estado. Só entra quando o motor
   // mediu no intervalo actual; sem medição mostramos o motivo, nunca os números
   // do intervalo anterior.
@@ -249,7 +274,9 @@ function StorageCard({ disk }: { disk: DiskSnapshot }) {
               </span>
               <span className="text-[11px] font-mono text-muted-foreground">Livre</span>
             </div>
-            {rows.map((row) => (
+            {rows.map((row, i) => {
+              const acao = acoes[i];
+              return (
               <div key={row.mount} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs font-mono">
                 <span className="flex items-center gap-2 min-w-0">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-primary/70" />
@@ -260,11 +287,26 @@ function StorageCard({ disk }: { disk: DiskSnapshot }) {
                     {row.kind === "system-reserved" ? row.kindLabel : `${row.usedText} usados · ${row.usagePercentText}`}
                   </span>
                 </span>
-                <span className={cn("whitespace-nowrap", row.kind === "system-reserved" ? "text-muted-foreground" : getUsageColor("disk", row.usagePercent))}>
-                  {row.freeText}
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  <span className={cn(row.kind === "system-reserved" ? "text-muted-foreground" : getUsageColor("disk", row.usagePercent))}>
+                    {row.freeText}
+                  </span>
+                  {acao?.podeAnalisar && onAnalisarVolume && (
+                    <button
+                      type="button"
+                      data-testid="disk-volume-analisar"
+                      onClick={() => onAnalisarVolume(row.mount)}
+                      title={`Analisar ${row.mount} com os motores disponíveis`}
+                      className="flex items-center gap-1 rounded-md border border-border bg-secondary/50 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:border-primary/50 hover:bg-primary/15"
+                    >
+                      <FileSearch className="w-3 h-3" />
+                      Analisar
+                    </button>
+                  )}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
         {atividade.length > 0 ? (
@@ -697,7 +739,15 @@ export function CachedSnapshotNotice({ origin, ageText }: { origin: BatteryOrigi
     </div>
   );
 }
-export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSnapshot; batteryOrigin: BatteryOrigin }) {
+export function AdvancedView({
+  hardware,
+  batteryOrigin,
+  onAnalisarVolume,
+}: {
+  hardware: HardwareSnapshot;
+  batteryOrigin: BatteryOrigin;
+  onAnalisarVolume?: (mount: string) => void;
+}) {
   const ramUsage = ramUsageDisplay(hardware.ram);
   const nowMs = useNow();
   const ramAgeText = ramUsage.state === "stale" ? snapshotAgeText(ramUsage.updatedAt, nowMs) : null;
@@ -1251,7 +1301,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
 }
 
 
-export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceConnection }: PCCenterPageProps) {
+export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceConnection, onAnalisarVolume }: PCCenterPageProps) {
   const [viewMode, setViewMode] = useState<"simple" | "advanced">("simple");
   // AG-07: Exatamente duas vistas. Se existia preferência antiga de "lab", migra de forma segura para "advanced".
   useEffect(() => {
@@ -1330,7 +1380,11 @@ export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceCo
         <SimpleView hardware={hardware} pcState={pcState} batteryOrigin={dataOrigin ?? "LIVE"} />
       ) : (
         <>
-          <AdvancedView hardware={hardware} batteryOrigin={dataOrigin ?? "LIVE"} />
+          <AdvancedView
+            hardware={hardware}
+            batteryOrigin={dataOrigin ?? "LIVE"}
+            onAnalisarVolume={onAnalisarVolume}
+          />
           <details className="cyber-border rounded-xl p-4">
             <summary className="cursor-pointer font-medium">Resumo de recursos, sensores e proveniência</summary>
             <PcCenterVisual hardware={hardware} pcState={pcState} dataOrigin={dataOrigin ?? "LIVE"} modo="avancado" />

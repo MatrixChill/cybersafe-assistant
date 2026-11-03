@@ -23,7 +23,10 @@ const entre = (fonte: string, inicio: string, fim: string): string => {
 };
 
 test("a grelha principal usa items-start: cada cartão fica na altura natural", () => {
-  const grelha = entre(PC, "{/* Main Grid", "<StorageCard disk={hardware.disk} />");
+  // O marcador de fim é a ABERTURA da tag, não a tag inteira: o cartão passou a
+  // receber mais props e é escrito em várias linhas. O que se prova aqui é o
+  // bloco da grelha até ao cartão de armazenamento — isso não mudou.
+  const grelha = entre(PC, "{/* Main Grid", "<StorageCard");
   assert.match(grelha, /grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start/);
 });
 

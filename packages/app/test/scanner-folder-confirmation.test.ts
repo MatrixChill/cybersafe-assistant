@@ -19,6 +19,7 @@ import * as scanSessionReal from "../src/lib/scanSession";
 
 const {
   createFolderConfirmationGate,
+  folderSelectionFromPath,
   confirmFolderSelection,
   folderConfirmationKeyAction,
   FolderConfirmationPanel,
@@ -581,5 +582,65 @@ describe("TP-A2 · painel de confirmação mostra a pasta exata", () => {
 
     assert.equal(html.includes("Confirmar análise da pasta"), false);
     assert.equal(html.includes("Analisar esta pasta"), false);
+  });
+});
+
+/* ─────────────────────────────────────────────────────────────────────────────
+ * P3-LINUX · a montagem escolhida no PC Center entra neste mesmo portão.
+ * O caminho vem com separadores POSIX e pode ser a raiz do volume ("/"), que
+ * não tem último componente. Não há atalho: a seleção de um volume tem de
+ * mostrar-se e exigir o mesmo clique explícito que uma pasta do diálogo.
+ * ──────────────────────────────────────────────────────────────────────────── */
+describe("P3-LINUX · montagem POSIX no portão de confirmação", () => {
+  test("um volume montado prepara a seleção sem arrancar nada", async () => {
+    const app = scannerHarness();
+    try {
+      await app.boot({
+        pendingScan: { type: "custom", targetPath: "/mnt/usb" },
+        onScanConsumed: () => {},
+      });
+
+      const mostrado = app.panel();
+      assert.ok(mostrado, "escolher um volume não pode saltar a confirmação");
+      assert.equal(mostrado.props.selection.path, "/mnt/usb");
+      assert.equal(mostrado.props.selection.name, "usb");
+      assert.deepEqual(app.starts, []);
+
+      mostrado.props.onConfirm();
+      await app.flush();
+      assert.deepEqual(app.starts, [{ type: "custom", path: "/mnt/usb" }]);
+    } finally {
+      app.dispose();
+    }
+  });
+
+  test("a raiz do volume tem rótulo: «/» não fica sem nome", async () => {
+    const selecao = folderSelectionFromPath("/", 1);
+    assert.ok(selecao);
+    assert.equal(selecao.name, "/", "um nome vazio leria «analisar  /» sem dizer o quê");
+
+    const app = scannerHarness();
+    try {
+      await app.boot({ pendingScan: { type: "custom", targetPath: "/" }, onScanConsumed: () => {} });
+      assert.equal(app.panel().props.selection.name, "/");
+      app.panel().props.onConfirm();
+      await app.flush();
+      assert.deepEqual(app.starts, [{ type: "custom", path: "/" }]);
+    } finally {
+      app.dispose();
+    }
+  });
+
+  test("cancelar a montagem não arranca nada", async () => {
+    const app = scannerHarness();
+    try {
+      await app.boot({ pendingScan: { type: "custom", targetPath: "/mnt/usb" }, onScanConsumed: () => {} });
+      app.panel().props.onCancel();
+      await app.flush();
+      assert.deepEqual(app.starts, []);
+      assert.equal(app.panel(), undefined);
+    } finally {
+      app.dispose();
+    }
   });
 });

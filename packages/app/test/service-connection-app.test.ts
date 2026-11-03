@@ -271,6 +271,7 @@ function appHarness(transformSource: (source: string) => string = (source) => so
     // P1-PROCESS-TRUTH: o estado de frescura que o App entrega ao Gestor de
     // Tarefas — a prop, não o hook interno, é o contrato observável.
     taskManager: () => find(tree, "./pages/TaskManagerPage"),
+    pccenter: () => find(tree, "./pages/PCCenterPage"),
     responderProcessos(answer: any) { processesAnswer = answer; },
     async navegar(page: string) { navigateListener?.(page); await flush(); },
     sidebar: () => find(tree, "./v2/LabSidebar"),
@@ -311,6 +312,32 @@ test("App invalida ON na queda, rejeita snapshot antigo e suspende polls; recupe
 });
 test("Dashboard navigation clears any previous scan intent without starting a scan",async()=>{
  const app=appHarness();try{await app.boot();app.dashboard().onScan('full');await app.flush();assert.equal(app.scanner().pendingScan.type,'full');await app.navegar('dashboard');app.dashboard().onOpenScanner();await app.flush();assert.equal(app.scanner().pendingScan,null);assert.equal(app.calls.filter(x=>x==='scan.start').length,0);}finally{app.dispose();}
+});
+
+test("PC Center: «analisar volume» entrega a montagem ao funil do Scanner, sem pedir análise", async () => {
+  // §10 pedia «selecionar um volume montado e analisá-lo». O que este teste
+  // prova é o fio: a prop que o PC Center recebe é o funil `pendingScan` que já
+  // existia, com `type: "custom"` e o caminho EXATO da montagem. Não prova que a
+  // análise arranca — porque não é suposto arrancar daqui: `custom` com alvo
+  // passa pelo portão de confirmação do Scanner (`scanner-folder-confirmation`),
+  // que exige o clique «Analisar esta pasta». Um botão noutro ecrã que disparasse
+  // `scan.start` direto era o defeito, não a funcionalidade.
+  const app = appHarness();
+  try {
+    await app.boot();
+    await app.navegar("pccenter");
+    const centro = app.pccenter();
+    assert.equal(typeof centro?.onAnalisarVolume, "function", "a página não recebeu o funil de análise por volume");
+    centro.onAnalisarVolume("/mnt/usb");
+    await app.flush();
+    // Campo a campo (não `deepEqual`): o objeto nasce no contexto do `vm` do
+    // harness, portanto tem protótipo de outro realm — a estrutura é igual e a
+    // referência deep-strict recusa, o que não diria nada sobre o produto.
+    const alvo = app.scanner().pendingScan;
+    assert.equal(alvo?.type, "custom");
+    assert.equal(alvo?.targetPath, "/mnt/usb");
+    assert.equal(app.calls.filter((x) => x === "scan.start").length, 0);
+  } finally { app.dispose(); }
 });
 
 test("controlo negativo: reintroduzir proteção congelada faz a regressão falhar", async () => {

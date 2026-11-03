@@ -28,7 +28,24 @@ const flush = async () => { for (let i = 0; i < 15; i++) await Promise.resolve()
  * campos dependentes do kernel ficam indisponíveis em vez de inventados.
  * `hardware-normalize.js` é puro e entra real: é o contrato que se exercita.
  */
+/**
+ * Fonte POSIX das montagens: o sandbox NUNCA lê o disco de quem corre a suite.
+ * Um resultado vazio com motivo é o mesmo contrato que a fonte real devolve
+ * quando não há nada medido — ausência declarada, não zeros.
+ */
+const montesSandbox = {
+  lerMontagensReais: () => ({
+    ok: false,
+    volumes: [],
+    excluidos: [],
+    naoMedidos: [],
+    semCapacidadeUtil: [],
+    ilegiveis: 0,
+    reason: 'sandbox: sem tabela de montagens',
+  }),
+};
 const kernelSandbox = () => ({
+  './mounts-posix.js': montesSandbox,
   './win-kernel.js': {
     readMemoryStatus: () => ({ status: 'error', reason: 'sandbox' }),
     readPowerStatus: () => ({ status: 'error', reason: 'sandbox' }),
@@ -45,6 +62,10 @@ function temperature(si, exec) {
   return load('temperature', { systeminformation: si, child_process: { exec }, util: { promisify: () => exec }, './gpu-selection.js': gpu });
 }
 
-test('pending disk and network work is not relaunched by later polling ticks',async()=>{let disks=0,net=0;const dg=deferred(),ng=deferred();const{HardwareHealthEngine}=load('hardware',{systeminformation:{fsSize:()=>{disks++;return dg.promise}},os:{uptime:()=>10,cpus:()=>[]},child_process:{},util:{promisify:()=>()=>{}},'./temperature.js':{},'./battery-health.js':battery,'./storage-health.js':{},'./gpu-selection.js':gpu,'./disk.js':disk,...kernelSandbox()});const e=new HardwareHealthEngine();e.readNetworkStats=()=>{net++;return ng.promise};const a=[e.readDisksOnce(),e.readDisksOnce(),e.refreshNetwork(),e.refreshNetwork()];await flush();try{assert.equal(disks,1);assert.equal(net,1);}finally{dg.resolve([]);ng.resolve(null);await Promise.all(a);} });
+test('pending disk and network work is not relaunched by later polling ticks',async()=>{let disks=0,net=0;const dg=deferred(),ng=deferred();const{HardwareHealthEngine}=load('hardware',{systeminformation:{fsSize:()=>{disks++;return dg.promise}},os:{uptime:()=>10,cpus:()=>[]},child_process:{},util:{promisify:()=>()=>{}},'./temperature.js':{},'./battery-health.js':battery,'./storage-health.js':{},'./gpu-selection.js':gpu,'./disk.js':disk,...kernelSandbox(),
+  // A contagem é «quantas vezes foi pedida a leitura do armazenamento», e em
+  // Linux a fonte deixou de ser `si.fsSize()`. Contar as duas é o que mantém
+  // esta garantia válida nas duas plataformas em vez de só na do autor.
+  './mounts-posix.js':{lerMontagensReais:()=>{disks++;return montesSandbox.lerMontagensReais()}}});const e=new HardwareHealthEngine();e.readNetworkStats=()=>{net++;return ng.promise};const a=[e.readDisksOnce(),e.readDisksOnce(),e.refreshNetwork(),e.refreshNetwork()];await flush();try{assert.equal(disks,1);assert.equal(net,1);}finally{dg.resolve([]);ng.resolve(null);await Promise.all(a);} });
 
 test('fresh battery from init is not repeated on the first slow tick or re-stamped',async()=>{const{HardwareHealthEngine}=load('hardware',{systeminformation:{},os:{uptime:()=>10,cpus:()=>[]},child_process:{},util:{promisify:()=>()=>{}},'./temperature.js':{readTemperature:async()=>({cpuPackageC:null,cpuCoreMaxC:null,gpuCoreC:null})},'./battery-health.js':battery,'./storage-health.js':{},'./gpu-selection.js':gpu,'./disk.js':disk,...kernelSandbox()});const e=new HardwareHealthEngine();e.initialized=true;e.diskReadAttempted=true;e.lastFastTick=e.lastMediumTick=Date.now();e.lastSlowTick=0;const stamp=Date.now();e.batteryState={updatedAt:stamp,status:'absent'};let calls=0;e.refreshBattery=async()=>{calls++};e.refreshNetwork=e.refreshStorageHealth=async()=>{};e.detectGpu=async()=>({available:false});await e.getSnapshot([]);assert.equal(calls,0);assert.equal(e.batteryState.updatedAt,stamp);e.batteryState.updatedAt=Date.now()-11000;e.lastSlowTick=0;await e.getSnapshot([]);assert.equal(calls,1);});

@@ -1,7 +1,7 @@
 import { verifyMatrixProvider } from "@/lib/matrixProviderStatus";
 import { minimizeContextForAi } from "@/lib/aiContextBuilder";
 import { getAuthToken } from "../lib/authSession";
-import { MatrixConfigModal } from "./MatrixConfigModal";
+import { MatrixConfigModal, type MecanismoArmazenamentoIa } from "./MatrixConfigModal";
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect, type PointerEvent as RPointerEvent, type KeyboardEvent as RKeyboardEvent } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Sparkles, MessageSquare, StopCircle, RefreshCw, MoreHorizontal, PanelLeft, PanelRight, Minimize2, Move, PinOff, Plus, KeyRound } from "lucide-react"
@@ -443,7 +443,13 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
   const [menuOpen, setMenuOpen] = useState(false)
   const [configModalAberta, setConfigModalAberta] = useState(false)
   const credentialGeneration = useRef(0)
-  const [credentialStatus, setCredentialStatus] = useState({ hasKey: false, provider: "groq", state: "unverified" })
+  const [credentialStatus, setCredentialStatus] = useState<{
+    hasKey: boolean;
+    provider: string;
+    state: string;
+    origem?: "cifrado" | "local-protegido" | null;
+    mecanismo?: MecanismoArmazenamentoIa | null;
+  }>({ hasKey: false, provider: "groq", state: "unverified", origem: null, mecanismo: null })
   const [providerState, setProviderState] = useState("Ligação não verificada")
   useEffect(() => {
     if (!configModalAberta) return
@@ -2709,6 +2715,8 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
         onClose={() => setConfigModalAberta(false)}
         currentProvider={credentialStatus.provider}
         hasConfiguredKey={credentialStatus.hasKey}
+        origem={credentialStatus.origem ?? null}
+        mecanismo={credentialStatus.mecanismo ?? null}
         providerState={providerState}
         onVerify={async () => {
           const generation = credentialGeneration.current;
@@ -2718,16 +2726,23 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
           setMode(result.operational ? "online" : "local");
           setProviderState(result.label);
         }}
-        onSaveKey={async (key: string, prov: string) => {
+        onSaveKey={async (key: string, prov: string, consentidoSemCifra: boolean) => {
           credentialGeneration.current++;
           const api = window.electronAPI;
           if (api?.aiCredentials?.save) {
-            const res = await api.aiCredentials.save(key, prov);
+            const res = await api.aiCredentials.save(key, prov, consentidoSemCifra);
             if (res.ok) {
               abortRef.current?.abort();
               setMode("local"); setModoConversa("local");
               setAutorizacoes([]); aplicarConsentimentoExterno({ descriptor: null, grant: null });
-              setCredentialStatus({ hasKey: true, provider: res.provider ?? prov, state: res.state ?? "configured" });
+              setCredentialStatus((atual) => ({
+                ...atual,
+                hasKey: true,
+                provider: res.provider ?? prov,
+                state: res.state ?? "configured",
+                origem: res.origem ?? atual.origem ?? null,
+                mecanismo: res.mecanismo ?? atual.mecanismo ?? null,
+              }));
               setProviderState(res.applied ? "Provider configurado — ligação não verificada" : "Chave guardada — API ainda não confirmou a configuração");
             }
             return res;
@@ -2743,7 +2758,14 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
               abortRef.current?.abort();
               setMode("local"); setModoConversa("local");
               setAutorizacoes([]); aplicarConsentimentoExterno({ descriptor: null, grant: null });
-              setCredentialStatus({ hasKey: false, provider: "groq", state: res.state ?? "configured" });
+              setCredentialStatus((atual) => ({
+                ...atual,
+                hasKey: false,
+                provider: "groq",
+                state: res.state ?? "configured",
+                origem: null,
+                mecanismo: res.mecanismo ?? atual.mecanismo ?? null,
+              }));
               setProviderState(res.applied ? "Chave removida — modo local" : "Chave removida — API ainda não confirmou a remoção");
             }
             return res;

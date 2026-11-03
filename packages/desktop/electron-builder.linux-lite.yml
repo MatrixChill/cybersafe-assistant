@@ -1,0 +1,104 @@
+# Empacotamento do CyberSafe Assistant Linux Lite (§14).
+#
+# Configuração SEPARADA de propósito: o bloco `build` de
+# packages/desktop/package.json é o do instalador Windows (NSIS, `icon.ico`,
+# `scan-engine.exe`, `vendor/clamav`). Este ficheiro é invocado com
+# `--config electron-builder.linux-lite.yml` e repete os campos partilhados em
+# vez de os herdar, para que uma mudança no packaging Windows não entre aqui
+# por acidente. O bloco Windows não é lido nem alterado por este caminho.
+appId: com.cybersafe.assistant.linuxlite
+productName: CyberSafe Assistant Linux Lite
+# Nome do executável e do .desktop: sem espaços, para não depender da
+# sanitização automática do electron-builder em deb/AppImage.
+executableName: cybersafe-assistant-linux-lite
+directories:
+  output: release-linux
+# Mesma seleção de ficheiros do Windows, mais as negações dos binários
+# Windows. Não é só higiene: o §14 proíbe empacotar `clamscan.exe`/
+# `scan-engine.exe`, e a `vendor/clamav` do Windows traz `.exe` e `.dll`.
+files:
+  - dist/**/*
+  - package.json
+  - "!**/*.log"
+  - "!node_modules/@cybersafe/service/logs/**"
+  - "!**/node_modules/@prisma/**"
+  - "!**/*.exe"
+  - "!**/*.dll"
+  - "!**/vendor/clamav/**"
+  - "!**/native-engine/**"
+# `@cybersafe/native-windows` fica NO pacote embora seja código Windows: o
+# motor importa-o estaticamente (packages/service/src/engine.ts:86) e o
+# `usb-detection-adapter` idem. Retirá-lo partia o `require` no arranque. É
+# JavaScript puro — sem `.exe` nem `.node` — e os ramos Windows não são
+# invocados em Linux; as negações acima já tiram os binários do caminho.
+asarUnpack:
+  - "**/*.node"
+  - "**/node_modules/better-sqlite3/**"
+# Em Linux o ClamAV é dependência de sistema (`clamscan`/`clamd` no PATH),
+# não um recurso copiado para dentro do pacote. Lista vazia = nada extraído.
+extraResources: []
+# As dependências de produção são preparadas fora do electron-builder neste
+# projeto (workspace npm: o `appDir` packages/desktop não tem node_modules
+# próprio). Sem esta linha, o electron-builder corre `npm install --production`
+# com cwd em packages/desktop e o npm resolve o worktree para a RAIZ e reify-a:
+# apagou todas as devDependencies — incluindo o próprio electron-builder, a
+# meio do build (medido: `node_modules/app-builder-lib/out` desapareceu e o
+# passo seguinte falhou com ENOENT no binário que ele próprio ia chamar).
+# Em `packager.js:405` (25.1.8) `npmRebuild === false` devolve antes de
+# `installOrRebuild`, por isso nem a instalação nem o node-gyp correm. Os
+# módulos nativos usados em Linux vêm pré-construídos; `g++` e `make` nem
+# existem neste ambiente de teste.
+npmRebuild: false
+# Metadados que o control do `.deb` exige e que o `package.json` do desktop não
+# declara. Não se inventa nada: a homepage é o `origin` que o próprio
+# repositório declara (`git remote -v`), e o maintainer é o nome já escrito em
+# `author`. Vai em `extraMetadata`, portanto só existe no pacote Linux — o
+# `package.json` partilhado com o Windows não é tocado.
+extraMetadata:
+  homepage: https://github.com/MatrixChill/cybersafe-assistant
+  # Vai para `Comment=` do `.desktop`. A descrição do `package.json` do desktop
+  # diz «desktop shell» genérica; no Linux Lite o menu tem de dizer o que esta
+  # edição é, sem tocar no ficheiro partilhado com o Windows.
+  description: Assistente de segurança do CyberSafe para Linux (edição Linux Lite)
+  # `name` decide onde o Electron põe `userData` ANTES de qualquer `setName`.
+  # Medido no binário empacotado: o renderer arrancou com
+  # `--user-data-dir=$HOME/.config/@cybersafe/desktop` — o mesmo diretório do
+  # perfil de desenvolvimento — e a credência do pipe foi recusada
+  # («secrets … tem 2 ligações físicas (partilharia a credência com outra
+  # instalação)»). Um pacote que partilha raiz de dados com o dev viola o §9.
+  # O `main.ts` só chama `app.setName` dentro de `whenReady` (linhas
+  # 1809/1875), depois do `userData` já resolvido, por isso isto resolve-se
+  # aqui e não no código partilhado: nome de pacote próprio do Linux Lite.
+  name: cybersafe-assistant-linux-lite
+linux:
+  # O electron-builder exige `author.email` para deduzir o Maintainer do .deb;
+  # o projeto não declara email nenhum, e `linux.maintainer` é exatamente a
+  # alternativa que a própria ferramenta oferece (`FpmTarget.js:61-66`).
+  maintainer: CyberSafe Team
+  target:
+    - target: deb
+      arch:
+        - x64
+    - target: AppImage
+      arch:
+        - x64
+  # `System` é a categoria freedesktop para utilitários de diagnóstico do
+  # sistema; é o que o menu usa. O ícone é o PNG oficial já distribuído com a
+  # aplicação — não há logótipo novo (§13).
+  category: System
+  icon: src/assets/icon.png
+  # `Section: default` não é secção Debian válida (medido no control do pacote
+  # anterior). `linux.packageCategory` vai para `--category` do fpm
+  # (`FpmTarget.js:138-140`), que é o que escreve o `Section:` do control.
+  packageCategory: utils
+  # O nome do `.desktop` e o `Name=` já saem de `executableName`/`productName`.
+  # Não se escreve um bloco `desktop:` aqui: em 25.1.8 as chaves dele vão para o
+  # ficheiro literais (medido: um `desktop: {entryName, comment}` produziu as
+  # linhas `entryName=…` e `comment=…` dentro do `.desktop` gerado), e o
+  # `Comment=` quer-se da descrição do produto, que vai em `extraMetadata`.
+  # Sem `mimeTypes`: pus `x-scheme-handler/cybersafe` e apaguei-o. O pacote
+  # declarava ao ambiente gráfico que abria links `cybersafe:`, mas não há
+  # `setAsDefaultProtocolClient` nem handler `open-url` em parte alguma de
+  # `packages/` (medido por grep) — seria uma capacidade anunciada sem
+  # mecanismo atrás.
+artifactName: "${productName}-${version}-linux-${arch}.${ext}"

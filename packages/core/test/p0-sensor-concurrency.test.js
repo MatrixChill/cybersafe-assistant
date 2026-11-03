@@ -51,6 +51,21 @@ function kernelStub() {
           close() {}
         },
       },
+      // A fonte POSIX das montagens entra stubada pelo MESMO motivo do PDH: um
+      // sandbox não lê o disco de quem corre a suite. Devolve o contrato de
+      // «nada medido» com motivo, que é o que a fonte real devolve quando não
+      // há tabela legível — nunca uma lista vazia silenciosa.
+      './mounts-posix.js': {
+        lerMontagensReais: () => ({
+          ok: false,
+          volumes: [],
+          excluidos: [],
+          naoMedidos: [],
+          semCapacidadeUtil: [],
+          ilegiveis: 0,
+          reason: 'sandbox: sem tabela de montagens',
+        }),
+      },
     },
   };
 }
