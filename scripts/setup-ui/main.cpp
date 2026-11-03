@@ -23,24 +23,46 @@ struct Btn { RECT r; int id; const wchar_t* label; int icon; bool primary; bool 
 static std::vector<Btn> g_buttons;
 static int g_page = 0, g_hover = -1, g_focus = 0, g_dpi = 96;
 static Bitmap *g_scene = nullptr, *g_sceneSoft = nullptr, *g_lockup = nullptr;
-static void BuildSceneSoft(int w, int h);
+static void BuildSceneSoft(int w);
+static void DrawContain(Graphics& g, Bitmap* b, RectF box);
 static int g_progress = 0;
 static bool g_openApp = true;
 static std::wstring g_note;
 
 static float S(float v){ return v * g_dpi / 96.0f; }
 
+static bool FileExistsW(const std::wstring& p){
+  DWORD a = GetFileAttributesW(p.c_str());
+  return a != INVALID_FILE_ATTRIBUTES;
+}
+static bool LoadPng(const wchar_t* rel, Bitmap** out){
+  wchar_t exe[MAX_PATH];
+  GetModuleFileNameW(nullptr, exe, MAX_PATH);
+  std::wstring dir(exe);
+  size_t cut = dir.find_last_of(L"\\");
+  if(cut != std::wstring::npos) dir = dir.substr(0, cut);
+  std::wstring bases[3] = { L"", dir, dir + L"\..\.." };
+  for(int i = 0; i < 3; i++){
+    std::wstring full = bases[i].empty() ? std::wstring(rel) : bases[i] + L"\\" + rel;
+    if(FileExistsW(full)){
+      Bitmap* b = new Bitmap(full.c_str());
+      if(b->GetLastStatus() == Ok){ *out = b; return true; }
+      delete b;
+    }
+  }
+  return false;
+}
 static void LoadImages(){
-  wchar_t path[MAX_PATH];
-  const wchar_t* rel = L"assets\\branding\\scene\\orbital-b-scene.png";
-  if(GetFullPathNameW(rel, MAX_PATH, path, nullptr) && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) g_scene = new Bitmap(path);
-  const wchar_t* lock = L"assets\\branding\\source\\07_CyberSafe_horizontal_lockup.png";
-  if(GetFullPathNameW(lock, MAX_PATH, path, nullptr) && GetFileAttributesW(path) != INVALID_FILE_ATTRIBUTES) g_lockup = new Bitmap(path);
-  BuildSceneSoft(720, 580);
+  LoadPng(L"assets\branding\scene\orbital-b-scene.png", &g_scene);
+  LoadPng(L"assets\branding\source\07_CyberSafe_horizontal_lockup.png", &g_lockup);
+  BuildSceneSoft(960);
 }
 
-static void BuildSceneSoft(int w, int h){
+static void BuildSceneSoft(int w){
   if(!g_scene) return;
+  int sw = (int)g_scene->GetWidth(), sh = (int)g_scene->GetHeight();
+  if(sw <= 0 || sh <= 0) return;
+  int h = (int)((float)w * sh / sw + 0.5f);
   Bitmap* tmp = new Bitmap(w, h, PixelFormat32bppARGB);
   { Graphics gg(tmp);
     gg.SetInterpolationMode(InterpolationModeHighQualityBicubic);
@@ -62,6 +84,15 @@ static void BuildSceneSoft(int w, int h){
     tmp->UnlockBits(&bd);
   }
   g_sceneSoft = tmp;
+}
+
+static void DrawContain(Graphics& g, Bitmap* b, RectF box){
+  if(!b) return;
+  float iw = (float)b->GetWidth(), ih = (float)b->GetHeight();
+  if(iw <= 0 || ih <= 0) return;
+  float sc = fminf(box.Width / iw, box.Height / ih);
+  float w = iw * sc, h = ih * sc;
+  g.DrawImage(b, RectF(box.X + (box.Width - w) / 2.0f, box.Y + (box.Height - h) / 2.0f, w, h));
 }
 
 static GraphicsPath* RoundRectPath(RectF r, float rad){
@@ -176,6 +207,8 @@ static void Paint(HWND hwnd, HDC hdc){
     Graphics g(mem);
     g.SetSmoothingMode(SmoothingModeAntiAlias);
     g.SetTextRenderingHint(TextRenderingHintClearTypeGridFit);
+    g.SetInterpolationMode(InterpolationModeHighQualityBicubic);
+    g.SetPixelOffsetMode(PixelOffsetModeHighQuality);
     float W = (float)rc.right, H = (float)rc.bottom;
 
     LinearGradientBrush bg(PointF(0,0), PointF(0,H), kBgTop, kBgBot);
@@ -210,7 +243,7 @@ static void Paint(HWND hwnd, HDC hdc){
       float lh = lw * g_lockup->GetHeight() / g_lockup->GetWidth();
       g.DrawImage(g_lockup, RectF(W - S(56) - lw, S(74), lw, lh));
     }
-    if(g_sceneSoft) g.DrawImage(g_sceneSoft, RectF(S(26), S(118), S(548), S(442)));
+    DrawContain(g, g_sceneSoft, RectF(S(26), S(118), S(548), S(442)));
 
     DrawTextAt(g, L"ASSISTANT  /  WINDOWS", RectF(S(56), H - S(122), S(400), S(22)), S(14), kText);
     DrawTextAt(g, L"SETUP  /  2026", RectF(S(56), H - S(96), S(300), S(20)), S(11), kMuted);

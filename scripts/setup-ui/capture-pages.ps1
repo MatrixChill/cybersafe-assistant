@@ -1,6 +1,7 @@
 param(
   [Parameter(Mandatory=$true)][string]$ExePath,
-  [Parameter(Mandatory=$true)][string]$OutDir
+  [Parameter(Mandatory=$true)][string]$OutDir,
+  [string]$WorkDir = ''
 )
 $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.Drawing
@@ -15,7 +16,7 @@ public class CsWin {
 }
 "@
 
-$root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
+$root = if ($WorkDir) { (Resolve-Path $WorkDir).Path } else { (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path }
 $exe = (Resolve-Path $ExePath).Path
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $proc = Start-Process -FilePath $exe -WorkingDirectory $root -PassThru
