@@ -9,7 +9,7 @@ import { createGitHubReleaseOpener, isGitHubReleaseUrl } from './github-transpor
 import { HttpsFeedSource } from './sources.ts';
 
 /** Build-pinned public trust, never renderer/env-controlled. No installer execution. */
-export function createProductionUpdater(opts: {runtimeSupported: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string}) {
+export function createProductionUpdater(opts: {runtimeSupported: boolean; automaticCheckEnabled?: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string}) {
   const unavailable = () => createUnconfiguredUpdater(opts);
   if (!trust.enabled || !isGitHubReleaseUrl(trust.feedManifestUrl)) return unavailable();
   try {
@@ -20,7 +20,7 @@ export function createProductionUpdater(opts: {runtimeSupported: boolean; instal
     originAllowlist: ['github.com'], pinnedKeyFingerprint: trust.pinnedKeyFingerprint,
     expectedPublisherName: trust.publisherLabel, cacheDir: opts.cacheDir,
     timeoutMs: 120000, maxDownloadBytes: 1024 * 1024 * 1024,
-    automaticCheckEnabled: false, minCheckIntervalMs: 30_000,
+    automaticCheckEnabled: opts.automaticCheckEnabled === true, minCheckIntervalMs: 30_000,
   });
   if (!config.ok) return unavailable();
   const transport = createGitHubReleaseOpener(createNodeHttpsOpener());

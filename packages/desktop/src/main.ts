@@ -140,8 +140,9 @@ const DEBOUNCE_TIME = 15000; // 15 segundos de silêncio para o mesmo arquivo
 // fundo sólido de sempre. Só um pedido explícito (ex.: um toggle futuro nas
 // Definições) liga o backdrop nativo — e mesmo assim apenas quando o
 // `window-material` confirmar que o sistema o suporta.
-let preferences: { notificationsEnabled: boolean; windowMaterial?: BackgroundMaterial } = {
+let preferences: { notificationsEnabled: boolean; automaticUpdateCheckEnabled?: boolean; windowMaterial?: BackgroundMaterial } = {
   notificationsEnabled: true,
+  automaticUpdateCheckEnabled: false,
 };
 
 function settingsFilePath(): string {
@@ -156,6 +157,7 @@ function loadPreferences() {
       if (typeof parsed.notificationsEnabled === "boolean") {
         preferences.notificationsEnabled = parsed.notificationsEnabled;
       }
+      preferences.automaticUpdateCheckEnabled = parsed.automaticUpdateCheckEnabled === true;
       // Só se aceita um material da lista do Electron; qualquer outro valor fica
       // como ausente (fallback sólido), nunca vai para o `new BrowserWindow`.
       if (VALID_BACKGROUND_MATERIALS.includes(parsed.windowMaterial)) {
@@ -171,8 +173,10 @@ function savePreferences() {
   try {
     fs.mkdirSync(path.dirname(settingsFilePath()), { recursive: true });
     fs.writeFileSync(settingsFilePath(), JSON.stringify(preferences, null, 2), "utf8");
+    return true;
   } catch {
-    // Falha de escrita não é fatal.
+    // O chamador pode reportar uma preferência que não pôde ser persistida.
+    return false;
   }
 }
 
@@ -1447,7 +1451,18 @@ function registerIpc(
   handle("app:update-set-automatic", async (_event, enabled: unknown) => {
     const v = validateAutomaticInput(enabled);
     if (!v.ok) return failureResult("internal", updateVersion(), "flag automática inválida");
-    return withUpdater((u) => u.setAutomaticCheck(v.value));
+    return withUpdater(async (u) => {
+      const previous = u.snapshotCopy().automaticCheckEnabled;
+      const result = await u.setAutomaticCheck(v.value);
+      if (!result.ok) return result;
+      preferences.automaticUpdateCheckEnabled = v.value;
+      if (!savePreferences()) {
+        preferences.automaticUpdateCheckEnabled = previous;
+        await u.setAutomaticCheck(previous);
+        return { ok: false, error: "internal", snapshot: u.snapshotCopy() };
+      }
+      return result;
+    });
   });
 
   /**
@@ -1855,6 +1870,7 @@ if (!gotTheLock) {
       cacheDir: updaterCacheDir(app.getPath("userData")),
       runtimeSupported: app.isPackaged && process.platform === "win32",
       installedVersion: app.getVersion(),
+      automaticCheckEnabled: preferences.automaticUpdateCheckEnabled === true,
       installedBuild: installedIdentity.build,
       installedCommit: installedIdentity.commit,
     });
