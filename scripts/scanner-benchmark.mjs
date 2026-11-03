@@ -17,6 +17,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
+import {parsePerfLogs, waitForTerminal} from "./scanner-benchmark-metrics.mjs";
 import AdmZip from "adm-zip";
 
 const FILE_COUNT = Number(process.env.BENCH_FILES ?? 300);
@@ -57,68 +58,6 @@ async function makeTree(root) {
   zip.writeZip(path.join(root, "archive.zip"));
 }
 
-function parsePerfLogs(rows) {
-  const engines = new Map();
-  const summary = {
-    zipMs: 0,
-    zipCount: 0,
-    prefetchMs: null,
-    batchMs: null,
-    historyMs: null,
-    historyCount: 0,
-    perfLines: 0,
-  };
-  for (const row of rows) {
-    const line = row.line;
-    let m = /^\[ScanPerf\] ENGINE_PHASE engine=(\w+) elapsedMs=(\d+)/.exec(line);
-    if (m) {
-      summary.perfLines += 1;
-      const name = m[1];
-      const ms = Number(m[2]);
-      const entry = engines.get(name) ?? { count: 0, totalMs: 0, maxMs: 0 };
-      entry.count += 1;
-      entry.totalMs += ms;
-      entry.maxMs = Math.max(entry.maxMs, ms);
-      engines.set(name, entry);
-      continue;
-    }
-    m = /^\[ScanPerf\] ZIP_PHASE .*elapsedMs=(\d+)/.exec(line);
-    if (m) {
-      summary.perfLines += 1;
-      summary.zipMs += Number(m[1]);
-      summary.zipCount += 1;
-      continue;
-    }
-    m = /^\[ScanPerf\] prefetch end .*elapsed=(\d+)s/.exec(line);
-    if (m) {
-      summary.perfLines += 1;
-      summary.prefetchMs = Number(m[1]) * 1000;
-      continue;
-    }
-    m = /^\[ScanPerf\] SCANMANAGER_BATCH_END .*elapsedMs=(\d+)/.exec(line);
-    if (m) {
-      summary.perfLines += 1;
-      summary.batchMs = Number(m[1]);
-      continue;
-    }
-    m = /^\[ScanPerf\] HISTORY_RECORD .*elapsedMs=(\d+)/.exec(line);
-    if (m) {
-      summary.perfLines += 1;
-      summary.historyMs = Number(m[1]);
-      summary.historyCount += 1;
-    }
-  }
-  const enginesOut = {};
-  for (const [name, entry] of engines) {
-    enginesOut[name] = {
-      count: entry.count,
-      totalMs: entry.totalMs,
-      avgMs: Math.round((entry.totalMs / entry.count) * 10) / 10,
-      maxMs: entry.maxMs,
-    };
-  }
-  return { engines: enginesOut, ...summary };
-}
 
 function startCapture() {
   const originals = { log: console.log, error: console.error, warn: console.warn };
@@ -155,12 +94,7 @@ async function runFake(root) {
   const start = Date.now();
   const id = await manager.startScan("custom", root);
   if (!id) throw new Error("scan recusado");
-  while (true) {
-    const state = manager.getScan(id);
-    if (state && ["completed", "cancelled", "failed"].includes(state.status)) break;
-    await sleep(50);
-  }
-  const state = manager.getScan(id);
+  const state = await waitForTerminal(manager,id);
   const elapsedMs = Date.now() - start;
   const perSec = elapsedMs > 0 ? Math.round((state.filesScanned / (elapsedMs / 1000)) * 10) / 10 : 0;
   return {
@@ -191,14 +125,7 @@ async function runReal(root) {
     const start = Date.now();
     const id = await manager.startScan("custom", root);
     if (!id) throw new Error("scan recusado");
-    let state = null;
-    const deadline = Date.now() + 300_000;
-    while (Date.now() < deadline) {
-      state = manager.getScan(id);
-      if (state && ["completed", "cancelled", "failed"].includes(state.status)) break;
-      await sleep(50);
-    }
-    if (!state) throw new Error("scan sem estado terminal");
+    const state = await waitForTerminal(manager,id);
     await sleep(750); // deixa o record assíncrono do histórico terminar
     let health = null;
     try { health = engine.getProtectionState(); } catch { /* health é opcional no benchmark */ }
@@ -227,7 +154,14 @@ async function main() {
   console.log("[bench] mode=" + (REAL ? "integrated" : "minimal") + " files=" + FILE_COUNT + " root=" + root);
   try {
     await makeTree(root);
+    const measuredAt = performance.now();
+    const cpuStart = process.cpuUsage();
+    const rssStart = process.memoryUsage().rss;
     const result = REAL ? await runReal(root) : await runFake(root);
+    const measuredElapsedMs = performance.now() - measuredAt;
+    const cpu = process.cpuUsage(cpuStart);
+    result.processResources = {scope:'node-controller-only; excludes child engines',elapsedMs:measuredElapsedMs,cpuMs:(cpu.user+cpu.system)/1000,rssStartBytes:rssStart,rssEndBytes:process.memoryUsage().rss};
+    if (process.env.BENCH_REPORT) await fs.writeFile(path.resolve(process.env.BENCH_REPORT), JSON.stringify({schema:1,syntheticCorpus:true,historicalComparison:false,fileCount:FILE_COUNT,measuredAt:new Date().toISOString(),...result},null,2), {flag:'wx'});
     const state = result.state;
     console.log(
       "[bench] status=" + state.status + " filesScanned=" + state.filesScanned + "/" + state.filesTotal +
