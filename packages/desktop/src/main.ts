@@ -1785,11 +1785,9 @@ function configureAutoStart() {
   // arranque do Windows.
   if (fronteiraLeituraWindows.activo) return;
 
-  app.setLoginItemSettings({
-    openAtLogin: false, // FASE 1.1: Auto-start desativado por padrão
-    path: process.execPath,
-    args: app.isPackaged ? ["--hidden"] : [path.resolve(process.argv[1]), "--hidden"],
-  });
+  // Windows owns this persisted preference. Startup must never register or
+  // remove it; only an explicit settings action may change the login item.
+
 }
 
 // O lock de instância única é chaveado pelo `userData`: sem isto, o dev partilha
