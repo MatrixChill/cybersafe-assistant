@@ -5,7 +5,9 @@ import {ProtectionEngineService} from '../../service/dist/engine.js';import {Nat
 import {ServiceClient} from '../src/service-client.ts';import {createSecurityNotifications} from '../src/security-notifications.ts';import {createNativeNotificationDelivery} from '../src/notification-delivery.ts';
 const wait=async predicate=>{const deadline=Date.now()+2000;while(!predicate()){if(Date.now()>deadline)throw Error('isolated bridge deadline');await new Promise(r=>setTimeout(r,5));}};
 for(const mode of ['confirmed','failed','notifications-off'])test('real authenticated pipe bridges '+mode+' to history and mock native Notification',async t=>{
- const dir=await fs.mkdtemp(path.join(os.tmpdir(),'cybersafe-final-bridge-'));const targetDir=await fs.mkdtemp(path.join(os.tmpdir(),'cybersafe-final-target-'));const file=path.join(targetDir,'fixture.txt');await fs.writeFile(file,'Benign isolated fixture');
+ // Resolve the runner's possible short-name/junction temp alias before testing a reparse-free target.
+ const tempRoot=await fs.realpath(os.tmpdir());
+ const dir=await fs.mkdtemp(path.join(tempRoot,'cybersafe-final-bridge-'));const targetDir=await fs.mkdtemp(path.join(tempRoot,'cybersafe-final-target-'));const file=path.join(targetDir,'fixture.txt');await fs.writeFile(file,'Benign isolated fixture');
  const oldToken=process.env.CYBERSAFE_PIPE_TOKEN;const token=randomBytes(32).toString('hex');process.env.CYBERSAFE_PIPE_TOKEN=token;const engine=new ProtectionEngineService(dir);if(oldToken===undefined)delete process.env.CYBERSAFE_PIPE_TOKEN;else process.env.CYBERSAFE_PIPE_TOKEN=oldToken;
  const pipe=process.platform==='win32'?'\\\\.\\pipe\\cybersafe-final-'+randomBytes(8).toString('hex'):path.join(dir,'test.sock');const client=new ServiceClient(pipe,token);
  t.after(async()=>{client.disconnect();await engine.dispose();await fs.rm(dir,{recursive:true,force:true});await fs.rm(targetDir,{recursive:true,force:true});});
@@ -19,7 +21,7 @@ for(const mode of ['confirmed','failed','notifications-off'])test('real authenti
  await engine.scanArtifact(file,'service',{skipVirusTotal:true});await wait(()=>received.some(e=>e.type==='threat.detected'));
  if(mode==='notifications-off'){assert.equal(osCalls.length,0);assert.equal(diagnostics.length,0);assert.ok(engine.events.some(e=>e.type==='threat.detected'));assert.ok(stored.some(e=>e.type==='threat.detected'));return;}
  if(mode==='failed')engine.quarantine.quarantine=async()=>null;
- const result=await engine.dispatch('threat.action',{id:file,action:'quarantine',sha256:sha});assert.equal(result.success,mode==='confirmed');const terminal=mode==='confirmed'?'quarantine.added':'quarantine.failed';await wait(()=>received.some(e=>e.type===terminal));assert.ok(stored.some(e=>e.type===terminal));assert.equal(osCalls.length,2);
+ const result=await engine.dispatch('threat.action',{id:file,action:'quarantine',sha256:sha});assert.equal(result.success,mode==='confirmed',JSON.stringify({result,quarantineEvents:stored.filter(e=>e.type.startsWith('quarantine.'))}));const terminal=mode==='confirmed'?'quarantine.added':'quarantine.failed';await wait(()=>received.some(e=>e.type===terminal));assert.ok(stored.some(e=>e.type===terminal));assert.equal(osCalls.length,2);
  assert.match(osCalls[1].body,mode==='confirmed'?/confirmada/i:/falha/i);if(mode==='failed'){assert.equal(received.some(e=>e.type==='quarantine.added'),false);assert.ok(await fs.stat(file));}else await assert.rejects(fs.stat(file));
  for(const message of osCalls)assert.doesNotMatch(message.body,/AppData|cybersafe-final-bridge|Users/);assert.ok(diagnostics.includes('accepted'));assert.doesNotMatch(JSON.stringify(received),new RegExp(token));
 });

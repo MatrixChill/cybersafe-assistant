@@ -1,7 +1,7 @@
 name: ci
 
 # Âmbito: build:all + testes dirigidos + suíte desktop. NÃO é packaging
-# completo: não builda native-engine, não provisiona ClamAV/YARA, não gera NSIS
+# completo: compila apenas o launcher nativo de ensaio, não provisiona ClamAV/YARA, não gera NSIS
 # nem mede o payload. Esses gates são locais/Windows com freeze aprovado.
 on:
   push:
@@ -52,6 +52,9 @@ jobs:
 
       - name: Suíte da aplicação e integração visual do atualizador
         run: npm test -w @cybersafe/app
+
+      - name: Launcher Windows e ensaio isolado de handoff (sem instalar)
+        run: node scripts/test-updater-handoff-lab.mjs
 
       - name: Suíte do desktop
         run: npm test -w @cybersafe/desktop
