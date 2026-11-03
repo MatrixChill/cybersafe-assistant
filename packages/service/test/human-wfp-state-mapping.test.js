@@ -51,7 +51,7 @@ describe("engine.wfp — a origem do estado chega ao pipe", () => {
 
     const bloco = engine.getProtectionState().engine.wfp;
     assert.equal(bloco.status, "unavailable");
-    assert.equal(bloco.detail, "filtro WFP inativo");
+    assert.equal(bloco.detail, "filtro WFP inativo — sem tentativa de ativação neste perfil");
     assert.equal(
       engine.getProtectionState().engine.firewall.detail,
       bloco.detail,

@@ -2725,7 +2725,9 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           ? "parado por pedido"
           : wfpEstado.estado === "solicitado_nao_verificado"
             ? "pedido enviado, estado não lido de volta"
-            : undefined;
+            : wfpEstado.estado === "nao_iniciado"
+              ? "sem tentativa de ativação neste perfil"
+              : undefined;
     const wfpDetail = wfpCausa
       ? `filtro WFP inativo — ${wfpCausa}`
       : wfpStatus === "active" ? "filtro WFP ativo" : "filtro WFP inativo";
