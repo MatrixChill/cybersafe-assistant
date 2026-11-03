@@ -17,7 +17,7 @@
 import * as fs from "node:fs/promises";
 import * as os from "node:os";
 import * as path from "node:path";
-import {parsePerfLogs, waitForTerminal} from "./scanner-benchmark-metrics.mjs";
+import {parsePerfLogs, waitForTerminal, inventoryCorpus, incompleteEngines} from "./scanner-benchmark-metrics.mjs";
 import AdmZip from "adm-zip";
 
 const FILE_COUNT = Number(process.env.BENCH_FILES ?? 300);
@@ -138,6 +138,7 @@ async function runReal(root) {
       perSec,
       engineCalls: state.filesAnalyzed,
       phases: parsePerfLogs(capture.rows),
+      trace: capture.rows.filter(row => row.line.startsWith('[ScanPerf]') || row.line.startsWith('[Service] engine-init ')),
       health: health ? { engine: health.engine } : null,
       errors: capture.rows.filter((row) => row.line.startsWith("[stderr]")).slice(0, 12),
     };
@@ -154,6 +155,7 @@ async function main() {
   console.log("[bench] mode=" + (REAL ? "integrated" : "minimal") + " files=" + FILE_COUNT + " root=" + root);
   try {
     await makeTree(root);
+    const corpus = await inventoryCorpus(root);
     const measuredAt = performance.now();
     const cpuStart = process.cpuUsage();
     const rssStart = process.memoryUsage().rss;
@@ -161,7 +163,7 @@ async function main() {
     const measuredElapsedMs = performance.now() - measuredAt;
     const cpu = process.cpuUsage(cpuStart);
     result.processResources = {scope:'node-controller-only; excludes child engines',elapsedMs:measuredElapsedMs,cpuMs:(cpu.user+cpu.system)/1000,rssStartBytes:rssStart,rssEndBytes:process.memoryUsage().rss};
-    if (process.env.BENCH_REPORT) await fs.writeFile(path.resolve(process.env.BENCH_REPORT), JSON.stringify({schema:1,syntheticCorpus:true,historicalComparison:false,fileCount:FILE_COUNT,measuredAt:new Date().toISOString(),...result},null,2), {flag:'wx'});
+    if (process.env.BENCH_REPORT) await fs.writeFile(path.resolve(process.env.BENCH_REPORT), JSON.stringify({schema:1,syntheticCorpus:true,historicalComparison:false,corpus,fileCount:FILE_COUNT,measuredAt:new Date().toISOString(),...result},null,2), {flag:'wx'});
     const state = result.state;
     console.log(
       "[bench] status=" + state.status + " filesScanned=" + state.filesScanned + "/" + state.filesTotal +
@@ -173,8 +175,8 @@ async function main() {
     if (result.health) console.log("[bench] health=" + JSON.stringify(result.health));
     if (result.errors.length > 0) console.log("[bench] errors=" + JSON.stringify(result.errors));
     if (state.status !== "completed") process.exitCode = 1;
-    if (REAL && result.health?.engine?.clamav?.status !== "active") {
-      console.log("[bench] incomplete=clamav-not-active");
+    if (REAL && incompleteEngines(result.health).length > 0) {
+      console.log("[bench] incomplete-engines=" + incompleteEngines(result.health).join(','));
       process.exitCode = 2;
     }
   } finally {

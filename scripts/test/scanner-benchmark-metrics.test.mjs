@@ -27,3 +27,16 @@ test('retains every batch/phase and counts actual spawn calls without calling th
  assert.deepEqual(result.phases,[{phase:'gathering',elapsedMs:12},{phase:'batch',elapsedMs:23}]);
  assert.equal(result.clamavSpawnCalls,2);
 });
+
+test('corpus inventory identifies actual bytes and SHA256 in stable order',async()=>{
+ const {mkdtemp,writeFile,rm}=await import('node:fs/promises');const {tmpdir}=await import('node:os');const path=await import('node:path');
+ const {inventoryCorpus}=await import('../scanner-benchmark-metrics.mjs');
+ const root=await mkdtemp(path.join(tmpdir(),'cs-inventory-'));
+ try{await writeFile(path.join(root,'b.txt'),'b');await writeFile(path.join(root,'a.txt'),'a');const result=await inventoryCorpus(root);assert.equal(result.totalBytes,2);assert.equal(result.fileCount,2);assert.deepEqual(result.files.map(f=>f.path),['a.txt','b.txt']);assert.equal(result.files[0].sha256,'ca978112ca1bbdcafac231b39a23dc4da786eff8147c4e72b9807785afee48bb');}finally{await rm(root,{recursive:true,force:true});}
+});
+
+test('integrated benchmark is incomplete if any required engine is missing or degraded',async()=>{
+ const {incompleteEngines}=await import('../scanner-benchmark-metrics.mjs');
+ const engine={clamav:{status:'active'},yara:{status:'active'},hashDb:{status:'active'},nativeEngine:{status:'degraded'}};
+ assert.deepEqual(incompleteEngines({engine}),['nativeEngine']);engine.nativeEngine.status='active';assert.deepEqual(incompleteEngines({engine}),[]);assert.equal(incompleteEngines(null).length,4);
+});

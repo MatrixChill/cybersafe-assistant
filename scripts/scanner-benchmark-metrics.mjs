@@ -1,3 +1,22 @@
+import {readdir,readFile} from 'node:fs/promises';
+import path from 'node:path';
+import {createHash} from 'node:crypto';
+
+export function incompleteEngines(health) {
+  return ['clamav','yara','hashDb','nativeEngine'].filter(key=>health?.engine?.[key]?.status!=='active');
+}
+
+/** Only used on our generated, private synthetic corpus. Never scans user folders. */
+export async function inventoryCorpus(root) {
+  const files=[];
+  for (const entry of (await readdir(root,{withFileTypes:true})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0)) {
+    if (!entry.isFile() || entry.isSymbolicLink()) throw Error('unexpected synthetic corpus entry');
+    const bytes=await readFile(path.join(root,entry.name));
+    files.push({path:entry.name,bytes:bytes.length,sha256:createHash('sha256').update(bytes).digest('hex')});
+  }
+  return {fileCount:files.length,totalBytes:files.reduce((sum,file)=>sum+file.bytes,0),files};
+}
+
 export function parsePerfLogs(rows) {
   const engines = new Map();
   const summary = {
