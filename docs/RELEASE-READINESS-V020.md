@@ -51,15 +51,23 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 | App (renderer/MATRIX) | `npm test -w @cybersafe/app` | **PASS 2971/2971** (HEAD `fc561bb`; app não foi alterada depois) |
 | API — política e tokens | `node --import tsx --test test/ai-policy.test.js test/ai-token-policy.test.js` | **PASS 20/20** |
 | Contrato de versão | `node --test scripts/test/product-version-coherence.test.mjs` | **PASS 3/3** |
-| Scripts/packaging | `npm run test:scripts` | **FAIL 1 de 454** — `linux-lite-package-renderer-guard` falha no agregado e **passa isolado**; suspeita de ordem/concorrência, não de código |
-| Desktop | `npm test -w @cybersafe/desktop` | **FAIL 1 de 683** — fixture de locks nativos do helper Windows; não tocado por esta integração |
-| Serviço | `npm test -w @cybersafe/service` | **NOT TESTED** — excedeu 120 s, execução interrompida |
+| Scripts/packaging | `npm run test:scripts` | **PASS 446/459, 0 falhas** após construir o renderer; guarda isolada 6/6 |
+| Desktop | `npm test -w @cybersafe/desktop` | **PASS** no ficheiro de handoff (1 pass, 2 skip) após `npm run build:native` |
+| Serviço | `npm test -w @cybersafe/service` | **FAIL** — 1010 testes, 1007 pass, 2 fail. P0: o teste «quarentena vive no tmpdir» escreveu em `C:/Users/caioc/.cybersafe-service`; o isolamento de runtime falhou |
 | Typecheck app/api | `tsc --noEmit` | **PASS** |
 | Build app | `npm run build -w @cybersafe/app` | **PASS** |
 | CI remoto | GitHub Actions | **NOT TESTED** — workflow passou a cobrir `release/**`, execução por confirmar |
 
 As duas falhas acima estão identificadas, não escondidas: nenhuma foi causada por
 alterações desta fase e ambas precisam de reprodução dirigida antes do merge.
+
+## Bugs P0
+
+- **Isolamento de runtime do serviço**: a suite escreveu em
+  `C:/Users/caioc/.cybersafe-service` durante o teste da quarentena. A pasta real
+  contém `api-lifecycle.jsonl` e `boot-debug.log` com data de hoje. Enquanto a
+  causa não for corrigida, nenhuma execução da suite do serviço é segura num
+  perfil com dados reais.
 
 ## Riscos
 
