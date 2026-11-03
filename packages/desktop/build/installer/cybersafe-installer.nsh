@@ -257,6 +257,20 @@ Var CSSpaceState
     System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 36, *i 0x00F8F8ED, i 4)'
     System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 34, *i 0x001A1507, i 4)'
     SetCtlColors $HWNDPARENT 0xEDF8F8 0x07151A
+    ; A faixa de branding do MUI e um static com as cores do sistema; sem
+    ; isto fica uma barra clara por baixo da arte escura.
+    ; A faixa de branding do MUI pinta-se com a cor de face do sistema e
+    ; atravessa a arte escura. A versao ja e mostrada no ecra 1.
+    GetDlgItem $0 $HWNDPARENT 1256
+    ${If} $0 != 0
+      ShowWindow $0 ${SW_HIDE}
+    ${EndIf}
+    GetDlgItem $0 $HWNDPARENT 1028
+    ${If} $0 != 0
+      SetCtlColors $0 0x7EA4A8 0x07151A
+    ${EndIf}
+    ; Forca o non-client a repintar depois dos atributos DWM.
+    System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i 0, i 0, i 0, i 0, i 0x37)'
   FunctionEnd
   !ifndef INSTALL_MODE_PER_ALL_USERS
   Function CS_InstallModeShow
@@ -288,9 +302,12 @@ Var CSSpaceState
   FunctionEnd
   Function CS_StyleFooter
     InitPluginsDir
+    ; Extrair a superficie dos botoes nao e uma etapa da instalacao.
+    SetDetailsPrint none
     File "/oname=$PLUGINSDIR\button-primary.bmp" "${CS_ASSET_DIR}\button-primary.bmp"
     File "/oname=$PLUGINSDIR\button-secondary.bmp" "${CS_ASSET_DIR}\button-secondary.bmp"
     SetCtlColors $HWNDPARENT 0xEDF8F8 0x07151A
+    SetDetailsPrint lastused
     GetDlgItem $0 $HWNDPARENT 1
     !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-primary.bmp"
     GetDlgItem $0 $HWNDPARENT 2
@@ -365,14 +382,18 @@ Var CSSpaceState
 
   Function CS_ChooseInstall
     StrCpy $CSMode "install"
-    GetDlgItem $0 $HWNDPARENT 1
-    SendMessage $0 ${BM_CLICK} 0 0
+    ; O Next do wizard esta oculto neste ecra. BM_CLICK num controlo
+    ; invisivel nao avanca; WM_COMMAND IDOK chega ao wizard.
+    ; PostMessage: o SendMessage reentrante e engolido enquanto o clique
+    ; ainda esta a ser processado pelo botao.
+    System::Call 'user32::PostMessage(p $HWNDPARENT, i 0x0111, i 1, i 0)'
   FunctionEnd
 
   Function CS_ChooseRepair
     StrCpy $CSMode "repair"
-    GetDlgItem $0 $HWNDPARENT 1
-    SendMessage $0 ${BM_CLICK} 0 0
+    ; PostMessage: o SendMessage reentrante e engolido enquanto o clique
+    ; ainda esta a ser processado pelo botao.
+    System::Call 'user32::PostMessage(p $HWNDPARENT, i 0x0111, i 1, i 0)'
   FunctionEnd
 
   Function CS_ShowLicense
