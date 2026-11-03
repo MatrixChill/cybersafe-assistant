@@ -13,3 +13,6 @@ Gestor: fa064a1 já é antepassado da base. Prova instalada do Notepad pendente 
 Ainda falta nesta missão: concluir validação funcional do autostart (UI, falhas e estado desativado pelo Windows), revisão dirigida de HashDB/WFP, diagnóstico Scanner por medições existentes, regressões afetadas e revisão final de segurança. Não se declara RC2 pronta, não se pede freeze de árvore ainda aberta e não se altera a versão para simular publicação.
 
 VM, source freeze exato, confiança do atualizador, integração main, tag, Release e eliminação de branches dependem dos gates definidos pelo proprietário. Alterações visuais anteriores preservadas no worktree Codex antigo e não trazidas para esta missão.
+
+
+Atualização: regressões e build concluídos nesta ronda; resultados, exclusões e gate de freeze em RC2-VALIDACOES-20261103.md. Ainda não existe setup RC2.
