@@ -80,6 +80,7 @@ describe("geração e configuração da chave de publicação", () => {
     const par = gerar(dir);
     const pública = await fs.readFile(par.público, "utf8");
     const config = confiança(pública, par.fingerprint);
+    assert.equal(config.assistedInstallationEnabled, false, "o gerador nunca autoriza instalação assistida");
     assert.equal(config.enabled, false, "gerar a chave não liga o atualizador: isso é decisão e precisa release existente");
     assert.equal(config.publicKeyPem, pública);
     assert.equal(config.pinnedKeyFingerprint, par.fingerprint);
@@ -106,7 +107,7 @@ describe("geração e configuração da chave de publicação", () => {
   it("recusa blocos que o cliente chumaria, em vez de os imprimir", async () => {
     const pem = "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEAxQ\n-----END PUBLIC KEY-----\n";
     const base = {
-      enabled: false, publicKeyPem: pem, pinnedKeyFingerprint: "a".repeat(64),
+      enabled: false, assistedInstallationEnabled:false, publicKeyPem: pem, pinnedKeyFingerprint: "a".repeat(64),
       publisherLabel: "CyberSafe", reason: "x",
     };
     assert.deepEqual(validarConfiança({ ...base, feedManifestUrl: "https://github.com/o/e/releases/latest/download/update-manifest.json" }), []);

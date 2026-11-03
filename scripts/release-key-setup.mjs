@@ -73,6 +73,7 @@ export function confiança(pemPúblico, fingerprint, opções = {}) {
   const atual = lerConfiançaAtual();
   const bloco = {
     enabled: opções.enabled === true,
+    assistedInstallationEnabled: false,
     feedManifestUrl: opções.feed ?? atual?.feedManifestUrl ?? "",
     publicKeyPem: pemPúblico,
     pinnedKeyFingerprint: fingerprint,
@@ -92,7 +93,7 @@ export function confiança(pemPúblico, fingerprint, opções = {}) {
  * contexto para quem abre o ficheiro.
  */
 export const CAMPOS_CONFIANÇA = [
-  "enabled", "feedManifestUrl", "publicKeyPem", "pinnedKeyFingerprint", "publisherLabel",
+  "enabled", "assistedInstallationEnabled", "feedManifestUrl", "publicKeyPem", "pinnedKeyFingerprint", "publisherLabel",
 ];
 
 export function validarConfiança(bloco) {
