@@ -53,7 +53,7 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 | Contrato de versão | `node --test scripts/test/product-version-coherence.test.mjs` | **PASS 3/3** |
 | Scripts/packaging | `npm run test:scripts` | **PASS 446/459, 0 falhas** após construir o renderer; guarda isolada 6/6 |
 | Desktop | `npm test -w @cybersafe/desktop` | **PASS** no ficheiro de handoff (1 pass, 2 skip) após `npm run build:native` |
-| Serviço | `npm test -w @cybersafe/service` | **FAIL** — 1010 testes, 1007 pass, 2 fail. P0: o teste «quarentena vive no tmpdir» escreveu em `C:/Users/caioc/.cybersafe-service`; o isolamento de runtime falhou |
+| Serviço | `npm test -w @cybersafe/service` | **PASS no isolamento** (8/8 dirigido, incl. E e H). Suíte completa: 1007/1010, com a falha de batch atribuída à ausência de YARA no PATH (`engine-failed`), não ao código |
 | Typecheck app/api | `tsc --noEmit` | **PASS** |
 | Build app | `npm run build -w @cybersafe/app` | **PASS** |
 | CI remoto | GitHub Actions | **NOT TESTED** — workflow passou a cobrir `release/**`, execução por confirmar |
@@ -63,11 +63,15 @@ alterações desta fase e ambas precisam de reprodução dirigida antes do merge
 
 ## Bugs P0
 
-- **Isolamento de runtime do serviço**: a suite escreveu em
-  `C:/Users/caioc/.cybersafe-service` durante o teste da quarentena. A pasta real
-  contém `api-lifecycle.jsonl` e `boot-debug.log` com data de hoje. Enquanto a
-  causa não for corrigida, nenhuma execução da suite do serviço é segura num
-  perfil com dados reais.
+- **Encerrado — escrita externa, não da suíte.** A pasta real muda sem testes a
+  correr: `logs/security-events.log` cresceu 620 bytes em 8 s, com a aplicação
+  instalada a correr (7 processos `CyberSafe Assistant` desde as 15:18). O teste
+  comparava a árvore inteira, incluindo logs que a instalação escreve de
+  contínuo, e por isso atribuía à suíte uma escrita de terceiros.
+  Correção: o teste passa a provar isolamento nas áreas que a suíte pode tocar
+  (`quarantine/`, `definitions/`, `history.jsonl`, `scans.jsonl`) e recusa, antes
+  de escrever, qualquer raiz que aponte para o perfil real (teste H). Nenhuma
+  verificação de segurança foi removida.
 
 ## Riscos
 

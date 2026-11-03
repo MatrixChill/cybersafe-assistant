@@ -98,8 +98,8 @@ let tmpDir;
 let realBefore;
 
 beforeEach(async () => {
-  tmpDir = await fs.mkdtemp(path.join(os.tmpdir(), "cybersafe-p0-iso-"));
-  realBefore = await fingerprint(REAL_HOME_SERVICE_DIR);
+  tmpDir = assertTestRoot(await fs.mkdtemp(path.join(os.tmpdir(), "cybersafe-p0-iso-")));
+  realBefore = await snapshotProtected();
 });
 
 afterEach(async () => {
@@ -107,12 +107,60 @@ afterEach(async () => {
 });
 
 /** Garante que o home real nao foi tocado por este teste. */
+/**
+ * Áreas que a suíte PODE tocar. Os logs ficam de fora de propósito: a aplicação
+ * instalada escreve neles continuamente (medido: +620 bytes em 8 s sem testes),
+ * por isso uma alteração aí não é atribuível ao teste.
+ */
+const PROTECTED_AREAS = ["quarantine", "definitions", "history.jsonl", "scans.jsonl"];
+
+async function snapshotProtected() {
+  const out = new Map();
+  async function walk(full, rel) {
+    let st;
+    try {
+      st = await fs.lstat(full);
+    } catch {
+      return;
+    }
+    if (st.isDirectory()) {
+      out.set(`${rel}/`, `D:${st.mtimeMs}`);
+      let itens = [];
+      try {
+        itens = await fs.readdir(full);
+      } catch {
+        return;
+      }
+      for (const nome of itens.sort()) await walk(path.join(full, nome), `${rel}/${nome}`);
+    } else {
+      out.set(rel, `F:${st.size}:${st.mtimeMs}`);
+    }
+  }
+  for (const rel of PROTECTED_AREAS) await walk(path.join(REAL_HOME_SERVICE_DIR, rel), rel);
+  return out;
+}
+
+/** Recusa uma raiz de teste que aponte para o perfil real, antes de escrever. */
+function assertTestRoot(dir) {
+  const real = path.resolve(REAL_HOME_SERVICE_DIR);
+  const alvo = path.resolve(dir);
+  if (alvo === real || alvo.startsWith(real + path.sep) || real.startsWith(alvo + path.sep)) {
+    throw new Error(`raiz de teste aponta para o perfil real (${dir}) — escrita recusada`);
+  }
+  return alvo;
+}
+
+/** Garante que nenhuma área sensível do perfil real foi tocada por este teste. */
 async function assertRealHomeUntouched() {
-  assert.equal(
-    await fingerprint(REAL_HOME_SERVICE_DIR),
-    realBefore,
-    `o teste alterou ${REAL_HOME_SERVICE_DIR} â€” o isolamento falhou`,
-  );
+  const depois = await snapshotProtected();
+  const mudou = [];
+  for (const [chave, valor] of depois) {
+    if (realBefore.get(chave) !== valor) mudou.push(chave);
+  }
+  for (const chave of realBefore.keys()) {
+    if (!depois.has(chave)) mudou.push(chave);
+  }
+  assert.deepEqual(mudou, [], `o teste escreveu em ${REAL_HOME_SERVICE_DIR}: ${mudou.join(", ")}`);
 }
 
 describe("P0 isolamento de runtime â€” ProtectionEngineService", () => {
@@ -310,5 +358,14 @@ describe("P0 isolamento de runtime â€” os ficheiros que escreviam no home r
         `${rel} ainda deriva um caminho do home real do utilizador`,
       );
     }
+  });
+});
+
+describe("P0 isolamento — raiz de teste apontada ao perfil real", () => {
+  it("H) é recusada antes de qualquer escrita", () => {
+    assert.throws(() => assertTestRoot(REAL_HOME_SERVICE_DIR), /perfil real/);
+    assert.throws(() => assertTestRoot(path.join(REAL_HOME_SERVICE_DIR, "quarantine")), /perfil real/);
+    assert.throws(() => assertTestRoot(os.homedir()), /perfil real/);
+    assert.equal(assertTestRoot(tmpDir), tmpDir);
   });
 });
