@@ -1,7 +1,7 @@
 import { describe, it, before, after } from "node:test";
 import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
-import * as os from "node:os";
+import { fileURLToPath } from "node:url";
 import * as path from "node:path";
 import { ProtectionEngineService } from "../dist/engine.js";
 import { formatKillBlockedLine } from "../dist/logging.js";
@@ -37,9 +37,10 @@ function processEntry(overrides = {}) {
 
 let engine;
 let logsDir;
+let base;
 
 before(async () => {
-  const base = await fs.mkdtemp(path.join(os.tmpdir(), "kgi-log-"));
+  base = await fs.mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)), "kgi-log-"));
   // ISOLAMENTO P0 pela via OFICIAL: o `baseDir` passou a ser injetavel no
   // construtor, por isso este teste nao escreve no `~/.cybersafe-service` real
   // do utilizador sem precisar de reescrever um field `private`. A guarda e a
@@ -50,7 +51,11 @@ before(async () => {
 });
 
 after(async () => {
-  if (engine?.dispose) engine.dispose();
+  try {
+    if (engine?.dispose) await engine.dispose();
+  } finally {
+    if (base) await fs.rm(base, { recursive: true, force: true });
+  }
 });
 
 async function lerAccoes() {
@@ -62,29 +67,26 @@ async function lerAccoes() {
 }
 
 describe("A7 — a recusa manual fica registada no actions.log", () => {
-  it("um PID de sistema recusado escreve uma linha [KILL-BLOCKED]", async () => {
+  it("a recusa global é auditada sem inventar classificação do PID", async () => {
     const antes = await lerAccoes();
     const result = await engine.killProcess(4);
-    assert.equal(result.status, "protected", "pre-condicao: PID 4 e recusado");
+    assert.equal(result.success, false);
+    assert.equal(result.status, "failed", "a recusa global não classifica o processo");
+    assert.match(result.error, /nenhuma ação foi executada/);
 
-    // A escrita e assincrona (nao bloqueia o utilizador); da-lhe um instante.
-    let depois = "";
-    for (let i = 0; i < 50 && depois === antes; i += 1) {
-      await new Promise((r) => setTimeout(r, 20));
-      depois = await lerAccoes();
-    }
-    assert.notEqual(depois, antes, "o actions.log tem de crescer: a recusa nao pode ser so um console.warn");
-
-    const linhas = depois.trim().split("\n").filter((l) => l.includes("[KILL-BLOCKED]"));
-    assert.equal(linhas.length, 1, `esperava 1 linha de recusa, obtive ${linhas.length}`);
-    assert.match(linhas[0], /\[KILL-BLOCKED\]/);
-    assert.match(linhas[0], /Req=k\d+-4\b/, `tem de trazer o id de correlacao: ${linhas[0]}`);
-    assert.match(linhas[0], /Request=manual/, "tem de se saber quem pediu");
-    assert.match(linhas[0], /PID=4\b/);
-    assert.match(linhas[0], /Classification=system-pid/);
-    assert.match(linhas[0], /ProtectedReason=system-pid/);
-    assert.match(linhas[0], /Result=blocked/);
-    assert.match(linhas[0], /^\d{4}-\d{2}-\d{2}T/, "a linha comeca por timestamp ISO");
+    const depois = await lerAccoes();
+    assert.notEqual(depois, antes, "a recusa tem de ficar persistida antes da resposta");
+    const linhas = depois.trim().split("\n").map((line) => JSON.parse(line));
+    assert.equal(linhas.length, 1);
+    const linha = linhas[0];
+    assert.equal(linha.action, "process.termination.refused");
+    assert.equal(linha.reason, "legacy-disabled");
+    assert.equal(linha.request, "manual");
+    assert.match(linha.requestId, /^k[0-9]+-4$/);
+    assert.equal(linha.pid, 4);
+    assert.equal(linha.executed, false);
+    assert.equal(Number.isNaN(Date.parse(linha.timestamp)), false);
+    assert.deepEqual(Object.keys(linha).sort(), ["action", "executed", "pid", "reason", "request", "requestId", "timestamp"]);
   });
 
   it("a linha NAO escreve a linha de comando (privacidade)", () => {
@@ -124,19 +126,21 @@ describe("A7 — a recusa manual fica registada no actions.log", () => {
     // A pergunta das 4 repetições, tornada respondível pelo registo: se cada
     // pedido tem o seu `Req=`, quatro linhas com quatro ids são quatro pedidos,
     // e quatro linhas com o MESMO id seriam um pedido escrito quatro vezes.
-    const antes = (await lerAccoes()).split("\n").filter((l) => l.includes("[KILL-BLOCKED]")).length;
+    const antes = (await lerAccoes()).trim().split("\n").filter(Boolean).length;
     for (let i = 0; i < 4; i += 1) {
-      await engine.killProcess(4);
+      const result = await engine.killProcess(4);
+      assert.equal(result.success, false);
+      assert.equal(result.status, "failed");
     }
-    let linhas = [];
-    for (let i = 0; i < 50; i += 1) {
-      linhas = (await lerAccoes()).split("\n").filter((l) => l.includes("[KILL-BLOCKED]"));
-      if (linhas.length >= antes + 4) break;
-      await new Promise((r) => setTimeout(r, 20));
-    }
+    const linhas = (await lerAccoes()).trim().split("\n").filter(Boolean).map((line) => JSON.parse(line));
     const novas = linhas.slice(antes);
     assert.equal(novas.length, 4, `esperava 4 linhas novas, obtive ${novas.length}`);
-    const reqs = novas.map((l) => l.split(" | ")[2]);
+    for (const linha of novas) {
+      assert.equal(linha.action, "process.termination.refused");
+      assert.equal(linha.reason, "legacy-disabled");
+      assert.equal(linha.executed, false);
+    }
+    const reqs = novas.map((linha) => linha.requestId);
     assert.equal(new Set(reqs).size, 4, `quatro pedidos reais = quatro Req diferentes: ${JSON.stringify(reqs)}`);
   });
 

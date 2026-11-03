@@ -75,6 +75,45 @@ describe("armazenamento: leitura crua → volumes", () => {
     assert.equal(pickPrimaryVolume(volumes.filter((v) => v.kind === "system-reserved")), null);
   });
 
+  test("em Linux o principal é a raiz `/`, não o volume mais cheio (era `/mnt/c`)", () => {
+    // Forma medida em WSL2: uma partilha 9p do Windows a 84,6% e a raiz ext4 a
+    // 1,6%. «O mais cheio» apontava o PC Center para o disco do Windows.
+    const linux = describeDiskRead([
+      fsEntry("/mnt/c", { totalGb: 952.9, usedGb: 806.1, type: "9p" }),
+      fsEntry("/", { totalGb: 1007, usedGb: 16, type: "ext4" }),
+    ]).volumes;
+    assert.equal(pickPrimaryVolume(linux)?.mount, "/", "a raiz do sistema é a máquina");
+    // A letra C: continua a ganhar quando existe: o caminho Windows não mudou.
+    assert.equal(pickPrimaryVolume(describeDiskRead(machineVolumes()).volumes)?.mount, "C:");
+    // Sem C: e sem `/`, mantém-se a queda para o mais cheio (comportamento antigo).
+    const semLetraSemRaiz = describeDiskRead([
+      fsEntry("E:", { totalGb: 100, usedGb: 20 }),
+      fsEntry("F:", { totalGb: 100, usedGb: 90 }),
+    ]).volumes;
+    assert.equal(pickPrimaryVolume(semLetraSemRaiz)?.mount, "F:");
+  });
+
+  test("um volume só-leitura nunca é o «mais cheio» do aviso de espaço", () => {
+    // Medido em WSL2: `/usr/lib/wsl/drivers` (9p, `ro`) era o maior «uso» da
+    // máquina. O aviso diz «apague ficheiros neste volume» — num `ro` isso é
+    // impossível de executar, logo é um alarme falso.
+    const linux = describeDiskRead([
+      fsEntry("/usr/lib/wsl/drivers", { totalGb: 953, usedGb: 916, type: "9p", rw: false }),
+      fsEntry("/mnt/c", { totalGb: 953, usedGb: 600, type: "9p" }),
+      fsEntry("/", { totalGb: 1007, usedGb: 16, type: "ext4" }),
+    ]).volumes;
+    assert.equal(linux.find((v) => v.mount === "/usr/lib/wsl/drivers").readOnly, true);
+    assert.equal(worstWorkingVolume(linux)?.mount, "/mnt/c");
+    // A mesma regra em forma Windows (DVD/ISO montado, partição protegida).
+    const win = describeDiskRead([
+      fsEntry("D:", { totalGb: 8, usedGb: 7.9, rw: false }),
+      fsEntry("E:", { totalGb: 500, usedGb: 300 }),
+    ]).volumes;
+    assert.equal(worstWorkingVolume(win)?.mount, "E:");
+    // Todos só-leitura: sem aviso, porque não há onde o utilizador possa agir.
+    assert.equal(worstWorkingVolume(win.filter((v) => v.readOnly)), null);
+  });
+
   test("capacidade, usado, livre e percentagem são coerentes com os bytes lidos", () => {
     const c = describeDiskRead(machineVolumes()).volumes.find((volume) => volume.mount === "C:");
     assert.equal(c.totalGb, 952.9);

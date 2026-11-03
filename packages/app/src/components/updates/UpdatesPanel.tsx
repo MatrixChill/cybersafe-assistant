@@ -286,8 +286,11 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
 
           {snapshot.manualDownloadOnly && (
             <div role="note" className="rounded border border-border p-3 text-sm">
-              Atualização manual: manifesto autenticado e SHA-256 verificado após a transferência.
-              O instalador não tem assinatura Authenticode validada. Não será executado automaticamente.
+              {snapshot.status === "downloaded"
+                ? "Transferência concluída: manifesto autenticado e SHA-256 verificado. "
+                : "Modo manual: cada transferência exige manifesto autenticado e verificação SHA-256. "}
+              Instalação automática bloqueada nesta compilação: não há validação Authenticode do editor.
+              Abrir a pasta não executa o instalador; a decisão de o executar é manual.
               {snapshot.status === "downloaded" && actions.revealDownload && (
                 <button type="button" disabled={state.busy !== null} onClick={() => actions.revealDownload?.()}>
                   Abrir pasta do instalador verificado
@@ -297,7 +300,9 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
           )}
           {snapshot.status === "downloaded" && !snapshot.canInstall && (
             <p className="font-mono text-xs text-muted-foreground" data-testid="app-update-install-blocked">
-              As verificações de segurança ainda não permitem instalar — o botão fica ativo quando terminarem.
+              {snapshot.manualDownloadOnly
+                ? "O botão de instalação permanece bloqueado neste modo manual."
+                : "As verificações de segurança ainda não permitem instalar."}
             </p>
           )}
 

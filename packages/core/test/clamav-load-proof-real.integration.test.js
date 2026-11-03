@@ -30,6 +30,8 @@ function fakeDataDir(databaseName = "main.cvd", content = "not a cvd: bytes fals
   // .cvd truncado/pretendido com mtime FRESCO — a classificação por
   // existência+mtime dizia `ready`+fresh.
   writeFileSync(path.join(dir, databaseName), content);
+  // A base diária evita sair antes da prova real pela guarda de cobertura incompleta.
+  writeFileSync(path.join(dir, "daily.cvd"), content);
   return dir;
 }
 

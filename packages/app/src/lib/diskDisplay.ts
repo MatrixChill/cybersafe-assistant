@@ -158,6 +158,66 @@ export interface DiskVolumeRow {
   volumeKind: "logical";
 }
 
+export interface DiskVolumeScanAction {
+  mount: string;
+  /**
+   * Só é `true` quando analisar este volume é realizável AGORA: plataforma com
+   * alvos por montagem, leitura medida nesta janela e montagem utilizável como
+   * caminho. Um botão por linha que nunca produza análise é o defeito que a
+   * regra «sem botões falsos» proíbe.
+   */
+  podeAnalisar: boolean;
+  /** Porquê, em PT-PT, quando `podeAnalisar` é `false`; `null` quando se pode. */
+  motivo: string | null;
+}
+
+/**
+ * Que volumes da lista publicada podem ser escolhidos como alvo de análise.
+ *
+ * A pergunta é de duas réguas e não uma só: «isto é um volume de trabalho
+ * montado num sistema que analisa por montagem?» e «esta lista é uma medição
+ * de agora?». A segunda importa porque um ponto de montagem pode ter deixado
+ * de existir entre duas leituras — oferecer «analisar» sobre uma montagem já
+ * desmontada é prometer um trabalho que o motor não pode fazer.
+ *
+ * O `platform` é o valor publicado pelo serviço em `hardware.system.platform`
+ * (`osInfo().platform`, que o `systeminformation` devolve como `"linux"` e
+ * `"Windows"`). Não é `process.platform` do renderer: o Electron isolado não o
+ * tem, e adivinhá-lo pelo formato do caminho seria inventar.
+ *
+ * Só Linux neste corte. Em Windows as linhas ficam sem ação — não é preferência
+ * estética: o alvo por volume nunca foi medido lá, e o produto Windows já tem
+ * o seu percurso (diálogo de pastas). Preserva-se o contrato atual em vez de
+ * lhe acrescentar um botão por validar.
+ */
+export function diskVolumeScanActions(
+  disk: DiskSnapshot,
+  platform: string | null | undefined,
+): DiskVolumeScanAction[] {
+  return disk.volumes.map((volume) => {
+    const mount = typeof volume.mount === "string" ? volume.mount : "";
+    if (platform !== "linux") {
+      return { mount, podeAnalisar: false, motivo: "fora do Linux Lite" };
+    }
+    if (disk.readStatus !== "ok") {
+      return {
+        mount,
+        podeAnalisar: false,
+        motivo: disk.readStatus === "stale"
+          ? "última leitura, sem medição nova"
+          : "sem leitura do armazenamento",
+      };
+    }
+    if (volume.kind !== "working") {
+      return { mount, podeAnalisar: false, motivo: "partição de sistema, não é volume de trabalho" };
+    }
+    if (!mount.startsWith("/")) {
+      return { mount, podeAnalisar: false, motivo: "montagem sem caminho absoluto" };
+    }
+    return { mount, podeAnalisar: true, motivo: null };
+  });
+}
+
 /** Linhas por unidade para o PC Center (capacidade, usado, livre e percentagem). */
 export function diskVolumeRows(disk: DiskSnapshot): DiskVolumeRow[] {
   return disk.volumes.map((volume) => ({

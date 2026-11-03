@@ -18,6 +18,7 @@ import assert from "node:assert/strict";
 import * as fs from "node:fs/promises";
 import * as path from "node:path";
 import * as os from "node:os";
+import { fileURLToPath } from "node:url";
 import {
   ScanHistory,
   toScanHistoryEntry,
@@ -372,4 +373,35 @@ describe("R7-L3 — engine (baseDir injetado + dispatch)", () => {
       await disposeQuietly(engine);
     }
   });
+});
+
+it('persistent history preserves exclusion and inconclusive reasons without paths', async () => {
+ const dir=await fs.mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)),'history-reasons-'));
+ try {
+  const history=new ScanHistory(path.join(dir,'scans.jsonl'));
+  const exclusions=[{reason:'extension',detail:'.log',count:3},{reason:'path',detail:path.win32.join('C:', 'Private', 'personal'),count:4}];
+  const inconclusive=[{reason:'timeout',count:23}];
+  await history.record(terminalState({filesExcluded:7,filesExcludedBy:exclusions,filesInconclusive:23,inconclusiveByReason:inconclusive,inconclusiveByEngine:[{engine:'clamav',count:23}]}));
+  const page=await history.query();assert.equal(page.entries.length,1);
+  assert.deepEqual(page.entries[0].filesExcludedBy,[{reason:'extension',detail:'.log',count:3},{reason:'path',count:4}]);
+  assert.deepEqual(page.entries[0].inconclusiveByReason,inconclusive);
+  assert.deepEqual(page.entries[0].inconclusiveByEngine,[{engine:'clamav',count:23}]);
+  assert.doesNotMatch(await fs.readFile(path.join(dir,'scans.jsonl'),'utf8'),/Private|personal/);
+ } finally {await fs.rm(dir,{recursive:true,force:true});}
+});
+
+it('history reason validation is independent of JSON key order and rejects unsafe entries', async () => {
+ const dir=await fs.mkdtemp(path.join(path.dirname(fileURLToPath(import.meta.url)),'history-validation-'));
+ try {
+  const file=path.join(dir,'scans.jsonl');
+  const base=toScanHistoryEntry(terminalState());
+  const entries=[
+   {...base,id:'valid-order',filesExcludedBy:[{count:7,detail:'.log',reason:'extension'}]},
+   {...base,id:'legacy'},
+   ...[null,{reason:'extension',count:-1},{reason:'unknown',count:7},{reason:'path',detail:'private',count:7},{reason:'filename',detail:path.win32.join('C:', 'Private', 'doc'),count:7}].map((item,i)=>({...base,id:`invalid-${i}`,filesExcludedBy:[item]})),
+  ];
+  await fs.writeFile(file,entries.map(e=>JSON.stringify(e)).join('\n')+'\n');
+  const result=await new ScanHistory(file).query();
+  assert.deepEqual(result.entries.map(e=>e.id).sort(),['legacy','valid-order']);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
 });

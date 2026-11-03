@@ -1,0 +1,16 @@
+/* Brand accents reuse the existing palette; security tokens are independent. */
+html {--cs-accent-cyan:#78dfeb;--cs-accent-purple:#9e9bff;--cs-accent-pink:#ff6bb5;}
+html[data-v2-theme="light"] {--cs-accent-cyan:#0e6f68;--cs-accent-purple:#7c3aed;--cs-accent-pink:#db2777;}
+html[data-v2-theme][data-v2-material][data-accent="cyan"]:root {--v2-accent:var(--cs-accent-cyan);}
+html[data-v2-theme][data-v2-material][data-accent="matrix-green"]:root {--v2-accent:var(--v2-ok);}
+html[data-v2-theme][data-v2-material][data-accent="blue"]:root {--v2-accent:var(--accent-blue);}
+html[data-v2-theme][data-v2-material][data-accent="purple"]:root {--v2-accent:var(--cs-accent-purple);}
+html[data-v2-theme][data-v2-material][data-accent="pink"]:root {--v2-accent:var(--cs-accent-pink);}
+html[data-v2-theme][data-v2-material][data-accent="amber"]:root {--v2-accent:var(--v2-warn);}
+html[data-v2-theme][data-v2-material][data-accent="red-wine"]:root {--v2-accent:var(--accent-wine);--v2-accent-ink:white;}
+html[data-v2-theme][data-v2-material][data-accent]:root {
+  --v2-focus:var(--v2-accent);
+  --v2-accent-soft:color-mix(in srgb,var(--v2-accent) 14%,var(--v2-panel));
+  --primary:var(--v2-accent);--accent:var(--v2-accent);--ring:var(--v2-focus);
+  --primary-foreground:var(--v2-accent-ink);--accent-foreground:var(--v2-accent-ink);
+}

@@ -382,8 +382,9 @@ export const DOCK_SLOT_PX = 64;
 
 export type MatrixMode = "floating" | "docked" | "minimized" | "panel";
 
-export function parseStoredMode(raw: string | null | undefined): MatrixMode {
+export function parseStoredMode(raw: string | null | undefined, newProfile = false): MatrixMode {
   if (raw === "docked" || raw === "minimized" || raw === "floating" || raw === "panel") return raw;
+  if (raw == null && newProfile) return "docked";
   return "floating";
 }
 

@@ -65,7 +65,49 @@ const UPDATE_INTERVAL_MS = 6 * 60 * 60 * 1000; // 6 horas
 /** Limite do corpo do feed de hashes. O feed real é pequeno; isto fecha DoS de memória. */
 export const MAX_HASH_FEED_BYTES = 8 * 1024 * 1024;
 
+/**
+ * Cadência PRÓPRIA do feed de hashes, mais curta que as 6 h das outras bases.
+ *
+ * Não é preferência, é aritmética da fonte: a documentação do MalwareBazaar
+ * define `selector=time` como «additions made within the past 60 minutes». Com
+ * o scheduler de 6 h a pedir esse selector, tudo o que caía nas cinco horas
+ * intermédias desaparecia para sempre — o `get_recent` não aceita cursor nem
+ * paginação. 45 min deixa sobreposição suficiente para que a mesma adição seja
+ * vista em dois pedidos consecutivos; a deduplicação por SHA-256 torna isso
+ * idempotente.
+ */
+export const HASH_FEED_INTERVAL_MS = 45 * 60 * 1000;
+/** Janela declarada do `selector=time`, na documentação oficial. */
+export const MALWAREBAZAAR_WINDOW_MS = 60 * 60 * 1000;
+/** Teto de registos em disco. O feed cresce; a base carregada em memória também não pode crescer sem limite. */
+export const MAX_HASH_RECORDS = 50_000;
+/**
+ * Nome da variável de ambiente onde o DONO da máquina põe a chave. A chave não
+ * vive no repositório, não é compilada no instalador e não é lida do `settings.json`
+ * (que é JSON em claro — `desktop/src/main.ts:145-175`). O precedente de chave de
+ * serviço é `engine.ts:510` (`VIRUSTOTAL_API_KEY`).
+ */
+export const MALWAREBAZAAR_AUTH_KEY_ENV = "MALWAREBAZAAR_AUTH_KEY";
+
 type UpdateComponent = "yara" | "clamav" | "hashes";
+
+interface FonteFalha {
+  /** Tentativas falhadas CONSECUTIVAS; limpa-se no primeiro sucesso. */
+  count: number;
+  /** Epoch ms a partir do qual esta fonte pode ser tentada outra vez. */
+  nextAllowedAtMs: number;
+  /** Último erro observado, para o UI poder mostrar a tentativa e a causa. */
+  lastError?: string;
+  lastAttemptAtMs?: number;
+}
+
+/**
+ * Backoff por fonte. Base = a cadência da própria fonte; duplica a cada falha
+ * consecutiva até 6 h. Sem teto, um fornecedor em baixo seria attackado a cada
+ * tick para sempre; sem escalonar por fonte, uma falha do YARA esconderia a
+ * saúde dos hashes.
+ */
+export const FALHA_BACKOFF_TETO_MS = 6 * 60 * 60 * 1000;
 
 /**
  * `.update-meta.json`. O timestamp global mantém-se (compatibilidade), mas a
@@ -81,6 +123,25 @@ interface UpdateMeta {
   timestamp?: number;
   iso?: string;
   components?: Partial<Record<UpdateComponent, number>>;
+  /**
+   * Histórico de FALHAS por fonte, para o backoff ser por fonte e não global.
+   * Uma fonte que falha não pode arrastar as outras duas, e uma fonte em falha
+   * permanente não pode martelar o fornecedor a cada tick.
+   */
+  falhas?: Partial<Record<UpdateComponent, FonteFalha>>;
+  /**
+   * Prova da última VERIFICAÇÃO do feed de hashes (não da última escrita).
+   * distinguir «verifiquei e não havia nada» de «escrevi coisas novas» é o que
+   * impede o UI de mostrar «atualizado» depois de uma tentativa sem alteraçoes.
+   */
+  hashesCheckedAt?: number;
+  /**
+   * Cursor de cobertura: o instante (ms) da adição mais recente que alguma vez
+   * vimos no feed. Se `now - cursor > MALWAREBAZAAR_WINDOW_MS`, a janela dos
+   * 60 min já não cobre o que passou — e isso declara-se como lacuna, em vez de
+   * se fingir uma base completa.
+   */
+  hashesCursorMs?: number;
 }
 
 // Fontes de regras YARA — lista de fallback.
@@ -100,20 +161,33 @@ interface UpdateMeta {
 // meses: o update reportava uma falha permanente e o corpus nunca teve
 // ransomware. Trocada por uma fonte real do mesmo repositório, com 17 regras
 // e compilação verificada contra o motor de regras.
-const YARA_SOURCES: Array<{ url: string; ruleClass: YaraRuleClass }> = [
-  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/MALW_Eicar.yar", ruleClass: "test" },
-  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/packers/packer_compiler_signatures.yar", ruleClass: "reference" },
-  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/crypto/crypto_signatures.yar", ruleClass: "reference" },
-  { url: "https://raw.githubusercontent.com/Yara-Rules/rules/master/malware/RANSOM_MS17-010_Wannacrypt.yar", ruleClass: "production" },
+/* yara:pinned-sources:inicio */
+/* Mantido por `scripts/yara-pin.mjs`. Rever = correr `--write`, o que é um
+   commit: nada entra no corpus sem um humano ter aprovado o diff. */
+export const YARA_PIN: Array<{ id: string; repo: string; file: string; revision: string; sha256: string; ruleClass: YaraRuleClass }> = [
+  { id: "MALW_Eicar.yar", repo: "Yara-Rules/rules", file: "malware/MALW_Eicar.yar", revision: "1edbe8e0ddc32dc47b76e370beb51db16c07f487", sha256: "1ba3175cebe28fc5d4d25c1caf604beda152766db268a3f159e4bf61c2eddf54", ruleClass: "test" },
+  { id: "packer_compiler_signatures.yar", repo: "Yara-Rules/rules", file: "packers/packer_compiler_signatures.yar", revision: "0de1aee46db299e2af7c24d597df0679cc834fcd", sha256: "5c60ed67663f1077cb8987c541ce2e18235d25a2f1aec1f986e10ddb92abe5a8", ruleClass: "reference" },
+  { id: "crypto_signatures.yar", repo: "Yara-Rules/rules", file: "crypto/crypto_signatures.yar", revision: "05500412959fb42710c64afa4c41c00b75991422", sha256: "886ffb7bff349189b4cfe6d7d702040f504d036fb02e66e2233e6554a9346145", ruleClass: "reference" },
+  { id: "RANSOM_MS17-010_Wannacrypt.yar", repo: "Yara-Rules/rules", file: "malware/RANSOM_MS17-010_Wannacrypt.yar", revision: "15a21a2eee9409cb20dbb2d4044c392522a9457e", sha256: "af98f947ff400fe76f0d2f919749fba5f278d7a6d19c0f34de6eeddd44e52f91", ruleClass: "production" },
 ];
+/* yara:pinned-sources:fim */
 
-/** Nome da fonte sem URL nem caminho: o que pode aparecer num estado ou manifesto. */
-function sourceName(url: string): string {
-  try {
-    return path.posix.basename(new URL(url).pathname);
-  } catch {
-    return "unknown-source";
-  }
+/**
+ * URL imutável da fonte: o `revision` é um commit, não uma branch. Buscar por
+ * `master` era o que o pedido recusava — aceitava-se o que a branch publicasse
+ * desde que compilasse, e compilar não é revisar.
+ */
+function urlDaFonte(pino: (typeof YARA_PIN)[number]): string {
+  return `https://raw.githubusercontent.com/${pino.repo}/${pino.revision}/${pino.file}`;
+}
+
+/** Pin malformado não é «fonte em falha», é configuração errada: recusa-se antes de tocar na rede. */
+export function pinoInvalido(pino: { revision: string; sha256: string; file: string; repo: string }): string | null {
+  if (!/^[0-9a-f]{40}$/.test(pino.revision)) return "revision não é um commit SHA-1 de 40 hex";
+  if (!/^[0-9a-f]{64}$/.test(pino.sha256)) return "sha256 não é um digest de 64 hex";
+  if (!pino.repo || !/^[\w.-]+\/[\w.-]+$/.test(pino.repo)) return "repo fora da forma <dono>/<projeto>";
+  if (!pino.file || pino.file.startsWith("/") || pino.file.includes("..")) return "caminho da fonte fora do repositório";
+  return null;
 }
 
 /**
@@ -132,6 +206,89 @@ function rejectionReason(error: unknown): string {
 
 // MalwareBazaar API endpoint
 const HASH_FEED_URL = "https://mb-api.abuse.ch/api/v1/";
+
+/**
+ * Chave de acesso: só aceito ASCII imprimível sem espaços, 16..128 caracteres.
+ *
+ * A regra não é cosmética. O valor vai direito para um header HTTP, por isso um
+ * CR/LF seria injeção de header; e uma string vazia ou de dois caracteres não é
+ * uma chave — é um typo que o feed pagaria com `missing api key` para sempre.
+ * Devolver `null` faz o caminho de update recusar-se ANTES da rede.
+ */
+export function normalizarAuthMalwareBazaar(raw: unknown): string | null {
+  if (typeof raw !== "string") return null;
+  const value = raw.trim();
+  if (value.length < 16 || value.length > 128) return null;
+  if (!/^[!-~]+$/.test(value)) return null;
+  return value;
+}
+
+const SHA256_HEX = /^[0-9a-f]{64}$/;
+
+/**
+ * O que o feed devolve NÃO é uma base: é material bruto que tem de ser
+ * validado antes de tocar em disco. Cada rejeição é contada e reportada —
+ * uma base que silenciosamente «ignora» 90% do feed parece saudável e não é.
+ *
+ * Política de severidade (o motivo do `severity` ter saído do `"critical"`
+ * automático): o `get_recent` devolve amostras com `signature` muitas vezes
+ * `null` — é um fluxo de NOVOS envios, não uma lista de famílias confirmadas.
+ * Marcar tudo como crítico seria afirmar uma certificação que a fonte não dá.
+ * Nota honesta sobre o efeito real: hoje a severidade guardada NUNCA é lida
+ * pela deteção — `analysis.ts:191` colapsa o registo num booleano e
+ * `scoring.ts:47,170-178` soma sempre 95 — por isso esta mudança não altera
+ * nenhum veredicto; altera a veracidade do que fica escrito em disco.
+ */
+export function parsearFeedMalwareBazaar(
+  corpo: string,
+): { status: string; registos: Array<{ sha256: string; family: string; severity: "high"; source: string }>; rejeitados: number; semAlteracoes: boolean } {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(corpo);
+  } catch {
+    throw new Error("MalwareBazaar: resposta não é JSON utilizável.");
+  }
+  const obj = parsed as { query_status?: unknown; data?: unknown };
+  const status = typeof obj?.query_status === "string" ? obj.query_status : "(ausente)";
+  if (status === "missing api key") {
+    throw new Error("MalwareBazaar: a API recusou o pedido por falta de Auth-Key.");
+  }
+  if (status === "bad auth" || status === "unauthorized") {
+    throw new Error(`MalwareBazaar: Auth-Key recusada (${status}).`);
+  }
+  if (status === "exceeding rate" || status === "rate limited") {
+    throw new Error(`MalwareBazaar: limite de pedidos atingido (${status}).`);
+  }
+  if (status !== "ok") {
+    throw new Error(`MalwareBazaar: query_status não reconhecido (${status}).`);
+  }
+  if (obj.data === null || obj.data === undefined) {
+    return { status, registos: [], rejeitados: 0, semAlteracoes: true };
+  }
+  if (!Array.isArray(obj.data)) {
+    throw new Error("MalwareBazaar: data não é um array.");
+  }
+  const vistos = new Set<string>();
+  const registos: Array<{ sha256: string; family: string; severity: "high"; source: string }> = [];
+  let rejeitados = 0;
+  for (const item of obj.data as Array<Record<string, unknown>>) {
+    const hash = typeof item?.sha256_hash === "string" ? item.sha256_hash.toLowerCase() : "";
+    if (!SHA256_HEX.test(hash)) {
+      rejeitados += 1;
+      continue;
+    }
+    if (vistos.has(hash)) {
+      rejeitados += 1;
+      continue;
+    }
+    vistos.add(hash);
+    const family = typeof item?.signature === "string" && item.signature.trim()
+      ? item.signature.trim().slice(0, 120)
+      : "Unknown";
+    registos.push({ sha256: hash, family, severity: "high", source: "malwarebazaar" });
+  }
+  return { status, registos, rejeitados, semAlteracoes: registos.length === 0 };
+}
 
 /**
  * Categorias do PRODUTO a partir dos códigos estáveis do adapter clássico.
@@ -297,6 +454,8 @@ export class DefinitionUpdater {
    * faz a coordenação ser real e não duas autoridades concordando por sorte.
    */
   readonly gate: ClamDatabaseGate;
+  /** Fontes pinadas desta instância (ver `YARA_PIN`). */
+  private readonly yaraPin: typeof YARA_PIN;
   /** Como o `freshclam` é criado. Ver a nota no construtor. */
   private readonly spawnFreshclam: typeof spawn;
   private readonly renameYaraRules: typeof fsPromises.rename;
@@ -308,6 +467,13 @@ export class DefinitionUpdater {
   private readonly renameHashes: typeof fsPromises.rename;
   /** Seam de teste; em produção é `https.request`. */
   private readonly hashFeedRequest: typeof https.request;
+  /**
+   * Chave de acesso do MalwareBazaar, resolvida NO CONSTRUCTOR a partir de
+   * ambiente/config injectável. `null` é um estado legítimo e declarado: sem
+   * chave o feed recusa-se antes de tocar na rede, e isso reporta-se como
+   * «não configurado», não como falha de formato nem como sucesso.
+   */
+  private readonly hashAuthKey: string | null;
 
   constructor(
     definitionsDir: string,
@@ -317,6 +483,12 @@ export class DefinitionUpdater {
       afterYaraRollbackFailed?: (error: unknown) => Promise<void> | void;
       afterDefinitionsUpdated?: (result: UpdateResult) => Promise<void> | void;
       gate?: ClamDatabaseGate;
+      /**
+       * Lista de fontes pinadas. Por omissão é o bloco revisto em código
+       * (`YARA_PIN`); injectável só para os testes poderem exercer o caminho de
+       * recusa por digesto — o produto nunca a passa.
+       */
+      yaraPin?: typeof YARA_PIN;
       /**
        * Seam de teste: como o `freshclam` é criado. A produção nunca injecta
        * nada; é `spawn` do `node:child_process`.
@@ -332,6 +504,12 @@ export class DefinitionUpdater {
       renameYaraRules?: typeof fsPromises.rename;
       renameHashes?: typeof fsPromises.rename;
       hashFeedRequest?: typeof https.request;
+      /**
+       * Chave do MalwareBazaar. `undefined` = ler do ambiente; `null` = declarar
+       * explicitamente que não há chave (testes); string = injectada por config
+       * segura. Nunca há valor embutido no código.
+       */
+      hashAuthKey?: string | null;
     } = {},
   ) {
     this.definitionsDir = definitionsDir;
@@ -339,10 +517,15 @@ export class DefinitionUpdater {
     this.hashesPath = path.join(definitionsDir, "hashes", "default.json");
     this.metaPath = path.join(definitionsDir, ".update-meta.json");
     this.gate = options.gate ?? new ClamDatabaseGate();
+    this.yaraPin = options.yaraPin ?? YARA_PIN;
     this.spawnFreshclam = options.spawnFreshclam ?? spawn;
     this.renameYaraRules = options.renameYaraRules ?? fsPromises.rename;
     this.renameHashes = options.renameHashes ?? fsPromises.rename;
     this.hashFeedRequest = options.hashFeedRequest ?? https.request;
+    this.hashAuthKey =
+      options.hashAuthKey === undefined
+        ? normalizarAuthMalwareBazaar(process.env[MALWAREBAZAAR_AUTH_KEY_ENV])
+        : normalizarAuthMalwareBazaar(options.hashAuthKey);
     DefinitionUpdater.liveGates.add(this.gate);
     // P1-1 (2) — o gancho é do CICLO, não do update manual: quem o regista é o
     // motor, e tanto o scheduler como o `updateDefinitions` o atravessam. Por
@@ -363,6 +546,20 @@ export class DefinitionUpdater {
   private activeOperations = 0;
   get operationInProgress(): boolean { return this.activeOperations > 0; }
   async checkAndUpdate(force = false): Promise<UpdateResult> {
+    if (this.activeOperations > 0) {
+      // Dois ciclos em paralelo escreveriam sobre as MESMAS bases: o gate do
+      // ClamAV protege a LEITURA de uma escrita, não duas escritas uma contra a
+      // outra. Recusar com aviso explícito é mais honesto do que serializar em
+      // silêncio ou enfileirar pedidos que ninguém pediu.
+      return {
+        yaraUpdated: false,
+        clamUpdated: false,
+        hashesUpdated: false,
+        errors: [],
+        warnings: ["Já existe um ciclo de atualização de definições em curso; este pedido foi recusado para não escrever duas vezes sobre as mesmas bases."],
+        timestamp: new Date().toISOString(),
+      };
+    }
     ++this.activeOperations;
     try { return await this.runCheckAndUpdate(force); }
     finally { --this.activeOperations; }
@@ -404,12 +601,14 @@ export class DefinitionUpdater {
       try {
         const yaraResult = await this.updateYaraRules();
         result.yaraUpdated = true;
+        this.limparFalha("yara");
         updated.yara = true;
         result.errors.push(...yaraResult.errors.map((error) => `YARA source: ${error}`));
         result.warnings.push(...yaraResult.warnings.map((warning) => `YARA warning: ${warning}`));
         console.log("[Updater] Regras YARA atualizadas.");
       } catch (err: any) {
         result.errors.push(`YARA: ${err.message}`);
+        this.registarFalha("yara", err.message);
         const sourceErrors = err?.sourceErrors;
         if (Array.isArray(sourceErrors)) {
           result.errors.push(...sourceErrors.map((detail: string) => `YARA source: ${detail}`));
@@ -428,11 +627,13 @@ export class DefinitionUpdater {
       try {
         await this.updateClamAV();
         result.clamUpdated = true;
+        this.limparFalha("clamav");
         updated.clamav = true;
         console.log("[Updater] ClamAV atualizado via freshclam.");
       } catch (err: any) {
         // ClamAV não é obrigatório — freshclam pode não estar instalado
         result.errors.push(`ClamAV: ${err.message}`);
+        this.registarFalha("clamav", err.message);
         console.warn("[Updater] freshclam indisponível ou falhou:", err.message);
       }
     }
@@ -440,12 +641,30 @@ export class DefinitionUpdater {
     // 3. Hash feed
     if (stale.hashes) {
       try {
-        await this.updateHashFeed();
-        result.hashesUpdated = true;
+        const feed = await this.updateHashFeed();
+        // Dois factos separados, porque são dois factos diferentes:
+        // `hashesUpdated` = a base em disco mudou (é isto que manda recarregar
+        // o SignatureDatabase); `updated.hashes` = houve uma verificação bem
+        // sucedida (é isto que avança o timestamp do componente e evita
+        // repassar o feed a cada minuto). Uma tentativa sem alterações não é
+        // «base atualizada», e o UI não pode recebê-la como tal.
+        result.hashesUpdated = feed.alterou;
+        this.limparFalha("hashes");
         updated.hashes = true;
-        console.log("[Updater] Feed de hashes atualizado.");
+        if (feed.rejeitados > 0) {
+          result.errors.push(`Hashes: ${feed.rejeitados} registos do feed rejeitados na validação.`);
+        }
+        if (feed.lacunaCobertura) {
+          result.errors.push(
+            "Hashes: lacuna de cobertura — passaram mais de 60 minutos desde a última adição observada e o get_recent não tem cursor; o feed só cobre a janela oficial.",
+          );
+        }
+        console.log(
+          `[Updater] Feed de hashes verificado: ${feed.novos} novos, ${feed.total} no total${feed.alterou ? "" : " (sem alterações)"}.`,
+        );
       } catch (err: any) {
         result.errors.push(`Hashes: ${err.message}`);
+        this.registarFalha("hashes", err.message);
         console.warn("[Updater] Falha ao atualizar hashes:", err.message);
       }
     }
@@ -501,7 +720,14 @@ export class DefinitionUpdater {
   startScheduler(): void {
     if (this.timer) return;
     if (this.abortController.signal.aborted) this.abortController = new AbortController();
-    console.log(`[Updater] Scheduler iniciado (intervalo: ${UPDATE_INTERVAL_MS / 3600000}h).`);
+    // O "tick" é a cadência MAIS curta entre as fontes (hoje a do feed de
+    // hashes); quem decide o que corre em cada tick é `componentStale`, com o
+    // limite por componente. Um único `setInterval` de 6 h não conseguia
+    // cumprir a janela de 60 min do MalwareBazaar; um `setInterval` por fonte
+    // criaria três concorrentes sem necessidade.
+    console.log(
+      `[Updater] Scheduler iniciado (tick: ${HASH_FEED_INTERVAL_MS / 60000}min; YARA/ClamAV: ${UPDATE_INTERVAL_MS / 3600000}h; hashes: ${HASH_FEED_INTERVAL_MS / 60000}min).`,
+    );
 
     // Check imediato (non-blocking)
     void this.checkAndUpdate().catch((err) =>
@@ -512,7 +738,7 @@ export class DefinitionUpdater {
       void this.checkAndUpdate().catch((err) =>
         console.error("[Updater] Erro no check periódico:", err),
       );
-    }, UPDATE_INTERVAL_MS);
+    }, HASH_FEED_INTERVAL_MS);
   }
 
   /**
@@ -533,6 +759,12 @@ export class DefinitionUpdater {
   // ── Private: YARA ──────────────────────────────────────────────────────────
 
   private async updateYaraRules(): Promise<{ errors: string[]; warnings: string[] }> {
+    if (this.yaraPin.length === 0) {
+      // Lista de pin vazia é ficheiro de revisão por preencher, não «nenhuma fonte
+      // falhou». Ir à rede sem pin seria exatamente o comportamento que foi
+      // recusado na decisão D4.
+      throw new Error("YARA: nenhuma fonte pinada para rever; corpus anterior preservado.");
+    }
     await fsPromises.mkdir(path.dirname(this.yaraPath), { recursive: true });
 
     const validSources: string[] = [];
@@ -541,12 +773,28 @@ export class DefinitionUpdater {
     const sourceErrors: string[] = [];
     const sourceWarnings: string[] = [];
     let lastError: Error | null = null;
-    for (const descriptor of YARA_SOURCES) {
-      const url = descriptor.url;
-      const name = sourceName(url);
+    for (const descriptor of this.yaraPin) {
+      const url = urlDaFonte(descriptor);
+      const name = descriptor.id;
+      const problemaDoPin = pinoInvalido(descriptor);
+      if (problemaDoPin) {
+        // Configuração errada nunca é «fonte que falhou na rede»: não se vai à
+        // rede com um commit ou digest ilegível.
+        sourceErrors.push(`${name}: pin inválido (${problemaDoPin})`);
+        rejected.push({ name, reason: "pin-invalid" });
+        lastError = new Error(`YARA pin inválido (${name}).`);
+        continue;
+      }
       try {
         const content = await this.downloadText(url);
         const source = new URL(url).pathname;
+        // Integridade antes de sintaxe: o conteúdo do commit pinado tem de ser o
+        // conteúdo revisto. Um `raw.githubusercontent.com` que sirva outra coisa
+        // (ou um espelho intermédio) é recusado aqui, não compilado e aceite.
+        const digesto = createHash("sha256").update(content, "utf8").digest("hex");
+        if (digesto !== descriptor.sha256) {
+          throw new Error(`Conteúdo não corresponde ao pin revisto (${name}); corpus anterior preservado.`);
+        }
         // Validação: regras YARA devem conter "rule " e compilar com o YARA
         // clássico oficial (yarac). Só escrevemos no disco o que compila.
         if (!content.includes("rule ") || content.includes("<!DOCTYPE html>")) {
@@ -1037,46 +1285,99 @@ export class DefinitionUpdater {
 
   // ── Private: Hash Feed ─────────────────────────────────────────────────────
 
-  private async updateHashFeed(): Promise<void> {
+  /**
+   * Verificação do feed de hashes. Devolve o que aconteceu, porque «sucesso» e
+   * «base alterada» não são a mesma coisa: sem esta distinção o UI mostrava
+   * «atualizado» depois de uma simples tentativa, e o motor recarregava uma base
+   * que não mudou.
+   */
+  private async updateHashFeed(): Promise<{
+    alterou: boolean;
+    novos: number;
+    total: number;
+    rejeitados: number;
+    lacunaCobertura: boolean;
+  }> {
+    if (!this.hashAuthKey) {
+      // Recusar ANTES da rede: sem Auth-Key a API responde `missing api key`,
+      // e o caminho antigo transformava isso em «Formato não reconhecido» — uma
+      // mensagem que apontava para o fornecedor quando o problema era a nossa
+      // configuração. Não há escrita, não há recarga, não há dúvida.
+      throw new Error(
+        `MalwareBazaar: sem chave de acesso (define ${MALWAREBAZAAR_AUTH_KEY_ENV} ou um canal de config seguro). O pedido não foi enviado.`,
+      );
+    }
     await fsPromises.mkdir(path.dirname(this.hashesPath), { recursive: true });
 
-    // Download from MalwareBazaar API (requires POST)
-    const content = await this.downloadMalwareBazaar();
+    const metaAntes = this.readUpdateMeta();
+    const cursor = Number(metaAntes.hashesCursorMs ?? 0);
+    const agora = Date.now();
+    // Lacuna declarada, não escondida: se não vemos uma adição há mais do que a
+    // janela oficial de 60 min, o que passou nesse intervalo não é recuperável
+    // por `get_recent` (não tem cursor nem paginação).
+    const lacunaCobertura =
+      Number.isFinite(cursor) && cursor > 0 && agora - cursor > MALWAREBAZAAR_WINDOW_MS;
 
-    let remoteFeeds: any[] = [];
-    try {
-      const parsed = JSON.parse(content);
-      if (parsed.query_status === "ok" && Array.isArray(parsed.data)) {
-         remoteFeeds = parsed.data.map((item: any) => ({
-             sha256: item.sha256_hash,
-             family: item.signature || "Unknown",
-             severity: "critical",
-             source: "malwarebazaar"
-         }));
-      } else {
-         throw new Error("Formato do MalwareBazaar não reconhecido.");
+    const paginaTime = await this.downloadMalwareBazaar("time");
+    const parsedTime = parsearFeedMalwareBazaar(paginaTime);
+    let registos = parsedTime.registos;
+    let rejeitados = parsedTime.rejeitados;
+
+    // Se há lacuna, pede-se também a lista das 100 adições mais recentes. Não é
+    // backfill completo — é o máximo que a fonte permite — e é um pedido extra
+    // por ciclo, não um loop: respeitar os limites do fornecedor é requisito.
+    if (lacunaCobertura) {
+      try {
+        const pagina100 = await this.downloadMalwareBazaar("100");
+        const parsed100 = parsearFeedMalwareBazaar(pagina100);
+        registos = this.mesclarRegistosPorHash(registos, parsed100.registos);
+        rejeitados += parsed100.rejeitados;
+      } catch (error: any) {
+        // A janela `time` já foi aceite; falhar aqui não pode deitar fora o que
+        // ela trouxe. Regista-se a limitação e segue-se com o que há.
+        console.warn("[Updater] Segundo pedido do MalwareBazaar falhou:", error?.message ?? error);
       }
-    } catch {
-      throw new Error("Falha ao parsear resposta do MalwareBazaar.");
     }
 
-    let existing: any[] = [];
+    let existing: unknown[] = [];
     try {
       const raw = await fsPromises.readFile(this.hashesPath, "utf-8");
-      existing = JSON.parse(raw);
+      const parsedExisting = JSON.parse(raw);
+      if (Array.isArray(parsedExisting)) existing = parsedExisting;
     } catch {
-      // Arquivo não existe ou é inválido
+      // Ficheiro ausente ou inválido: começa-se do zero, mas a escrita abaixo é
+      // atómica e o `SignatureDatabase.load()` valida o que receber.
     }
 
-    const merged = this.mergeHashFeeds(existing, remoteFeeds);
-    // Staging + rename no MESMO directório: uma falha a meio não deixa a base
-    // de hashes truncada; o ficheiro anterior continua válido.
+    const merged = this.mergeHashFeeds(existing, registos);
+    const totalAntes = existing.length;
+    const novos = Math.max(0, merged.length - totalAntes);
+    const alterou = novos > 0;
+
+    if (!alterou) {
+      // Nada novo: não se escreve, não se recarrega, mas a VERIFICAÇÃO conta e
+      // fica registada — é o que permite ao UI dizer «verificado há X, sem
+      // alterações» em vez de «atualizado».
+      this.guardarEstadoHashes(agora, cursor);
+      return { alterou: false, novos: 0, total: merged.length, rejeitados, lacunaCobertura };
+    }
+
+    // Teto de crescimento: mais vale uma base truncada com o corte declarado,
+    // do que um ficheiro e um Map em memória a crescerem sem limite com o feed.
+    const limitado = merged.length > MAX_HASH_RECORDS;
+    const final = limitado ? merged.slice(merged.length - MAX_HASH_RECORDS) : merged;
+    if (limitado) {
+      console.warn(
+        `[Updater] Base de hashes limitada a ${MAX_HASH_RECORDS} registos (${merged.length - MAX_HASH_RECORDS} descartados por antiguidade).`,
+      );
+    }
+
     const staging = path.join(
       path.dirname(this.hashesPath),
       `.${path.basename(this.hashesPath)}.${process.pid}.${randomUUID()}.tmp`,
     );
     try {
-      await fsPromises.writeFile(staging, JSON.stringify(merged, null, 2), "utf-8");
+      await fsPromises.writeFile(staging, JSON.stringify(final, null, 2), "utf-8");
       // Seam próprio, não o do YARA: um duplo do corpus não pode governar a
       // escrita da base de hashes. Em produção continua a ser `fsPromises.rename`.
       await this.renameHashes(staging, this.hashesPath);
@@ -1084,20 +1385,70 @@ export class DefinitionUpdater {
       await fsPromises.rm(staging, { force: true }).catch(() => undefined);
       throw error;
     }
+
+    const cursorNovo = Math.max(cursor, agora);
+    this.guardarEstadoHashes(agora, cursorNovo);
+    return {
+      alterou: true,
+      novos,
+      total: final.length,
+      rejeitados,
+      lacunaCobertura,
+    };
   }
 
-  private downloadMalwareBazaar(): Promise<string> {
+  /** Dedupe por SHA-256 entre duas páginas da mesma fonte (o `100` sobrepõe-se ao `time`). */
+  private mesclarRegistosPorHash(
+    a: Array<{ sha256: string }>,
+    b: Array<{ sha256: string }>,
+  ): Array<{ sha256: string; family: string; severity: "high"; source: string }> {
+    const map = new Map<string, any>();
+    for (const item of a) map.set(item.sha256, item);
+    for (const item of b) if (!map.has(item.sha256)) map.set(item.sha256, item);
+    return Array.from(map.values());
+  }
+
+  /**
+   * Prova de verificação do feed, separada da prova de escrita.
+   * `hashesCheckedAt` avança mesmo quando não houve alterações; `hashesCursorMs`
+   * guarda o instante da última cobertura. Os dois vivem no mesmo ficheiro de
+   * metadados por uma razão: `saveUpdateTimestamp` reescreve esse ficheiro, e por
+   * isso preserva explicitamente estes campos.
+   */
+  private guardarEstadoHashes(quando: number, cursor: number): void {
+    const meta = this.readUpdateMeta();
+    fs.mkdirSync(path.dirname(this.metaPath), { recursive: true });
+    fs.writeFileSync(
+      this.metaPath,
+      JSON.stringify(
+        { ...meta, timestamp: meta.timestamp ?? quando, hashesCheckedAt: quando, hashesCursorMs: cursor },
+        null,
+        2,
+      ),
+      "utf-8",
+    );
+  }
+
+  private downloadMalwareBazaar(selector: "time" | "100" = "time"): Promise<string> {
     return new Promise((resolve, reject) => {
-      const data = "query=get_recent&selector=time";
+      const data = `query=get_recent&selector=${selector}`;
       const req = this.hashFeedRequest(HASH_FEED_URL, {
         signal: this.abortController.signal,
         method: 'POST',
         headers: {
           'Content-Type': 'application/x-www-form-urlencoded',
-          'Content-Length': Buffer.byteLength(data)
+          'Content-Length': Buffer.byteLength(data),
+          // Obrigatório em TODA a interação com a API, segundo a documentação
+          // oficial («Obtain an Auth-Key (Required)», «you must include the HTTP
+          // header Auth-Key»). Sem ele o pedido nem sequer chega aos dados.
+          'Auth-Key': this.hashAuthKey as string,
         },
         timeout: 30000
       }, (res) => {
+        if (res.statusCode && res.statusCode === 429) {
+          reject(new Error("MalwareBazaar HTTP 429: limite de pedidos do fornecedor."));
+          return;
+        }
         if (res.statusCode && res.statusCode !== 200) {
           reject(new Error(`MalwareBazaar HTTP ${res.statusCode}`));
           return;
@@ -1183,16 +1534,120 @@ export class DefinitionUpdater {
    * Na migração, o ClamAV é tentado já: o global histórico não é prova de que o
    * freshclam correu. YARA/hashes podem herdar o global uma vez.
    */
+  /**
+   * Cadência por componente, não uma cadência única para as três fontes.
+   * YARA e ClamAV ficam nas 6 h; o feed de hashes obedece à janela de 60 min
+   * que a própria fonte define (ver `HASH_FEED_INTERVAL_MS`).
+   */
+  /**
+   * Estado POR FONTE, para a UI poder dizer «actualizado / desactualizado /
+   * degradado / indisponível / nunca verificado» sem inventar nada.
+   *
+   * Porque é um método do updater e não do motor: o único registo de quando cada
+   * fonte foi tentada e conseguiu vive no `.update-meta.json` que o updater escreve.
+   * O motor acrescenta depois o que só ele sabe (contagem de assinaturas em
+   * memória, saúde do YARA e do ClamAV).
+   *
+   * Distinções que importam e antes não existiam:
+   *  - `nunca_verificado` ≠ `indisponivel`: a primeira nunca tentou, a segunda
+   *    tentou e o motor não está lá;
+   *  - `ultimaTentativa` ≠ `ultimaBemSucedida`: mostrar a tentativa como se fosse
+   *    sucesso é a mentira que o requisito 4 proíbe explicitamente;
+   *  - `proximaVerificacao` sai da cadência da fonte, EXCETO quando há backoff em
+   *    vigor — nesse caso é o fim da recusa, que é o que realmente vai acontecer.
+   */
+  estadoDasFontes(now = Date.now()): Array<{
+    fonte: UpdateComponent;
+    ultimaBemSucedidaAtMs: number | null;
+    ultimaTentativaAtMs: number | null;
+    ultimoErro: string | null;
+    tentativasConsecutivas: number;
+    proximaVerificacaoAtMs: number;
+    cadenciaMs: number;
+    nuncaVerificado: boolean;
+    emBackoff: boolean;
+  }> {
+    const meta = this.readUpdateMeta();
+    const hashesTentado = Number(meta.hashesCheckedAt ?? 0);
+    return (["clamav", "yara", "hashes"] as UpdateComponent[]).map((fonte) => {
+      const sucesso = Number(meta.components?.[fonte] ?? 0) || null;
+      const falha = meta.falhas?.[fonte];
+      const cadenciaMs = this.intervaloDoComponente(fonte);
+      const ultimaTentativa =
+        Number.isFinite(falha?.lastAttemptAtMs ?? 0) && (falha?.lastAttemptAtMs ?? 0) > 0
+          ? (falha as FonteFalha).lastAttemptAtMs as number
+          : fonte === "hashes" && hashesTentado > 0
+            ? hashesTentado
+            : sucesso;
+      const emBackoff = !!falha && Number.isFinite(falha.nextAllowedAtMs) && now < falha.nextAllowedAtMs;
+      return {
+        fonte,
+        ultimaBemSucedidaAtMs: sucesso,
+        ultimaTentativaAtMs: ultimaTentativa ?? null,
+        ultimoErro: falha?.lastError ?? null,
+        tentativasConsecutivas: falha?.count ?? 0,
+        proximaVerificacaoAtMs: emBackoff
+          ? (falha as FonteFalha).nextAllowedAtMs
+          : (sucesso ?? 0) + cadenciaMs,
+        cadenciaMs,
+        // Uma fonte só é «nunca verificada» se não houver NEM sucesso NEM
+        // tentativa registada — e, no caso dos hashes, a verificação conta mesmo
+        // sem alteração escrita, porque foi isso que aconteceu.
+        nuncaVerificado: sucesso === null && ultimaTentativa == null && !(fonte === "hashes" && hashesTentado > 0),
+        emBackoff,
+      };
+    });
+  }
+
+  /**
+   * Regista uma falha desta fonte e calcula quando pode ser tentada de novo.
+   * Backoff = cadência da fonte × 2^(tentativas-1), com teto de 6 h.
+   */
+  private registarFalha(componente: UpdateComponent, erro: string): void {
+    const meta = this.readUpdateMeta();
+    const anterior = meta.falhas?.[componente];
+    const count = (anterior?.count ?? 0) + 1;
+    const base = this.intervaloDoComponente(componente);
+    const espera = Math.min(FALHA_BACKOFF_TETO_MS, base * 2 ** (count - 1));
+    const agora = Date.now();
+    const falhas = { ...(meta.falhas ?? {}) };
+    falhas[componente] = { count, nextAllowedAtMs: agora + espera, lastError: erro.slice(0, 400), lastAttemptAtMs: agora };
+    fs.mkdirSync(path.dirname(this.metaPath), { recursive: true });
+    fs.writeFileSync(this.metaPath, JSON.stringify({ ...meta, falhas }, null, 2), "utf-8");
+    console.warn(`[Updater] Falha registada em ${componente} (tentativa ${count}): nova tentativa não antes de ${Math.round(espera / 60000)} min.`);
+  }
+
+  /** Um sucesso limpa o histórico dessa fonte — o backoff é de FALHAS consecutivas. */
+  private limparFalha(componente: UpdateComponent): void {
+    const meta = this.readUpdateMeta();
+    if (!meta.falhas?.[componente]) return;
+    const falhas = { ...meta.falhas };
+    delete falhas[componente];
+    fs.writeFileSync(this.metaPath, JSON.stringify({ ...meta, falhas }, null, 2), "utf-8");
+  }
+
+  private intervaloDoComponente(component: UpdateComponent): number {
+    return component === "hashes" ? HASH_FEED_INTERVAL_MS : UPDATE_INTERVAL_MS;
+  }
+
   private componentStale(component: UpdateComponent): boolean {
     const meta = this.readUpdateMeta();
+    const limite = this.intervaloDoComponente(component);
+    // Backoff em vigor: uma fonte em falha consecutiva NÃO é «velha» até o seu
+    // intervalo de recusa passar. Assim o scheduler continua a tentar as outras
+    // fontes na cadência normal em vez de repicar num fornecedor caído.
+    const recusa = meta.falhas?.[component];
+    if (recusa && Number.isFinite(recusa.nextAllowedAtMs) && Date.now() < recusa.nextAllowedAtMs) {
+      return false;
+    }
     const hasComponents = meta.components !== undefined && Object.keys(meta.components).length > 0;
     if (!hasComponents) {
       if (component === "clamav") return true;
       const legacy = Number(meta.timestamp ?? 0);
-      return !(Number.isFinite(legacy) && legacy > 0 && Date.now() - legacy < UPDATE_INTERVAL_MS);
+      return !(Number.isFinite(legacy) && legacy > 0 && Date.now() - legacy < limite);
     }
     const own = Number(meta.components?.[component] ?? 0);
-    return !(Number.isFinite(own) && own > 0 && Date.now() - own < UPDATE_INTERVAL_MS);
+    return !(Number.isFinite(own) && own > 0 && Date.now() - own < limite);
   }
 
   private saveUpdateTimestamp(updated: Partial<Record<UpdateComponent, boolean>>): void {
@@ -1205,7 +1660,15 @@ export class DefinitionUpdater {
     fs.mkdirSync(path.dirname(this.metaPath), { recursive: true });
     fs.writeFileSync(
       this.metaPath,
-      JSON.stringify({ timestamp: now, iso: new Date(now).toISOString(), components }, null, 2),
+      JSON.stringify(
+        // `...meta` primeiro: o metadado é um só ficheiro e este é o caminho que
+        // o reescreve por inteiro. Sem o spread, a prova de verificação do feed
+        // (`hashesCheckedAt`/`hashesCursorMs`) desaparecia a cada ciclo e o UI
+        // perdia justamente o que permite distinguir «verificado» de «atualizado».
+        { ...meta, timestamp: now, iso: new Date(now).toISOString(), components },
+        null,
+        2,
+      ),
       "utf-8",
     );
   }

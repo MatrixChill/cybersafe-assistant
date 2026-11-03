@@ -40,6 +40,7 @@ import {
   type DiskLastGood,
   type DiskReadOutcome,
 } from "./disk.js";
+import { lerMontagensReais, type ResultadoMontagens } from "./mounts-posix.js";
 import type { DiskSnapshot } from "@cybersafe/shared-types";
 
 // Reexportado para consumidores históricos (ex.: testes) sem duplicar código.
@@ -1834,7 +1835,52 @@ export class HardwareHealthEngine {
     return flight;
   }
 
+  /**
+   * Fonte POSIX da lista de montagens. Seam sobreponível em testes (como
+   * `pollDiskActivity`), para que o caminho Linux seja exercitado sem um disco
+   * real por baixo.
+   */
+  protected lerMontagens(): ResultadoMontagens {
+    return lerMontagensReais();
+  }
+
   private async collectDisks(): Promise<void> {
+    if (process.platform === "linux") {
+      // O `si.fsSize()` funciona em Linux — medido em WSL2: 10 entradas em
+      // 1055 ms. Não é essa a razão da troca. As razões são as quatro entradas
+      // erradas que ele produz e que este ecrã publicaria:
+      //  1. um volume por MONTAGEM, não por sistema de ficheiros — o mesmo 9p
+      //    `C:\134` sai como `/mnt/c` E como `/usr/lib/wsl/drivers`, e o mesmo
+      //    `overlay` sai quatro vezes (`/usr/lib/modules/…`, `/usr/lib/wsl/lib`,
+      //    `/mnt/wslg/versions.txt`, `/mnt/wslg/doc`); a lista de «discos»
+      //    duplica-se e a raiz do `/mnt/wslg/*` nem é uma montagem real;
+      //  2. `/mnt/d` — um leitor de cartões 9p sem cartão — vem como
+      //    `0 GB / 64,24% de uso`: um disco inventado, cheio;
+      //  3. `overlay` e outros pseudo-fs contam como volumes;
+      //  4. não há `major:minor`, portanto não há forma de saber que duas
+      //    linhas são o mesmo disco.
+      // Em Linux a fonte única passa a ser a tabela do kernel (`mountinfo`)
+      // medida por `statfs`. O Windows continua exatamente onde estava.
+      try {
+        const montagens = this.lerMontagens();
+        this.applyDiskRead(
+          montagens.ok
+            ? describeDiskRead(montagens.volumes)
+            : { ok: false, volumes: [], reason: montagens.reason ?? "Sem leitura das montagens do sistema." },
+          Date.now(),
+        );
+      } catch (error: unknown) {
+        this.applyDiskRead(
+          {
+            ok: false,
+            volumes: [],
+            reason: `A leitura das montagens do sistema falhou (${error instanceof Error ? error.message : String(error)}).`,
+          },
+          Date.now(),
+        );
+      }
+      return;
+    }
     try {
       const fsSize = await runHardwareQuery('volumes', () => si.fsSize(), true);
       this.applyDiskRead(describeDiskRead(fsSize), Date.now());

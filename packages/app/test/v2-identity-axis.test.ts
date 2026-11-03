@@ -92,7 +92,7 @@ describe("eixos fechados", () => {
     assert.deepEqual([...V2.V2_THEME_ORDER], ["core", "neon", "terminal", "aurora", "belbete", "glass", "tactical", "light"]);
     assert.deepEqual([...V2.V2_MATERIAL_ORDER], ["solid", "light", "frosted", "liquid", "advanced"]);
     assert.deepEqual([...V2.V2_MOVEMENT_ORDER], ["off", "reduced", "balanced", "cinematic"]);
-    assert.deepEqual([...V2.V2_PERFORMANCE_ORDER], ["economy", "balanced", "high", "auto"]);
+    assert.deepEqual([...V2.V2_PERFORMANCE_ORDER], ["auto", "high", "balanced", "economy", "custom"]);
     for (const id of V2.V2_THEME_ORDER) assert.ok(V2.V2_THEME_META[id].name && V2.V2_THEME_META[id].subtitle, id);
     // Cada tabela de rótulos cobre exatamente o seu eixo — nem mais uma opção
     // decorativa, nem uma sem nome para mostrar.
@@ -305,12 +305,12 @@ describe("condições da revisão do Codex", () => {
     assert.equal(V2.deriveV2Capabilities({ ...base, movement: "cinematic" }).animate, false, "o sistema pede menos movimento");
   });
 
-  test("desempeno: `economy` corta o desfoque, `auto` decide por processadores lógicos", () => {
+  test("desempeno: `economy` corta o desfoque, `auto` não classifica a GPU por processadores lógicos", () => {
     comSistemaReduced(false);
     const base = { ...V2.DEFAULT_V2_PREFERENCES };
     assert.equal(V2.deriveV2Capabilities({ ...base, performance: "economy" }).lowPower, true);
     comSistemaReduced(false); comCpus(4);
-    assert.equal(V2.deriveV2Capabilities({ ...base, performance: "auto" }).lowPower, true, "4 ou menos lógicos é o limiar declarado do lab");
+    assert.equal(V2.deriveV2Capabilities({ ...base, performance: "auto" }).lowPower, false, "CPU não é evidência de capacidade gráfica");
     comCpus(12);
     assert.equal(V2.deriveV2Capabilities({ ...base, performance: "auto" }).lowPower, false);
     assert.equal(V2.deriveV2Capabilities({ ...base, performance: "high" }).renderDpr, 1.5);

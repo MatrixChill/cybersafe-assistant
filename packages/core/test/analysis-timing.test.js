@@ -15,7 +15,7 @@ test('opt-in engine phase timings are numeric, path-free and verdict-neutral', a
  try {
   process.env.CYBERSAFE_DEBUG_SCAN='0'; const before=await analyzer.analyze(file); assert.equal(rows.length,0);
   process.env.CYBERSAFE_DEBUG_SCAN='1'; const after=await analyzer.analyze(file); assert.equal(after.verdict,before.verdict);
-  for(const phase of ['yara','clamav']) assert.ok(rows.some(r=>new RegExp(`^\\[ScanPerf\\] ENGINE_PHASE engine=${phase} elapsedMs=\\d+`).test(r)),phase);
+  for(const phase of ['yara','clamav','hashdb']) assert.ok(rows.some(r=>new RegExp(`^\\[ScanPerf\\] ENGINE_PHASE engine=${phase} elapsedMs=\\d+`).test(r)),phase);
   assert.doesNotMatch(rows.join('\n'),/private-benign|cs-timing-private|[A-Z]:\\/);
  } finally {console.log=log;if(old===undefined)delete process.env.CYBERSAFE_DEBUG_SCAN;else process.env.CYBERSAFE_DEBUG_SCAN=old;}
 });

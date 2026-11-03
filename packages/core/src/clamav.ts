@@ -7,6 +7,11 @@ import * as path from "node:path";
 import * as os from "node:os";
 import { promisify } from "node:util";
 import type { EngineSubsystemHealth } from "@cybersafe/shared-types";
+import {
+  type LeitorBinario,
+  leitorBinarioReal,
+  recusarBinarioNaPlataforma,
+} from "./executavel-posix.js";
 
 /**
  * `exec` com STRING passa por `/bin/sh` (ou `cmd.exe`). `where clamscan` e
@@ -740,6 +745,8 @@ export interface ClamavBridgeOptions {
   loadProofEnabled?: boolean;
   /** Timeout da PROVA DE CARGA (default: `CLAMAV_LOAD_PROBE_TIMEOUT_MS`). Testes injectam. */
   probeTimeoutMs?: number;
+  /** Espera máxima pela vaga antes de adiar a prova (default 5 s). */
+  probeSlotWaitMs?: number;
   /** Órçamento do `dispose()` à espera da morte dos filhos (default 5 s). Testes injectam. */
   disposeBudgetMs?: number;
   /**
@@ -883,8 +890,18 @@ const DEFAULT_SCAN_STARTUP_MS = 10_000;
  */
 const MAX_CAPTURED_OUTPUT = 8 * 1024 * 1024;
 
-/** Tecto do deadline de um batch, para que N grande não fique infinito. */
-const MAX_BATCH_TIMEOUT_MS = 600_000;
+/**
+ * Tecto do deadline de um batch, para que N grande não fique infinito.
+ *
+ * MEDIDO (2026-11-02, instalação real): um Quick Scan de 800 ficheiros levou
+ * 10 min 48 s. O tecto anterior de 600 s matou o clamscan nesse instante e os
+ * 23 ficheiros que ainda não tinham linha `OK` ficaram inconclusivos, apesar
+ * de o motor estar saudável. O tecto existe para um processo encravado, não
+ * para cortar um batch que ainda está a progredir. 30 min mantém a rede de
+ * segurança e deixa concluir o corpus observado; o cancelamento do utilizador
+ * continua a matar o processo imediatamente.
+ */
+const MAX_BATCH_TIMEOUT_MS = 30 * 60_000;
 /**
  * Tempo que damos a um processo morto para sair de facto depois de
  * `taskkill /T /F`. Passado isto, o outcome resolve como morto para o cap não
@@ -919,6 +936,8 @@ const globalClamavSlots = {
   poisoned: 0,
   /** Fila dos scans do UTILIZADOR (têm scanId: quick/full/custom do ScanManager). */
   waitingUser: [] as Array<(granted: ClamavSlotResult) => void>,
+  /** Fila das provas de saúde/carga (não são scans do utilizador). */
+  waitingHealth: [] as Array<(granted: ClamavSlotResult) => void>,
   /** Fila de BACKGROUND (análise unitária de ficheiro/processo, sem scanId). */
   waitingBackground: [] as Array<(granted: ClamavSlotResult) => void>,
   /** Jobs de background RECUSADOS por fila cheia (backpressure honesta). */
@@ -929,11 +948,15 @@ const globalClamavSlots = {
  * Classe de prioridade de um job na vaga GLOBAL.
  *
  * `user`     = trabalho de um scan que o utilizador pediu (tem scanId).
+ * `health`   = prova de saúde/carga do motor. Não pode ficar atrás de uma
+ *              fila de análises automáticas (era a origem do `sem vaga dentro
+ *              de 30000 ms`), mas também não passa à frente de um scan pedido
+ *              pelo utilizador.
  * `background` = análise unitária automática (ficheiro observado, processo
  *              iniciado, correlação ETW). É o default, e é o conservador: só
  *              quem declara (ou traz scanId) sobe de prioridade.
  */
-export type ClamavJobPriority = "user" | "background";
+export type ClamavJobPriority = "user" | "health" | "background";
 
 /**
  * Tecto de jobs de BACKGROUND à espera da vaga.
@@ -1021,7 +1044,9 @@ async function acquireClamavSlot(
     const queue =
       priority === "user"
         ? globalClamavSlots.waitingUser
-        : globalClamavSlots.waitingBackground;
+        : priority === "health"
+          ? globalClamavSlots.waitingHealth
+          : globalClamavSlots.waitingBackground;
     let settled = false;
     const settle = (result: ClamavSlotResult) => {
       if (settled) return;
@@ -1048,8 +1073,9 @@ async function acquireClamavSlot(
  *
  * ORDEM DE PRIORIDADE (o P0 SCANNER_RUNTIME_ZERO_PROGRESS):
  *   1. scans do utilizador em espera, por ordem de chegada;
- *   2. análises de background em espera, por ordem de chegada;
- *   3. ninguém -> a vaga fica livre (`active` decrementa).
+ *   2. provas de saúde/carga, por ordem de chegada;
+ *   3. análises de background em espera, por ordem de chegada;
+ *   4. ninguém -> a vaga fica livre (`active` decrementa).
  *
  * O job ATIVO nunca é interrompido: a vaga só é decidida quando ele termina.
  * Isso é deliberado — matar um clamscan saudável a meio para preempção pagaria
@@ -1058,7 +1084,9 @@ async function acquireClamavSlot(
  */
 function releaseClamavSlot(): void {
   const next =
-    globalClamavSlots.waitingUser.shift() ?? globalClamavSlots.waitingBackground.shift();
+    globalClamavSlots.waitingUser.shift() ??
+    globalClamavSlots.waitingHealth.shift() ??
+    globalClamavSlots.waitingBackground.shift();
   if (next) {
     // `active` mantem-se: a vaga passa de mãos em mãos, nunca há um instante
     // em que o limite possa ser excedido.
@@ -1075,6 +1103,7 @@ function releaseClamavSlot(): void {
 export function clamavSlotStats(): {
   active: number;
   waitingUser: number;
+  waitingHealth: number;
   waitingBackground: number;
   poisoned: number;
   droppedBackground: number;
@@ -1083,6 +1112,7 @@ export function clamavSlotStats(): {
   return {
     active: globalClamavSlots.active,
     waitingUser: globalClamavSlots.waitingUser.length,
+    waitingHealth: globalClamavSlots.waitingHealth.length,
     waitingBackground: globalClamavSlots.waitingBackground.length,
     poisoned: globalClamavSlots.poisoned,
     droppedBackground: globalClamavSlots.droppedBackground,
@@ -1104,6 +1134,9 @@ function poisonClamavSlot(): void {
   // dos waiters presos para sempre — ninguém lhes daria vaga nem recusa.
   while (globalClamavSlots.waitingUser.length > 0) {
     globalClamavSlots.waitingUser.shift()!("poisoned");
+  }
+  while (globalClamavSlots.waitingHealth.length > 0) {
+    globalClamavSlots.waitingHealth.shift()!("poisoned");
   }
   while (globalClamavSlots.waitingBackground.length > 0) {
     globalClamavSlots.waitingBackground.shift()!("poisoned");
@@ -2400,6 +2433,19 @@ export interface ClamavProbeFacts {
    * `dbDir`/`dbFiles`, que se mantêm para compatibilidade.
    */
   candidates?: ClamavDbCandidate[];
+  /**
+   * Binários que ESTÃO no disco mas que esta plataforma não pode lançar como
+   * motor (`clamscan.exe` num host Linux, um PE sem bit de execução). Só tem
+   * valor quando nada de utilizável foi encontrado: com um motor escolhido, a
+   * recusa anterior não é uma falha.
+   *
+   * Vai aqui o nome do ficheiro, não o caminho: a regra do contexto da MATRIX
+   * (`app/src/lib/matrixContext.ts`) é não levar texto livre com caminhos de
+   * disco, que podem identificar o utilizador (`/mnt/c/Users/…`,
+   * `C:\Users\…`). O caminho completo fica no `diagnoseClamavBinary`, que é
+   * local e não é reexportado.
+   */
+  binarioRecusado?: ReadonlyArray<{ nome: string; motivo: string }>;
   /** Instante de referência para a frescura; default Date.now(). */
   now?: number;
   /** Idade máxima aceite das assinaturas. */
@@ -2553,6 +2599,21 @@ function classifyWithCandidates(facts: ClamavProbeFacts): { available: boolean; 
     };
   }
 
+  // Mesma regra do ramo `dbFiles`, pelo mesmo motivo medido: uma descarga de
+  // freshclam interrompida deixa `main.cvd` e perde o `daily.cvd`. `archives>0`
+  // com data fresca NÃO é cobertura — é a contagem de ficheiros a voltar a
+  // passar por saúde. Sem diária falta quase toda a assinatura recente.
+  const temDiaria = chosen.signatureFiles.some((name) => /^(daily|nightly)[-.]/i.test(name));
+  if (!temDiaria) {
+    return {
+      available: true,
+      health: {
+        status: "degraded",
+        detail: `ClamAV carrega ${count} assinatura(s) em ${chosen.dir}, mas falta a base diária (daily/nightly) — assinatura recente em falta até correr freshclam`,
+      },
+    };
+  }
+
   return {
     available: true,
     health: { status: "active", detail: `ClamAV binary available (${count} signature database file(s))` },
@@ -2570,6 +2631,24 @@ function classifyWithCandidates(facts: ClamavProbeFacts): { available: boolean; 
  */
 export function classifyClamavHealth(facts: ClamavProbeFacts): { available: boolean; health: EngineSubsystemHealth } {
   if (facts.versionOutput === null) {
+    // «Não encontrado» e «encontrado mas isto não é um binário desta
+    // plataforma» são factos diferentes com remédios diferentes. Dizer
+    // `not found` a um `clamscan.exe` apontado por pin levaria o utilizador a
+    // instalar o que já lá está, em vez de apontar o pin para o binário certo.
+    const recusado = facts.binarioRecusado ?? [];
+    if (recusado.length > 0) {
+      const primeiro = recusado[0];
+      const outros = recusado.length > 1 ? ` (+${recusado.length - 1} outro(s) recusado(s))` : "";
+      return {
+        available: false,
+        health: {
+          status: "unavailable",
+          detail:
+            `ClamAV existe no disco mas não é motor desta plataforma: ${primeiro.nome} ${primeiro.motivo}${outros}. ` +
+            "Instale o ClamAV do sistema (ex. apt install clamav) ou aponte CYBERSAFE_CLAMSCAN_PATH para um binário Linux.",
+        },
+      };
+    }
     return {
       available: false,
       health: { status: "unavailable", detail: `clamscan not found or failed: ${facts.versionError ?? "unknown"}` },
@@ -2612,6 +2691,23 @@ export function classifyClamavHealth(facts: ClamavProbeFacts): { available: bool
       },
     };
   }
+  // Base oficial presente mas INCOMPLETA: provado em percurso real (2026-11-01)
+  // — um `freshclam` interrompido a meio deixa `main.cvd` intacto e `daily.cvd`
+  // ausente, sem ficheiro parcial, e a classificação antiga respondia `active`
+  // com «2 signature database file(s)». O binário está bom, as duas bases que
+  // existem carregam-se, e mesmo assim quase toda a assinatura recente falta.
+  // `active` aqui seria a mentira da classe que o comentário acima jura evitar:
+  // contagem de ficheiros não é cobertura. A sonda passa a dizer O QUE FALTA.
+  const temDiaria = dbs.some((entry) => /^(daily|nightly)[-.]/i.test(entry));
+  if (!temDiaria) {
+    return {
+      available: true,
+      health: {
+        status: "degraded",
+        detail: `ClamAV carrega ${dbs.length} base(s) oficial(is) em ${facts.dbDir}, mas falta a base diária (daily/nightly) — assinatura recente em falta até correr freshclam`,
+      },
+    };
+  }
   return {
     available: true,
     health: { status: "active", detail: `ClamAV binary available (${dbs.length} signature database file(s))` },
@@ -2651,6 +2747,11 @@ export interface ClamavLoadProof {
   exitCode: number | null;
   /** erro de spawn/timeout/lease/modo; ausente quando o processo correu. */
   error?: string;
+  /**
+   * A prova NÃO correu por o motor estar ocupado (sem vaga no prazo de espera).
+   * Não é falha de carga: não pode degradar um estado já comprovado.
+   */
+  deferred?: boolean;
 }
 
 /** Seam de teste: executa `clamscan <args>` e devolve a saída. Nunca definido em produção. */
@@ -2667,6 +2768,15 @@ export type ClamavLoadRun = (
  * (exit 0). 30 s é o tecto com margem >4× para máquinas lentas.
  */
 export const CLAMAV_LOAD_PROBE_TIMEOUT_MS = 30_000;
+
+/**
+ * Espera máxima pela VAGA antes de adiar a prova. Distinta do deadline da
+ * prova: um scan longo pode ocupar a única vaga durante minutos, e esperar
+ * 30 s por ela só atrasa a saúde sem produzir evidência nenhuma. Cinco
+ * segundos cobrem a rotação normal entre scans; acima disso a prova é adiada
+ * e revalidada quando o scan libertar a vaga.
+ */
+export const CLAMAV_LOAD_PROBE_SLOT_WAIT_MS = 5_000;
 
 /** ENV que liga o modo SO-SOMENTE-LEITURA do serviço (dev-windows-readonly). */
 export const CLAMAV_READONLY_MODE_ENV = "CYBERSAFE_DEV_WINDOWS_READONLY";
@@ -2764,7 +2874,35 @@ export function applyClamavLoadProof(
   outcome: { available: boolean; health: EngineSubsystemHealth },
   chosen: ClamavDbCandidate | null,
   proof: ClamavLoadProof,
+  previous?: EngineSubsystemHealth,
 ): { available: boolean; health: EngineSubsystemHealth } {
+  // OCUPAÇÃO NÃO É FALHA. A prova ficou sem vaga porque o motor estava a
+  // analisar: não houve spawn nem evidência contra a base. Preservar um
+  // `active` já comprovado (marcado `busy`) evita o ciclo ACTIVE→DEGRADED→ACTIVE
+  // causado pela contenção da própria fila; sem confirmação anterior, o estado
+  // honesto é `unavailable`, nunca `active`.
+  if (proof.deferred === true) {
+    const why = proof.error ?? "motor ocupado";
+    if (previous?.status === "active") {
+      return {
+        available: true,
+        health: {
+          status: "active",
+          busy: true,
+          coverage: previous.coverage,
+          detail: `Motor ocupado: prova de carga adiada (${why}); mantém-se a última carga comprovada.`,
+        },
+      };
+    }
+    return {
+      available: false,
+      health: {
+        status: "unavailable",
+        busy: true,
+        detail: `Motor ocupado: prova de carga adiada (${why}); ainda sem carga comprovada.`,
+      },
+    };
+  }
   if (outcome.health.status !== "active" || !chosen) return outcome;
   if (clamavLoadConfirmed(proof)) return outcome;
   const why = proof.error
@@ -2991,6 +3129,41 @@ export function firstExistingClamavBinary(
 }
 
 /**
+ * Escolhe o binário como o motor o vai usar: tem de EXISTIR e, em POSIX, tem de
+ * ser um binário daquele sistema. Um `clamscan.exe` (ou um PE com nome POSIX)
+ * apontado por `CYBERSAFE_CLAMSCAN_PATH` passa hoje no `existsSync` e seria
+ * lançado como se fosse o motor Linux — no WSL a interop ainda o deixaria
+ * correr. A recusa não é silenciosa: vai em `recusados` com o motivo, para o
+ * estado do motor poder dizer «não-suportado» em vez de «não encontrado».
+ */
+export function selecionaClamavBinario(
+  candidates: readonly ClamavBinaryCandidate[],
+  platform: NodeJS.Platform = process.platform,
+  leitor: LeitorBinario = leitorBinarioReal,
+): {
+  escolhido: ClamavBinaryCandidate | null;
+  recusados: Array<ClamavBinaryCandidate & { motivo: string }>;
+} {
+  const recusados: Array<ClamavBinaryCandidate & { motivo: string }> = [];
+  for (const candidate of candidates) {
+    let existe = false;
+    try {
+      existe = leitor.isFile(candidate.path);
+    } catch {
+      existe = false;
+    }
+    if (!existe) continue;
+    const motivo = recusarBinarioNaPlataforma(candidate.path, platform, leitor);
+    if (motivo) {
+      recusados.push({ ...candidate, motivo });
+      continue;
+    }
+    return { escolhido: candidate, recusados };
+  }
+  return { escolhido: null, recusados };
+}
+
+/**
  * O ficheiro que o motor LANÇA.
  *
  * Contrato: um binário RESOLVIDO é lançado pelo caminho absoluto (é o que
@@ -3012,6 +3185,11 @@ export interface ClamavBinaryDiagnosis {
   resolvedSource: ClamavBinarySource | null;
   /** TODOS os candidatos, com o resultado real do disco em cada um. */
   candidates: Array<ClamavBinaryCandidate & { exists: boolean }>;
+  /**
+   * Candidatos que existem no disco mas que esta plataforma não pode usar como
+   * motor, com o motivo. Em Windows vem sempre vazio — a verificação é de POSIX.
+   */
+  recusados: Array<ClamavBinaryCandidate & { motivo: string }>;
 }
 
 /**
@@ -3027,11 +3205,13 @@ export function diagnoseClamavBinary(
     env?: NodeJS.ProcessEnv;
     platform?: NodeJS.Platform;
     exists?: (path: string) => boolean;
+    leitor?: LeitorBinario;
   } = {},
 ): ClamavBinaryDiagnosis {
   const env = options.env ?? process.env;
   const platform = options.platform ?? process.platform;
   const exists = options.exists ?? (existsSync as (path: string) => boolean);
+  const leitor = options.leitor ?? leitorBinarioReal;
   const candidates = clamavBinaryCandidates(env, platform).map((entry) => ({
     ...entry,
     exists: (() => {
@@ -3042,12 +3222,22 @@ export function diagnoseClamavBinary(
       }
     })(),
   }));
-  const chosen = candidates.find((entry) => entry.exists) ?? null;
+  // Existe não chega: em POSIX um `.exe` do Windows, um PE com nome POSIX ou um
+  // ficheiro sem bit de execução estão no disco mas não são o motor desta
+  // plataforma. O motivo fica no diagnóstico em vez de virar «não encontrado».
+  // A existência já foi sondada pelo `exists` injectado, por isso o leitor
+  // recebe-a como dada e só acrescenta as duas leituras da proveniência.
+  const { escolhido, recusados } = selecionaClamavBinario(
+    candidates.filter((entry) => entry.exists),
+    platform,
+    { ...leitor, isFile: () => true },
+  );
   return {
     platform,
-    resolved: chosen?.path ?? null,
-    resolvedSource: chosen?.source ?? null,
+    resolved: escolhido?.path ?? null,
+    resolvedSource: escolhido?.source ?? null,
     candidates,
+    recusados,
   };
 }
 
@@ -3068,8 +3258,12 @@ export class ClamavBridge {
    */
   private _databaseHealth: EngineSubsystemHealth | null = null;
   private probePromise: Promise<boolean> | null = null;
+  /** Revalidar falhas após 30 s; saúde confirmada após 5 min, sem polling próprio. */
+  private probeExpiresAt = 0;
   /** Prova EM CURSO (single-flight: até `force` se junta à em curso). */
   private probeInFlight: Promise<boolean> | null = null;
+  /** Há uma prova adiada por ocupação à espera de revalidação. */
+  private probeDeferredPending = false;
   private _dbDir: string | null = null;
   /** Há assinaturas num directório sondado — mesmo que velhas. */
   private _hasSignatures = false;
@@ -3135,27 +3329,45 @@ export class ClamavBridge {
    * é a única válida, e é aqui que tem de ser cumprida: um pin explícito é uma
    * decisão do operador/deploy e não pode perder para o que calhar no PATH.
    */
-  private async resolveBinaryPath(): Promise<string | null> {
+  private async resolveBinaryPath(): Promise<{
+    path: string | null;
+    recusados: Array<{ nome: string; motivo: string }>;
+  }> {
+    // Os recusados acumulam-se porque a saúde precisa de dizer PORQUE É que não
+    // há motor: «não encontrado» e «há um binário Windows aqui» têm remédios
+    // diferentes. A chave é o caminho — o pin volta a aparecer na lista de
+    // candidatos e não pode contar duas vezes.
+    const recusados = new Map<string, string>();
+
     // 1. Pin explícito (autoridade máxima). Sem ficheiro no disco, não serve —
-    //    um pin fantasma não é aceite; segue-se para o PATH.
+    //    um pin fantasma não é aceite; e em POSIX um pin que aponta um `.exe`
+    //    também não serve: não é o motor desta plataforma. Segue para o PATH.
     const pinned = process.env[CLAMAV_BINARY_ENV]?.trim();
-    if (pinned && existsSync(pinned)) return pinned;
+    if (pinned && leitorBinarioReal.isFile(pinned)) {
+      const motivo = recusarBinarioNaPlataforma(pinned, process.platform);
+      if (!motivo) return { path: pinned, recusados: [] };
+      recusados.set(pinned, motivo);
+    }
 
     // 2. PATH do processo. `where` no Windows mantém o comportamento de DEV.
     if (process.platform === "win32") {
       try {
         const { stdout } = await execFileAsync("where", ["clamscan"], { timeout: 5_000, windowsHide: true });
         const first = stdout.split(/\r?\n/).map((l) => l.trim()).find(Boolean);
-        if (first && existsSync(first)) return first;
+        if (first && existsSync(first)) return { path: first, recusados: [] };
       } catch {
         /* seguimos para as raízes conhecidas */
       }
     }
-    const chosen = firstExistingClamavBinary(
+    const escolha = selecionaClamavBinario(
       clamavBinaryCandidates(process.env, process.platform),
-      existsSync,
+      process.platform,
     );
-    return chosen?.path ?? null;
+    for (const recusado of escolha.recusados) recusados.set(recusado.path, recusado.motivo);
+    return {
+      path: escolha.escolhido?.path ?? null,
+      recusados: [...recusados].map(([caminho, motivo]) => ({ nome: path.basename(caminho), motivo })),
+    };
   }
 
   /** Limite de clamscans simultâneos em vigor (1 = o default global). */
@@ -3238,9 +3450,17 @@ export class ClamavBridge {
     // SINGLE-FLIGHT: qualquer chamada (mesmo `force`) junta-se à prova em
     // curso. Sem isto, duas `force` concorrentes (health-check + após swap)
     // arrancavam duas provas e dois clamscans de ~1 GB.
+    if (this.disposed) return false;
     if (this.probeInFlight) return this.probeInFlight;
-    if (this.probePromise && !force) return this.probePromise;
-    const run = this.probe();
+    if (this.probePromise && !force && Date.now() < this.probeExpiresAt) return this.probePromise;
+    const run = this.probe().then((available) => {
+      this.probeExpiresAt = Date.now() + (this._health.status === "active" ? 300_000 : 30_000);
+      return available;
+    }, (error) => {
+      // Uma rejeição inesperada também não pode ficar eternamente em cache.
+      this.probeExpiresAt = Date.now() + 30_000;
+      throw error;
+    });
     this.probeInFlight = run;
     this.probePromise = run;
     return run.finally(() => {
@@ -3253,7 +3473,7 @@ export class ClamavBridge {
     // binário que vamos usar a sério. Correr `clamscan --version` pelo nome
     // dava `unavailable` a uma instalação que existe fora do PATH — e era
     // isso que tornava "está instalado" indistinguível de "não está".
-    const resolved = await this.resolveBinaryPath();
+    const { path: resolved, recusados } = await this.resolveBinaryPath();
     let versionOutput: string | null = null;
     let versionError: string | undefined;
     try {
@@ -3284,6 +3504,7 @@ export class ClamavBridge {
       dbDir: candidates?.[0]?.dir ?? null,
       dbFiles: null,
       candidates,
+      binarioRecusado: recusados,
     });
 
     const chosen = candidates ? selectDatabaseCandidate(candidates) : null;
@@ -3296,13 +3517,15 @@ export class ClamavBridge {
     // o motor fica `degraded` com a razão honesta.
     let decided: { available: boolean; health: EngineSubsystemHealth } = outcome;
     if (decided.health.status === "active" && chosen) {
+      const previous = this._health;
       // Modo readonly/fixture (por opção OU por ENV — fail-closed): sem spawn
       // e sem fixture — degradado honesto.
       const proof =
         this.loadProofEnabled === false
           ? { stdout: null, stderr: null, exitCode: null, error: "prova de carga desativada neste modo (readonly/fixture)" }
           : await this.runLoadProof(chosen);
-      decided = applyClamavLoadProof(decided, chosen, proof);
+      decided = applyClamavLoadProof(decided, chosen, proof, previous);
+      if (proof.deferred === true) this.probeDeferredPending = true;
     }
     // POST017: timeout/lease/cancel da prova não tornam as definições velhas.
     // Guardar a frescura separadamente permite recuperar SÓ após batch positivo;
@@ -3343,15 +3566,23 @@ export class ClamavBridge {
     // adquire a vaga como qualquer job (background, espera com limite do
     // probe), e a vaga só é libertada/envenenada QUEM A POSSUI.
     const probeTimeoutMs = this.options.probeTimeoutMs ?? CLAMAV_LOAD_PROBE_TIMEOUT_MS;
+    const slotWaitMs = this.options.probeSlotWaitMs ?? CLAMAV_LOAD_PROBE_SLOT_WAIT_MS;
     // Cancelamento da ESPERA pela vaga: um controlador próprio cujo timer se
     // limpa assim que a vaga decide (o `AbortSignal.timeout` deixava um timer
     // de 30 s armado a segurar o processo depois de uma prova de 6 s).
     const slotAbort = new AbortController();
     this.probeSlotAbort = slotAbort;
-    const slotWaitTimer = setTimeout(() => slotAbort.abort(), probeTimeoutMs);
+    let slotWaitExpired = false;
+    const slotWaitTimer = setTimeout(() => {
+      slotWaitExpired = true;
+      slotAbort.abort();
+    }, slotWaitMs);
     let slot: ClamavSlotResult;
     try {
-      slot = await acquireClamavSlot(this.concurrencyLimit, "background", slotAbort.signal);
+      // A prova é saúde, não trabalho automático: se entrar como background
+      // fica atrás de dezenas de análises e expira com "sem vaga dentro de
+      // 30000 ms", fazendo o motor oscilar active/degraded sem estar avariado.
+      slot = await acquireClamavSlot(this.concurrencyLimit, "health", slotAbort.signal);
     } finally {
       clearTimeout(slotWaitTimer);
       if (this.probeSlotAbort === slotAbort) this.probeSlotAbort = null;
@@ -3370,11 +3601,20 @@ export class ClamavBridge {
       };
     }
     if (slot === "aborted") {
+      if (slotWaitExpired) {
+        return {
+          stdout: null,
+          stderr: null,
+          exitCode: null,
+          deferred: true,
+          error: `sem vaga dentro de ${slotWaitMs} ms`,
+        };
+      }
       return {
         stdout: null,
         stderr: null,
         exitCode: null,
-        error: `prova cancelada: sem vaga dentro de ${probeTimeoutMs} ms`,
+        error: "prova cancelada (shutdown)",
       };
     }
     // `granted`: a vaga é NOSSA até ao `finally` decidir o contrário. Nunca se
@@ -3763,7 +4003,25 @@ export class ClamavBridge {
         leaseBox.lease.release();
         scanPerfLog("DB_LEASE_RELEASE", options.scanId, "reason=batch-finally");
       }
+      this.scheduleDeferredProbeIfIdle();
     }
+  }
+
+  /**
+   * Revalida uma prova adiada assim que o scan libertou a vaga. Sem isto, a
+   * ocupação que adiou a prova continuava a ser o último facto conhecido até
+   * ao próximo freshclam. Se o batch já provou carga positiva, não há prova
+   * nova a fazer; se falhou, a revalidação é o que fecha o ciclo.
+   */
+  private scheduleDeferredProbeIfIdle(): void {
+    if (!this.probeDeferredPending) return;
+    this.probeDeferredPending = false;
+    if (this.disposed || this.probeInFlight) return;
+    if (this._health.status === "active" && this._health.busy !== true) return;
+    const timer = setTimeout(() => {
+      void this.isAvailable(true).catch(() => undefined);
+    }, 250);
+    timer.unref();
   }
 
   /**
@@ -3881,7 +4139,7 @@ export class ClamavBridge {
     scanPerfLog(
       "CLAMAV_SLOT_ACQUIRE_BEGIN",
       options.scanId,
-      `priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
+      `priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
     );
     // HEARTBEAT DA ESPERA PELA VAGA. A vaga é GLOBAL (1) e partilhada com o
     // monitor de ficheiros, o monitor de processos e o dashboard: se outro
@@ -3894,7 +4152,7 @@ export class ClamavBridge {
         scanPerfLog(
           "CLAMAV_SLOT_WAIT",
           options.scanId,
-          `waitedMs=${Date.now() - slotStartedAt} priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
+          `waitedMs=${Date.now() - slotStartedAt} priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
         );
       }, 5000);
     }
@@ -3903,7 +4161,7 @@ export class ClamavBridge {
     scanPerfLog(
       "CLAMAV_SLOT_ACQUIRE_END",
       options.scanId,
-      `result=${slot} priority=${priority} elapsedMs=${Date.now() - slotStartedAt} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} droppedBackground=${globalClamavSlots.droppedBackground}`,
+      `result=${slot} priority=${priority} elapsedMs=${Date.now() - slotStartedAt} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} droppedBackground=${globalClamavSlots.droppedBackground}`,
     );
     // Vaga envenenada: há um clamscan vivo cuja morte ninguém confirmou. Não
     // admitimos outro — seria 2 GB em voo. E não fingimos que o ficheiro está

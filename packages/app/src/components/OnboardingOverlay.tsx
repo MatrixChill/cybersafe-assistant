@@ -3,6 +3,7 @@ import { AnimatePresence, motion } from "framer-motion";
 import { Shield, FileSearch, Sparkles, ArrowRight, Check, X } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { markOnboardingSeen } from "../lib/onboarding";
+import { protecaoLinux } from "../lib/platformTruth";
 import { MatrixAvatar } from "./MatrixAvatar";
 
 export interface OnboardingStep {
@@ -39,12 +40,20 @@ const STEPS: OnboardingStep[] = [
 interface OnboardingOverlayProps {
   onDone?: () => void;
   onSkip?: () => void;
+  /**
+   * Plataforma publicada pelo serviço. A primeira página promete proteção; a
+   * frase só pode ser dita com o mecanismo que existe na máquina da pessoa.
+   */
+  plataforma?: string | null;
 }
 
-export function OnboardingOverlay({ onDone, onSkip }: OnboardingOverlayProps) {
+export function OnboardingOverlay({ onDone, onSkip, plataforma = null }: OnboardingOverlayProps) {
   const [step, setStep] = useState(0);
   const total = STEPS.length;
-  const current = STEPS[step];
+  /* A primeira página nomeia o mecanismo de proteção. Em Linux o mecanismo é a
+     leitura periódica e não há contenção, por isso só a escrita muda: o ícone, o
+     destaque e as contas do passo ficam exatamente como estão. */
+  const current = { ...STEPS[step], ...(step === 0 ? protecaoLinux(plataforma) : null) };
   const isLast = step === total - 1;
   const Icon = current.icon;
 

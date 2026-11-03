@@ -1,0 +1,59 @@
+{
+  "base": "2e3f311fb8d49e0355458766dfa0b64f98cfcf22",
+  "branch": "freebuff/r7-final-integration-20261101",
+  "remoteMainVerified": "21fefa69352516c188f99c665966d4443588aa2b",
+  "initialNewWorktreeClean": true,
+  "before": {
+    "historical": {
+      "head": "2dae912efabbf85570a09ec09cf940204cd71195",
+      "status": "",
+      "diffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dirtyFilesSha256": {}
+    },
+    "qoder": {
+      "head": "2e3f311fb8d49e0355458766dfa0b64f98cfcf22",
+      "status": " M CHANGELOG.md\n M README.md\n?? docs/checkpoints/qoder-2026-11-01/01-RELATORIO-MESTRE.md\n?? docs/checkpoints/qoder-2026-11-01/02-MATRIZ-DE-TAREFAS.md\n?? docs/checkpoints/qoder-2026-11-01/03-MATRIZ-DE-TESTES.md\n?? docs/checkpoints/qoder-2026-11-01/04-MATRIZ-DE-DEFITOS.md\n?? docs/checkpoints/qoder-2026-11-01/05-ESTADO-DO-GITHUB-E-RELEASE.md\n?? docs/checkpoints/qoder-2026-11-01/06-ATUALIZACOES-E-MOTORES.md\n?? docs/checkpoints/qoder-2026-11-01/07-DECISOES-DO-PROPRIETARIO.md\n?? docs/checkpoints/qoder-2026-11-01/08-PROMPT-DE-RETOMA.md\n?? docs/checkpoints/qoder-2026-11-01/09-ESTADO-MAQUINA.json\n",
+      "diffSha256": "ebfc3a6da12bc1cefbe3afd2dd2ebcd48a07ada9f7f5d04018da8ac8a91953c3",
+      "dirtyFilesSha256": {
+        "CHANGELOG.md": "e4c5de2656fcbad8d59db27bc9164cf78e0d6d7a5ac9314a85da36c171f42e17",
+        "README.md": "34596dd132aff93c86823a3c187381922923b87ca6b3295ba986d37eaa369cdc",
+        "docs/checkpoints/qoder-2026-11-01/01-RELATORIO-MESTRE.md": "8fc63c87ecd504b3ea4f59e4949312cc12eae75a2fa0eb7321760efc8c99c379",
+        "docs/checkpoints/qoder-2026-11-01/02-MATRIZ-DE-TAREFAS.md": "86d95911cd09165a447b60425fb9e68b236d037afd52a17bc56150ba3538260d",
+        "docs/checkpoints/qoder-2026-11-01/03-MATRIZ-DE-TESTES.md": "e15fa14650ac4aae243d79c31bced3e0ac5befc2bafbfd2b1ce9b1d6fc35bb33",
+        "docs/checkpoints/qoder-2026-11-01/04-MATRIZ-DE-DEFITOS.md": "05b49e0204973c39c8173ac6745b50399a7b7a17003b30bb860aeebed396237a",
+        "docs/checkpoints/qoder-2026-11-01/05-ESTADO-DO-GITHUB-E-RELEASE.md": "8d75a02409a29163c830a4c0073f6d5920f26edc204ce4b754c05bc2ffcab390",
+        "docs/checkpoints/qoder-2026-11-01/06-ATUALIZACOES-E-MOTORES.md": "88b8025496adb451544ce8905d9bedc97640a6b57b241fdb693d0f8f8e4a1863",
+        "docs/checkpoints/qoder-2026-11-01/07-DECISOES-DO-PROPRIETARIO.md": "4eff931ea24c3069a742ed61fbd500e257337667066f911116dca741a17c0b36",
+        "docs/checkpoints/qoder-2026-11-01/08-PROMPT-DE-RETOMA.md": "37272fcf4547258d915fbee99643c0eeb25b63505142497a49e3f774ab2dde66",
+        "docs/checkpoints/qoder-2026-11-01/09-ESTADO-MAQUINA.json": "25c75f2261fc114e65a73acdd9264ade4885d3d09d9d1eeb8eb84b7d4c73d731"
+      }
+    }
+  },
+  "after": {
+    "historical": {
+      "head": "2dae912efabbf85570a09ec09cf940204cd71195",
+      "status": "",
+      "diffSha256": "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855",
+      "dirtyFilesSha256": {}
+    },
+    "qoder": {
+      "head": "2e3f311fb8d49e0355458766dfa0b64f98cfcf22",
+      "status": " M CHANGELOG.md\n M README.md\n?? docs/checkpoints/qoder-2026-11-01/01-RELATORIO-MESTRE.md\n?? docs/checkpoints/qoder-2026-11-01/02-MATRIZ-DE-TAREFAS.md\n?? docs/checkpoints/qoder-2026-11-01/03-MATRIZ-DE-TESTES.md\n?? docs/checkpoints/qoder-2026-11-01/04-MATRIZ-DE-DEFITOS.md\n?? docs/checkpoints/qoder-2026-11-01/05-ESTADO-DO-GITHUB-E-RELEASE.md\n?? docs/checkpoints/qoder-2026-11-01/06-ATUALIZACOES-E-MOTORES.md\n?? docs/checkpoints/qoder-2026-11-01/07-DECISOES-DO-PROPRIETARIO.md\n?? docs/checkpoints/qoder-2026-11-01/08-PROMPT-DE-RETOMA.md\n?? docs/checkpoints/qoder-2026-11-01/09-ESTADO-MAQUINA.json\n",
+      "diffSha256": "ebfc3a6da12bc1cefbe3afd2dd2ebcd48a07ada9f7f5d04018da8ac8a91953c3",
+      "dirtyFilesSha256": {
+        "CHANGELOG.md": "e4c5de2656fcbad8d59db27bc9164cf78e0d6d7a5ac9314a85da36c171f42e17",
+        "README.md": "34596dd132aff93c86823a3c187381922923b87ca6b3295ba986d37eaa369cdc",
+        "docs/checkpoints/qoder-2026-11-01/01-RELATORIO-MESTRE.md": "8fc63c87ecd504b3ea4f59e4949312cc12eae75a2fa0eb7321760efc8c99c379",
+        "docs/checkpoints/qoder-2026-11-01/02-MATRIZ-DE-TAREFAS.md": "86d95911cd09165a447b60425fb9e68b236d037afd52a17bc56150ba3538260d",
+        "docs/checkpoints/qoder-2026-11-01/03-MATRIZ-DE-TESTES.md": "e15fa14650ac4aae243d79c31bced3e0ac5befc2bafbfd2b1ce9b1d6fc35bb33",
+        "docs/checkpoints/qoder-2026-11-01/04-MATRIZ-DE-DEFITOS.md": "05b49e0204973c39c8173ac6745b50399a7b7a17003b30bb860aeebed396237a",
+        "docs/checkpoints/qoder-2026-11-01/05-ESTADO-DO-GITHUB-E-RELEASE.md": "8d75a02409a29163c830a4c0073f6d5920f26edc204ce4b754c05bc2ffcab390",
+        "docs/checkpoints/qoder-2026-11-01/06-ATUALIZACOES-E-MOTORES.md": "88b8025496adb451544ce8905d9bedc97640a6b57b241fdb693d0f8f8e4a1863",
+        "docs/checkpoints/qoder-2026-11-01/07-DECISOES-DO-PROPRIETARIO.md": "4eff931ea24c3069a742ed61fbd500e257337667066f911116dca741a17c0b36",
+        "docs/checkpoints/qoder-2026-11-01/08-PROMPT-DE-RETOMA.md": "37272fcf4547258d915fbee99643c0eeb25b63505142497a49e3f774ab2dde66",
+        "docs/checkpoints/qoder-2026-11-01/09-ESTADO-MAQUINA.json": "25c75f2261fc114e65a73acdd9264ade4885d3d09d9d1eeb8eb84b7d4c73d731"
+      }
+    }
+  },
+  "identical": true
+}

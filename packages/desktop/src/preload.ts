@@ -62,12 +62,15 @@ contextBridge.exposeInMainWorld("electronAPI", {
   getProcesses: () => invoke("service:get-processes"),
   getConnections: () => invoke("service:get-connections"),
   getQuarantineFiles: () => invoke("service:get-quarantine"),
+  getQuarantinePolicy: () => invoke("service:get-quarantine-policy"),
+  setQuarantinePolicy: (payload: { policy: "warn" | "ask" | "automatic-high-confidence"; consent?: boolean }) =>
+    invoke("service:set-quarantine-policy", payload),
   clearThreatEvents: () => invoke("service:clear-events"),
   scanFile: (filePath: string) => invoke("service:scan-artifact", filePath),
   scanFullSystem: () => invoke("service:scan-full-system"),
-  prepareProcessTermination: (selection: {pid:number;startedAt:string}) => {
+  prepareProcessTermination: (selection: {pid:number;startedAt:string;mode?:"sigterm"|"sigkill"}) => {
     if (!selection || !Number.isInteger(selection.pid) || typeof selection.startedAt!=="string") return Promise.reject(new Error("Seleção inválida"));
-    return invoke("service:prepare-process-termination", {pid:selection.pid,startedAt:selection.startedAt});
+    return invoke("service:prepare-process-termination", {pid:selection.pid,startedAt:selection.startedAt,...(selection.mode==="sigkill"?{mode:"sigkill"}:{})});
   },
   confirmProcessTermination: (ticket:string) => {
     if(typeof ticket!=="string" || ticket.length!==36) return Promise.reject(new Error("Confirmação inválida"));
@@ -89,6 +92,9 @@ contextBridge.exposeInMainWorld("electronAPI", {
   allowPublisher: (publisher: string) => invoke("service:allow-publisher", publisher),
   runRestrictedAnalysis: (filePath: string) => invoke("service:run-restricted-analysis", filePath),
   updateDefinitions: () => invoke("service:update-definitions"),
+  getDefinitionsStatus: () => invoke("service:get-definitions-status"),
+  getExclusions: () => invoke("service:get-exclusions"),
+  updateExclusions: (config: { rules: import("@cybersafe/shared-types").ExclusionRule[] }) => invoke("service:update-exclusions", config),
   // Opt-in de retoma ao arrancar: passagem sem lógica própria. A preferência é
   // lida e escrita pelo serviço, que é quem confirma o que está em disco.
   getProtectionIntent: () => invoke("service:get-protection-intent"),
@@ -203,10 +209,10 @@ contextBridge.exposeInMainWorld("electronAPI", {
   openReportWindow: (html: string) => invoke("app:open-report-window", html),
   aiCredentials: {
     getStatus: () => invoke("ai-credentials:get-status"),
-    save: (key: string, provider: string) => {
+    save: (key: string, provider: string, consentidoSemCifra?: boolean) => {
       if (typeof key !== "string" || key.length < 16 || key.length > 512 || /[\r\n\x00]/.test(key) || !["groq", "openai"].includes(provider))
         return Promise.reject(new Error("Configuração de IA inválida."));
-      return invoke("ai-credentials:save", key, provider);
+      return invoke("ai-credentials:save", key, provider, consentidoSemCifra === true);
     },
     clear: () => invoke("ai-credentials:clear"),
   },

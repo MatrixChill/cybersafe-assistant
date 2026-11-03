@@ -1,17 +1,17 @@
 import { verifyMatrixProvider } from "@/lib/matrixProviderStatus";
 import { minimizeContextForAi } from "@/lib/aiContextBuilder";
 import { getAuthToken } from "../lib/authSession";
-import { MatrixConfigModal } from "./MatrixConfigModal";
+import { MatrixConfigModal, type MecanismoArmazenamentoIa } from "./MatrixConfigModal";
 import { useState, useEffect, useRef, useCallback, useMemo, useLayoutEffect, type PointerEvent as RPointerEvent, type KeyboardEvent as RKeyboardEvent } from "react"
 import { motion, AnimatePresence } from "framer-motion"
 import { X, Send, Sparkles, MessageSquare, StopCircle, RefreshCw, MoreHorizontal, PanelLeft, PanelRight, Minimize2, Move, PinOff, Plus, KeyRound } from "lucide-react"
 import { cn } from "@/lib/utils"
 import {
-  answerLocalSecurityQuestion,
   cancelLocalSecurityRequest,
   shouldDiscardLateAnswer,
   isLocalSecurityQuestion,
 } from "@/lib/localSecurityReply"
+import { answerMatrixLocalQuestion, classifyMatrixTopic } from "@/lib/matrixLocalTools"
 import { MatrixAvatar } from "./MatrixAvatar"
 import { useAuth } from "@/contexts/AuthContext"
 import { subscribeMatrixEscape } from "@/lib/matrixEscape"
@@ -45,7 +45,7 @@ import {
 } from "@/lib/matrixLauncherPosition"
 import type { ProcessIntelligenceContext } from "@cybersafe/shared-types"
 import type { ProcessDiagnostic, EstadoIdentidade } from "@/lib/processIntelligence"
-import { buildProcessLocalReply, buildIdentityLostReply, isProcessQuestion, perguntaApontaParaAlvo, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, alvoParaConsentimento, mesmoAlvo, rotuloDoProcessoEmCausa, consentValeParaAlvo, rotuloDeConsentimento, identidadeDeExplicacaoPerdida, deveReenviarExplicacaoAposAutorizacao, autorizarAlvo, revogarAlvo, autorizacaoValida, limparAutorizacoesExpiradas, AMBITO_CONSENTIMENTO, CAMPOS_AUTORIZADOS, CAMPOS_NUNCAS_AUTORIZADOS, type AlvoProcesso, type PendenteExplicacao, type AutorizacaoAlvo } from "@/lib/processMatrix"
+import { buildProcessLocalReply, buildIdentityLostReply, isProcessDiagnosticRequest, isProcessListQuestion, perguntaApontaParaAlvo, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, alvoParaConsentimento, mesmoAlvo, rotuloDoProcessoEmCausa, consentValeParaAlvo, rotuloDeConsentimento, identidadeDeExplicacaoPerdida, deveReenviarExplicacaoAposAutorizacao, autorizarAlvo, revogarAlvo, autorizacaoValida, limparAutorizacoesExpiradas, AMBITO_CONSENTIMENTO, CAMPOS_AUTORIZADOS, CAMPOS_NUNCAS_AUTORIZADOS, type AlvoProcesso, type PendenteExplicacao, type AutorizacaoAlvo } from "@/lib/processMatrix"
 import {
   lerConsentimento,
   criarConsentimento,
@@ -437,13 +437,19 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
   }, [])
   // Modo do launcher (TP-MATRIX-DOCK). A posição antiga continua a ser lida; o
   // modo é um eixo novo, guardado à parte, que nasce em `floating`.
-  const [launcherMode, setLauncherModeState] = useState<MatrixMode>(() => parseStoredMode(safeReadLauncherMode()))
+  const [launcherMode, setLauncherModeState] = useState<MatrixMode>(() => parseStoredMode(safeReadLauncherMode(), safeReadPos() === null))
   const [dockHover, setDockHover] = useState(false)
   const [dockSlot, setDockSlot] = useState<Pos | null>(null)
   const [menuOpen, setMenuOpen] = useState(false)
   const [configModalAberta, setConfigModalAberta] = useState(false)
   const credentialGeneration = useRef(0)
-  const [credentialStatus, setCredentialStatus] = useState({ hasKey: false, provider: "groq", state: "unverified" })
+  const [credentialStatus, setCredentialStatus] = useState<{
+    hasKey: boolean;
+    provider: string;
+    state: string;
+    origem?: "cifrado" | "local-protegido" | null;
+    mecanismo?: MecanismoArmazenamentoIa | null;
+  }>({ hasKey: false, provider: "groq", state: "unverified", origem: null, mecanismo: null })
   const [providerState, setProviderState] = useState("Ligação não verificada")
   useEffect(() => {
     if (!configModalAberta) return
@@ -1281,7 +1287,8 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       stickToBottomRef.current = true
       cancelLocalSecurityRequest(abortRef.current)
       const questionId = ++questionGenerationRef.current
-      const processQuestion = isProcessQuestion(trimmed)
+      const processListQuestion = isProcessListQuestion(trimmed)
+      const processQuestion = isProcessDiagnosticRequest(trimmed)
       // O controlador nasce ANTES da identidade e fica capturado pela decisão:
       // ler `abortRef.current` mais tarde é ler o controlador de OUTRO pedido, que
       // é precisamente o que acontece depois de `resetConversation` ou de um novo
@@ -1366,13 +1373,19 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       // máquina, e só vai ao fornecedor o que não tem motivo de intercepção. Antes
       // isto estavam cinco `if`s soltos e a resposta não dizia de onde vinha — que
       // era exactamente o defeito: um diagnóstico local parecia uma resposta de IA.
+      // O gate tem de usar a MESMA classificação que a resposta: o detector
+      // antigo exigia sujeito "PC" e deixava "Verifique aí o estado de proteção"
+      // e "Quanto armazenamento tenho?" sem rota local — a função nova nunca era
+      // chamada. `general` continua a não abrir este caminho.
+      const topicoLocal = classifyMatrixTopic(trimmed)
       const rota = {
         texto: trimmed,
         // O gate de consentimento só se aplica quando há MESMO contexto do alvo a
         // enviar. Discutir «processos» em geral é chat geral e não requer telemetria;
         // a marca de privacidade da mensagem usa a mesma decisão (`perguntaPrivada`).
         perguntaProcesso: processQuestion && anexarContexto,
-        perguntaSegurancaLocal: isLocalSecurityQuestion(trimmed),
+        perguntaSegurancaLocal: isLocalSecurityQuestion(trimmed)
+          || (topicoLocal !== null && topicoLocal !== "general"),
         identidadePerdida: identityLost,
         perigo: localReply.isDanger === true,
         foraDoTema: localReply.isOffTopic === true,
@@ -1411,6 +1424,15 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       if (motivo === "sem-consentimento" || motivo === "identidade-perdida") {
         return responderLocal(localReply.content, true)
       }
+      // Caso D: "Qual processo usa mais CPU?" é uma consulta à lista medida.
+      // Responde com o processo que as medições apontam — nunca com o que estiver
+      // selecionado — e sem tocar no fornecedor.
+      if (processListQuestion) {
+        const lista = processDiagnostic
+          ? buildProcessLocalReply(processDiagnostic, undefined, undefined)
+          : "Sem leitura de processos neste momento — não posso dizer qual está a consumir mais CPU."
+        return responderLocal(lista, false, true)
+      }
       // Pedido perigoso ou fora do tema: responde-se localmente (nunca ao provider).
       if (motivo === "perigo") return responderLocal(localReply.content, processQuestion)
       if (motivo === "fora-do-tema") return responderLocal(localReply.content, false, true)
@@ -1423,7 +1445,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       // que chega tarde (cancelar/janela fechada) é descartado: sem late append.
       let respostaLocalDisponivel = false
       if (motivo === "seguranca-local") {
-        const answer = await answerLocalSecurityQuestion(
+        const answer = await answerMatrixLocalQuestion(
           trimmed,
           window.electronAPI ?? null,
           { signal: controller.signal },
@@ -1991,10 +2013,10 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
     const rect = el.getBoundingClientRect()
     const vp = viewport()
     return {
-      x: Math.round(rect.left + (rect.width - launcherSize.w) / 2),
+      x: Math.round(rect.left + Math.max(0, (rect.width - launcherFootprint.w) / 2)),
       bottom: Math.round(vp.h - rect.bottom),
     }
-  }, [launcherSize.w, viewport])
+  }, [launcherFootprint.w, viewport])
 
   // PAINEL LATERAL: publica a largura real do painel e um sinal no <html>
   // para a área principal ceder esse espaço (`[data-cs-main]` em index.css).
@@ -2216,7 +2238,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
             initial={{ opacity: 0, y: 20, scale: 0.9 }}
             animate={{ opacity: 1, y: 0, scale: 1 }}
             exit={{ opacity: 0, y: 20, scale: 0.9 }}
-            className="absolute border border-primary/30 rounded-2xl bg-card/80 backdrop-blur-xl shadow-2xl flex flex-col overflow-hidden cyber-border"
+            data-cs-overlay="matrix" className="absolute border border-primary/30 rounded-2xl bg-card/80 backdrop-blur-xl shadow-2xl flex flex-col overflow-hidden cyber-border"
             style={{
               left: chatPlacement.left - origin.x,
               bottom: chatPlacement.bottom - origin.bottom,
@@ -2693,6 +2715,8 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
         onClose={() => setConfigModalAberta(false)}
         currentProvider={credentialStatus.provider}
         hasConfiguredKey={credentialStatus.hasKey}
+        origem={credentialStatus.origem ?? null}
+        mecanismo={credentialStatus.mecanismo ?? null}
         providerState={providerState}
         onVerify={async () => {
           const generation = credentialGeneration.current;
@@ -2702,16 +2726,23 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
           setMode(result.operational ? "online" : "local");
           setProviderState(result.label);
         }}
-        onSaveKey={async (key: string, prov: string) => {
+        onSaveKey={async (key: string, prov: string, consentidoSemCifra: boolean) => {
           credentialGeneration.current++;
           const api = window.electronAPI;
           if (api?.aiCredentials?.save) {
-            const res = await api.aiCredentials.save(key, prov);
+            const res = await api.aiCredentials.save(key, prov, consentidoSemCifra);
             if (res.ok) {
               abortRef.current?.abort();
               setMode("local"); setModoConversa("local");
               setAutorizacoes([]); aplicarConsentimentoExterno({ descriptor: null, grant: null });
-              setCredentialStatus({ hasKey: true, provider: res.provider ?? prov, state: res.state ?? "configured" });
+              setCredentialStatus((atual) => ({
+                ...atual,
+                hasKey: true,
+                provider: res.provider ?? prov,
+                state: res.state ?? "configured",
+                origem: res.origem ?? atual.origem ?? null,
+                mecanismo: res.mecanismo ?? atual.mecanismo ?? null,
+              }));
               setProviderState(res.applied ? "Provider configurado — ligação não verificada" : "Chave guardada — API ainda não confirmou a configuração");
             }
             return res;
@@ -2727,7 +2758,14 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
               abortRef.current?.abort();
               setMode("local"); setModoConversa("local");
               setAutorizacoes([]); aplicarConsentimentoExterno({ descriptor: null, grant: null });
-              setCredentialStatus({ hasKey: false, provider: "groq", state: res.state ?? "configured" });
+              setCredentialStatus((atual) => ({
+                ...atual,
+                hasKey: false,
+                provider: "groq",
+                state: res.state ?? "configured",
+                origem: null,
+                mecanismo: res.mecanismo ?? atual.mecanismo ?? null,
+              }));
               setProviderState(res.applied ? "Chave removida — modo local" : "Chave removida — API ainda não confirmou a remoção");
             }
             return res;

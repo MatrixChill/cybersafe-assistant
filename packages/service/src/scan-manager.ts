@@ -4,7 +4,7 @@ import * as os from "node:os";
 import { randomUUID } from "node:crypto";
 import { pinFixture } from "./fixture-pin.js";
 import { readBoundedArchiveEntry } from "@cybersafe/core";
-import type { ExclusionReasonCount, ScanState, ScanType, SecurityEvent } from "@cybersafe/shared-types";
+import type { ExclusionReasonCount, InconclusiveEngine, InconclusiveEngineCount, ScanState, ScanType, SecurityEvent } from "@cybersafe/shared-types";
 import type { FileScanResponse, ThreatEvent } from "@cybersafe/shared-types";
 import { categorizeFsError, isTransientFsError } from "./scan-error.js";
 // ————— Observabilidade do CANCELAMENTO (TP-A5-D2-20261020) —————
@@ -95,6 +95,17 @@ export function addInconclusiveReason(
 ): InconclusiveReasonCount[] {
   const idx = list.findIndex((entry) => entry.reason === reason);
   if (idx < 0) return [...list, { reason, count: 1 }];
+  const next = list.slice();
+  next[idx] = { ...next[idx], count: next[idx].count + 1 };
+  return next;
+}
+
+export function addInconclusiveEngine(
+  list: InconclusiveEngineCount[],
+  engine: InconclusiveEngine,
+): InconclusiveEngineCount[] {
+  const idx = list.findIndex((entry) => entry.engine === engine);
+  if (idx < 0) return [...list, { engine, count: 1 }];
   const next = list.slice();
   next[idx] = { ...next[idx], count: next[idx].count + 1 };
   return next;
@@ -208,6 +219,7 @@ export interface ExtendedScanState extends ScanState {
    * `failedByReason`; `normalizeScanState` decide se o expõe à UI.
    */
   inconclusiveByReason?: InconclusiveReasonCount[];
+  inconclusiveByEngine?: InconclusiveEngineCount[];
 }
 
 /**
@@ -254,11 +266,52 @@ export type InconclusiveReason =
   | "engine-unavailable"
   | "engine-failed"
   | "no-verdict"
-  | "coverage-incomplete";
+  | "coverage-incomplete"
+  | "timeout"
+  | "invalid-output"
+  | "file-changed"
+  | "archive-incomplete"
+  | "cancelled";
+
+/**
+ * Classifica apenas o que o resultado do motor permite afirmar. O `detail` é
+ * usado como evidência textual; quando não contém um sinal reconhecido, fica
+ * a causa genérica do `analysisState` — nunca se inventa um motor ou uma fase.
+ */
+export function classifyInconclusiveReason(
+  analysisState: string | undefined,
+  detail: string | undefined,
+): InconclusiveReason {
+  const text = (detail ?? "").toLowerCase();
+  if (text.includes("cancel")) return "cancelled";
+  if (text.includes("timeout") || text.includes("timed out") || text.includes("etimedout")) return "timeout";
+  if (text.includes("invalid") || text.includes("malformed") || text.includes("parse")) return "invalid-output";
+  if (text.includes("changed") || text.includes("alterad") || text.includes("substitut")) return "file-changed";
+  if (text.includes("archive") || text.includes("zip")) return "archive-incomplete";
+  if (text.includes("cobertura") || text.includes("coverage")) return "coverage-incomplete";
+  if (analysisState === "engine-unavailable") return "engine-unavailable";
+  if (analysisState === "failed") return "engine-failed";
+  if (analysisState === "inconclusive") return "coverage-incomplete";
+  return "no-verdict";
+}
 
 export interface InconclusiveReasonCount {
   reason: InconclusiveReason;
   count: number;
+}
+
+/** Uma causa por ficheiro, escolhida por codigo e nao por texto. */
+const INCONCLUSIVE_PRIORITY: ReadonlyArray<InconclusiveReason> = [
+  "cancelled", "engine-unavailable", "timeout", "engine-failed",
+  "invalid-output", "file-changed", "archive-incomplete",
+  "coverage-incomplete", "no-verdict",
+];
+
+export function preferredInconclusiveReason(
+  reasons: ReadonlyArray<InconclusiveReason | undefined>,
+): InconclusiveReason | undefined {
+  const known = reasons.filter((r): r is InconclusiveReason => r !== undefined);
+  return INCONCLUSIVE_PRIORITY.find((reason) => known.includes(reason)) ?? known[0];
 }
 
 /**
@@ -331,6 +384,38 @@ export function allocateQuickScanCandidates(
 
 // Full Scan cap
 const FULL_SCAN_MAX_FILES = 50000;
+
+/**
+ * Árvores do kernel que não são armazenamento, em POSIX.
+ *
+ * O que obriga a podar não é performance: `/proc/kcore` é um ficheiro REGULAR
+ * cujo tamanho declarado é o espaço de endereçamento do kernel (ordem de
+ * dezenas de TB), e `MalwareAnalyzer.analyze` calcula o SHA-256 do ficheiro
+ * ANTES do portão de tamanho (`core/src/analysis.ts:73` e `:77`). Uma análise
+ * de `/` ficaria presa nesse `await`; o cancelamento é verificado ENTRE
+ * ficheiros, não dentro de uma leitura que não termina. `/dev/*` e FIFOs já não
+ * chegam ao leitor (o `entry.isFile()` e o `lstat().isFile()` do motor excluem
+ * dispositivos de caracteres) — o que restava eram os regulares falsos do
+ * procfs.
+ */
+export const RAIZES_DO_KERNEL_POSIX = ["/proc", "/sys", "/dev", "/run"] as const;
+
+/**
+ * Comparação EXATA, não por nome: podar `proc` em qualquer profundidade tiraria
+ * do utilizador o seu `~/projetos/proc`. A interface do kernel só é aquela
+ * quando está na raiz, e é só isso que este predicado reconhece.
+ *
+ * Em `win32` devolve sempre `false` — o caminho Windows não passa por aqui, e
+ * a poda não é uma preferência do Linux Lite: é a diferença entre dois sistemas
+ * de ficheiros.
+ */
+export function eRaizDoKernelPosix(
+  caminho: string,
+  plataforma: NodeJS.Platform = process.platform,
+): boolean {
+  if (plataforma === "win32") return false;
+  return (RAIZES_DO_KERNEL_POSIX as readonly string[]).includes(caminho);
+}
 
 export class ScanManager {
   private activeScans = new Map<string, ExtendedScanState>();
@@ -533,6 +618,13 @@ if (state.status === "running" || state.status === "queued") {
       const updated: ExtendedScanState = {
         ...current,
         ...updates,
+        // Terminal snapshots must not retain a live batch axis. The worker may
+        // still be draining after abort; its late updates are deliberately ignored.
+        ...(updates.status && TERMINAL.includes(updates.status) ? {
+          filesInEngineBatch: 0,
+          filesInEngineScanned: 0,
+          engineBatchStartedAt: undefined,
+        } : {}),
         revision,
         updatedAt: new Date().toISOString(),
       };
@@ -796,7 +888,10 @@ const heartbeat = setInterval(() => {
       }
 
       const maxFiles = type === "quick" ? QUICK_SCAN_BUDGET : FULL_SCAN_MAX_FILES;
+      const preparingStarted = Date.now();
+      scanPerfLog("PHASE_BEGIN", id, "phase=preparing");
       const pathsToScan = await this.resolvePathsForScan(type, targetPath);
+      scanPerfLog("PHASE_END", id, `phase=preparing elapsedMs=${Date.now() - preparingStarted} roots=${pathsToScan.length}`);
       let scanned = 0;
       let analyzed = 0;
       let excluded = 0;
@@ -804,6 +899,7 @@ const heartbeat = setInterval(() => {
       let filesFailed = 0;
       let filesInconclusive = 0;
       let inconclusiveByReason: InconclusiveReasonCount[] = [];
+      let inconclusiveByEngine: InconclusiveEngineCount[] = [];
       /** Razões de ficheiros inacessíveis, agregadas por categoria. */
       let failedByReason: Record<FsErrorCategory, number> = {} as Record<FsErrorCategory, number>;
       // PORQUÊ cada ficheiro ficou fora dos motores — agregado por categoria.
@@ -835,6 +931,7 @@ const heartbeat = setInterval(() => {
 
       // 1. Gather files
       const gatherStart = Date.now();
+      scanPerfLog("PHASE_BEGIN", id, "phase=gathering");
       const gatherStats = { failed: 0, failedByReason: {} as Record<FsErrorCategory, number> };
       this.updateScan(id, {
         phase: "gathering",
@@ -895,6 +992,7 @@ const heartbeat = setInterval(() => {
         id,
         `count=${totalFiles} budget=${maxFiles} type=${type} failed=${gatherStats.failed}`,
       );
+      scanPerfLog("PHASE_END", id, `phase=gathering elapsedMs=${Date.now() - gatherStart} selected=${totalFiles}`);
       if (totalFiles === 0) {
         // Explicit terminal state — a zero-file scan must never stay "running".
         //
@@ -942,7 +1040,13 @@ const heartbeat = setInterval(() => {
 
       // 2. Scan files
       const startTime = Date.now();
+      // Amostra do processo do serviço (não inclui o filho clamscan). Existe
+      // apenas com CYBERSAFE_DEBUG_SCAN=1; não decide estados nem veredictos.
+      const resourceCpuStart = process.cpuUsage();
+      const resourceRssStart = process.memoryUsage().rss;
       let lastEmit = 0;
+      let firstFileMs: number | null = null;
+      let slowestFileMs = 0;
       // Profiling DEV agregado (nunca por ficheiro, só com CYBERSAFE_DEBUG_SCAN=1).
       const perfEnabled = process.env.CYBERSAFE_DEBUG_SCAN === "1";
       let engineMs = 0;
@@ -967,6 +1071,8 @@ const heartbeat = setInterval(() => {
         // exclusivos).
         let skippedExcluded = 0;
         let skippedZip = 0;
+        const preprocessStarted = Date.now();
+        scanPerfLog("PREPROCESS_BEGIN", id, `selected=${files.length}`);
         // Os ZIP continuam a ser um candidato proprio na decomposicao
         // (selected = candidatos + excluidos + zip), mas o ficheiro EXTERNO do
         // arquivo pode ser verificado no mesmo batch de ClamAV em vez de pagar
@@ -1010,6 +1116,11 @@ const heartbeat = setInterval(() => {
           }
           candidatos.push(file);
         }
+        scanPerfLog(
+          "PREPROCESS_END",
+          id,
+          `elapsedMs=${Date.now() - preprocessStarted} selected=${files.length} candidates=${candidatos.length} excluded=${skippedExcluded} zip=${skippedZip}`,
+        );
         // P1 — JANELA DE CANCEL DURANTE looksLikeZip (defesa em profundidade).
         //
         // O re-check de dentro do ciclo cobre um cancel que chega DURANTE um
@@ -1030,7 +1141,13 @@ const heartbeat = setInterval(() => {
           // ficheiros encontrados" com 0% e 0 f/s — descrevendo um trabalho que
           // ainda não tinha começado. Isto diz a verdade: estão N ficheiros
           // dentro do clamscan, e ainda não foi avaliado nenhum.
-          this.updateScan(id, { filesInEngineBatch: candidatos.length });
+          const batchStartedAt = new Date(prefetchStarted).toISOString();
+          scanPerfLog("PHASE_BEGIN", id, `phase=batch candidates=${candidatos.length}`);
+          this.updateScan(id, {
+            filesInEngineBatch: candidatos.length,
+            filesInEngineScanned: 0,
+            engineBatchStartedAt: batchStartedAt,
+          });
 
           // O clamscan vai dizendo, linha a linha, quantos ficheiros ja varreu.
           // Publicamos isso como o que e': ficheirosJA ANALISADOS pelo motor de
@@ -1049,16 +1166,25 @@ const heartbeat = setInterval(() => {
           let ultimoRelato = 0;
           const relatar = (n: number) => {
             if (n <= analisadosNoBatch) return;
-            analisadosNoBatch = n;
-            // Nao inundar o pipe: um evento por cada 1% ou por cada 100ms.
+            const primeiro = analisadosNoBatch === 0;
+            analisadosNoBatch = Math.min(n, candidatos.length);
+            if (primeiro) {
+              scanPerfLog(
+                "BATCH_FIRST_PROGRESS",
+                id,
+                `processed=${analisadosNoBatch} batch=${candidatos.length} elapsedMs=${Date.now() - prefetchStarted}`,
+              );
+            }
+            // Nao inundar o pipe: um evento por cada 100ms. O eixo GLOBAL
+            // (progress) nao e' escrito aqui: ele conta apenas resultados
+            // fechados pelo pipeline e continuaria a 0 durante todo o batch.
             const agora = Date.now();
             if (agora - ultimoRelato < 100 && n < candidatos.length) return;
             ultimoRelato = agora;
-            const pct = Math.min(99, Math.floor((n / Math.max(1, totalFiles)) * 100));
-            const atual = this.activeScans.get(id);
             this.updateScan(id, {
-              progress: Math.max(atual?.progress ?? 0, pct),
               filesInEngineBatch: candidatos.length,
+              filesInEngineScanned: analisadosNoBatch,
+              engineBatchStartedAt: batchStartedAt,
             });
           };
 
@@ -1075,7 +1201,11 @@ const heartbeat = setInterval(() => {
             // SEMPRE, mesmo em cancelamento ou excepção: um contador que fica
             // a dizer "20 ficheiros" quando nada está a correr é pior que
             // não o ter.
-            this.updateScan(id, { filesInEngineBatch: 0 });
+            this.updateScan(id, {
+              filesInEngineBatch: 0,
+              filesInEngineScanned: 0,
+              engineBatchStartedAt: undefined,
+            });
           }
           // O `onProgress` conta as linhas `OK`/`FOUND` do clamscan, e pode
           // omitir uma. O batch devolve UM veredicto terminal por ficheiro pedido,
@@ -1104,6 +1234,7 @@ const heartbeat = setInterval(() => {
             `spawned=${outcome.spawned} selected=${totalFiles} candidates=${candidatos.length} excluded=${skippedExcluded} zip=${skippedZip} outcomes=${String(outcome.files ?? "n/a")} analyzedInBatch=${analisadosNoBatch} elapsedMs=${Date.now() - prefetchStarted}` +
               (outcome.error ? ` error=${outcome.error}` : ""),
           );
+          scanPerfLog("PHASE_END", id, `phase=batch elapsedMs=${Date.now() - prefetchStarted} candidates=${candidatos.length}`);
         }
 
         // O ficheiro EXTERNO de cada ZIP tambem e verificado pelo ClamAV no
@@ -1124,6 +1255,7 @@ const heartbeat = setInterval(() => {
         if (this.isCancelled.has(id)) break;
 
         const file = files[i];
+        const iterationStarted = perfEnabled ? Date.now() : 0;
         this.archiveCoverageGaps.delete(id);
         // Fixture: verificação imediatamente antes do hand-off ao motor. O
         // objecto tem de continuar a ser, com identidade efectiva, o validado.
@@ -1220,16 +1352,33 @@ const heartbeat = setInterval(() => {
               // O motivo sai do que o motor devolveu, nunca de uma dedução.
               // `no-verdict` = resposta vazia/ausente; os restantes espelham o
               // `analysisState` do resultado que ficou por fechar.
-              const motivo: InconclusiveReason =
-                !Array.isArray(scanResults) || scanResults.length === 0
-                  ? "no-verdict"
-                  : scanResults.some((item) => item.analysisState === "engine-unavailable")
-                    ? "engine-unavailable"
-                    : scanResults.some((item) => item.analysisState === "failed")
-                      ? "engine-failed"
-                      : "coverage-incomplete";
-              inconclusiveByReason = addInconclusiveReason(inconclusiveByReason,
-                this.archiveCoverageGaps.has(id) ? "coverage-incomplete" : motivo);
+              const problema = Array.isArray(scanResults)
+                ? scanResults.find((item) => item.analysisState !== "completed")
+                : undefined;
+              const motivo: InconclusiveReason = !problema
+                ? "no-verdict"
+                : this.archiveCoverageGaps.has(id)
+                  ? "coverage-incomplete"
+                  : classifyInconclusiveReason(
+                    problema.analysisState,
+                    (problema as { detail?: string }).detail,
+                  );
+              const structured = preferredInconclusiveReason(
+                Array.isArray(scanResults) ? scanResults.map((item) => item.inconclusiveReason) : [],
+              );
+              inconclusiveByReason = addInconclusiveReason(
+                inconclusiveByReason,
+                this.archiveCoverageGaps.has(id) ? "archive-incomplete" : structured ?? motivo,
+              );
+              const engines = new Set<InconclusiveEngine>(
+                Array.isArray(scanResults)
+                  ? scanResults.flatMap((item) => item.inconclusiveEngines ?? [])
+                  : [],
+              );
+              if (this.archiveCoverageGaps.has(id)) engines.add("archive");
+              for (const engine of engines) {
+                inconclusiveByEngine = addInconclusiveEngine(inconclusiveByEngine, engine);
+              }
             }
             this.archiveCoverageGaps.delete(id);
             analyzed++;
@@ -1252,6 +1401,12 @@ const heartbeat = setInterval(() => {
          }
 
         // Emit progress every 4 files, at least once per second, or on last file
+        if (perfEnabled) {
+          const iterationMs = Date.now() - iterationStarted;
+          if (firstFileMs === null) firstFileMs = iterationMs;
+          slowestFileMs = Math.max(slowestFileMs, iterationMs);
+        }
+
         if (i % 4 === 0 || i === files.length - 1 || Date.now() - lastEmit >= 1000) {
           lastEmit = Date.now();
           const elapsedSec = (Date.now() - startTime) / 1000;
@@ -1277,6 +1432,7 @@ const heartbeat = setInterval(() => {
              filesAnalyzed: mostradosAnalisados,
              filesInconclusive,
              inconclusiveByReason: inconclusiveByReason.length > 0 ? inconclusiveByReason : undefined,
+            inconclusiveByEngine: inconclusiveByEngine.length > 0 ? inconclusiveByEngine : undefined,
              filesExcluded: excluded,
              filesExcludedBy: excludedBy,
              threatsFound: threats,
@@ -1290,10 +1446,21 @@ const heartbeat = setInterval(() => {
 
       if (perfEnabled) {
         const elapsedMs = Date.now() - startTime;
+        const gatherMs = Math.max(0, startTime - gatherStart);
+        const overheadMs = Math.max(0, elapsedMs - engineMs);
         const perSec = elapsedMs > 0 ? Math.round((analyzed / (elapsedMs / 1000)) * 10) / 10 : 0;
-        console.log(`[ScanPerf] type=${type} files=${analyzed} excluded=${excluded} failed=${filesFailed} zip=${zipCount} elapsed=${Math.round(elapsedMs / 1000)}s engine=${Math.round(engineMs / 1000)}s avg=${analyzed > 0 ? Math.round(engineMs / analyzed) : 0}ms/file filesPerSec=${perSec}`);
+        console.log(`[ScanPerf] type=${type} files=${analyzed} excluded=${excluded} failed=${filesFailed} zip=${zipCount} elapsed=${Math.round(elapsedMs / 1000)}s gatherMs=${gatherMs} scanLoopMs=${elapsedMs} engine=${Math.round(engineMs / 1000)}s overheadMs=${overheadMs} firstFileMs=${firstFileMs ?? -1} slowestFileMs=${slowestFileMs} avg=${analyzed > 0 ? Math.round(engineMs / analyzed) : 0}ms/file filesPerSec=${perSec}`);
+        const cpu = process.cpuUsage(resourceCpuStart);
+        const rssEnd = process.memoryUsage().rss;
+        console.log(
+          `[ScanPerf] RESOURCE_SUMMARY elapsedMs=${elapsedMs} cpuMs=${Math.round((cpu.user + cpu.system) / 1000)} ` +
+            `rssStartMb=${Math.round(resourceRssStart / 1024 / 1024)} rssEndMb=${Math.round(rssEnd / 1024 / 1024)} ` +
+            `rssDeltaMb=${Math.round((rssEnd - resourceRssStart) / 1024 / 1024)}`,
+        );
       }
 
+      const finalizeStarted = Date.now();
+      scanPerfLog("PHASE_BEGIN", id, "phase=finalizing");
       const finalState = this.activeScans.get(id)!;
       if (finalState.status === "running") {
         // ── Confirmação terminal OPCIONAL (USB) ────────────────────────────
@@ -1324,6 +1491,7 @@ const heartbeat = setInterval(() => {
             filesAnalyzed: analyzed,
             filesInconclusive,
             inconclusiveByReason: inconclusiveByReason.length > 0 ? inconclusiveByReason : undefined,
+            inconclusiveByEngine: inconclusiveByEngine.length > 0 ? inconclusiveByEngine : undefined,
             filesExcluded: excluded,
             filesExcludedBy: excludedBy,
             threatsFound: threats,
@@ -1349,6 +1517,7 @@ const heartbeat = setInterval(() => {
             filesAnalyzed: analyzed,
             filesInconclusive,
             inconclusiveByReason: inconclusiveByReason.length > 0 ? inconclusiveByReason : undefined,
+            inconclusiveByEngine: inconclusiveByEngine.length > 0 ? inconclusiveByEngine : undefined,
             filesExcluded: excluded,
             filesExcludedBy: excludedBy,
             threatsFound: threats,
@@ -1358,6 +1527,12 @@ const heartbeat = setInterval(() => {
           });
         }
       }
+
+      scanPerfLog(
+        "PHASE_END",
+        id,
+        `phase=finalizing elapsedMs=${Date.now() - finalizeStarted} status=${this.activeScans.get(id)?.status ?? "?"}`,
+      );
 
     } catch (error) {
       // P1-4-F — O `catch` exterior também tem de respeitar o estado terminal.
@@ -1616,6 +1791,9 @@ const heartbeat = setInterval(() => {
     if (this.isCancelled.has(scanId)) return;
     if (filesList.length >= budget) return;
     if (depth > maxDepth) return;
+    // Mesma poda do walk completo: a raiz do Quick Scan em Linux pode ser o
+    // diretório pessoal, mas a regra não deve depender disso.
+    if (eRaizDoKernelPosix(dir)) return;
 
     try {
       const stat = await fs.stat(dir).catch((error) => {
@@ -1706,6 +1884,11 @@ const heartbeat = setInterval(() => {
   ) {
     if (this.isCancelled.has(scanId)) return;
     if (filesList.length >= maxFiles) return;
+    // Andar por `/` não é andar por um volume: as árvores do kernel ficam de
+    // fora (ver `eRaizDoKernelPosix`). Um alvo que seja SÓ uma delas recolhe
+    // zero ficheiros e cai no ramo «Nenhum ficheiro para analisar» — fracasso,
+    // nunca um «limpo» que não foi lido.
+    if (eRaizDoKernelPosix(dir)) return;
 
     try {
       const stat = await fs.stat(dir).catch((error) => {

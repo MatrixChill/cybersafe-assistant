@@ -697,3 +697,24 @@ describe("P1 — cancelamento a meio de um batch em curso", () => {
   });
 
 });
+
+// The batch fields describe active work, never a cancelled or failed terminal.
+it("cancelled terminal clears the entire batch axis before the worker drains", async () => {
+  const engine = makeEngine();
+  const mgr = makeManager(engine);
+  const id = await mgr.startScan("custom", tmp);
+  await waitBatchActive(mgr, id);
+  mgr.updateScan(id, { filesInEngineScanned: 9, engineBatchStartedAt: "2026-11-02T10:00:00.000Z" });
+  try {
+    mgr.cancelScan(id);
+    const terminal = engine.events.filter(e => e.id === id && e.status === "cancelled").at(-1);
+    assert.equal(terminal.filesInEngineBatch, 0);
+    assert.equal(terminal.filesInEngineScanned, 0);
+    assert.equal(terminal.engineBatchStartedAt, undefined);
+    assert.equal(terminal.filesAnalyzed, 0);
+    assert.equal(terminal.progress, 0);
+  } finally {
+    engine.releaseBatch();
+    await mgr.currentScanPromise;
+  }
+});

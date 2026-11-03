@@ -112,7 +112,9 @@ export function statusSummary(snapshot: AppUpdateSnapshot): string {
     case "downloaded":
       return snapshot.canInstall
         ? "Transferência concluída e verificada — podes instalar."
-        : "Transferência concluída; as verificações de segurança ainda não permitem instalar.";
+        : snapshot.manualDownloadOnly
+          ? "Transferência verificada; instalação automática bloqueada nesta compilação."
+          : "Transferência concluída; as verificações de segurança ainda não permitem instalar.";
     case "deferred":
       return "Atualização adiada. Podes voltar a verificar quando quiseres.";
     case "installing":

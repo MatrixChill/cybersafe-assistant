@@ -4,7 +4,7 @@ import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { createHash } from "node:crypto";
-import { DefinitionUpdater } from "../dist/updater.js";
+import { DefinitionUpdater, YARA_PIN } from "../dist/updater.js";
 import { countReportableYaraRules, YaraEngine } from "@cybersafe/core";
 
 /**
@@ -63,6 +63,15 @@ function stubSources(updater, bodies) {
     if (body instanceof Error) throw body;
     return body;
   };
+  // Desde a decisão D4 o updater recusa conteúdo cujo SHA-256 não bata com o pin
+  // revisto. Estas fontes são sintéticas, por isso o fixture pinia exatamente o
+  // que serve: nomes, `repo` e classes continuam a vir do pin de produção e só o
+  // digest é recomputado. Não é uma asserção afrouxada — é a mesma condição que o
+  // produto tem de satisfazer, aplicada ao conteúdo do stub.
+  updater.yaraPin = YARA_PIN.map((pino) => ({
+    ...pino,
+    sha256: sha256(typeof bodies.get(pino.id) === "string" ? bodies.get(pino.id) : ""),
+  }));
 }
 
 describe("manifesto do corpus YARA — proveniência e classes", () => {

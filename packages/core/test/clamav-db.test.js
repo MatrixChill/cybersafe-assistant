@@ -242,7 +242,7 @@ describe("classifyClamavHealth — active exige assinaturas reais", () => {
     // Este é o defeito reportado: o clamconf diz <pacote choco>\database (que
     // não existe) e a base real é a da app. Antes ⇒ degraded para sempre.
     const r = classify([
-      cand({ dir: "C:\\app\\definitions\\clamav", source: "app-definitions", state: "ready", signatureFiles: ["main.cvd"] }),
+      cand({ dir: "C:\\app\\definitions\\clamav", source: "app-definitions", state: "ready", signatureFiles: ["main.cvd", "daily.cld"] }),
       cand({ dir: "C:\\choco\\database", source: "clamconf", state: "missing", signatureFiles: [] }),
     ]);
     assert.equal(r.health.status, "active");
@@ -294,12 +294,12 @@ describe("classifyClamavHealth — active exige assinaturas reais", () => {
   });
 
   it("assinaturas dentro do limite ⇒ active", () => {
-    const r = classify([cand({ newestMtimeMs: Date.now() - 2 * DAY })]);
+    const r = classify([cand({ signatureFiles: ["main.cvd", "daily.cld"], newestMtimeMs: Date.now() - 2 * DAY })]);
     assert.equal(r.health.status, "active");
   });
 
   it("mtime desconhecido (0) não penaliza: frescura não é avaliável", () => {
-    const r = classify([cand({ newestMtimeMs: 0 })]);
+    const r = classify([cand({ signatureFiles: ["main.cvd", "daily.cld"], newestMtimeMs: 0 })]);
     assert.equal(r.health.status, "active");
   });
 
@@ -327,11 +327,24 @@ describe("classifyClamavHealth — active exige assinaturas reais", () => {
   });
 
   it("active exige ficheiros .cvd/.cld: ready sem assinaturas ⇒ degraded", () => {
+    // O que este caso sempre protegeu: `ready` sem NENHUM ficheiro de assinatura
+    // não pode dar `active`, e existir um arquivo oficial é o que separa «base
+    // oficial» de «assinaturas locais». A completude do CONJUNTO é uma asserção
+    // diferente, e passou a ser exigida em 2026-11-01: uma descarga de freshclam
+    // interrompida deixa `main.cvd` intacto e perde o `daily`, e esse estado já
+    // não é cobertura — não pode ler-se como `active`.
     for (const name of ["main.cvd", "daily.cld", "bytecode.cuv", "bytecode.cud"]) {
       const r = classify([cand({ signatureFiles: [name] })]);
-      assert.equal(r.health.status, "active", name);
-      assert.match(r.health.detail, /1 signature database file/);
+      assert.equal(r.available, true, name);
+      assert.notEqual(r.health.status, "unavailable", name);
+      assert.ok(!/não tem ficheiros \.cvd\/\.cld/.test(r.health.detail), `${name}: ${r.health.detail}`);
     }
+    const completa = classify([cand({ signatureFiles: ["main.cvd", "daily.cld"] })]);
+    assert.equal(completa.health.status, "active");
+    assert.match(completa.health.detail, /2 signature database file/);
+    const semDiaria = classify([cand({ signatureFiles: ["main.cvd"] })]);
+    assert.equal(semDiaria.health.status, "degraded", "main sem daily não é conjunto completo");
+    assert.match(semDiaria.health.detail, /falta a base diária/);
     // `ready` sem nenhum ficheiro de assinatura não pode dar active.
     const vazio = classify([cand({ signatureFiles: [] })]);
     assert.equal(vazio.available, false);
@@ -381,7 +394,7 @@ describe("ClamavBridge — integração com o disco real", () => {
     // Base "pronta" por arquivo mas que o clamscan real não carrega (é o
     // estado real antes do freshclam funcionar). O que interessa: o estado
     // tem de descer a degraded com o diagnóstico, e nunca dizer "active".
-    const dir = await makeDb(path.join(tmp, "definitions", "clamav"), ["main.cvd"]);
+    const dir = await makeDb(path.join(tmp, "definitions", "clamav"), ["main.cvd", "daily.cld"]);
     const bridge = new ClamavBridge({
       definitionsDir: path.join(tmp, "definitions"),
       datadir: dir,

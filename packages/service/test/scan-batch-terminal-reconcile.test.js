@@ -13,9 +13,15 @@ import { ScanManager } from "../dist/scan-manager.js";
  *
  *   1. SELECTED=800 mas PREFETCH=728. A diferenca tem de ter NOME, nao ser
  *      "provavelmente": remainder = excluded + zip, e os tres somam 800.
- *   2. O clamscan reportou 727 linhas de progresso para 728 ficheiros. O
- *      contador NAO pode ficar preso em 727 se o batch deu 728 veredictos
- *      terminais — um por ficheiro pedido.
+ *   2. O clamscan reportou 727 linhas de progresso para 728 ficheiros. O numero
+ *      da ETAPA reconcilia para 728 (um veredicto terminal por ficheiro pedido),
+ *      no tracing opt-in. Desde 2026-10-23 esse numero NAO e' `filesAnalyzed`:
+ *      so contam aqui os veredictos que o loop de resultados aceitou.
+ *
+ * ── Os tres eixos, para nao voltar a confusao ────────────────────────────
+ * `filesScanned`/`filesProcessed` — fecho do ciclo, global.
+ * `filesInEngineBatch` — quantos estao AGORA dentro do batch; nao e' progresso.
+ * `filesAnalyzed` — resultados aceites pelo loop. Nada da etapa entra aqui.
  *
  * Estes testes atravessam so o ScanManager (o `prefetchClamav` e' injectado).
  * O core (contagem de linhas `OK`/`FOUND`) ja tem o seu proprio teste.
@@ -113,6 +119,39 @@ async function waitTerminal(mgr, id) {
   throw new Error("o scan nao terminou");
 }
 
+/**
+ * Onde vive a reconciliacao 727 -> 728, e por que nao no estado publicado.
+ *
+ * A decisao de 2026-10-23 (`scan-manager.ts:1044-1048`) tirou a etapa do motor de
+ * `filesAnalyzed`: um batch cancelado a meio produz veredictos que o loop deita
+ * fora, e promo-los a "analisados" seria afirmar cobertura que nao existe. O
+ * numero da etapa (`analisadosNoBatch`) passou a ser observavel so no tracing
+ * opt-in, na linha `SCANMANAGER_BATCH_END`. Capturar essa linha e' a unica forma
+ * de provar a reconciliacao sem escrever no eixo dos aceites.
+ *
+ * Nota de honestidade: `CYBERSAFE_DEBUG_SCAN` so liga escrita de log; o
+ * `scanPerfLog` declara e o codigo confirma que nao altera comportamento.
+ */
+function captureBatchEnd() {
+  const linhas = [];
+  const original = console.log;
+  process.env.CYBERSAFE_DEBUG_SCAN = "1";
+  console.log = (...args) => {
+    if (typeof args[0] === "string" && args[0].includes("SCANMANAGER_BATCH_END")) linhas.push(args[0]);
+    else original(...args);
+  };
+  return {
+    linha: () => {
+      assert.equal(linhas.length, 1, `esperava 1 linha de fim de batch, vieram ${linhas.length}`);
+      return linhas[0];
+    },
+    stop() {
+      console.log = original;
+      delete process.env.CYBERSAFE_DEBUG_SCAN;
+    },
+  };
+}
+
 describe("P0 SCANNER_728_OF_800 — o remainder tem nome e o contador reconcilia", () => {
   it("800 selecionados = 728 candidatos + 72 excluidos, sem ficheiros a desaparecer", async () => {
     const names = [];
@@ -146,30 +185,54 @@ describe("P0 SCANNER_728_OF_800 — o remainder tem nome e o contador reconcilia
     assert.equal(state.progress, 100);
   });
 
-  it("o contador nao fica preso em 727 quando o batch devolveu 728 veredictos", async () => {
+  it("o batch devolve 8 veredictos com 7 linhas de progresso: reconcilia para 8 no eixo da etapa", async () => {
     const names = [];
     for (let i = 0; i < 8; i++) names.push(`f${i}.txt`);
     await seed(names);
 
-    // 7 linhas de progresso para 8 ficheiros; o batch diz que analisou 8.
-    // O loop falha todos: sem reconciliacao o final recuava para 0.
+    // 7 linhas de progresso para 8 ficheiros; o batch da 8 veredictos terminais.
+    // O loop falha todos, por isso NADA e' aceite — e e' exatamente isso que a
+    // decisao de 2026-10-23 quer que `filesAnalyzed` diga.
     const callbacks = [1, 2, 3, 4, 5, 6, 7];
     const engine = makeEngine({ callbacks, files: 8, artifact: "throw" });
     const mgr = manager(engine);
-    const id = await mgr.startScan("custom", tmp);
-    const state = await waitTerminal(mgr, id);
+    const perf = captureBatchEnd();
+    let state;
+    try {
+      const id = await mgr.startScan("custom", tmp);
+      state = await waitTerminal(mgr, id);
+    } finally {
+      perf.stop();
+    }
 
-    assert.equal(state.filesScanned, 8);
+    // EIXO DA ETAPA: a reconciliacao 7 -> 8 existe e e' medida, nao inferida.
+    const linha = perf.linha();
+    assert.match(linha, /\boutcomes=8\b/, `o batch reportou 8 terminais: ${linha}`);
+    assert.match(linha, /\banalyzedInBatch=8\b/, `a etapa reconciliou para cima (7 -> 8): ${linha}`);
+    assert.doesNotMatch(linha, /\banalyzedInBatch=7\b/);
+
+    // EIXO GLOBAL: nenhum ficheiro desaparece, e a falha tem nome.
+    assert.equal(state.filesScanned, 8, "todos os 8 fecharam o ciclo");
+    assert.equal(state.filesProcessed, 8);
     assert.equal(state.filesFailed, 8, "o loop falhou todos os 8");
+
+    // EIXO DOS ACEITES: zero, e isto NAO e' o bug que a versao anterior deste
+    // teste procurava. Promover os 8 do batch para aqui diria "8 verificados"
+    // quando o scanner deitou os 8 fora.
     assert.equal(
       state.filesAnalyzed,
-      8,
-      `o batch provou 8 terminais; o contador nao pode recuar para ${state.filesAnalyzed}`,
+      0,
+      `nenhum veredicto foi aceite; afirmar cobertura aqui seria mentira (${state.filesAnalyzed})`,
     );
-    assert.ok(state.filesAnalyzed <= 8, "nunca conta mais do que os candidatos (sem double count)");
+    assert.equal(
+      state.filesScanned,
+      state.filesAnalyzed + state.filesExcluded + state.filesFailed,
+      "invariante do contrato: scanned = analisados + excluidos + falhados",
+    );
+    assert.equal(state.filesInEngineBatch, 0, "sem batch a correr o contador de etapa e' zero");
   });
 
-  it("durante o batch publica o numero terminal de outcomes, nao a ultima linha (727 -> 728)", async () => {
+  it("durante o batch publica-se quantos estao no motor (5), e os aceites ficam a zero ate' o loop comer", async () => {
     const names = [];
     for (let i = 0; i < 5; i++) names.push(`g${i}.txt`);
     await seed(names);
@@ -181,24 +244,41 @@ describe("P0 SCANNER_728_OF_800 — o remainder tem nome e o contador reconcilia
     const mgr = manager(engine);
     const id = await mgr.startScan("custom", tmp);
 
-    // Espera que o batch resolva e a reconciliacao publique, com o loop preso.
-    let visto = null;
     try {
-      for (let i = 0; i < 100; i++) {
+      // (1)_batch em curso: o numero publicado e' o dos candidatos dentro do
+      // clamscan — nao a ultima linha (4). E' o que a UI mostra como "em curso".
+      let emCurso = null;
+      for (let i = 0; i < 150 && !emCurso; i++) {
         const s = mgr.getScan(id);
-        if (s && (s.filesInEngineBatch ?? 0) === 0 && (s.filesAnalyzed ?? 0) >= 5) {
-          visto = s;
-          break;
-        }
-        await sleep(20);
+        if (s && s.filesInEngineBatch === 5) emCurso = s;
+        else await sleep(20);
       }
-      assert.ok(visto, "o batch reconciliou para 5 outcomes terminais (nao ficou em 4)");
-      assert.equal(visto.filesAnalyzed, 5);
-      assert.ok(visto.filesAnalyzed <= 5, "sem double count");
+      assert.ok(emCurso, "o batch publicou os 5 candidatos em curso");
+      assert.ok(
+        (emCurso.filesAnalyzed ?? 0) === 0,
+        `com o loop preso nada foi aceite, mas ` +
+          `filesAnalyzed=${emCurso.filesAnalyzed} — a etapa nao pode promover-se a cobertura`,
+      );
+
+      // (2) batch resolvido, loop ainda preso: o contador de etapa tem de voltar
+      // a zero. Ficar a dizer "5 no batch" quando nada la esta e' pior do que 0.
+      let resolvido = null;
+      for (let i = 0; i < 150 && !resolvido; i++) {
+        const s = mgr.getScan(id);
+        if (s && s.filesInEngineBatch === 0) resolvido = s;
+        else await sleep(20);
+      }
+      assert.ok(resolvido, "o fim do batch zera o contador de etapa (finally em scan-manager.ts:1078)");
+      assert.equal(resolvido.filesAnalyzed ?? 0, 0, "5 veredictos do batch, 0 aceites: os 5 ainda nao passaram pelo loop");
     } finally {
       release();
-      await waitTerminal(mgr, id);
     }
+
+    // (3) com o loop libertado, os mesmos 5 sao efectivamente aceites — uma vez.
+    const final = await waitTerminal(mgr, id);
+    assert.equal(final.filesScanned, 5);
+    assert.equal(final.filesAnalyzed, 5, "aceites so quando o loop os comeu");
+    assert.ok(final.filesAnalyzed <= 5, "sem double count: batch + loop nao somam 10");
   });
 
   it("um motor que nao reporta o count NAO inventa numeros (contrato antigo intacto)", async () => {
@@ -210,15 +290,26 @@ describe("P0 SCANNER_728_OF_800 — o remainder tem nome e o contador reconcilia
     const callbacks = [1, 2, 3, 4, 5, 6];
     const engine = makeEngine({ callbacks, files: undefined, artifact: "throw" });
     const mgr = manager(engine);
-    const id = await mgr.startScan("custom", tmp);
-    const state = await waitTerminal(mgr, id);
+    const perf = captureBatchEnd();
+    let state;
+    try {
+      const id = await mgr.startScan("custom", tmp);
+      state = await waitTerminal(mgr, id);
+    } finally {
+      perf.stop();
+    }
+
+    const linha = perf.linha();
+    assert.match(linha, /\boutcomes=n\/a\b/, `o motor nao reportou count: ${linha}`);
+    assert.match(
+      linha,
+      /\banalyzedInBatch=6\b/,
+      `sem count do batch a etapa fica no que o onProgress provou (6), nao sobe aos 8 candidatos: ${linha}`,
+    );
 
     assert.equal(state.filesScanned, 8);
-    assert.equal(
-      state.filesAnalyzed,
-      6,
-      `sem count do batch o contador fica no que foi provado (6), mas veio ${state.filesAnalyzed}`,
-    );
+    assert.equal(state.filesFailed, 8);
+    assert.equal(state.filesAnalyzed, 0, "nada foi aceite, e o numero provado da etapa nao vira cobertura");
   });
 
   it("o loop que re-analisa os mesmos ficheiros nao conta a dobrar", async () => {

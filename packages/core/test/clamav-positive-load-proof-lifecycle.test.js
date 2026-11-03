@@ -50,8 +50,8 @@ function mockHandle({ value, autoKill = false, resolveImmediately = false } = {}
   return handle;
 }
 
-function fakeDbDir(files = ["main.cvd"]) {
-  // Diretório com a base FALSA (só existência+mtime conta para escolher):
+function fakeDbDir(files = ["main.cvd", "daily.cvd"]) {
+  // Bases oficiais FALSAS completas para chegar à prova de carga injectada:
   // o classificador diz `ready` e a versão real + spawn mock decidem o resto.
   const dir = path.join(os.tmpdir(), `cs-probe-db-${Date.now()}-${Math.floor(Math.random() * 1e6)}`);
   mkdirSync(dir, { recursive: true });

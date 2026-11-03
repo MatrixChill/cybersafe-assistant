@@ -7,12 +7,19 @@ import {createHash} from 'node:crypto';
 import {ProtectionEngineService} from '../dist/engine.js';
 import {NativeEngineBridge} from '../dist/native-engine-bridge.js';
 import {createSecurityNotifications} from '../../desktop/src/security-notifications.ts';
-async function fixture(t){
+async function fixture(t, nativeAvailable = true){
   const dir=await fs.mkdtemp(path.join(os.tmpdir(),'cs-recovery-pipeline-'));
   const file=path.join(dir,'fixture.txt');await fs.writeFile(file,'Benign disposable fixture.');
-  const e=new ProtectionEngineService(dir);await e.quarantine.init();
+  // A raiz de dados do serviço é uma raiz protegida pelo portão da quarentena.
+  // Partilhá-la com o alvo fazia o portão recusar corretamente e o teste ler a
+  // recusa como se fosse o comportamento à espera — por isso o motor vive num
+  // subdiretório e o ficheiro fica fora dele, como estaria numa máquina real.
+  const base=path.join(dir,'service');await fs.mkdir(base,{recursive:true});
+  const e=new ProtectionEngineService(base);await e.quarantine.init();
   e.vt.isEnabled=()=>false;e.logHistory=async()=>{};e.actionsLog.write=async()=>{};
-  const original=NativeEngineBridge.scan;NativeEngineBridge.scan=async()=>({ok:false,result:null});
+  const original=NativeEngineBridge.scan;NativeEngineBridge.scan=async()=>nativeAvailable
+    ? ({ok:true,result:{path:file,file_size:26,sha256:createHash('sha256').update('Benign disposable fixture.').digest('hex'),entropy:0,score:0,level:'safe',reasons:[],pe:{valid_pe:false,is_64:false,machine:0,sections:0,writable_executable_section:false,no_imports:false,suspicious_section:false}}})
+    : ({ok:false,result:null,failure:'unavailable'});
   t.after(async()=>{NativeEngineBridge.scan=original;await e.dispose();await fs.rm(dir,{recursive:true,force:true});});
   const sha=createHash('sha256').update(await fs.readFile(file)).digest('hex');
   const analysis={artifactPath:file,fileName:'fixture.txt',size:26,sha256:sha,verdict:'safe',severity:'low',riskScore:0,confidence:0.9,rulesTriggered:[],factors:[],recommendedAction:'allowed',scanTimestamp:new Date().toISOString()};
@@ -50,7 +57,7 @@ test('D null or thrown quarantine never emits success; explicit manual action re
   const result=await e.dispatch('threat.action',{id:file,action:'quarantine',sha256:e.threats[0].sha256});assert.equal(result.success,false);assert.equal(events.some(e=>e.type==='quarantine.added'),false);
 });
 test('E unavailable engine stays inconclusive and never produces clean verdict',async t=>{
-  const {e,file,analysis,events}=await fixture(t);Object.assign(analysis,{verdict:'inconclusive',confidence:0.3});
+  const {e,file,analysis,events}=await fixture(t, false);Object.assign(analysis,{verdict:'inconclusive',confidence:0.3});
   const result=await e.scanArtifact(file,'service',{skipVirusTotal:true});assert.equal(result.results[0].verdict,'inconclusive');assert.equal(events.some(e=>e.type==='threat.detected'),false);
 });
 test('F OFF does not admit automatic file analysis',async t=>{

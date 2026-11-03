@@ -222,6 +222,13 @@ describe("configuração inválida recusa antes de qualquer efeito", () => {
     },
     {
       nome: "ancestral da raiz (base temporária) é junction",
+      // O guarda compõe os ancestrais com o `path` do anfitrião (`path.dirname`,
+      // `path.resolve`), não com `path.win32`. Num POSIX, `"C:\\Temp"` não tem
+      // separador: `path.dirname` devolve `.` e não existe ancestral para
+      // espiar. Aqui só se prova o Windows; salta-se em vez de se inventar um
+      // equivalente — um salto nomeado é verificação a menos, uma asserção
+      // falsa é verificação errada.
+      exigeSemanticaWindows: true,
       fs: fsSim({ existem: [RAIZ, "C:\\Temp", path.join(RAIZ, "service")], links: ["C:\\Temp"] }),
       causa: "ancestral_da_raiz_reparse",
     },
@@ -260,8 +267,11 @@ describe("configuração inválida recusa antes de qualquer efeito", () => {
     { nome: "corpus canário declarado", env: { CYBERSAFE_DEV_TEST_YARA_PATH: p("c.yar") }, causa: "conflito_com_corpus_canario" },
   ];
 
+  const semanticaWindows = path.sep === "\\";
+
   for (const c of casos) {
-    it(`${c.nome} → ${c.causa}`, () => {
+    const exec = c.exigeSemanticaWindows && !semanticaWindows ? it.skip : it;
+    exec(`${c.nome} → ${c.causa}`, () => {
       assert.throws(
         () => valida({
           env: envOk(c.env ?? {}),
@@ -688,7 +698,7 @@ describe("registo real com efeitos duplados", () => {
     const evento = { sender: contents, senderFrame: frame };
     // Sem política, o canal de efeito chega ao handler (comportamento de antes).
     void canais.get("app:set-auto-start")(evento, { enabled: true, startMinimized: false });
-    assert.equal(efeitos.filter((e) => e[0] === "loginItem").length, 1, "off: o handler do main corre como antes");
+    assert.equal(efeitos.filter((e) => e[0] === "loginItem").length, 0, "DEV não escreve no autostart, mesmo sem a política adicional");
 
     // (b) modo ligado: a MESMA função real, com a política do módulo injetada.
     canais.clear();

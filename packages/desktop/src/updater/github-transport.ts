@@ -24,6 +24,10 @@ export function createGitHubReleaseOpener(inner: HttpStreamOpener): HttpStreamOp
         if (signal.aborted) throw new TransportError("aborted", "pedido cancelado");
         if (!isGitHubReleaseUrl(current, hop > 0)) throw new TransportError("redirect", "destino de release não autorizado");
         const response = await inner.open(current, signal);
+        if (signal.aborted) {
+          response.abort();
+          throw new TransportError("aborted", "pedido cancelado");
+        }
         if (response.status < 300 || response.status >= 400) return response;
         const location = response.headers.location;
         response.abort();

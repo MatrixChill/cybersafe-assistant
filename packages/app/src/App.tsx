@@ -165,7 +165,7 @@ function buildDashboard(protection: ProtectionState | null, threats: ThreatEvent
 
 function AuthenticatedApp() {
   const { user, logout } = useAuth();
-  const { identity } = useAppearance();
+  const { identity, effects } = useAppearance();
   const [page, setPage] = useState<Page>("dashboard");
   const [protection, setProtection] = useState<ProtectionState | null>(null);
   const [serviceConnected, setServiceConnected] = useState<boolean | null>(null);
@@ -841,11 +841,11 @@ function AuthenticatedApp() {
   function renderPage() {
     switch (page) {
       case "dashboard":
-        return <DashboardPage dashboard={dashboard} isLoading={isLoading} hardware={hardware} pcState={pcState} onScan={handleScan} onOpenScanner={openScanner} onOpenPC={()=>setPage("pccenter")} events={events} eventsReadPhase={eventsObservation.generation===connectionGeneration.current?eventsObservation.phase:"a_consultar"} realtime={realtimeInfo} onSetProtection={handleSetProtection} onPauseProtection={handlePauseProtection} protectionPending={protectionPending} protectionError={protectionActionError} onDismissProtectionError={() => setProtectionActionError(null)} serviceConnected={serviceConnected} serviceGeneration={connectionGeneration.current} />;
+        return <DashboardPage dashboard={dashboard} isLoading={isLoading} hardware={hardware} pcState={pcState} onScan={handleScan} onOpenScanner={openScanner} onOpenHistory={()=>setPage("threats")} onOpenPC={()=>setPage("pccenter")} events={events} eventsReadPhase={eventsObservation.generation===connectionGeneration.current?eventsObservation.phase:"a_consultar"} realtime={realtimeInfo} onSetProtection={handleSetProtection} onPauseProtection={handlePauseProtection} protectionPending={protectionPending} protectionError={protectionActionError} onDismissProtectionError={() => setProtectionActionError(null)} serviceConnected={serviceConnected} serviceGeneration={connectionGeneration.current} />;
       case "pccenter":
         // O estado de ligação é lido aqui, no commit do render — não dentro de um `useMemo`
         // sobre um ref. Em produção o prop é `null` e o PC Center não emite atributos.
-        return <PCCenterPage hardware={pcCenterHardware} pcState={pcState} dataOrigin={pcCenterOrigin} devTraceConnection={import.meta.env.DEV ? { connected: serviceConnected, generation: connectionGeneration.current } : null} />;
+        return <PCCenterPage hardware={pcCenterHardware} pcState={pcState} dataOrigin={pcCenterOrigin} onAnalisarVolume={(mount) => handleScan("custom", mount)} devTraceConnection={import.meta.env.DEV ? { connected: serviceConnected, generation: connectionGeneration.current } : null} />;
       case "threats":
         return (
           <ThreatsPage
@@ -864,7 +864,7 @@ function AuthenticatedApp() {
       case "taskmanager":
         return <TaskManagerPage processes={processes} serviceConnected={serviceConnected} processesObservedAt={processesObservedAt} processTruth={processesTruth} aEnumerar={processesInFlight} onRefreshProcesses={refreshProcesses} diagnostic={processDiagnostic ?? undefined} onExplainProcess={explainProcess} />;
       case "monitor":
-        return <MonitorPage events={events} processes={processes} processesObservedAt={processesObservedAt} processTruth={processesTruth} serviceConnected={serviceConnected} connections={connections} protection={protection} quarantine={quarantine} />;
+        return <MonitorPage events={events} processes={processes} processesObservedAt={processesObservedAt} processTruth={processesTruth} serviceConnected={serviceConnected} connections={connections} protection={protection} quarantine={quarantine} plataforma={hardware?.system.platform ?? null} />;
       case "quarantine":
         // Rota antiga preservada: o tray (`app:navigate` → "quarantine") e
         // marcadores anteriores aterram na aba Quarentena de Ameaças — mesmo
@@ -1079,7 +1079,7 @@ function AuthenticatedApp() {
 
           <main ref={mainScrollRef} data-cs-main="" className={cn("flex-1 overflow-y-auto relative min-w-0",
                 page!=="dashboard" && !isLiquid && !isCore && "cyber-grid"
-              )} data-presentation={page==="dashboard"?"lab-v2":"legacy"}
+              )} data-cs-page={page} data-presentation={page==="dashboard"?"lab-v2":"legacy"}
           >
             {mostraAvisoDeModoLimitado(bootPhase, bootReadiness) && (
               <div className="m-4 p-3 bg-secondary/40 border border-border text-muted-foreground text-xs font-mono rounded flex items-start gap-2">
@@ -1131,13 +1131,12 @@ function AuthenticatedApp() {
               <motion.div
                 key={page}
                 ref={anchorNewPageAtTop}
-                initial={{ opacity: 0, x: 20 }}
-                animate={{ opacity: 1, x: 0 }}
-                exit={{ opacity: 0, x: -20 }}
-                transition={{ duration: 0.2 }}
+                initial={effects.transitions ? { opacity: 0, y: 6 } : false}
+                animate={{ opacity: 1, y: 0 }}
+                exit={effects.transitions ? { opacity: 0, y: -6 } : { opacity: 1 }}
+                transition={{ duration: effects.transitions ? 0.2 : 0 }}
                 className="min-h-full"
               >
-                {import.meta.env.DEV&&page!=="dashboard"&&<p className="v2-migration-note" role="note">DEV · Apresentação desta página ainda em migração para o Design Lab V2. Funcionalidades existentes preservadas.</p>}
                 {renderPage()}
               </motion.div>
             </AnimatePresence>
@@ -1193,7 +1192,7 @@ function AuthenticatedApp() {
       <AIAssistant currentPage={page} context={matrixContext} processDiagnostic={processDiagnostic} processContext={processContext} explainRequest={processExplanation} explainIdentity={explicacaoIdentidade} />
 
       {showOnboarding && (
-        <OnboardingOverlay onDone={() => setShowOnboarding(false)} onSkip={() => setShowOnboarding(false)} />
+        <OnboardingOverlay plataforma={hardware?.system.platform ?? null} onDone={() => setShowOnboarding(false)} onSkip={() => setShowOnboarding(false)} />
       )}
     </div>
   );

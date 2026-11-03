@@ -12,6 +12,7 @@
  */
 import type { ScanHistoryEntry, ScanHistoryStatus, ScanType } from "@cybersafe/shared-types";
 import { formatDuration, describeScanHistoryOutcome } from "./scanHistoryReport.js";
+import { asInconclusiveByReason, asInconclusiveByEngine, inconclusiveReasonsLabel, inconclusiveEnginesLabel } from "./scanSession.js";
 
 export interface ConsolidatedReportFilter {
   startDate?: string | null;
@@ -65,6 +66,8 @@ export interface SanitizedHistoryEntry {
   threatsFound: number | null;
   isPartial: boolean;
   outcomeLabel: string | null;
+  inconclusiveReasons: string | null;
+  inconclusiveEngines: string | null;
   engineLimitations: string[];
 }
 
@@ -98,6 +101,8 @@ export function sanitizeHistoryEntry(
     threatsFound: counter(entry.threatsFound),
     isPartial: outcome.partial || (entry.status === "completed" && (inconclusive === null || (counter(entry.filesFailed) ?? 0) > 0 || (entry.engineLimitations?.length ?? 0) > 0)),
     outcomeLabel: outcome.label,
+    inconclusiveReasons: inconclusiveReasonsLabel(asInconclusiveByReason(entry.inconclusiveByReason)),
+    inconclusiveEngines: inconclusiveEnginesLabel(asInconclusiveByEngine(entry.inconclusiveByEngine)),
     engineLimitations: entry.engineLimitations ? entry.engineLimitations.map(lim => hidePersonalData ? "Limitação de motor reportada (detalhe ocultado por privacidade)." : lim) : [],
   };
 }

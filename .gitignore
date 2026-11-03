@@ -48,3 +48,6 @@ Thumbs.db
 # Python
 __pycache__/
 *.pyc
+
+# Evidência local da missão R7 (bases ClamAV descarregadas, logs de prova)
+.r7-evidence/

@@ -37,6 +37,12 @@ const FAB = { w: 56, h: 56 };
 const VP = { w: 1200, h: 800 };
 
 describe("preferência de modo — compatível com a versão anterior", () => {
+  test("perfil novo começa encaixado sem cobrir dados; perfis existentes conservam o modo", () => {
+    assert.equal(parseStoredMode(null,true),'docked');
+    assert.equal(parseStoredMode(null,false),'floating');
+    assert.equal(parseStoredMode('floating',true),'floating');
+    assert.equal(parseStoredMode('minimized',true),'minimized');
+  });
   test("sem valor guardado o modo é flutuante (a preferência antiga só tinha posição)", () => {
     assert.equal(parseStoredMode(null), "floating");
     assert.equal(parseStoredMode(undefined), "floating");
@@ -152,7 +158,7 @@ describe("ligações na interface — o modo chega ao componente e à barra", ()
   });
 
   test("o launcher lê e grava o modo, e expõe-no no DOM", () => {
-    assert.match(assistant, /parseStoredMode\(safeReadLauncherMode\(\)\)/, "o modo não é lido do armazenamento");
+    assert.match(assistant, /parseStoredMode\(safeReadLauncherMode\(\), safeReadPos\(\) === null\)/, "o modo não é lido do armazenamento");
     assert.match(assistant, /localStorage\.setItem\(MATRIX_MODE_KEY, next\)/, "o modo não é persistido");
     assert.match(assistant, /data-matrix-mode=\{launcherMode\}/, "o modo não é observável no DOM");
     assert.match(assistant, /setProperty\("--matrix-dock-slot-h", launcherMode === "docked"/, "a barra não recebe a altura do encaixe");

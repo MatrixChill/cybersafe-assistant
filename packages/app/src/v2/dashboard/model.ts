@@ -83,6 +83,22 @@ export function engineCards(
     };
   });
 }
+/**
+ * Limitações que o SERVIÇO reportou, prontas para o hero. Não se deduz uma
+ * limitação a partir de um motor "active": a lista é a `degradedReasons`
+ * recebida, e a UI só a mostra quando existe. Sem lista, o hero mantém a frase
+ * genérica — não inventa uma causa.
+ */
+export function dashboardLimitationSummary(engine?: EngineHealth): string | null {
+  const reasons = (engine?.degradedReasons ?? [])
+    .map((reason) => reason.trim())
+    .filter((reason) => reason !== "");
+  if (reasons.length === 0) return null;
+  // Duas causas chegam para identificar o problema; o diagnóstico completo
+  // continua disponível em ProtectionDetails.
+  return reasons.slice(0, 2).join(" · ");
+}
+
 export function dashboardVerdict(
   d: DashboardSummary,
   realtime: RealtimeProtectionInfo | undefined,
@@ -96,11 +112,14 @@ export function dashboardVerdict(
       tone: "na",
     };
   const level = deriveProtectionLevel(d.systemStatus, d.engineHealth, realtime);
+  const limitations = dashboardLimitationSummary(d.engineHealth);
+  const limitationText = limitations ? ` Limitações reportadas: ${limitations}.` : "";
   if (level === "critical")
     return {
       title: "Proteção com limitações",
       description:
-        "O relatório recebido contém erros ou sinais críticos. Consulta o estado de cada motor.",
+        "O relatório recebido contém erros ou sinais críticos." +
+        (limitations ? limitationText : " Consulta o estado de cada motor."),
       tone: "crit",
     };
   if (realtime?.pausedUntil)
@@ -128,7 +147,8 @@ export function dashboardVerdict(
     return {
       title: "Proteção com limitações",
       description:
-        "Consulta a cobertura e os limites reportados antes de interpretar os resultados.",
+        "Consulta a cobertura e os limites reportados antes de interpretar os resultados." +
+        limitationText,
       tone: "warn",
     };
   return {

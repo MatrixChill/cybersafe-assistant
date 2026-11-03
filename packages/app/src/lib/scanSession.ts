@@ -163,10 +163,22 @@ export type InconclusiveCause =
   | "engine-unavailable"
   | "engine-failed"
   | "no-verdict"
-  | "coverage-incomplete";
+  | "coverage-incomplete"
+  | "timeout"
+  | "invalid-output"
+  | "file-changed"
+  | "archive-incomplete"
+  | "cancelled";
 
 export interface InconclusiveCauseCount {
   reason: InconclusiveCause;
+  count: number;
+}
+
+export type InconclusiveEngine = "clamav" | "yara" | "native" | "archive" | "filesystem";
+
+export interface InconclusiveEngineCount {
+  engine: InconclusiveEngine;
   count: number;
 }
 
@@ -182,6 +194,7 @@ const FS_ERROR_REASON_LABEL: Record<FsErrorCategory, string> = {
 export interface ScanStateExtended extends ScanState {
   failedByReason?: Record<FsErrorCategory, number>;
   inconclusiveByReason?: InconclusiveCauseCount[];
+  inconclusiveByEngine?: InconclusiveEngineCount[];
 }
 
 const INCONCLUSIVE_CAUSES: InconclusiveCause[] = [
@@ -189,9 +202,18 @@ const INCONCLUSIVE_CAUSES: InconclusiveCause[] = [
   "engine-failed",
   "no-verdict",
   "coverage-incomplete",
+  "timeout",
+  "invalid-output",
+  "file-changed",
+  "archive-incomplete",
+  "cancelled",
 ];
 
-function asInconclusiveByReason(value: unknown): InconclusiveCauseCount[] | undefined {
+const INCONCLUSIVE_ENGINES: InconclusiveEngine[] = [
+  "clamav", "yara", "native", "archive", "filesystem",
+];
+
+export function asInconclusiveByReason(value: unknown): InconclusiveCauseCount[] | undefined {
   if (!Array.isArray(value)) return undefined;
   const cleaned: InconclusiveCauseCount[] = [];
   for (const raw of value) {
@@ -201,6 +223,20 @@ function asInconclusiveByReason(value: unknown): InconclusiveCauseCount[] | unde
     if (typeof reason !== "string" || !INCONCLUSIVE_CAUSES.includes(reason as InconclusiveCause)) continue;
     if (typeof count !== "number" || count <= 0) continue;
     cleaned.push({ reason: reason as InconclusiveCause, count: Math.round(count) });
+  }
+  return cleaned.length > 0 ? cleaned : undefined;
+}
+
+export function asInconclusiveByEngine(value: unknown): InconclusiveEngineCount[] | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const cleaned: InconclusiveEngineCount[] = [];
+  for (const raw of value) {
+    if (!raw || typeof raw !== "object") continue;
+    const engine = (raw as { engine?: unknown }).engine;
+    const count = asOptionalNumber((raw as { count?: unknown }).count);
+    if (typeof engine !== "string" || !INCONCLUSIVE_ENGINES.includes(engine as InconclusiveEngine)) continue;
+    if (typeof count !== "number" || count <= 0) continue;
+    cleaned.push({ engine: engine as InconclusiveEngine, count: Math.round(count) });
   }
   return cleaned.length > 0 ? cleaned : undefined;
 }
@@ -281,7 +317,10 @@ export function normalizeScanState(raw: unknown): ScanState & Partial<ScanStateE
     filesAnalyzed: asOptionalNumber(source.filesAnalyzed),
     filesInconclusive: asOptionalNumber(source.filesInconclusive),
     inconclusiveByReason: asInconclusiveByReason(source.inconclusiveByReason),
+    inconclusiveByEngine: asInconclusiveByEngine(source.inconclusiveByEngine),
     filesInEngineBatch: asOptionalNumber((source as { filesInEngineBatch?: unknown }).filesInEngineBatch),
+    filesInEngineScanned: asOptionalNumber((source as { filesInEngineScanned?: unknown }).filesInEngineScanned),
+    engineBatchStartedAt: asOptionalString((source as { engineBatchStartedAt?: unknown }).engineBatchStartedAt),
     filesExcluded: asOptionalNumber(source.filesExcluded),
     filesExcludedBy: asExcludedBy(source.filesExcludedBy),
     filesFailed: asOptionalNumber(source.filesFailed),
@@ -362,11 +401,17 @@ export function mergeScanState(
       (next.inconclusiveByReason?.length ?? 0) > 0
         ? next.inconclusiveByReason
         : current?.inconclusiveByReason,
+    inconclusiveByEngine:
+      (next.inconclusiveByEngine?.length ?? 0) > 0
+        ? next.inconclusiveByEngine
+        : current?.inconclusiveByEngine,
     filesDiscovered: keepMax(current.filesDiscovered, next.filesDiscovered) || undefined,
     // NÃO é keepMax: o batch tem começos e fins. Sobe para N e volta a 0, e um
     // `keepMax` deixaria a UI presa em "20 ficheiros" para sempre — a mentira
     // que este campo existe para evitar. O snapshot mais recente manda.
     filesInEngineBatch: next.filesInEngineBatch,
+    filesInEngineScanned: next.filesInEngineScanned,
+    engineBatchStartedAt: next.engineBatchStartedAt,
     threatsFound: keepMax(current.threatsFound, next.threatsFound),
   };
 }
@@ -405,12 +450,15 @@ export function projectedAnalyzedCount(
  * pipeline global.
  *
  * O batch carrega ~1 GB de base e devolve N veredictos de uma vez: enquanto
- * decorre, `filesInEngineBatch` é a dimensão da etapa e `filesAnalyzed` é o que
- * o clamscan já reportou. É trabalho real e tem de ser visível — mas NÃO é
- * progresso do pipeline: nenhum desses ficheiros completou ainda os restantes
- * motores, e apresentá-lo na barra global era exactamente o que a fazia parecer
- * concluída e ficar presa durante a segunda passagem.
+ * decorre, `filesInEngineBatch` é a dimensão da etapa e
+ * `filesInEngineScanned` é o que o clamscan já confirmou. É trabalho real e tem
+ * de ser visível — mas NÃO é progresso do pipeline: nenhum desses ficheiros
+ * completou ainda os restantes motores, e apresentá-lo na barra global era
+ * exactamente o que a fazia parecer concluída e ficar presa durante a segunda
+ * passagem.
  *
+ * `filesAnalyzed` é o fallback legado (payloads antigos, onde o manager ainda
+ * reutilizava esse campo). O manager actual nunca o escreve durante o batch.
  * `done` é limitado a `total`: uma linha de progresso perdida ou um
  * `filesAnalyzed` de outro eixo nunca podem produzir uma etapa acima de 100%.
  */
@@ -423,11 +471,28 @@ export type ScanAnalysisStage = {
 
 export function scanAnalysisStage(state: ScanState | null): ScanAnalysisStage {
   const total = state?.filesInEngineBatch ?? 0;
-  if (!Number.isFinite(total) || total <= 0) {
+  if (!state || isTerminalScanStatus(state.status) || !Number.isFinite(total) || total <= 0) {
     return { active: false, done: 0, total: 0, percent: null };
   }
-  const done = Math.min(Math.max(state?.filesAnalyzed ?? 0, 0), total);
+  const done = Math.min(
+    Math.max(state?.filesInEngineScanned ?? state?.filesAnalyzed ?? 0, 0),
+    total,
+  );
   return { active: true, done, total, percent: Math.floor((done / total) * 100) };
+}
+
+/**
+ * Tempo decorrido desde o início do batch de assinaturas, ou null quando não
+ * há batch em curso. É tempo de relógio, não uma estimativa de conclusão.
+ */
+export function scanEngineBatchElapsedSeconds(
+  state: Pick<ScanState, "engineBatchStartedAt"> & Partial<Pick<ScanState, "status">> | null,
+  now: number = Date.now(),
+): number | null {
+  if (!state?.engineBatchStartedAt || (state.status && isTerminalScanStatus(state.status))) return null;
+  const started = Date.parse(state.engineBatchStartedAt);
+  if (!Number.isFinite(started)) return null;
+  return Math.max(0, Math.floor((now - started) / 1000));
 }
 
 /**
@@ -825,6 +890,7 @@ export function activeScanDetail(
   targetName?: string,
   filesInEngineBatch = 0,
   filesVerifiedInBatch = 0,
+  engineBatchElapsedSeconds?: number,
 ): string {
   switch (ui) {
     case "preparing":
@@ -844,12 +910,15 @@ export function activeScanDetail(
       // não começou. Dizer a verdade é melhor que dizer nada de diferente.
       if (filesInEngineBatch > 0) {
         const done = filesVerifiedInBatch ?? 0;
-        if (filesInEngineBatch === 1) {
-          return "O motor de assinaturas está a verificar 1 ficheiro de uma vez.";
+        const elapsed = typeof engineBatchElapsedSeconds === "number" && engineBatchElapsedSeconds >= 0
+          ? ` Há ${engineBatchElapsedSeconds} s.`
+          : "";
+        if (done > 0) {
+          return `Fase de assinaturas: ${done} de ${filesInEngineBatch} verificados pelo motor.${elapsed}`;
         }
-        return done > 0
-          ? `Fase de assinaturas: ${done} de ${filesInEngineBatch} verificados pelo motor.`
-          : `O motor de assinaturas está a verificar ${filesInEngineBatch} ficheiros de uma só vez.`;
+        return filesInEngineBatch === 1
+          ? `O motor de assinaturas está a preparar 1 ficheiro; ainda não devolveu o primeiro resultado.${elapsed}`
+          : `O motor de assinaturas está a preparar ${filesInEngineBatch} ficheiros de uma só vez; ainda não devolveu o primeiro resultado.${elapsed}`;
       }
       if (scope === "file") return "A carregar e verificar o conteúdo do ficheiro.";
       if (scope === "folder") return "A verificar os ficheiros encontrados na pasta.";
@@ -1031,6 +1100,11 @@ const INCONCLUSIVE_CAUSE_LABEL: Record<InconclusiveCause, string> = {
   "engine-failed": "falha do motor",
   "no-verdict": "sem veredicto dos motores",
   "coverage-incomplete": "cobertura incompleta",
+  timeout: "tempo excedido",
+  "invalid-output": "resultado inválido",
+  "file-changed": "ficheiro alterado durante a análise",
+  "archive-incomplete": "arquivo não verificado completamente",
+  cancelled: "análise cancelada",
 };
 
 /**
@@ -1045,6 +1119,25 @@ export function inconclusiveReasonsLabel(
   const parts = inconclusiveByReason
     .filter((entry) => entry.count > 0)
     .map((entry) => `${entry.count} ${entry.count === 1 ? "ficheiro" : "ficheiros"} (${INCONCLUSIVE_CAUSE_LABEL[entry.reason] ?? entry.reason})`);
+  return parts.length > 0 ? parts.sort().join(", ") : null;
+}
+
+const INCONCLUSIVE_ENGINE_LABEL: Record<InconclusiveEngine, string> = {
+  clamav: "ClamAV",
+  yara: "YARA",
+  native: "motor nativo",
+  archive: "arquivo",
+  filesystem: "sistema de ficheiros",
+};
+
+/** Explica quais os motores com lacunas; a contagem e' por motor, nao um total unico. */
+export function inconclusiveEnginesLabel(
+  inconclusiveByEngine: InconclusiveEngineCount[] | undefined,
+): string | null {
+  if (!inconclusiveByEngine || inconclusiveByEngine.length === 0) return null;
+  const parts = inconclusiveByEngine
+    .filter((entry) => entry.count > 0)
+    .map((entry) => `${entry.count} ${entry.count === 1 ? "ficheiro" : "ficheiros"} (${INCONCLUSIVE_ENGINE_LABEL[entry.engine] ?? entry.engine})`);
   return parts.length > 0 ? parts.sort().join(", ") : null;
 }
 

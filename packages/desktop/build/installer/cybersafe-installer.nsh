@@ -1,4 +1,4 @@
-﻿; ---------------------------------------------------------------------------
+; ---------------------------------------------------------------------------
 ; CyberSafe Assistant — superficie do instalador para electron-builder 25.1.8
 ;
 ; Nao substitui o script do electron-builder. Usa apenas os hooks oficiais:
@@ -12,6 +12,11 @@
 ; O desinstalador continua a ser o do electron-builder (dados preservados:
 ; deleteAppDataOnUninstall=false e o fluxo /KEEP_APP_DATA do proprio builder).
 ; ---------------------------------------------------------------------------
+
+ ; Core dark palette; MUI remains the native extraction/finish engine.
+!define MUI_BGCOLOR "07151A"
+!define MUI_TEXTCOLOR "EDF8F8"
+!define MUI_INSTFILESPAGE_COLORS "EDF8F8 07151A"
 
 !ifndef BUILD_UNINSTALLER
 
@@ -39,6 +44,8 @@ Var CSFontTitle
 Var CSFontHeading
 Var CSMode
 Var CSDesktopShortcut
+Var CSStartMenuShortcut
+Var CSStartMenu
 Var CSInstalledVersion
 Var CSInstalledDir
 Var CSDirEdit
@@ -49,6 +56,7 @@ Var CSErrorLabel
 Var CSRepairNote
 Var CSErrorText
 Var CSSpaceState
+!include "${CS_ASSET_DIR}\cybersafe-controls.nsh"
 
 ; --- registo das paginas (corpo expandido depois de MUI2 estar carregado) ---
 
@@ -60,12 +68,41 @@ Var CSSpaceState
   PageExEnd
 !macroend
 
+; Expanded by electron-builder inside its install-mode function, AFTER any
+; optional licence page has consumed its own one-shot MUI SHOW callback.
+!macro customInstallMode
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE CS_InstallModePre
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW CS_InstallModeShow
+!macroend
+
 !macro customPageAfterChangeDir
   !insertmacro MUI_PAGE_INIT
   !insertmacro MUI_SET CS_CONFIG_PAGE ""
   PageEx custom
     PageCallbacks CSConfigPre CSConfigLeave
   PageExEnd
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE CS_ProgressPre
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW CS_ProgressShow
+!macroend
+
+; Adapted from electron-builder assistedInstaller.nsh (MIT): same MUI finish
+; and StartApp path. Only the SHOW callback is added for native styling.
+!macro customFinishPage
+  !ifndef HIDE_RUN_AFTER_FINISH
+    Function StartApp
+      ${if} ${isUpdated}
+        StrCpy $1 "--updated"
+      ${else}
+        StrCpy $1 ""
+      ${endif}
+      ${StdUtils.ExecShellAsUser} $0 "$launchLink" "open" "$1"
+    FunctionEnd
+    !define MUI_FINISHPAGE_RUN
+    !define MUI_FINISHPAGE_RUN_FUNCTION "StartApp"
+  !endif
+  !define MUI_PAGE_CUSTOMFUNCTION_PRE CS_FinishPre
+  !define MUI_PAGE_CUSTOMFUNCTION_SHOW CS_FinishShow
+  !insertmacro MUI_PAGE_FINISH
 !macroend
 
 ; --- codigo diferido: so compila depois de MUI2, MUI_LANGUAGE e flags ---
@@ -81,14 +118,19 @@ Var CSSpaceState
   ${If} $CSDialog == error
     Abort
   ${EndIf}
+  SetCtlColors $CSDialog 0xEDF8F8 0x07151A
   InitPluginsDir
   SetOutPath "$PLUGINSDIR"
+  File "/oname=button-secondary.bmp" "${CS_ASSET_DIR}\button-secondary.bmp"
+  File "/oname=button-primary.bmp" "${CS_ASSET_DIR}\button-primary.bmp"
   File "/oname=${BMPNAME}" "${CS_ASSET_DIR}\${BMPNAME}"
   ${NSD_CreateBitmap} 0 0 1u 1u ""
   Pop $CSBg
   Call CS_Measure
   System::Call 'user32::MoveWindow(p $CSBg, i 0, i 0, i $CSW, i $CSH, i 1)'
   ${NSD_SetStretchedImage} $CSBg "$PLUGINSDIR\${BMPNAME}" $CSBgImage
+  ; SetStretchedImage deixa o bitmap no topo; empurra-o para tras dos controlos.
+  System::Call 'user32::SetWindowPos(p $CSBg, p 1, i 0, i 0, i 0, i 0, i 0x13)'
 !macroend
 
 ; Posiciona em percentagem da area util, para alinhar com o bitmap esticado
@@ -103,10 +145,13 @@ Var CSSpaceState
   IntOp $R3 $CSH * ${HPCT}
   IntOp $R3 $R3 / 100
   System::Call 'user32::MoveWindow(p ${CONTROL}, i $R0, i $R1, i $R2, i $R3, i 1)'
+  ; O bitmap de fundo e criado como controlo irmao; sem este raise os
+  ; labels/botoes ficam por tras dele em algumas versoes do nsDialogs.
+  System::Call 'user32::SetWindowPos(p ${CONTROL}, p 0, i 0, i 0, i 0, i 0, i 0x13)'
 !macroend
 
 !macro CS_CardColors CONTROL
-  SetCtlColors ${CONTROL} 0x20130C 0xFAF6F3
+  SetCtlColors ${CONTROL} 0xEDF8F8 0x07151A
 !macroend
 
 ; ReadRegStr exige uma chave de registo literal, por isso o root vem por
@@ -114,6 +159,16 @@ Var CSSpaceState
 !macro CS_ReadRoot ROOT
   ReadRegStr $0 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" InstallLocation
   ReadRegStr $1 ${ROOT} "${UNINSTALL_REGISTRY_KEY}" DisplayVersion
+  ${If} $0 == ""
+  ${AndIf} $1 != ""
+    ; Ha instalacoes antigas com InstallLocation vazio. O caminho e fixo
+    ; (allowToChangeInstallationDirectory=false); so o aceitamos se o
+    ; desinstalador real existir, nunca por suposicao.
+    StrCpy $0 "$LOCALAPPDATA\Programs\${APP_FILENAME}"
+    ${IfNot} ${FileExists} "$0\Uninstall ${PRODUCT_FILENAME}.exe"
+      StrCpy $0 ""
+    ${EndIf}
+  ${EndIf}
   ${If} $0 != ""
   ${AndIf} ${FileExists} "$0\Uninstall ${PRODUCT_FILENAME}.exe"
     StrCpy $CSInstalledDir "$0"
@@ -138,6 +193,16 @@ Var CSSpaceState
       Delete "$newDesktopLink"
       System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
     ${EndIf}
+  ${EndIf}
+  ${If} $CSStartMenuShortcut == "0"
+    ${If} ${FileExists} "$newStartMenuLink"
+      Delete "$newStartMenuLink"
+      System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
+    ${EndIf}
+    ; Apenas remove a pasta do produto se estiver vazia.
+    !ifdef MENU_FILENAME
+      RMDir "$SMPROGRAMS\${MENU_FILENAME}"
+    !endif
   ${EndIf}
 !macroend
 
@@ -186,6 +251,128 @@ Var CSSpaceState
 !macroend
 
 !macro CS_Deferred
+  ; Native frame: DWM dark caption and accent border. The OS still owns the
+  ; minimise/close buttons, focus, Alt+F4 and accessibility; nothing is hidden.
+  Function CS_ThemeCheckboxes
+    Push $0
+    Push $1
+    Push $2
+    StrCpy $2 0
+    cs_cb_loop:
+      System::Call 'user32::FindWindowEx(p $HWNDPARENT, p r2, t "Button", p 0) p.r0'
+      ${If} $0 == 0
+        Goto cs_cb_done
+      ${EndIf}
+      System::Call 'user32::GetWindowLongW(p r0, i -16) i.r1'
+      IntOp $1 $1 & 0x0F
+      ${If} $1 == 2
+      ${OrIf} $1 == 3
+        System::Call 'uxtheme::SetWindowTheme(p r0, w "", w "")'
+        SetCtlColors $0 0xEDF8F8 0x07151A
+      ${EndIf}
+      StrCpy $2 $0
+      Goto cs_cb_loop
+    cs_cb_done:
+    Pop $2
+    Pop $1
+    Pop $0
+  FunctionEnd
+
+  Function CS_ApplyFrame
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 20, *i 1, i 4)'
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 19, *i 1, i 4)'
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 35, *i 0x001A1507, i 4)'
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 36, *i 0x00F8F8ED, i 4)'
+    System::Call 'dwmapi::DwmSetWindowAttribute(p $HWNDPARENT, i 34, *i 0x001A1507, i 4)'
+    SetCtlColors $HWNDPARENT 0xEDF8F8 0x07151A
+    ; A faixa de branding do MUI e um static com as cores do sistema; sem
+    ; isto fica uma barra clara por baixo da arte escura.
+    ; A faixa de branding do MUI pinta-se com a cor de face do sistema e
+    ; atravessa a arte escura. A versao ja e mostrada no ecra 1.
+    GetDlgItem $0 $HWNDPARENT 1256
+    ${If} $0 != 0
+      ShowWindow $0 ${SW_HIDE}
+    ${EndIf}
+    GetDlgItem $0 $HWNDPARENT 1028
+    ${If} $0 != 0
+      ; Este e o static visivel (483x13) por baixo da pagina; pinta-se com
+      ; a cor de face do sistema e corta a arte escura.
+      ShowWindow $0 ${SW_HIDE}
+    ${EndIf}
+    ; Forca o non-client a repintar depois dos atributos DWM.
+    System::Call 'user32::SetWindowPos(p $HWNDPARENT, p 0, i 0, i 0, i 0, i 0, i 0x37)'
+    Call CS_ThemeCheckboxes
+  FunctionEnd
+  !ifndef INSTALL_MODE_PER_ALL_USERS
+  Function CS_InstallModeShow
+    Call CS_ApplyFrame
+    SetCtlColors $MultiUser.InstallModePage 0xEDF8F8 0x07151A
+    SetCtlColors $MultiUser.InstallModePage.Text 0xEDF8F8 0x07151A
+    System::Call 'uxtheme::SetWindowTheme(p $MultiUser.InstallModePage.AllUsers,w "",w "")'
+    System::Call 'uxtheme::SetWindowTheme(p $MultiUser.InstallModePage.CurrentUser,w "",w "")'
+    SetCtlColors $MultiUser.InstallModePage.AllUsers 0xEDF8F8 0x07151A
+    SetCtlColors $MultiUser.InstallModePage.CurrentUser 0xEDF8F8 0x07151A
+    SetCtlColors $RadioButtonLabel1 0xEDF8F8 0x07151A
+    System::Call 'uxtheme::SetWindowTheme(p $MultiUser.InstallModePage.AllUsers, w "", w "")'
+    System::Call 'uxtheme::SetWindowTheme(p $MultiUser.InstallModePage.CurrentUser, w "", w "")'
+    Call CS_StyleFooter
+  FunctionEnd
+  !endif
+  Function CS_InstallModePre
+    Call CS_StyleFooter
+  FunctionEnd
+  Function CS_ProgressPre
+    Call CS_StyleFooter
+  FunctionEnd
+  Function CS_FinishPre
+    Call CS_StyleFooter
+  FunctionEnd
+  Function CS_ProgressShow
+    Call CS_ApplyFrame
+    SetCtlColors $mui.InstFilesPage 0xEDF8F8 0x07151A
+    SetCtlColors $mui.InstFilesPage.Text 0xEDF8F8 0x07151A
+    SetCtlColors $mui.InstFilesPage.Log 0xEDF8F8 0x07151A
+    System::Call 'uxtheme::SetWindowTheme(p $mui.InstFilesPage.Log,w "",w "")'
+    System::Call 'uxtheme::SetWindowTheme(p $mui.InstFilesPage.ProgressBar,w "",w "")'
+    SendMessage $mui.InstFilesPage.ProgressBar 0x409 0 0x00C1D616
+    SendMessage $mui.InstFilesPage.ProgressBar 0x2001 0 0x001A1507
+    Call CS_StyleFooter
+  FunctionEnd
+  Function CS_FinishShow
+    Call CS_ApplyFrame
+    Call CS_StyleFooter
+  FunctionEnd
+  Function CS_StyleFooter
+    InitPluginsDir
+    ; Sem isto o File escreve no $OUTDIR corrente e o LoadImage falha,
+    ; deixando os botoes MUI com a placa branca do tema do sistema.
+    SetOutPath "$PLUGINSDIR"
+    ; Extrair a superficie dos botoes nao e uma etapa da instalacao.
+    SetDetailsPrint none
+    File "/oname=$PLUGINSDIR\button-primary.bmp" "${CS_ASSET_DIR}\button-primary.bmp"
+    File "/oname=$PLUGINSDIR\button-secondary.bmp" "${CS_ASSET_DIR}\button-secondary.bmp"
+    SetCtlColors $HWNDPARENT 0xEDF8F8 0x07151A
+    SetDetailsPrint lastused
+    GetDlgItem $0 $HWNDPARENT 1
+    !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-primary.bmp"
+    GetDlgItem $0 $HWNDPARENT 2
+    !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-secondary.bmp"
+    GetDlgItem $0 $HWNDPARENT 3
+    !insertmacro CS_StyleButton $0 "$PLUGINSDIR\button-secondary.bmp"
+  
+    ; MUI ja pintou estes botoes antes do callback; sem invalidar,
+    ; o BS_BITMAP aplicado agora nao aparece.
+    GetDlgItem $0 $HWNDPARENT 1
+    System::Call 'user32::InvalidateRect(p $0, p 0, i 1)'
+    GetDlgItem $0 $HWNDPARENT 2
+    System::Call 'user32::InvalidateRect(p $0, p 0, i 1)'
+    GetDlgItem $0 $HWNDPARENT 3
+    System::Call 'user32::InvalidateRect(p $0, p 0, i 1)'
+FunctionEnd
+  Function .onGUIEnd
+    Call CSFreeButtonImages
+  FunctionEnd
+
 
   ; Mede a area util da pagina (pixels logicos; NSIS e DPI-unaware).
   Function CS_Measure
@@ -249,14 +436,26 @@ Var CSSpaceState
 
   Function CS_ChooseInstall
     StrCpy $CSMode "install"
-    GetDlgItem $0 $HWNDPARENT 1
-    SendMessage $0 ${BM_CLICK} 0 0
+    ; O Next do wizard esta oculto neste ecra. BM_CLICK num controlo
+    ; invisivel nao avanca; WM_COMMAND IDOK chega ao wizard.
+    ; PostMessage: o SendMessage reentrante e engolido enquanto o clique
+    ; ainda esta a ser processado pelo botao.
+    System::Call 'user32::PostMessage(p $HWNDPARENT, i 0x0111, i 1, i 0)'
   FunctionEnd
 
   Function CS_ChooseRepair
     StrCpy $CSMode "repair"
-    GetDlgItem $0 $HWNDPARENT 1
-    SendMessage $0 ${BM_CLICK} 0 0
+    ; PostMessage: o SendMessage reentrante e engolido enquanto o clique
+    ; ainda esta a ser processado pelo botao.
+    System::Call 'user32::PostMessage(p $HWNDPARENT, i 0x0111, i 1, i 0)'
+  FunctionEnd
+
+  Function CS_ShowLicense
+    ${If} ${FileExists} "$PLUGINSDIR\THIRD-PARTY-NOTICES.txt"
+      ExecShell "open" "$PLUGINSDIR\THIRD-PARTY-NOTICES.txt"
+    ${Else}
+      MessageBox MB_ICONEXCLAMATION|MB_OK "As licencas de terceiros nao estao disponiveis neste instalador."
+    ${EndIf}
   FunctionEnd
 
   Function CS_ChooseUninstall
@@ -276,11 +475,20 @@ Var CSSpaceState
 
     StrCpy $CSMode "install"
     StrCpy $CSDesktopShortcut "1"
+    StrCpy $CSStartMenuShortcut "1"
     Call CS_Detect
 
     !insertmacro MUI_HEADER_TEXT "$(CS_WelcomeHeader)" ""
     !insertmacro CS_BeginPage "page-welcome.bmp"
+    ; O staging do electron-builder nao contem assets/licenses; o documento
+    ; revisto fica na raiz do repo e e lido no compile-time.
+    File "/oname=THIRD-PARTY-NOTICES.txt" "${BUILD_RESOURCES_DIR}\..\..\..\assets\licenses\THIRD-PARTY-NOTICES.txt"
     Call CS_CreateFonts
+
+    ${NSD_CreateLabel} 0 0 1u 1u "01  /  BOAS-VINDAS"
+    Pop $R9
+    !insertmacro CS_Place $R9 39 3 57 6
+    SetCtlColors $R9 0xC1D616 0x07151A
 
     ${NSD_CreateLabel} 0 0 1u 1u "$(CS_WelcomeTitle)"
     Pop $R9
@@ -315,11 +523,13 @@ Var CSSpaceState
     ${NSD_CreateButton} 0 0 1u 1u "$(CS_InstallBtn)"
     Pop $R9
     !insertmacro CS_Place $R9 39 64 24 8
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-primary.bmp"
     ${NSD_OnClick} $R9 CS_ChooseInstall
 
     ${NSD_CreateButton} 0 0 1u 1u "$(CS_RepairBtn)"
     Pop $R9
     !insertmacro CS_Place $R9 64 64 24 8
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-secondary.bmp"
     ${NSD_OnClick} $R9 CS_ChooseRepair
     ${If} $CSInstalledDir == ""
       EnableWindow $R9 0
@@ -328,10 +538,17 @@ Var CSSpaceState
     ${NSD_CreateButton} 0 0 1u 1u "$(CS_UninstallBtn)"
     Pop $R9
     !insertmacro CS_Place $R9 39 75 24 8
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-secondary.bmp"
     ${NSD_OnClick} $R9 CS_ChooseUninstall
     ${If} $CSInstalledDir == ""
       EnableWindow $R9 0
     ${EndIf}
+
+    ${NSD_CreateButton} 0 0 1u 1u "$(CS_LicenseBtn)"
+    Pop $R9
+    !insertmacro CS_Place $R9 64 75 24 8
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-secondary.bmp"
+    ${NSD_OnClick} $R9 CS_ShowLicense
 
     ; A pagina tem os seus proprios botoes de accao; o Next/Back do wizard
     ; ficam ocultos apenas aqui e sao repostos ao sair.
@@ -340,6 +557,7 @@ Var CSSpaceState
     GetDlgItem $0 $HWNDPARENT 2
     ShowWindow $0 ${SW_HIDE}
 
+    Call CS_ApplyFrame
     nsDialogs::Show
   FunctionEnd
 
@@ -519,6 +737,11 @@ Var CSSpaceState
     !insertmacro CS_BeginPage "page-config.bmp"
     Call CS_CreateFonts
 
+    ${NSD_CreateLabel} 0 0 1u 1u "02  /  VERIFICAÇÃO"
+    Pop $R9
+    !insertmacro CS_Place $R9 39 3 57 3
+    SetCtlColors $R9 0xC1D616 0x07151A
+
     ${NSD_CreateLabel} 0 0 1u 1u "$(CS_ConfigTitle)"
     Pop $R9
     !insertmacro CS_Place $R9 39 8 57 7
@@ -535,20 +758,29 @@ Var CSSpaceState
     ${NSD_CreateText} 0 0 1u 1u "$INSTDIR"
     Pop $CSDirEdit
     !insertmacro CS_Place $CSDirEdit 39 29 43 7
+    SetCtlColors $CSDirEdit 0xEDF8F8 0x07151A
 
     ${NSD_CreateButton} 0 0 1u 1u "$(CS_Browse)"
     Pop $R9
     !insertmacro CS_Place $R9 83 29 13 7
+    !insertmacro CS_StyleButton $R9 "$PLUGINSDIR\button-secondary.bmp"
     ${NSD_OnClick} $R9 CS_Browse
 
     ${NSD_CreateCheckbox} 0 0 1u 1u "$(CS_DesktopShortcut)"
     Pop $CSDesktop
     !insertmacro CS_Place $CSDesktop 39 40 57 6
+    SetCtlColors $CSDesktop 0xEDF8F8 0x07151A
     ${NSD_SetState} $CSDesktop ${BST_CHECKED}
+
+    ${NSD_CreateCheckbox} 0 0 1u 1u "$(CS_StartMenuShortcut)"
+    Pop $CSStartMenu
+    !insertmacro CS_Place $CSStartMenu 39 46 57 5
+    SetCtlColors $CSStartMenu 0xEDF8F8 0x07151A
+    ${NSD_SetState} $CSStartMenu ${BST_CHECKED}
 
     ${NSD_CreateLabel} 0 0 1u 1u ""
     Pop $CSRepairNote
-    !insertmacro CS_Place $CSRepairNote 39 49 57 8
+    !insertmacro CS_Place $CSRepairNote 39 53 57 7
     !insertmacro CS_CardColors $CSRepairNote
     ${If} $CSMode == "repair"
       ${NSD_SetText} $CSRepairNote "$(CS_RepairModeNote)"
@@ -567,7 +799,7 @@ Var CSSpaceState
     ${NSD_CreateLabel} 0 0 1u 1u ""
     Pop $CSErrorLabel
     !insertmacro CS_Place $CSErrorLabel 39 79 57 9
-    SetCtlColors $CSErrorLabel 0x2000B0 0xFAF6F3
+    SetCtlColors $CSErrorLabel 0x5C5CFF 0x07151A
 
     ; O botao Next passa a chamar-se Instalar apenas neste ecra.
     GetDlgItem $0 $HWNDPARENT 1
@@ -577,6 +809,7 @@ Var CSSpaceState
     ShowWindow $0 ${SW_SHOW}
 
     Call CS_UpdateSpace
+    Call CS_StyleFooter
     nsDialogs::Show
   FunctionEnd
 
@@ -593,6 +826,13 @@ Var CSSpaceState
       StrCpy $CSDesktopShortcut "1"
     ${Else}
       StrCpy $CSDesktopShortcut "0"
+    ${EndIf}
+
+    ${NSD_GetState} $CSStartMenu $R0
+    ${If} $R0 == ${BST_CHECKED}
+      StrCpy $CSStartMenuShortcut "1"
+    ${Else}
+      StrCpy $CSStartMenuShortcut "0"
     ${EndIf}
 
     Call CS_FreeResources

@@ -1,3 +1,6 @@
+import { UpdateJournal } from './updater/install-journal.js';
+import { reconcileInstalledUpdate } from './updater/installed-startup.js';
+import { atomicWriteJsonSync } from "./atomic-json.js";
 import { installNavigationPolicy } from "./navigation-policy.js";
 import { installInitialWindowReveal } from "./window-foreground.js";
 import { readBuildIdentity } from "./build-identity.js";
@@ -49,6 +52,7 @@ import {
   validateAutomaticInput,
   validateInstallRequest,
 } from "./updater/bridge.js";
+import { startAutomaticChecks } from "./updater/automatic-checks.js";
 import { createProductionUpdater } from "./updater/production.js";
 import type { Updater } from "./updater/updater.js";
 import type { UpdaterResult } from "./updater/index.js";
@@ -98,6 +102,7 @@ let mainWindow: BrowserWindow | null = null;
 // Updater da aplicação (ver updater/bridge.ts). `null` até whenReady inicializar;
 // os handlers tratam `null` sem crash e sem `appUpdater!`.
 let appUpdater: Updater | null = null;
+let stopAutomaticChecks: (() => void) | null = null;
 let updateStateUnsub: (() => void) | null = null;
 let tray: Tray | null = null;
 let isQuitting = false;
@@ -138,8 +143,9 @@ const DEBOUNCE_TIME = 15000; // 15 segundos de silêncio para o mesmo arquivo
 // fundo sólido de sempre. Só um pedido explícito (ex.: um toggle futuro nas
 // Definições) liga o backdrop nativo — e mesmo assim apenas quando o
 // `window-material` confirmar que o sistema o suporta.
-let preferences: { notificationsEnabled: boolean; windowMaterial?: BackgroundMaterial } = {
+let preferences: { notificationsEnabled: boolean; automaticUpdateCheckEnabled?: boolean; windowMaterial?: BackgroundMaterial } = {
   notificationsEnabled: true,
+  automaticUpdateCheckEnabled: false,
 };
 
 function settingsFilePath(): string {
@@ -154,6 +160,7 @@ function loadPreferences() {
       if (typeof parsed.notificationsEnabled === "boolean") {
         preferences.notificationsEnabled = parsed.notificationsEnabled;
       }
+      preferences.automaticUpdateCheckEnabled = parsed.automaticUpdateCheckEnabled === true;
       // Só se aceita um material da lista do Electron; qualquer outro valor fica
       // como ausente (fallback sólido), nunca vai para o `new BrowserWindow`.
       if (VALID_BACKGROUND_MATERIALS.includes(parsed.windowMaterial)) {
@@ -167,10 +174,11 @@ function loadPreferences() {
 
 function savePreferences() {
   try {
-    fs.mkdirSync(path.dirname(settingsFilePath()), { recursive: true });
-    fs.writeFileSync(settingsFilePath(), JSON.stringify(preferences, null, 2), "utf8");
+    atomicWriteJsonSync(settingsFilePath(), preferences);
+    return true;
   } catch {
-    // Falha de escrita não é fatal.
+    // O chamador pode reportar uma preferência que não pôde ser persistida.
+    return false;
   }
 }
 
@@ -409,7 +417,9 @@ let apiChild: ChildProcess | null = null;
 let apiStartInFlight = false;
 let aiStore: AiCredentialsStore | undefined;
 function currentAiStore() {
-  return aiStore ??= createAiCredentialsStore(app.getPath("userData"), safeStorage);
+  // A plataforma entra explicitamente: em Linux o mecanismo (libsecret/kwallet
+  // vs basic_text) decide se podemos afirmar que a chave está cifrada.
+  return (aiStore ??= createAiCredentialsStore(app.getPath("userData"), safeStorage, { plataforma: process.platform }));
 }
 
 /** Tenta abrir o named pipe do serviço. true = um serviço vivo está a servir. */
@@ -580,6 +590,49 @@ async function startServiceProcess(): Promise<ServiceStartOutcome> {
  * guardado em `userData` (nunca dentro do pacote). A falha é declarada e NÃO
  * impede o serviço de proteção nem a janela de arrancar.
  */
+async function reconcilePendingInstalledUpdate(runtime: ApiRuntime): Promise<void> {
+  if (!app.isPackaged || isQuitting) return;
+  const journal = new UpdateJournal(path.join(app.getPath("userData"), "updater-operation.json"));
+  try {
+    if (!journal.read()) return;
+    const operation = await reconcileInstalledUpdate({
+      journal, installedVersion: app.getVersion(), isQuitting: () => isQuitting,
+      dataReady: async () => {
+        if (!runtime.bootId || runtime.child.exitCode !== null || !client.isConnected) return false;
+        const response = await fetch(`http://127.0.0.1:${runtime.port}/health`, { signal: AbortSignal.timeout(3000) });
+        if (!response.ok) return false;
+        const value = await response.json() as Record<string, unknown>;
+        if (value.bootId !== runtime.bootId || value.service !== "cybersafe-api" || value.databaseReady !== true) return false;
+        if (fs.existsSync(settingsFilePath())) {
+          const settings: unknown = JSON.parse(fs.readFileSync(settingsFilePath(), "utf8"));
+          if (!settings || typeof settings !== "object" || Array.isArray(settings)) return false;
+        }
+        return !isQuitting && runtime.child.exitCode === null;
+      },
+    });
+    if (operation) {
+      logStartup("update-startup", { status: operation.stage });
+      if (operation.stage === "recovery-required") dialog.showErrorBox(
+        "CyberSafe — Recuperação da atualização",
+        "Não foi possível confirmar a versão e os dados após a atualização. Não será iniciada outra instalação automaticamente. Preserve os dados e utilize o procedimento de recuperação com um instalador verificado."
+      );
+    }
+  } catch {
+    logStartup("update-startup", { status: "recovery-required", classification: "INVALID_UPDATE_EVIDENCE" });
+  }
+}
+
+function recoverPendingUpdateAfterStartupFailure(): void {
+  if (!app.isPackaged) return;
+  try {
+    const journal = new UpdateJournal(path.join(app.getPath("userData"), "updater-operation.json"));
+    if (journal.read()) {
+      journal.recoverInterrupted();
+      logStartup("update-startup", { status: "recovery-required", classification: "API_STARTUP_FAILED" });
+    }
+  } catch { logStartup("update-startup", { status: "recovery-required", classification: "INVALID_UPDATE_EVIDENCE" }); }
+}
+
 function startPackagedApi(): void {
   if (!app.isPackaged) {
     console.log("[Electron] Modo dev: API assumida via npm run dev:api");
@@ -615,10 +668,12 @@ function startPackagedApi(): void {
         apiRuntime = result.runtime;
         void configureAiChild(result.runtime.child, currentAiStore()).then((applied) => {
           if (!applied) stopLocalApi(result.runtime.child);
+          else void reconcilePendingInstalledUpdate(result.runtime);
         }).catch(() => stopLocalApi(result.runtime.child));
       }
       return;
     }
+    recoverPendingUpdateAfterStartupFailure();
     // Sem "API pronta" quando não está: o estado é declarado tal como é.
     console.error(`[Electron] API local não arrancou (${result.status}): ${result.reason}`);
     if (result.status === "failed" && result.error) {
@@ -627,6 +682,7 @@ function startPackagedApi(): void {
   }).catch((error) => {
     logStartup("api-unavailable", { status: "failed", port: DEFAULT_API_PORT, classification: classifyStartupError(error) });
     console.error("[Electron] Falha inesperada no arranque da API:", error);
+    recoverPendingUpdateAfterStartupFailure();
   }).finally(() => { apiStartInFlight = false; });
 }
 
@@ -910,14 +966,7 @@ function updateTrayMenu() {
 
   // Copy + tradução de estados vivem em tray-menu.ts (testável, sem enums crus).
   const template = buildTrayMenuTemplate(info, {
-    open: () => {
-      if (mainWindow) {
-        mainWindow.show();
-        mainWindow.focus();
-      } else {
-        createWindow();
-      }
-    },
+    open: () => requestMainWindowForeground(),
     // Confirmação integrada (modal CyberSafe) — nunca o diálogo nativo branco.
     exit: () => {
       void exitConfirmation.request();
@@ -1029,12 +1078,7 @@ function trayActionHandlers(): Pick<
 }
 
 function showWindow() {
-  if (mainWindow) {
-    mainWindow.show();
-    mainWindow.focus();
-  } else {
-    createWindow();
-  }
+  requestMainWindowForeground();
 }
 
 /**
@@ -1277,6 +1321,9 @@ function createTray() {
     ? (dedicated ? primary : primary.resize({ width: size, height: size }))
     : (fallback.isEmpty() ? nativeImage.createEmpty() : fallback.resize({ width: size, height: size }));
   tray = new Tray(trayImage);
+  // O clique simples mantém o comportamento existente; o duplo clique expressa
+  // um pedido explícito de abertura, pelo mesmo percurso do menu contextual.
+  tray.on("double-click", () => requestMainWindowForeground());
 
   updateTrayMenu();
 
@@ -1454,7 +1501,18 @@ function registerIpc(
   handle("app:update-set-automatic", async (_event, enabled: unknown) => {
     const v = validateAutomaticInput(enabled);
     if (!v.ok) return failureResult("internal", updateVersion(), "flag automática inválida");
-    return withUpdater((u) => u.setAutomaticCheck(v.value));
+    return withUpdater(async (u) => {
+      const previous = u.snapshotCopy().automaticCheckEnabled;
+      const result = await u.setAutomaticCheck(v.value);
+      if (!result.ok) return result;
+      preferences.automaticUpdateCheckEnabled = v.value;
+      if (!savePreferences()) {
+        preferences.automaticUpdateCheckEnabled = previous;
+        await u.setAutomaticCheck(previous);
+        return { ok: false, error: "internal", snapshot: u.snapshotCopy() };
+      }
+      return result;
+    });
   });
 
   /**
@@ -1498,6 +1556,28 @@ function registerIpc(
   serviceRequest("service:get-processes", () => client.request("processes.list", undefined));
   serviceRequest("service:get-connections", () => client.request("connections.list", undefined));
   serviceRequest("service:get-quarantine", () => client.request("quarantine.list", undefined));
+  serviceRequest("service:get-quarantine-policy", () => client.request("quarantine.policy.get", undefined));
+  serviceRequest("service:set-quarantine-policy", (_event, payload: unknown) => {
+    if (typeof payload !== "object" || payload === null || Array.isArray(payload)) {
+      throw new Error("Pedido de política de quarentena inválido.");
+    }
+    const entrada = payload as Record<string, unknown>;
+    const chaves = Object.keys(entrada);
+    if (chaves.some((chave) => chave !== "policy" && chave !== "consent")) {
+      throw new Error("Pedido de política de quarentena inválido: campo desconhecido.");
+    }
+    const policy = entrada.policy;
+    if (policy !== "warn" && policy !== "ask" && policy !== "automatic-high-confidence") {
+      throw new Error("Política de quarentena inválida.");
+    }
+    if (entrada.consent !== undefined && typeof entrada.consent !== "boolean") {
+      throw new Error("Consentimento inválido.");
+    }
+    if (policy === "automatic-high-confidence" && entrada.consent !== true) {
+      throw new Error("A quarentena automática exige consentimento explícito.");
+    }
+    return client.request("quarantine.policy.set", { policy, consent: entrada.consent });
+  });
   serviceRequest("service:clear-events", () => client.request("events.clear", undefined));
   serviceRequest("service:scan-artifact", (_event, filePath: string) => client.request("scan.artifact", { path: filePath }));
   serviceRequest("service:scan-full-system", () => client.request("scan.fullSystem", undefined));
@@ -1522,6 +1602,14 @@ function registerIpc(
   serviceRequest("service:run-restricted-analysis", (_event, filePath: string) =>
     client.request("analysis.restricted", { path: filePath }));
   serviceRequest("service:update-definitions", () => client.request("definitions.update", undefined));
+  // Leitura do estado por fonte (ClamAV / YARA / HashDB). Pass-through fino: a
+  // contagem, a idade e o backoff vivem no servico — o renderer nao os inferir.
+  serviceRequest("service:get-definitions-status", () => client.request("definitions.status", undefined));
+  // Contrato R7: snapshot a pedido, nunca disparado por scan.progress.
+  // O serviço valida as regras antes de gravar; a política interna não é editável.
+  serviceRequest("service:get-exclusions", () => client.request("exclusions.get", undefined));
+  serviceRequest("service:update-exclusions", (_event, config: { rules: import("@cybersafe/shared-types").ExclusionRule[] }) =>
+    client.request("exclusions.update", config));
   // ── Opt-in de retoma ao arrancar ──────────────────────────────────────────
   // Pass-through fino e validado: a decisão de gravar e a confirmação em disco
   // vivem no serviço. O renderer não escreve ficheiros nem infere estado — e um
@@ -1649,8 +1737,8 @@ function registerIpc(
 
   // ── Auto-Start IPC ──
   handle("app:get-auto-start", () => {
-    if (process.platform !== "win32") return { enabled: false, startMinimized: false };
-    const settings = app.getLoginItemSettings();
+    if (process.platform !== "win32" || !app.isPackaged || !perfil.autoStart) return { enabled: false, startMinimized: false };
+    const settings = app.getLoginItemSettings({ path: process.execPath });
     return {
       enabled: settings.executableWillLaunchAtLogin,
       startMinimized: settings.launchItems.some(item => item.enabled && item.args.includes("--hidden")),
@@ -1658,7 +1746,8 @@ function registerIpc(
   });
 
   handle("app:set-auto-start", (_event, config: { enabled: boolean; startMinimized: boolean }) => {
-    if (process.platform !== "win32") return { success: false };
+    if (process.platform !== "win32" || !app.isPackaged || !perfil.autoStart || fronteiraLeituraWindows.activo) return { success: false };
+    if (!config || typeof config.enabled !== "boolean" || typeof config.startMinimized !== "boolean") return { success: false };
     app.setLoginItemSettings({
       openAtLogin: config.enabled,
       path: process.execPath,
@@ -1764,11 +1853,9 @@ function configureAutoStart() {
   // arranque do Windows.
   if (fronteiraLeituraWindows.activo) return;
 
-  app.setLoginItemSettings({
-    openAtLogin: false, // FASE 1.1: Auto-start desativado por padrão
-    path: process.execPath,
-    args: app.isPackaged ? ["--hidden"] : [path.resolve(process.argv[1]), "--hidden"],
-  });
+  // Windows owns this persisted preference. Startup must never register or
+  // remove it; only an explicit settings action may change the login item.
+
 }
 
 // O lock de instância única é chaveado pelo `userData`: sem isto, o dev partilha
@@ -1833,9 +1920,29 @@ if (!gotTheLock) {
       cacheDir: updaterCacheDir(app.getPath("userData")),
       runtimeSupported: app.isPackaged && process.platform === "win32",
       installedVersion: app.getVersion(),
+      automaticCheckEnabled: preferences.automaticUpdateCheckEnabled === true,
+      installation: {
+        stagingRoot: path.join(app.getPath("userData"), "update-staging"),
+        journalFile: path.join(app.getPath("userData"), "updater-operation.json"),
+        launcherPath: path.join(process.resourcesPath, "cybersafe-update-launcher.exe"),
+        // Reuse service/watcher/API shutdown and the existing before-quit cleanup.
+        requestShutdown: async () => { if (isQuitting) throw new Error("Shutdown already started"); await quitCyberSafe(); },
+        confirmConsent: async (context) => !isQuitting && context.confirmed === true
+          && appUpdater?.snapshotCopy().phase === "installing"
+          && appUpdater.snapshotCopy().latest?.version === context.expectedVersion,
+        scanProbe: async () => {
+          if (!client.isConnected) return "unknown";
+          try {
+            const state = await client.request("scan.getActive", undefined);
+            if (state === null) return "idle";
+            return state.status === "running" || state.status === "queued" ? "running" : "unknown";
+          } catch { return "unknown"; }
+        },
+      },
       installedBuild: installedIdentity.build,
       installedCommit: installedIdentity.commit,
     });
+    stopAutomaticChecks = startAutomaticChecks(appUpdater);
     updateStateUnsub = appUpdater.onState((s) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:update-state", toAppUpdateSnapshot(s));
     });
@@ -1939,6 +2046,8 @@ app.on("before-quit", (event) => {
   });
   // updater: liberta o listener de estado (sem referência solta após sair).
   if (updateStateUnsub) { try { updateStateUnsub(); } catch { /* já removido */ } updateStateUnsub = null; }
+  stopAutomaticChecks?.();
+  stopAutomaticChecks = null;
   appUpdater = null;
   if (!app.isPackaged) {
     // Em `npm run dev`, o `concurrently -k` mata os restantes watchers

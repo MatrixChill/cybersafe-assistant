@@ -21,6 +21,12 @@ import { DefinitionUpdater, agendadorDefinicoesDeveArrancar } from "../dist/upda
 
 const ROOT = fs.mkdtempSync(path.join(os.tmpdir(), "cs-retoma01-test-"));
 const HOUR = 60 * 60 * 1000;
+const MINUTO = 60 * 1000;
+/* Fresco tem de ser fresco para A FONTE em causa: o updater usa cadências
+   diferentes por componente (hashes 45 min, YARA 6 h, ClamAV 24 h). Uma hora deixou
+   de ser fresco para o feed de hashes no dia em que a cadência passou a ser a
+   janela oficial do MalwareBazaar. Dez minutos está dentro das três. */
+const FRESCO = 10 * MINUTO;
 const now = Date.now();
 
 function writeMeta(defs, components) {
@@ -45,6 +51,18 @@ function readMeta(defs) {
   return JSON.parse(fs.readFileSync(path.join(defs, ".update-meta.json"), "utf8"));
 }
 
+/**
+ * Fazer passar a janela de recusa dessa fonte. O backoff é comportamento do
+ * produto (tentativas controladas, por fonte), mas a asserção que estes casos
+ * protegem é outra: a ausência de prova não congela a fonte para sempre.
+ */
+function expirarRecusa(defs, componente) {
+  const meta = readMeta(defs);
+  if (!meta.falhas?.[componente]) throw new Error(`sem recusa registada em ${componente}`);
+  meta.falhas[componente].nextAllowedAtMs = now - 1;
+  fs.writeFileSync(path.join(defs, ".update-meta.json"), JSON.stringify(meta, null, 2), "utf8");
+}
+
 function makeUpdater(defs, exitCode = 0) {
   const spawnCalls = [];
   const spawnFreshclam = () => {
@@ -65,6 +83,9 @@ function makeUpdater(defs, exitCode = 0) {
   };
   updater.updateHashFeed = async () => {
     network.hashes += 1;
+    // A forma real de `updateHashFeed`: `alterou` é o que separa «houve
+    // verificação bem sucedida» de «a base em disco mudou».
+    return { alterou: true, novos: 1, total: 1, rejeitados: 0, lacunaCobertura: false };
   };
   return { updater, network, spawnCalls };
 }
@@ -73,7 +94,7 @@ test.after(() => fs.rmSync(ROOT, { recursive: true, force: true }));
 
 test("um ClamAV velho é actualizado mesmo com YARA/hashes frescos", async () => {
   const defs = path.join(ROOT, "so-clamav");
-  writeMeta(defs, { yara: now - HOUR, hashes: now - HOUR, clamav: now - 10 * 24 * HOUR });
+  writeMeta(defs, { yara: now - FRESCO, hashes: now - FRESCO, clamav: now - 10 * 24 * HOUR });
   const { updater, network, spawnCalls } = makeUpdater(defs);
 
   const result = await updater.checkAndUpdate(false);
@@ -85,14 +106,14 @@ test("um ClamAV velho é actualizado mesmo com YARA/hashes frescos", async () =>
   assert.equal(result.yaraUpdated, false);
   assert.equal(result.hashesUpdated, false);
   const meta = readMeta(defs);
-  assert.ok(meta.components.clamav > now - HOUR);
-  assert.equal(meta.components.yara, now - HOUR);
-  assert.equal(meta.components.hashes, now - HOUR);
+  assert.ok(meta.components.clamav > now - FRESCO);
+  assert.equal(meta.components.yara, now - FRESCO);
+  assert.equal(meta.components.hashes, now - FRESCO);
 });
 
 test("tudo fresco não faz rede nem freshclam", async () => {
   const defs = path.join(ROOT, "tudo-fresco");
-  writeMeta(defs, { yara: now - HOUR, hashes: now - HOUR, clamav: now - HOUR });
+  writeMeta(defs, { yara: now - FRESCO, hashes: now - FRESCO, clamav: now - FRESCO });
   const { updater, network, spawnCalls } = makeUpdater(defs);
 
   const result = await updater.checkAndUpdate(false);
@@ -103,7 +124,7 @@ test("tudo fresco não faz rede nem freshclam", async () => {
 
 test("freshclam que falha NÃO renova a prova e é tentado outra vez", async () => {
   const defs = path.join(ROOT, "falha");
-  writeMeta(defs, { yara: now - HOUR, hashes: now - HOUR, clamav: now - 10 * 24 * HOUR });
+  writeMeta(defs, { yara: now - FRESCO, hashes: now - FRESCO, clamav: now - 10 * 24 * HOUR });
   const { updater, spawnCalls } = makeUpdater(defs, 1);
 
   const primeira = await updater.checkAndUpdate(false);
@@ -111,30 +132,36 @@ test("freshclam que falha NÃO renova a prova e é tentado outra vez", async () 
   assert.ok(primeira.errors.some((e) => e.startsWith("ClamAV:")));
   assert.equal(readMeta(defs).components.clamav, now - 10 * 24 * HOUR, "falha não é frescura");
 
+  const dentroDaRecusa = await updater.checkAndUpdate(false);
+  assert.equal(spawnCalls.length, 1, "dentro da janela de recusa não se repica no fornecedor");
+  assert.equal(dentroDaRecusa.clamUpdated, false);
+
+  expirarRecusa(defs, "clamav");
   const segunda = await updater.checkAndUpdate(false);
   assert.equal(segunda.clamUpdated, false);
-  assert.equal(spawnCalls.length, 2, "sem prova de sucesso o ciclo seguinte volta a tentar");
+  assert.equal(spawnCalls.length, 2, "sem prova de sucesso a fonte não fica congelada: tenta quando a recusa passa");
 });
 
 test("falha sem prova própria NÃO herda o timestamp global de outro componente", async () => {
   const defs = path.join(ROOT, "falha-sem-prova");
   // Metadado já migrado: YARA/hashes frescos, ClamAV sem entrada nenhuma.
-  writeMeta(defs, { yara: now - HOUR, hashes: now - HOUR });
+  writeMeta(defs, { yara: now - FRESCO, hashes: now - FRESCO });
   const { updater, spawnCalls } = makeUpdater(defs, 1);
 
   const primeira = await updater.checkAndUpdate(false);
   assert.equal(primeira.clamUpdated, false);
   assert.equal(spawnCalls.length, 1, "a ausência de prova do ClamAV é velhice, não frescura global");
 
+  expirarRecusa(defs, "clamav");
   const segunda = await updater.checkAndUpdate(false);
   assert.equal(segunda.clamUpdated, false);
-  assert.equal(spawnCalls.length, 2, "o global de YARA não pode adiar o ClamAV");
+  assert.equal(spawnCalls.length, 2, "o global de YARA não pode adiar o ClamAV, e a recusa do ClamAV expira");
   assert.equal(readMeta(defs).components.clamav, undefined, "falha continua sem prova");
 });
 
 test("migração de metadado legado tenta o ClamAV já; YARA/hashes herdam o global", async () => {
   const defs = path.join(ROOT, "migracao");
-  writeLegacyMeta(defs, now - HOUR);
+  writeLegacyMeta(defs, now - FRESCO);
   const { updater, network, spawnCalls } = makeUpdater(defs);
 
   const result = await updater.checkAndUpdate(false);
@@ -143,12 +170,12 @@ test("migração de metadado legado tenta o ClamAV já; YARA/hashes herdam o glo
   assert.equal(network.hashes, 0, "Hashes legados frescos podem herdar o global uma vez");
   assert.equal(spawnCalls.length, 1, "o global legado não é prova de frescura do ClamAV");
   assert.equal(result.clamUpdated, true);
-  assert.ok(readMeta(defs).components.clamav > now - HOUR);
+  assert.ok(readMeta(defs).components.clamav > now - FRESCO);
 });
 
 test("force continua a ser os três componentes", async () => {
   const defs = path.join(ROOT, "force");
-  writeMeta(defs, { yara: now - HOUR, hashes: now - HOUR, clamav: now - HOUR });
+  writeMeta(defs, { yara: now - FRESCO, hashes: now - FRESCO, clamav: now - FRESCO });
   const { updater, network, spawnCalls } = makeUpdater(defs);
 
   const result = await updater.checkAndUpdate(true);

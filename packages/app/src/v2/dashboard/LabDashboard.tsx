@@ -1,4 +1,4 @@
-import { securityEventPresentation } from "@/lib/securityEventPresentation";
+import { activityEventsForDisplay, securityEventPresentation } from "@/lib/securityEventPresentation";
 /** Presentation structure from Design Lab src/SecurityPages.tsx Dashboard.
  * No service access or demo imports: the container supplies measured contracts.
  */
@@ -54,6 +54,7 @@ export interface DashboardProps {
   pcState?: PcState | null;
   onScan?: (type: string, targetPath?: string) => void;
   onOpenScanner?: () => void;
+  onOpenHistory?: () => void;
   onOpenPC?: () => void;
   realtime?: RealtimeProtectionInfo;
   onSetProtection?: (enabled: boolean) => void;
@@ -80,7 +81,7 @@ const readingCopy: Record<ReadPhase, string> = {
 export default function LabDashboard(
   p: DashboardProps & { history: HistoryReading },
 ) {
-  const { animate } = useAppearance();
+  const { animate, effects } = useAppearance();
   const [details, setDetails] = useState(false),
     [control, setControl] = useState(false),
     [engine, setEngine] = useState<string | null>(null);
@@ -112,11 +113,7 @@ export default function LabDashboard(
       ? "sem_ligacao"
       : (p.eventsReadPhase ?? "a_consultar");
   const events =
-    eventPhase === "pronto"
-      ? [...(p.events ?? [])]
-          .sort((a, b) => b.sequence - a.sequence)
-          .slice(0, 3)
-      : [];
+    eventPhase === "pronto" ? activityEventsForDisplay(p.events ?? [], 3) : [];
   const selected = engines.find((e) => e.key === engine);
   const active = engines.filter((e) => e.state === "ACTIVE").length;
   const states = Object.fromEntries(
@@ -311,6 +308,12 @@ export default function LabDashboard(
               <ArrowUpRight size={14} />
             </button>
           )}
+          {p.onOpenHistory && (
+            <button className="text-link" onClick={p.onOpenHistory}>
+              Ver histórico completo
+              <ArrowRight size={14} />
+            </button>
+          )}
         </Panel>
       </div>
       <div id="dashboard-engines">
@@ -331,8 +334,8 @@ export default function LabDashboard(
         {engines.map((e) => (
           <SpotlightCard
             key={e.key}
-            intensity={animate ? 0.12 : 0}
-            borderGlow={animate ? 0.4 : 0}
+            intensity={animate && effects.glow ? 0.12 : 0}
+            borderGlow={animate && effects.glow ? 0.4 : 0}
             proximity={0}
             className="engine-card"
             data-engine={e.key}

@@ -38,6 +38,8 @@ for (const failure of ['unavailable', 'timeout', 'spawn', 'exit', 'output', 'can
     const result = response.results[0];
     assert.equal(result.verdict, 'inconclusive');
     assert.equal(result.analysisState, failure === 'unavailable' ? 'engine-unavailable' : failure === 'cancelled' ? 'inconclusive' : 'failed');
+    assert.equal(result.inconclusiveReason, failure === 'unavailable' ? 'engine-unavailable' : failure === 'cancelled' ? 'cancelled' : failure === 'timeout' ? 'timeout' : failure === 'output' ? 'invalid-output' : 'engine-failed');
+    assert.deepEqual(result.inconclusiveEngines, ['native']);
     assert.ok(result.nativeEngine, 'per-file native outcome must be present');
     assert.equal(result.nativeEngine.status, failure === 'unavailable' ? 'unavailable' : failure === 'cancelled' ? 'cancelled' : 'error');
     assert.equal(result.nativeEngine.failure, failure);
@@ -61,6 +63,8 @@ test('real bridge with binary absent propagates unavailable without spawning', a
   const result = (await engine.scanArtifact(file, 'system-scanner', { skipVirusTotal: true, readOnly: true })).results[0];
   assert.equal(result.verdict, 'inconclusive');
   assert.equal(result.analysisState, 'engine-unavailable');
+  assert.equal(result.inconclusiveReason, 'engine-unavailable');
+  assert.deepEqual(result.inconclusiveEngines, ['native']);
   assert.equal(result.nativeEngine.status, 'unavailable');
   assert.equal(NativeEngineBridge.pendingChildren, 0);
 });
@@ -116,6 +120,8 @@ test('native gap never erases positive evidence from other engines', async t => 
   const result = (await engine.scanArtifact(file, 'system-scanner', { skipVirusTotal: true, readOnly: true })).results[0];
   assert.equal(result.verdict, 'malicious');
   assert.equal(result.analysisState, 'engine-unavailable');
+  assert.equal(result.inconclusiveReason, 'engine-unavailable');
+  assert.deepEqual(result.inconclusiveEngines, ['native']);
   assert.equal(result.nativeEngine.status, 'unavailable');
   assert.equal(events.some(e => e.type === 'threat.detected'), true);
   assert.ok(await fs.stat(file));

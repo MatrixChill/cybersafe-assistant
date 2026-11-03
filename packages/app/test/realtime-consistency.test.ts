@@ -180,6 +180,27 @@ describe("G3 — buildMatrixContext", () => {
     assert.match(ctx, /Active threats: 1/, "as ameacas ativas continuam a ser contadas");
   });
 
+  test("tendencia de 24h usa apenas amostras datadas e nao conta o futuro", () => {
+    const now = Date.parse("2026-11-01T12:00:00.000Z");
+    const ctx = buildMatrixContext({
+      ...input,
+      now,
+      threats: [
+        { severity: "high", createdAt: "2026-11-01T11:00:00.000Z" },
+        { severity: "high", createdAt: "2026-11-01T10:00:00.000Z" },
+        { severity: "high", createdAt: "2026-10-31T06:00:00.000Z" },
+        { severity: "high", createdAt: "2026-11-02T12:00:00.000Z" },
+        { severity: "high", createdAt: "nao-e-data" },
+      ] as never,
+    });
+    assert.match(ctx, /Threats in retained feed: last 24h 2, previous 24h 1, trend up \(\+1\)/);
+  });
+
+  test("sem datas utilizaveis, a tendencia nao aparece", () => {
+    const ctx = buildMatrixContext({ ...input, threats: [{ severity: "high" }] as never });
+    assert.doesNotMatch(ctx, /Threats in retained feed/);
+  });
+
   test("o App usa o helper — a montagem inline nao voltou, e o WIP de scroll esta intacto", () => {
     const app = readFileSync(new URL("../src/App.tsx", import.meta.url), "utf8");
     assert.match(app, /import \{ buildMatrixContext \} from "\.\/lib\/matrixContext"/);

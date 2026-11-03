@@ -24,7 +24,7 @@ import * as os from "node:os";
 import * as path from "node:path";
 
 import {
-  APPROVER,
+  APPROVERS_ENV,
   FreezeError,
   buildManifest,
   digestEntries,
@@ -33,7 +33,14 @@ import {
 } from "../source-freeze.mjs";
 import { runFreezeGatedPipeline } from "../package-windows.mjs";
 
-const APPROVAL = { approvedBy: APPROVER, candidateId: "lane-freeze-assets-fixture", approvedAt: "2026-10-25T00:00:00.000Z" };
+const APROVADOR = "Proprietária do CyberSafe (fixture)";
+const REGISTO_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cs-approvers-assets-"));
+const REGISTO = path.join(REGISTO_DIR, "approvers.json");
+fs.writeFileSync(REGISTO, `${JSON.stringify({ schema: 1, owners: [APROVADOR], integrators: [] }, null, 2)}\n`, "utf8");
+process.env[APPROVERS_ENV] = REGISTO;
+process.on("exit", () => fs.rmSync(REGISTO_DIR, { recursive: true, force: true }));
+
+const APPROVAL = { approvedBy: APROVADOR, candidateId: "lane-freeze-assets-fixture", approvedAt: "2026-10-25T00:00:00.000Z" };
 const NOTICES = "assets/licenses/THIRD-PARTY-NOTICES.txt";
 const PROVENANCE = "assets/licenses/PROVENANCE.json";
 
@@ -48,10 +55,16 @@ function fixture(t) {
   };
   put("package.json", "{}\n");
   put("package-lock.json", "{}\n");
+  put("product-version.json", '{"version":"0.1.11","channel":"internal","codename":"fixture"}\n');
   put("scripts/a.mjs", "export const a = 1;\n");
   put("packages/core/src/index.ts", "export const b = 2;\n");
   put("packages/native-engine/build/Release/scan-engine.exe", "MZ\n");
+  put("packages/native-engine/build/Release/cybersafe-update-launcher.exe", "MZ-launcher\n");
   put("vendor/clamav/VENDOR.json", "{}\n");
+  put("vendor/yara/VENDOR.json", '{"schema":1,"engine":"yara-classic","version":"4.6.0"}\n');
+  put("vendor/yara/yara64.exe", "MZ\n");
+  put("vendor/yara/yarac64.exe", "MZ\n");
+  put("vendor/yara/COPYING.txt", "BSD-3-Clause (fixture)\n");
   put("assets/branding/logo.svg", "<svg/>\n");
   put("assets/licenses/rust/textos/SPDX-MIT.txt", "MIT (fixture)\n");
   put(NOTICES, "Avisos de terceiros (fixture).\n");

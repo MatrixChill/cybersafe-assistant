@@ -24,8 +24,11 @@ import {
   VirusTotalClient,
   SafeProcessTermination,
   matchesSnapshotCreation,
+  modosTerminacao,
   createWindowsTerminationOpener,
   type TerminationIdentity,
+  type TerminationLease,
+  type PosixProcessIdentity,
   HardwareHealthEngine,
   ClamavBridge,
   CLAMAV_ENGINE_PROCESS_NAMES,
@@ -45,7 +48,7 @@ import {
   encodeMessage,
   classifyKillTarget,  isAliasStubTarget,
   isProcessAlive,
-  killProcessTree,
+  killProcessPlatform,
   killTargetIdentity,
   KILL_REAP_DEADLINE_MS,
   KILL_REAP_INTERVAL_MS,
@@ -84,7 +87,8 @@ import { NativeWindowsWatcher,
 import { NativeEngineBridge } from "./native-engine-bridge.js";
 import { RealtimeFileQueue } from "./realtime-file-queue.js";
 import { RealtimeRecovery, type SaturationStage } from "./realtime-recovery.js";
-import { canAutoQuarantine, loadQuarantinePolicy, type QuarantinePolicy } from "./quarantine-policy.js";
+import { canAutoQuarantine, loadQuarantinePolicy, saveQuarantinePolicy, type QuarantinePolicy } from "./quarantine-policy.js";
+import { quarantinePathRefusal } from "./quarantine-mounts.js";
 import { isTransientFsError, TRANSIENT_SCAN_ERROR_WINDOW_MS } from "./scan-error.js";
 import { DefinitionUpdater, agendadorDefinicoesDeveArrancar, recuperacaoYaraPermitida } from "./updater.js";
 import { ClamDatabaseGate } from "./clam-database-gate.js";
@@ -97,6 +101,7 @@ import { createServiceLogWriters, shouldPersistEvent, formatScanLog, scanIdFromC
 import { UsbConfigStore, UsbProtectionMonitor } from "./usb-protection.js";
 import { UsbReadOnlyScanAdapter, criarConfirmacaoPresencaUsb } from "./usb-scan-adapter.js";
 import { criarDeteccaoUsbNativa } from "./usb-detection-adapter.js";
+import { criarDeteccaoUsbPosix } from "./usb-detection-adapter-posix.js";
 import { UsbProtectionRuntime, caminhoConfigUsb, motivoBloqueioUsbPolicy } from "./usb-protection-runtime.js";
 import { formatKillBlockedLine, type KillRequestKind } from "./logging.js";
 import type {
@@ -120,10 +125,15 @@ ProcessKillProtectionReason,
   ServiceCommandMap,
   ServiceResponseMap,
   ThreatEvent,
+  DefinitionsStatus,
+  DefinitionsSourceStatus,
+  DefinitionsSourceState,
+  ProcessTerminationMode,
 } from "@cybersafe/shared-types";
 import { hasDegradedProtections, ENGINE_DISPLAY_NAME, classifyProcessEnumerationError } from "@cybersafe/shared-types";
 import { RealtimeLossLedger } from "./realtime-loss.js";
-import type { KillProtectionContext, KillTargetInfo } from "@cybersafe/core";
+import type { KillProtectionContext, KillTargetInfo, PosixTerminationExpectation } from "@cybersafe/core";
+import { PosixProcessProvider, abrirLeasePosixTerminacao } from "@cybersafe/core";
 
 const execFileAsync = promisify(execFile);
 
@@ -148,6 +158,7 @@ interface RpcResponse<K extends keyof ServiceResponseMap = keyof ServiceResponse
 error aqui deve prolongar o encerramento.
  */
 const SHUTDOWN_BLOCKED_METHODS = new Set<string>([
+  "exclusions.update",
   "scan.start",
   "scan.fullSystem",
   "definitions.update",
@@ -391,6 +402,23 @@ const OWN_CHILD_IDENTITY_FUTURE_SLACK_MS = 2_000;
  */
 const HARDWARE_SNAPSHOT_REUSE_MS = 1_000;
 
+/** Traduz o codigo de bloqueio para uma causa accionavel. Sem caminhos. */
+export function terminationBlockedMessage(code: string): string {
+  switch (code) {
+    case "session-unauthenticated": return "Sessão não autenticada; nenhuma terminação foi enviada. Volta a iniciar sessão na aplicação.";
+    case "service-shutting-down": return "O serviço está a encerrar; nenhuma terminação foi enviada.";
+    case "service-not-ready": return "O serviço ainda não terminou o arranque; tenta novamente quando estiver pronto.";
+    case "readonly-mode": return "Modo de leitura ativo: a terminação de processos está desativada nesta sessão.";
+    case "critical-operation": return "Há uma operação crítica da aplicação em curso (proteção ou definições). Nenhuma terminação foi executada; tenta novamente quando terminar.";
+    case "definitions-update-in-progress": return "Está a decorrer uma atualização de definições. Nenhuma terminação foi executada; tenta novamente quando terminar.";
+    case "protected-or-identity-unconfirmed": return "O processo é protegido ou a identidade já não corresponde à instância selecionada.";
+    case "posix-sem-clk-tck": return "Terminação indisponível: sem CLK_TCK o instante de criação não é conversível; nenhum bilhete foi emitido.";
+    case "posix-sem-btime": return "Terminação indisponível: /proc/stat não publica btime, portanto não há instante de criação verificável.";
+    case "posix-proc-ilegivel": return "Terminação indisponível: /proc não é legível; o CyberSafe não emite confirmação sem fonte de identidade.";
+    default: return "Terminação indisponível: " + code;
+  }
+}
+
 export class ProtectionEngineService {
   /** Admission can be OFF while a previous module teardown remains unconfirmed. */
   private protectionStopUnconfirmed = false;
@@ -491,6 +519,13 @@ export class ProtectionEngineService {
   private readonly quarantine: QuarantineManager;
   private readonly watcher = new NativeWindowsWatcher();
   private readonly processMonitor = new ProcessMonitor();
+  /**
+   * Fornecedor de processos POSIX. O `ProcessMonitor` acima é o CIM do
+   * Windows: em Linux lança `spawn powershell.exe ENOENT`, e o Gestor de
+   * Tarefas ficava sem nenhuma linha. A enumeração escolhe a fonte por
+   * plataforma em `enumerateProcesses()`; em Windows nada muda.
+   */
+  private readonly posixProcessProvider = new PosixProcessProvider();
   private readonly etwConsumer = new EtwConsumer();
   private readonly wfpFilter = new WfpFilter();
   private readonly amsiProvider = new AmsiProvider();
@@ -596,7 +631,11 @@ export class ProtectionEngineService {
     // identidade, e o adapter volta a enumerar para CONFIRMAR o alvo ANTES de
     // o scan declarar `completed` — as duas leem a mesma fonte, sem duplicar
     // o enumerador nativo.
-    const deteccaoUsb = criarDeteccaoUsbNativa();
+    // A fonte depende da plataforma; a política não muda uma vírgula. Em Linux não
+    // há CIM: o detetor nativo invocaria PowerShell para enumerar, e o kernel já
+    // diz o transporte em sysfs. O ramo `else` é a linha exata que estava aqui.
+    const deteccaoUsb =
+      process.platform === "linux" ? criarDeteccaoUsbPosix() : criarDeteccaoUsbNativa();
     this.usbAdapter = new UsbReadOnlyScanAdapter({
       scans: {
         startScan: (type, targetPath, options) => this.scanManager.startScan(type, targetPath, options),
@@ -775,11 +814,19 @@ export class ProtectionEngineService {
   private killProbeMinIntervalMs = 500;
   /** Antes de quantas confirmações seguidas o CIM diz "não existe"? Um falhanço transitório não mata ninguém. */
   private killProbeConfirmations = 2;
-  /** Seam de teste: execução do taskkill (mesmo padrão do spawnImpl no core).
+  /** Seam de teste: execução da terminação (mesmo padrão do spawnImpl no core).
    *  P4: aceita `timeoutMs` para que o kill possa limitar a etapa ao orçamento
    *  global restante. `killProcessTree` no core já suporta `timeoutMs`, logo
-   *  esta é a única superfície que alarga — o core não muda. */
-  private readonly runTaskkill: (pid: number, options?: { timeoutMs?: number }) => Promise<KillProcessResult> = killProcessTree;
+   *  esta é a única superfície que alarga — o core não muda.
+   *  P1-LINUX: o alvo passa a ser `killProcessPlatform`. Em Windows é o MESMO
+   *  `killProcessTree`/`taskkill` de sempre; em POSIX envia SIGTERM com
+   *  revalidação por `/proc`, porque `taskkill` não existe e chamá-lo produziria
+   *  ENOENT apresentado como falha sem causa. O nome do campo mantém-se para não
+   *  partir os testes que o substituem. */
+  private readonly runTaskkill: (
+    pid: number,
+    options?: { timeoutMs?: number } & PosixTerminationExpectation,
+  ) => Promise<KillProcessResult> = killProcessPlatform;
   private connections: ConnectionSnapshot[] = [];
   private blockedHashes = new Set<string>();
   private blockedPaths = new Set<string>();
@@ -916,8 +963,12 @@ export class ProtectionEngineService {
    * O corpo antigo vive em `initInternal` para não alterar a ordem interna.
    */
   async init() {
+    const initStartedAt = performance.now();
     try {
       await this.initInternal();
+      // Instrumentação sanitizada: tempo total até o serviço poder declarar-se
+      // pronto. O probe nativo é assíncrono e não bloqueia este número.
+      console.log(`[Service] engine-init totalMs=${Math.round(performance.now() - initStartedAt)}`);
       // O dispose pode chegar durante um await do init. Nesse caso o motor já
       // está a encerrar: NUNCA se declara ready nem se deixa o bootstrap enviar
       // `service-ready` sobre um serviço meio-desmontado.
@@ -953,6 +1004,7 @@ export class ProtectionEngineService {
   private async initInternal() {
     this.throwIfDisposed();
     await fs.mkdir(this.baseDir, { recursive: true });
+    await this.exclusions.init(path.join(this.baseDir, "exclusions.json"), [path.resolve(path.dirname(fileURLToPath(import.meta.url)), ".."), path.dirname(process.execPath)]);
     this.quarantinePolicy = await loadQuarantinePolicy(path.join(this.baseDir, "protection-policy.json"));
     await fs.mkdir(this.logsDir, { recursive: true });
     await this.seedDefinitions();
@@ -1326,7 +1378,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // proteção não o volta a arrancar (e não contorna a guarda readonly).
 
       Promise.all([
-        this.processMonitor.list().then((p) => {
+        this.enumerateProcesses().then((p) => {
           const revisionBefore = this.processesRevision;
           this.processes = this.withoutTombstoned(p);
           // O restart da proteção pode apanhar um kill em curso: vale a mesma
@@ -2236,7 +2288,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       if (stat.isDirectory() || stat.isSymbolicLink()) return true;
       fingerprint = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
     } catch {
-      if (this.protectionState && !this.isShuttingDown && generation === this.protectionGeneration) this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.");
+      if (this.protectionState && !this.isShuttingDown && generation === this.protectionGeneration) this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.", "file-changed");
       return true;
     } finally {
       --this.fileObservationReads;
@@ -2247,9 +2299,16 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     const admission = this.realtimeQueue.enqueue(path.resolve(filePath).toLowerCase(), fingerprint, async () => {
       if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || signal.aborted) return;
       await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true });
-    });
+    }, this.realtimePriority(filePath));
     if (admission === "full") { this.reportRealtimeOverflow(filePath, "analysis", retry); return false; }
     return true;
+  }
+
+  /** Downloads primeiro: e onde o EICAR chega e onde a detecao tardia se nota. */
+  private realtimePriority(filePath: string): "high" | "normal" {
+    const home = process.env.USERPROFILE || os.homedir();
+    const downloads = path.resolve(home, "Downloads").toLowerCase() + path.sep;
+    return path.resolve(filePath).toLowerCase().startsWith(downloads) ? "high" : "normal";
   }
 
   private reportRealtimeOverflow(caminho = "", stage: SaturationStage = "analysis", retry = false): void {
@@ -2303,20 +2362,48 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     });
   }
 
-  private publishInconclusiveFile(filePath: string, reason: string): ServiceResponseMap["scan.artifact"] {
-    const result = { fileName:path.basename(filePath),size:0,severity:"low" as const,confidence:0,rulesTriggered:[],riskScore:0,verdict:"inconclusive" as const,sha256:"",analysisState:"failed" as const,detail:reason };
+  private publishInconclusiveFile(
+    filePath: string,
+    reason: string,
+    inconclusiveReason: import("@cybersafe/shared-types").InconclusiveReason = "no-verdict",
+    inconclusiveEngine: import("@cybersafe/shared-types").InconclusiveEngine = "filesystem",
+  ): ServiceResponseMap["scan.artifact"] {
+    const result = { fileName:path.basename(filePath),size:0,severity:"low" as const,confidence:0,rulesTriggered:[],riskScore:0,verdict:"inconclusive" as const,sha256:"",analysisState:"failed" as const,inconclusiveReason,inconclusiveEngines:[inconclusiveEngine],detail:reason };
     this.eventBus.publish("artifact.analyzed", "low", reason, {...result,artifactPath:filePath,reason});
     return {results:[result],totalFiles:1,highRiskCount:0,overallSeverity:"low",rulesTriggered:[],riskScore:0};
   }
 
   private async requestQuarantine(analysis: AnalysisResult, authorization: "manual" | "automatic"): Promise<boolean> {
     const evidence = {artifactPath:analysis.artifactPath,fileName:analysis.fileName,sha256:analysis.sha256,authorization};
+    // Linux Lite §9: «a quarentena deve respeitar … Caminhos protegidos. Links
+    // simbólicos. Mount points.» Os três portões vivem numa só função
+    // precisamente para serem a função que os testes exercitam. A recusa por
+    // montagem não é coberta pelas duas primeiras: `/media/...` não é raiz
+    // protegida nem link, e o §10 acabou de dar ao utilizador um botão que
+    // analisa um volume montado — o produto passou a ter montagens nos alvos.
+    const recusa = await quarantinePathRefusal(analysis.artifactPath, { baseDir: this.baseDir, execPath: process.execPath });
+    if (recusa) {
+      const descricao = recusa === "protected-path"
+        ? `Isolamento recusado por caminho protegido: ${analysis.fileName}`
+        : recusa === "mount-point"
+          ? `Isolamento recusado por ser um ponto de montagem: ${analysis.fileName}`
+          : recusa === "mount-table-incomplete"
+            ? `Isolamento recusado: a tabela de montagens tem linhas não interpretadas e não se pode confirmar que ${analysis.fileName} não é uma montagem`
+            : `Isolamento recusado: a tabela de montagens não pôde ser lida e não se pode confirmar que ${analysis.fileName} não é uma montagem`;
+      this.eventBus.publish("quarantine.failed", "high", descricao, {...evidence, reason:recusa});
+      void this.logHistory({type:"quarantine.failed",...evidence,reason:recusa,timestamp:new Date().toISOString()});
+      return false;
+    }
     this.eventBus.publish("quarantine.requested", "high", `Quarentena solicitada: ${analysis.fileName}`, evidence);
     try {
       const entry = await this.quarantine.quarantine(analysis);
       if (!entry) throw new Error("Operação não confirmada");
       this.eventBus.publish("quarantine.added", "critical", `Colocado em quarentena ${analysis.fileName}`, entry);
-      void this.logHistory({type:"quarantine.added",entry,timestamp:new Date().toISOString()});
+      // A prova fica no registo em disco, não só no evento: as duas linhas de
+      // recusa já levam `authorization`, e uma auditoria onde só as falhas dizem
+      // quem autorizou não permite responder, dias depois, se um isolamento foi
+      // pedido pelo utilizador ou feito pelo motor.
+      void this.logHistory({ type: "quarantine.added", ...evidence, entry, timestamp: new Date().toISOString() });
       return true;
     } catch {
       this.eventBus.publish("quarantine.failed", "high", `Não foi possível confirmar o isolamento de ${analysis.fileName}. Verifique a quarentena e o ficheiro.`, evidence);
@@ -2585,6 +2672,23 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     setTimeout(() => {
        process.exit(0);
     }, 200);
+  }
+
+  private async changeQuarantinePolicy(payload: { policy?: unknown; consent?: unknown }): Promise<{ ok: boolean; policy: QuarantinePolicy; error?: string }> {
+    const saved = await saveQuarantinePolicy(
+      path.join(this.baseDir, "protection-policy.json"),
+      payload?.policy,
+      payload?.consent,
+    );
+    if (!saved.ok) return saved;
+    this.quarantinePolicy = saved.policy;
+    void this.logHistory({
+      type: "quarantine.policy.changed",
+      policy: saved.policy,
+      authorization: saved.policy === "automatic-high-confidence" ? "user-consent" : "explicit",
+      timestamp: new Date().toISOString(),
+    });
+    return { ok: true, policy: saved.policy };
   }
 
   getProtectionState(): ProtectionState {
@@ -3050,10 +3154,10 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       let beforeFile: string;
       try {
         const stat = await fs.lstat(filePath);
-        if (!stat.isFile() || stat.isSymbolicLink()) return this.publishInconclusiveFile(filePath, "O alvo não é um ficheiro regular; análise não realizada.");
+        if (!stat.isFile() || stat.isSymbolicLink()) return this.publishInconclusiveFile(filePath, "O alvo não é um ficheiro regular; análise não realizada.", "no-verdict");
         beforeFile = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
       } catch {
-        return options?.backgroundSignal?.aborted ? null : this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.");
+        return options?.backgroundSignal?.aborted ? null : this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.", "file-changed");
       }
       const analysis = await this.analyzer.analyze(filePath, undefined, undefined, {
         signal: options?.backgroundSignal ?? this.signalForScan(options?.scanId),
@@ -3076,8 +3180,8 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       if (beforeFile !== undefined) {
         try {
           const stat = await fs.lstat(filePath);
-          if (beforeFile !== `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`) return this.publishInconclusiveFile(filePath, "Ficheiro alterado durante a análise; o resultado anterior não foi aplicado.");
-        } catch { return this.publishInconclusiveFile(filePath, "Ficheiro removido ou inacessível durante a análise."); }
+          if (beforeFile !== `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`) return this.publishInconclusiveFile(filePath, "Ficheiro alterado durante a análise; o resultado anterior não foi aplicado.", "file-changed");
+        } catch { return this.publishInconclusiveFile(filePath, "Ficheiro removido ou inacessível durante a análise.", "file-changed"); }
       }
 
       // Per-file coverage must come from this invocation, never cached health.
@@ -3159,6 +3263,24 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
         !nativeCompleted ? nativeFailure === "unavailable" ? "engine-unavailable"
           : nativeFailure === "cancelled" ? "inconclusive" : "failed"
         : upstreamIncomplete ? "inconclusive" : "completed";
+      // A causa e' um codigo desta invocacao. `coverageDetail` e' apenas texto.
+      const inconclusiveReason: import("@cybersafe/shared-types").InconclusiveReason | undefined =
+        !nativeCompleted
+          ? nativeFailure === "unavailable" ? "engine-unavailable"
+            : nativeFailure === "cancelled" ? "cancelled"
+            : nativeFailure === "timeout" ? "timeout"
+            : nativeFailure === "output" ? "invalid-output"
+            : "engine-failed"
+          : analysis.factors.some((factor) => factor.id === "scan-cancelled") ? "cancelled"
+          : analysis.factors.some((factor) => factor.id === "yara-timeout") ? "timeout"
+          : analysis.factors.some((factor) => ["clamav-inconclusive", "yara-inconclusive"].includes(factor.id)) ? "engine-failed"
+          : upstreamIncomplete ? "coverage-incomplete"
+          : undefined;
+      const inconclusiveEngines: import("@cybersafe/shared-types").InconclusiveEngine[] = [
+        ...(!nativeCompleted ? ["native" as const] : []),
+        ...(analysis.factors.some((factor) => factor.id === "clamav-inconclusive") ? ["clamav" as const] : []),
+        ...(analysis.factors.some((factor) => ["yara-inconclusive", "yara-timeout"].includes(factor.id)) ? ["yara" as const] : []),
+      ];
       const coverageDetail = nativeDetail ?? (upstreamIncomplete
         ? "Pelo menos um motor não conseguiu avaliar o ficheiro; a deteção disponível foi preservada, mas a cobertura é inconclusiva."
         : undefined);
@@ -3211,7 +3333,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
       }
 
-      this.eventBus.publish("artifact.analyzed", finalSeverity, `Analisado ${analysis.fileName}`, { ...analysis, vtResult, analysisState, nativeEngine, detail: coverageDetail });
+      this.eventBus.publish("artifact.analyzed", finalSeverity, `Analisado ${analysis.fileName}`, { ...analysis, vtResult, analysisState, inconclusiveReason, inconclusiveEngines, nativeEngine, detail: coverageDetail });
 
 
       // Log VT result to Action log (Workstream F: rotation + dedupe)
@@ -3229,6 +3351,8 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           riskScore: finalRiskScore,
           verdict: analysis.verdict,
           analysisState,
+          inconclusiveReason,
+          inconclusiveEngines,
           nativeEngine,
           detail: coverageDetail,
           sha256: analysis.sha256,
@@ -3251,7 +3375,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       } else {
         console.error("Scan error:", err);
       }
-      return this.publishInconclusiveFile(filePath, "A análise falhou; não foi possível concluir um veredicto.");
+      return this.publishInconclusiveFile(filePath, "A análise falhou; não foi possível concluir um veredicto.", "engine-failed");
     }
   }
 
@@ -3357,15 +3481,32 @@ if (processInfo.path) {
   }
 
   async restoreQuarantine(id: string, trustAfterRestore = false) {
+    if (typeof trustAfterRestore !== "boolean") {
+      return { success: false, error: "Consentimento de confiança inválido; nenhum restauro executado." };
+    }
     const entry = this.quarantine.list().find((item) => item.id === id);
     const { success: restored, error } = await this.quarantine.restore(id, "desktop-ui");
     const success = restored === true;
-    if (success && trustAfterRestore && entry?.sha256) {
+    if (success && trustAfterRestore === true && entry?.sha256) {
       await this.allowHash(entry.sha256);
     }
     if (success) {
       this.eventBus.publish("quarantine.restored", "low", `Entrada de quarentena restaurada ${id}`, { id });
     }
+    // Linux Lite §9 «Auditoria»: um ficheiro que volta a existir no sistema de
+    // ficheiros é tantas vezes o acontecimento importante como o que foi isolado,
+    // e esta era a única mutação do ciclo da quarentena sem registo em disco. A
+    // linha nomeia o ficheiro (a UI só mostra um `id`), diz se o utilizador pediu
+    // confiança permanente e fica também quando a recusa aconteceu — uma recusa
+    // não auditada é indistinguível de «ninguém tentou».
+    void this.logHistory({
+      type: success ? "quarantine.restored" : "quarantine.restore.failed",
+      id,
+      ...(entry ? { fileName: entry.fileName, sha256: entry.sha256, artifactPath: entry.originalPath } : {}),
+      trustAfterRestore,
+      ...(error !== undefined ? { error } : {}),
+      timestamp: new Date().toISOString(),
+    });
     return { success, ...(error !== undefined ? { error } : {}) };
   }
 
@@ -3373,6 +3514,79 @@ if (processInfo.path) {
     // Sem evento publico: um "eliminado" nao tem tipo de evento proprio e
     // reaproveitar "restored" seria mentir sobre o que aconteceu ao ficheiro.
     return this.quarantine.delete(id);
+  }
+
+  /**
+   * `definitions.status` — leitura do estado POR FONTE para a UI das definições.
+   *
+   * Sem side-effect e sem rede: é a memória do serviço + o `.update-meta.json`.
+   * O que importa aqui é a honestidade dos cinco estados: um motor que não está
+   * instalado não pode aparecer como «desactualizado» (sugeriria que bastava
+   * esperar), e uma base parcial não pode aparecer como «actualizada» porque a
+   * última tentativa correu. Por isso a saúde do motor tem precedência sobre a
+   * idade da base, e a idade só é mostrada quando a saúde confirma cobertura.
+   */
+  async definitionsStatus(): Promise<DefinitionsStatus> {
+    const agora = Date.now();
+    const brutas = this.updater.estadoDasFontes(agora);
+    const saudeClamav = this.clamav.health;
+    const saudeYara = this.yara.health;
+
+    let nomesDaBase: string[] = [];
+    try {
+      nomesDaBase = await fs.readdir(path.join(this.definitionsDir, "clamav"));
+    } catch {
+      nomesDaBase = [];
+    }
+    const diaria = nomesDaBase.find((n) => /^daily[-.]/i.test(n)) ?? null;
+
+    const fontes: DefinitionsSourceStatus[] = brutas.map((bruta) => {
+      const motor: "out" | "degradado" | "ok" =
+        bruta.fonte === "clamav"
+          ? saudeClamav.status === "active"
+            ? "ok"
+            : saudeClamav.status === "degraded"
+              ? "degradado"
+              : "out"
+          : bruta.fonte === "yara"
+            ? saudeYara.status === "error" || saudeYara.status === "unavailable"
+              ? "out"
+              : saudeYara.status !== "active"
+                ? "degradado"
+                : "ok"
+            : "ok";
+      let estado: DefinitionsSourceState;
+      if (motor === "out") {
+        estado = bruta.nuncaVerificado ? "nunca_verificado" : "indisponivel";
+      } else if (motor === "degradado" || bruta.emBackoff) {
+        estado = "degradado";
+      } else if (bruta.ultimaBemSucedidaAtMs === null) {
+        estado = "nunca_verificado";
+      } else {
+        estado =
+          agora - bruta.ultimaBemSucedidaAtMs > bruta.cadenciaMs ? "desactualizado" : "actualizado";
+      }
+      return {
+        fonte: bruta.fonte,
+        estado,
+        ultimaBemSucedidaAtMs: bruta.ultimaBemSucedidaAtMs,
+        ultimaTentativaAtMs: bruta.ultimaTentativaAtMs,
+        ultimoErro: bruta.ultimoErro,
+        tentativasConsecutivas: bruta.tentativasConsecutivas,
+        proximaVerificacaoAtMs: bruta.proximaVerificacaoAtMs,
+        cadenciaMs: bruta.cadenciaMs,
+        identificadorBase:
+          bruta.fonte === "clamav" ? diaria : bruta.fonte === "hashes" ? "hashes/default.json" : "yara/default.yar",
+        itensCarregados:
+          bruta.fonte === "hashes"
+            ? this.signatures.size
+            : bruta.fonte === "clamav"
+              ? nomesDaBase.filter((n) => /\.(cvd|cld)$/i.test(n)).length || null
+              : null,
+      };
+    });
+
+    return { fontes, cicloEmCurso: this.updater.operationInProgress, geradoEmMs: agora };
   }
 
   async updateDefinitions() {
@@ -3671,7 +3885,7 @@ if (processInfo.path) {
       this.processesEnumerating = (async () => {
         let falhou = false;
         try {
-          const fresh = await this.processMonitor.list();
+          const fresh = await this.enumerateProcesses();
           // Uma enumeração é uma FOTO. Um processo que nasce (ou que a UI mata)
           // enquanto ela corre não pode estar na foto, e overwrite simples
           // apagava do cache um processo VIVO — ou trazia de volta um morto.
@@ -3720,6 +3934,81 @@ if (processInfo.path) {
     }
     const { rows, servedFrom } = await this.processesEnumerating;
     return { processes: rows, truth: this.composeProcessesTruth(servedFrom) };
+  }
+
+  /**
+   * Fonte da foto de processos, escolhida em tempo de chamada: Windows mantém
+   * exatamente o `ProcessMonitor` de CIM de sempre; POSIX enumera `/proc`. A
+   * escolha por plataforma (e não por importação) é o que permite correr o
+   * mesmo ficheiro compilado nos dois sistemas sem importar APIs Windows no
+   * caminho Linux.
+   */
+  private async enumerateProcesses(): Promise<ProcessSnapshot[]> {
+    if (process.platform === "win32") return this.processMonitor.list();
+    return this.posixProcessProvider.list();
+  }
+
+  /**
+   * Fonte de identidade pontual — o mesmo `queryCimProcesses` do Windows, `/proc`
+   * em POSIX, com os mesmos três filtros (`ProcessId=n`, `ParentProcessId=n`,
+   * `Name='x'`). Uma primitiva dispatchada em vez de um ramo em cada chamada é o
+   * que garante que a foto, a revalidação antes do sinal, o diagnóstico de alias,
+   * a varredura de árvore e a sonda de reaparecimento vêm todos do MESMO sítio:
+   * a comparação de identidade só vale entre duas leituras da mesma fonte.
+   *
+   * Não há ramo POSIX que «_ENUMERA TUDO_» aqui disfarçado: um filtro que o
+   * fornecedor não saiba interpretar LANÇA, em vez de responder «não existe».
+   */
+  private async consultarFonteIdentidade(
+    filtro: string,
+    timeoutMs = ProtectionEngineService.CIM_QUERY_TIMEOUT_MS,
+  ): Promise<Array<KillTargetInfo & { startedAt?: string }>> {
+    if (process.platform === "win32") return this.queryCimProcesses(filtro, timeoutMs);
+    return this.posixProcessProvider.consultar(filtro);
+  }
+
+  /** Rótulo da fonte que foi consultada — para o diagnóstico não nomear o que não correu. */
+  private get rotuloFonteIdentidade(): string {
+    return process.platform === "win32" ? "CIM" : "/proc";
+  }
+
+  /** O que foi realmente enviado ao processo: `taskkill` só existe em Windows. */
+  private get rotuloTerminacao(): string {
+    return process.platform === "win32" ? "taskkill" : "SIGTERM";
+  }
+
+  /**
+   * A terminação está indisponível, e porquê.
+   *
+   * Windows: a decisão do congelamento da R7 vale sozinha — `KILL_TERMINATION_DISABLED`
+   * não ganhou exceção nem plataforma, e a linha de auditoria e o erro ficam
+   * byte a byte como estavam.
+   *
+   * POSIX: a cadeia de identidade é `/proc` + `getconf`. Sem `CLK_TCK` ou sem
+   * `btime` não há instante de criação provável, e sem instante não há
+   * autorização para sinalizar — perguntar isto antes de aceitar o pedido dá um
+   * motivo nomeado em vez de um `failed` sem explicação.
+   */
+  private bloqueioDeTerminacao(): { motivo: string; mensagem: string } | null {
+    if (process.platform === "win32") {
+      return ProtectionEngineService.KILL_TERMINATION_DISABLED
+        ? {
+          motivo: "legacy-disabled",
+          mensagem: "Terminação de processos indisponível: identidade não pode ser provada de ponta a ponta; nenhuma ação foi executada.",
+        }
+        : null;
+    }
+    const cadeia = this.posixProcessProvider.cadeiaIdentia();
+    if (cadeia.ok) return null;
+    const porque = cadeia.motivo === "sem-clk-tck"
+      ? "getconf CLK_TCK indisponível: o instante de criação não é conversível"
+      : cadeia.motivo === "sem-btime"
+        ? "/proc/stat sem btime: o instante de criação não é verificável"
+        : "/proc ilegível: não há fonte de identidade";
+    return {
+      motivo: cadeia.motivo,
+      mensagem: `Terminação de processos indisponível neste sistema: ${porque}; nenhuma ação foi executada.`,
+    };
   }
 
   /**
@@ -3798,7 +4087,7 @@ if (processInfo.path) {
     pid: number,
     timeoutMs?: number,
   ): Promise<(KillTargetInfo & { startedAt?: string }) | undefined> {
-    const rows = await this.queryCimProcesses(`ProcessId=${pid}`, timeoutMs);
+    const rows = await this.consultarFonteIdentidade(`ProcessId=${pid}`, timeoutMs);
     return rows.find((entry) => entry.pid === pid);
   }
 
@@ -3807,7 +4096,7 @@ if (processInfo.path) {
     // not-found; uma falha de CIM aqui não pode inventar uma instância viva.
     // Por isso este é o único caminho tolerante explícito.
     try {
-      return await this.queryCimProcesses(`Name='${name.replace(/'/g, "''")}'`, timeoutMs);
+      return await this.consultarFonteIdentidade(`Name='${name.replace(/'/g, "''")}'`, timeoutMs);
     } catch {
       return [];
     }
@@ -3897,7 +4186,7 @@ if (processInfo.path) {
       for (const parentPid of frontier) {
         const children = treeChildrenOf(
           parentPid,
-          await this.queryCimProcesses(`ParentProcessId=${parentPid}`, step(ProtectionEngineService.KILL_ALIAS_QUERY_TIMEOUT_MS)),
+          await this.consultarFonteIdentidade(`ParentProcessId=${parentPid}`, step(ProtectionEngineService.KILL_ALIAS_QUERY_TIMEOUT_MS)),
         );
         for (const child of children) {
           if (seen.has(child.pid)) continue;
@@ -3907,7 +4196,10 @@ if (processInfo.path) {
             continue;
           }
           if (!isProcessAlive(child.pid)) continue;
-          const result = await this.runTaskkill(child.pid, { timeoutMs: step(ProtectionEngineService.KILL_TREE_CHILD_TIMEOUT_MS) });
+          const result = await this.runTaskkill(child.pid, {
+            timeoutMs: step(ProtectionEngineService.KILL_TREE_CHILD_TIMEOUT_MS),
+            esperadoNome: child.name,
+          });
           const stillThere = await this.killTargetStillAlive(child.pid, step(ProtectionEngineService.KILL_ALIAS_QUERY_TIMEOUT_MS));
           if (!stillThere && result.status !== "timeout") {
             killed.push(child.pid);
@@ -3926,16 +4218,28 @@ if (processInfo.path) {
   private criticalRpcOperations = 0;
 
   private terminationBlocked(identity?: TerminationIdentity): string | null {
-    const gate = this.clamDatabaseGate.state;
-    // Check actual work, not the enabled/disabled preference. No await follows
-    // this final gate before the native operation; protection is never suspended.
-    if (!this.pipeAuthRequired || !this.pipeToken || this.disposed || this.isShuttingDown ||
-        this.startupStateValue !== "ready" || this.criticalRpcOperations > 0 || process.env.CYBERSAFE_DEV_WINDOWS_READONLY === "1" ||
-        process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN === "1" ||
-        this.protectionTransition || this.protectionStopUnconfirmed || this.fileObservationReads > 0 ||
-        this.realtimeQueue.size > 0 || this.realtimeQueue.active > 0 || this.clamavPrefetches.size > 0 || this.scanAbortControllers.size > 0 ||
-        this.scanManager.getActiveScan() || this.updater.operationInProgress ||
-        gate.activeScans > 0 || gate.updatePending || gate.updateActive) return "critical-operation-or-untrusted-session";
+    // Cada causa tem o seu codigo: a UI nao pode dizer "operacao critica" a quem
+    // so precisa de saber que a sessao nao esta autenticada ou que ha um scan a
+    // correr. O bloqueio mantem-se exatamente o mesmo; so a RAZAO fica nomeada.
+    if (!this.pipeAuthRequired || !this.pipeToken) return "session-unauthenticated";
+    if (this.disposed || this.isShuttingDown) return "service-shutting-down";
+    if (this.startupStateValue !== "ready") return "service-not-ready";
+    if (process.env.CYBERSAFE_DEV_WINDOWS_READONLY === "1" ||
+        process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN === "1") return "readonly-mode";
+    if (this.criticalRpcOperations > 0 || this.protectionTransition || this.protectionStopUnconfirmed) return "critical-operation";
+    // A terminação individual é uma operação sobre um HANDLE de processo, não
+    // sobre a fila de ficheiros nem sobre o scan global. O trabalho de ficheiros
+    // pode continuar a correr: a identidade é revalidada no prepare e outra vez
+    // no confirm, e o alvo protegido continua recusado por classifyKillTarget.
+    // Manter estes dois vetos transformava qualquer fila activa numa recusa
+    // indefinida de terminar uma aplicação benigna (P0 medido no Notepad).
+    // Em POSIX a cadeia é `/proc` + `getconf`. Se o instante não é conversível,
+    // o bilhete não tem nada para comparar — e um `reused` genético seria uma
+    // mentira sobre o alvo. Perguntar à fonte aqui dá a razão certa.
+    if (process.platform !== "win32") {
+      const cadeia = this.posixProcessProvider.cadeiaIdentia();
+      if (!cadeia.ok) return `posix-${cadeia.motivo}`;
+    }
     if (identity) {
       const cached = this.processes.find(p => p.pid === identity.pid);
       if (!cached || !matchesSnapshotCreation(cached.startedAt,identity.creation) ||
@@ -3946,17 +4250,64 @@ if (processInfo.path) {
   }
 
   private nativeTerminationOpen: ReturnType<typeof createWindowsTerminationOpener> | null = null;
-  private openIndividualProcess(pid:number) {
+  private openIndividualProcess(pid: number, mode: ProcessTerminationMode): TerminationLease {
+    if (process.platform !== "win32") return this.openIndividualProcessPosix(pid, mode);
+    // O controlador já recusou qualquer fora de `modosTerminacao("win32")`
+    // antes de chegar aqui; este throw é a cintura, não a porta.
+    if (mode !== "sigterm") throw new Error(`win32: modo «${mode}» indisponível; nenhum sinal foi enviado`);
     this.nativeTerminationOpen ??= createWindowsTerminationOpener();
     return this.nativeTerminationOpen(pid);
+  }
+
+  /**
+   * O que o lease POSIX pergunta a `classifyKillTarget`: o `pid` sozinho já
+   * bastava no Windows porque lá o handle é a identidade; aqui o alvo é lido
+   * do `/proc` no instante da pergunta, portanto `ppid` e `path` existem e a
+   * proteção por ancestral/descendente/componente interno funciona de verdade.
+   * `ownChildPids` entra porque o contexto de proteção é construído a partir
+   * da cadeia vista no snapshot, e um filho nosso recém-nascido pode não estar
+   * nessa cadeia ainda.
+   */
+  private alvoProtegidoPosix(identidade: PosixProcessIdentity, caminho: string): boolean {
+    if (this.ownChildPids.has(identidade.pid)) return true;
+    return classifyKillTarget(
+      { pid: identidade.pid, ppid: identidade.ppid, name: identidade.comm, path: caminho },
+      this.killProtectionContext(),
+    ) !== null;
+  }
+
+  /**
+   * Bilhete POSIX. Em Windows o `open` pinha um handle de processo; em POSIX
+   * não há `pidfd_open` exposto pelo Node, por isso o lease fixa o `starttime`
+   * lido agora e relê `/proc` antes de cada decisão — e diz `identity-
+   * reconfirmed` em vez de fingir que foi um handle. Sem `CLK_TCK` ou sem
+   * `btime` não há instante: lançar aqui devolve uma falha nomeada no `prepare`
+   * em vez de um bilhete que não sabe o que comparar.
+   */
+  private openIndividualProcessPosix(pid: number, mode: ProcessTerminationMode): TerminationLease {
+    const cadeia = this.posixProcessProvider.cadeiaIdentia();
+    if (!cadeia.ok) {
+      throw new Error(`posix: fonte de identidade indisponível (${cadeia.motivo}); nenhum bilhete foi emitido`);
+    }
+    const constantes = this.posixProcessProvider.constantes();
+    if (!constantes || !constantes.hz || constantes.bootMs === null) {
+      throw new Error("posix: constantes do kernel indisponíveis; nenhum bilhete foi emitido");
+    }
+    return abrirLeasePosixTerminacao(pid, {
+      hz: constantes.hz,
+      bootMs: constantes.bootMs,
+      // O sinal é fixado no lease, portanto o `confirm` não pode escolher outro.
+      signal: mode === "sigkill" ? "SIGKILL" : "SIGTERM",
+      protegido: (identidade, caminho) => this.alvoProtegidoPosix(identidade, caminho),
+    });
   }
 
   private terminationController(): SafeProcessTermination {
     if (!this.individualTermination) {
       // Binding is lazy, after normal startup/readonly guards, never at import.
-      const open = (pid:number) => this.openIndividualProcess(pid);
+      const open = (pid: number, mode: ProcessTerminationMode) => this.openIndividualProcess(pid, mode);
       this.individualTermination = new SafeProcessTermination({
-        open, blocked: identity => this.terminationBlocked(identity),
+        open, modes: modosTerminacao(), blocked: identity => this.terminationBlocked(identity),
         audit: event => {
           void fs.appendFile(path.join(this.logsDir,"actions.log"), JSON.stringify({
             timestamp:new Date().toISOString(), action:"process.termination", ...event,
@@ -3992,14 +4343,24 @@ if (processInfo.path) {
       return { success: false, status: "failed", pid, error: "PID inválido" };
     }
 
-    if (ProtectionEngineService.KILL_TERMINATION_DISABLED) {
-      // Fail-closed: sem ação, sem consulta, sem tentativa. A resposta diz a
-      // verdade — indisponibilidade, não uma falha inventada nem sucesso.
+    const bloqueioTerminacao = this.bloqueioDeTerminacao();
+    if (bloqueioTerminacao) {
+      // Fail-closed: sem ação, sem consulta, sem tentativa. Registar apenas
+      // a recusa global, sem inventar identidade ou classificação do alvo.
+      await this.actionsLog.write(JSON.stringify({
+        timestamp: new Date().toISOString(),
+        action: "process.termination.refused",
+        request: "manual",
+        requestId: this.nextKillRequestId(pid),
+        pid,
+        reason: bloqueioTerminacao.motivo,
+        executed: false,
+      }));
       return {
         success: false,
         status: "failed",
         pid,
-        error: "Terminação de processos indisponível: identidade não pode ser provada de ponta a ponta; nenhuma ação foi executada.",
+        error: bloqueioTerminacao.mensagem,
       };
     }
 
@@ -4073,8 +4434,8 @@ if (processInfo.path) {
           status: "failed",
           pid,
           error: sourceError
-            ? `Identidade do processo não confirmada: a fonte CIM falhou (${(sourceError as Error)?.message ?? String(sourceError)}); terminação recusada.`
-            : `Identidade do processo não confirmada: o CIM não devolveu o PID ${pid}, mas o processo está vivo; terminação recusada.`,
+            ? `Identidade do processo não confirmada: a fonte ${this.rotuloFonteIdentidade} falhou (${(sourceError as Error)?.message ?? String(sourceError)}); terminação recusada.`
+            : `Identidade do processo não confirmada: o ${this.rotuloFonteIdentidade} não devolveu o PID ${pid}, mas o processo está vivo; terminação recusada.`,
         };
       }
       // Existe linha, mas não existe referência de snapshot do utilizador.
@@ -4121,7 +4482,7 @@ if (processInfo.path) {
     // taskkill sem a fonte ser consultada.)
     let fresco: (KillTargetInfo & { startedAt?: string }) | undefined;
     try {
-      const linhas = await this.queryCimProcesses(
+      const linhas = await this.consultarFonteIdentidade(
         `ProcessId=${pid}`,
         step(ProtectionEngineService.CIM_QUERY_TIMEOUT_MS),
       );
@@ -4133,7 +4494,7 @@ if (processInfo.path) {
         success: false,
         status: "failed",
         pid,
-        error: `Identidade do processo não confirmada: a fonte CIM falhou (${(error as Error)?.message ?? String(error)}); terminação recusada.`,
+        error: `Identidade do processo não confirmada: a fonte ${this.rotuloFonteIdentidade} falhou (${(error as Error)?.message ?? String(error)}); terminação recusada.`,
       };
     }
     if (!fresco) {
@@ -4180,15 +4541,23 @@ if (processInfo.path) {
         success: false,
         status: "timeout",
         pid,
-        error: `Orçamento de ${ProtectionEngineService.KILL_TOTAL_BUDGET_MS} ms esgotado antes do taskkill.`,
+        error: process.platform === "win32"
+          ? `Orçamento de ${ProtectionEngineService.KILL_TOTAL_BUDGET_MS} ms esgotado antes do taskkill.`
+          : `Orçamento de ${ProtectionEngineService.KILL_TOTAL_BUDGET_MS} ms esgotado antes de enviar ${this.rotuloTerminacao}.`,
       };
     }
 
+    // O log tem de descrever o que FOI executado. No Linux não existe
+    // `taskkill`: registar esse comando seria uma auditoria inventada, e a
+    // recusa do passo 1 provaria o contrário. Em Windows a linha fica byte a
+    // byte como sempre esteve.
+    const comandoTerminacao =
+      process.platform === "win32" ? `taskkill /F /T /PID ${pid}` : `kill(SIGTERM) PID=${pid}`;
     const logKillAttempt = (attempt: number, result: KillProcessResult) => {
       void fs
         .appendFile(
           path.join(this.logsDir, "actions.log"),
-          `[KILL] PID=${pid} | Name=${processInfo?.name ?? "unknown"} | Cmd=taskkill /F /T /PID ${pid}` +
+          `[KILL] PID=${pid} | Name=${processInfo?.name ?? "unknown"} | Cmd=${comandoTerminacao}` +
           ` | Attempt=${attempt} | Status=${result.status} | Exit=${result.exitCode ?? "n/a"}` +
           ` | Stdout="${oneLineLog(result.stdout)}" | Stderr="${oneLineLog(result.stderr)}"\n`,
           "utf-8",
@@ -4197,7 +4566,10 @@ if (processInfo.path) {
     };
 
     let attempt = 1;
-    let taskkill = await this.runTaskkill(pid, { timeoutMs: remaining() });
+    // `esperadoNome`: no POSIX é a segunda âncora de identidade (o `comm` de
+    // `/proc`); em Windows `killProcessTree` ignora o campo e o comportamento é
+    // o de sempre. Nome divergente = PID reutilizado = recusa antes do sinal.
+    let taskkill = await this.runTaskkill(pid, { timeoutMs: remaining(), esperadoNome: processInfo?.name });
     logKillAttempt(attempt, taskkill);
 
     // Retry com critério do SO, não do taskkill: o exit 255 nao distingue "ja
@@ -4219,7 +4591,7 @@ if (processInfo.path) {
       const retryDelay = Math.min(KILL_RETRY_DELAY_MS, Math.max(0, remaining()));
       await new Promise((resolve) => setTimeout(resolve, retryDelay));
       attempt += 1;
-      taskkill = await this.runTaskkill(pid, { timeoutMs: remaining() });
+      taskkill = await this.runTaskkill(pid, { timeoutMs: remaining(), esperadoNome: processInfo?.name });
       logKillAttempt(attempt, taskkill);
     }
 
@@ -4258,7 +4630,7 @@ if (processInfo.path) {
         exitCode: taskkill.exitCode,
         stdout: taskkill.stdout,
         stderr: taskkill.stderr,
-        error: "taskkill não terminou dentro do prazo.",
+        error: `${this.rotuloTerminacao} não terminou dentro do prazo.`,
       };
     }
     if (taskkill.status === "access-denied") {
@@ -4290,7 +4662,7 @@ if (processInfo.path) {
           status: "failed",
           pid,
           exitCode: taskkill.exitCode,
-          error: `Árvore não confirmada: a fonte CIM falhou (${(error as Error)?.message ?? String(error)}); terminação não declarada.`,
+          error: `Árvore não confirmada: a fonte ${this.rotuloFonteIdentidade} falhou (${(error as Error)?.message ?? String(error)}); terminação não declarada.`,
         };
       }
       const rootAlive = await this.killTargetStillAlive(pid, step(ProtectionEngineService.KILL_ALIAS_QUERY_TIMEOUT_MS));
@@ -4322,7 +4694,7 @@ if (processInfo.path) {
           `${taskkill.error ?? "Falha ao terminar processo."} ` +
           `Tentativas=${attempt}; ` +
           (survivors.length > 0
-            ? `continuam vivos no Windows: PID ${survivors.join(", ")}.`
+            ? `continuam vivos${process.platform === "win32" ? " no Windows" : ""}: PID ${survivors.join(", ")}.`
             : `a arvore caiu mas o PID ${pid} nao foi confirmado morto.`),
       };
     }
@@ -4369,7 +4741,7 @@ if (processInfo.path) {
         // `isProcessAlive` acima é síncrono e não consome orçamento.
         let current: (KillTargetInfo & { startedAt?: string }) | undefined;
         try {
-          const linhas = await this.queryCimProcesses(
+          const linhas = await this.consultarFonteIdentidade(
             `ProcessId=${candidate}`,
             step(ProtectionEngineService.CIM_QUERY_TIMEOUT_MS),
           );
@@ -4407,7 +4779,7 @@ if (processInfo.path) {
         exitCode: taskkill.exitCode,
         stdout: taskkill.stdout,
         stderr: taskkill.stderr,
-        error: "Processo ainda ativo depois do taskkill.",
+        error: process.platform === "win32" ? "Processo ainda ativo depois do taskkill." : `Processo ainda ativo depois de ${this.rotuloTerminacao}.`,
       };
     }
 
@@ -4762,12 +5134,41 @@ if (processInfo.path) {
     socket.once("close", cleanup);
   }
 
+  /**
+   * AF_UNIX: um ficheiro de socket sobrevive a um crash do motor e faria o
+   * `listen` falhar com EADDRINUSE. Só remove o ficheiro quando a sonda de
+   * conexão prova que NINGUÉM está à escuta; com listener vivo nada é
+   * apagado e o resultado do `listen` mantém o comportamento histórico.
+   */
+  private async clearStaleUnixSocket(socketPath: string): Promise<void> {
+    const live = await new Promise<boolean>((resolve) => {
+      const probe = net.connect(socketPath);
+      const finish = (value: boolean) => {
+        probe.removeAllListeners();
+        probe.destroy();
+        resolve(value);
+      };
+      probe.setTimeout(1000, () => finish(false));
+      probe.once("connect", () => finish(true));
+      probe.once("error", () => finish(false));
+    });
+    if (live) return;
+    try {
+      await fs.unlink(socketPath);
+    } catch {
+      // ENOENT (nada a limpar) ou EACCES — o `listen` reporta o resultado real.
+    }
+  }
+
   async startPipeServer(pipeName: string = PIPE_NAME) {
     if (this.pipeAuthRequired && (!this.pipeToken || !/^[a-f0-9]{64}$/.test(this.pipeToken))) {
       throw new Error("Credencial de autenticação do pipe ausente ou inválida");
     }
     if (!this.pipeAuthRequired) {
       console.warn("[Service] AVISO S4: DEV externo sem autenticação do pipe; não utilizar em produção.");
+    }
+    if (process.platform === "linux" && path.isAbsolute(pipeName)) {
+      await this.clearStaleUnixSocket(pipeName);
     }
     this.server = net.createServer((socket) => {
       if (this.pipeAuthRequired) this.authenticateClientSocket(socket);
@@ -4855,6 +5256,10 @@ if (processInfo.path) {
         return this.connections;
       case "quarantine.list":
         return this.quarantine.list();
+      case "quarantine.policy.get":
+        return { policy: this.quarantinePolicy };
+      case "quarantine.policy.set":
+        return this.changeQuarantinePolicy(payload as { policy?: unknown; consent?: unknown });
       // ── Protecao USB (R8) ──
       // Leitura coalescida do estado e opt-in. Nenhum caminho/target vem do
       // renderer: o auto-scan usa o dispositivo que ESTE servico confirmou.
@@ -4934,7 +5339,8 @@ if (processInfo.path) {
         return this.protectionStartup.definirOptin(entrada.enabled);
       }
       case "process.termination.prepare":
-        if (this.terminationBlocked()) return {ok:false,status:"protected",error:"Terminação indisponível durante operações críticas ou sessão não autenticada."};
+        const bloqueio = this.terminationBlocked();
+        if (bloqueio) return {ok:false,status:"protected",error:terminationBlockedMessage(bloqueio)};
         try { return this.terminationController().prepare(payload); }
         catch { return {ok:false,status:"failed",error:"Componente nativo de terminação indisponível; nenhuma ação executada."}; }
       case "process.termination.confirm":
@@ -4956,6 +5362,10 @@ if (processInfo.path) {
         return this.allowPublisher((payload as { publisher: string }).publisher);
       case "definitions.update":
         return this.updateDefinitions();
+      // Leitura pura: não cria trabalho novo, não toca na rede, não precisa do
+      // gate de encerramento — é o que permite à UI mostrar os cinco estados.
+      case "definitions.status":
+        return this.definitionsStatus();
       case "analysis.restricted":
         return this.runRestrictedAnalysis((payload as { path: string }).path);
       case "hardware.snapshot":
@@ -4969,7 +5379,7 @@ if (processInfo.path) {
       case "exclusions.get":
         return this.exclusions.getConfig();
       case "exclusions.update":
-        return this.exclusions.updateConfig(payload as any);
+        return this.exclusions.updateRules(payload);
       case "scan.start": {
         const { type, targetPath } = payload as any;
         const id = await this.scanManager.startScan(type, targetPath);

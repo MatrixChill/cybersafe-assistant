@@ -32,3 +32,21 @@ test('TP queue: synchronous callback error releases the slot and permits a retry
   assert.equal(q.enqueue('file', 'A', async () => { calls++; }), 'queued');
   await tick(); assert.equal(calls, 2);
 });
+
+test('TP queue: Downloads (high) passa a frente da fila normal sem perder versao', async () => {
+  const q = new RealtimeFileQueue(8); const calls = []; let release;
+  q.enqueue('a', 'v1', async () => { calls.push('a'); await new Promise(r => release = r); });
+  q.enqueue('b', 'v1', async () => { calls.push('b'); });
+  q.enqueue('c', 'v1', async () => { calls.push('c'); }, 'high');
+  release(); await tick(); await tick(); await tick();
+  assert.deepEqual(calls, ['a', 'c', 'b']);
+});
+
+test('TP queue: evento high sobe um caminho que ja esperava sem duplicar', async () => {
+  const q = new RealtimeFileQueue(8); const calls = []; let release;
+  q.enqueue('a', 'v1', async () => { calls.push('a'); await new Promise(r => release = r); });
+  q.enqueue('b', 'v1', async () => { calls.push('b-old'); });
+  assert.equal(q.enqueue('b', 'v1', async () => { calls.push('b-new'); }, 'high'), 'queued');
+  release(); await tick(); await tick();
+  assert.deepEqual(calls, ['a', 'b-new']);
+});

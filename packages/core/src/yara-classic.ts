@@ -16,10 +16,14 @@
  * Este módulo é o adapter mínimo entre o `YaraEngine` (que mantém a API e a
  * lógica de saúde/cobertura) e o executável oficial:
  *
- *   • `resolveYaraClassicBinaries()` — encontra `yara64.exe`/`yarac64.exe`, por
- *     ordem: env `CYBERSAFE_YARA_BIN_DIR` → `resources/yara` (pacote) →
- *     `vendor/yara/<versão>` (dev). Sem binários devolve `null`: o motor fica
- *     indisponível e DIZ isso, nunca "sem deteções".
+ *   • `resolveYaraClassicBinaries()` — encontra o par de executáveis DO SISTEMA
+ *     QUE CORRE (`yara64.exe`/`yarac64.exe` em Windows, `yara`/`yarac` em
+ *     POSIX), por ordem: env `CYBERSAFE_YARA_BIN_DIR` → `resources/yara`
+ *     (pacote) → `vendor/yara/<versão>` (dev) → directórios de sistema e `PATH`
+ *     (só POSIX; é assim que um YARA instalado por pacotes chega a «disponível»
+ *     sem empacotar binários). Em POSIX um candidato `.exe`, uma imagem `MZ` ou
+ *     um ficheiro sem bit de execução NÃO é motor. Sem binários devolve `null`:
+ *     o motor fica indisponível e DIZ isso, nunca "sem deteções".
  *   • `validateYaraFile` / `validateYaraSource` — compilação com `yarac64`,
  *     exit code como verdade. Um `include` resolve-se no directório do próprio
  *     ficheiro (medido: `include` é relativo ao ficheiro que o declara).
@@ -51,6 +55,11 @@ import os from "node:os";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { firstDiagnosticLine } from "./response.js";
+import {
+  type LeitorBinario as LeitorBinarioYara,
+  leitorBinarioReal,
+  recusaExecutavelPosix,
+} from "./executavel-posix.js";
 
 /** Versão vendorizada (release oficial com binários win64 publicados). */
 export const YARA_CLASSIC_VERSION = "4.6.0";
@@ -108,11 +117,16 @@ export function classifyWindowsLoaderFailure(
   return entry ? { code, ...entry } : null;
 }
 
+/** De onde veio o binário resolvido — a proveniência tem de ser declarável. */
+export type YaraOrigem = "explicito" | "pacote" | "vendor" | "sistema";
+
 export interface YaraClassicBinaries {
   yara: string;
   yarac: string;
   /** Directório de onde vieram (diagnóstico; sem caminhos de utilizador). */
   dir: string;
+  /** `"sistema"` = instalado fora do pacote (apt/brew/snap/PATH): versão não pinada. */
+  origem: YaraOrigem;
 }
 
 export type YaraClassicDiagnosticCode =
@@ -145,62 +159,116 @@ export interface YaraClassicScanner {
   scanFileAsync(filePath: string, options?: { signal?: AbortSignal; timeoutMs?: number }): Promise<YaraClassicMatch[]>;
 }
 
-const WINDOWS_EXECUTABLES = { yara: "yara64.exe", yarac: "yarac64.exe" } as const;
+/**
+ * Nomes do executável POR PLATAFORMA. O `yara64.exe` vendorizado é um PE
+ * win64: noutro sistema operativo não é um binário YARA, é um ficheiro que o
+ * kernel recusa (ou, no WSL com interop, um executável Windows que corre por
+ * acidente). Em POSIX só aceitamos os nomes POSIX — um `.exe` nunca é candidato.
+ */
+export const YARA_BINARIOS_POR_PLATAFORMA = {
+  win32: { yara: "yara64.exe", yarac: "yarac64.exe" },
+  posix: { yara: "yara", yarac: "yarac" },
+} as const;
 
-function isUsableFile(candidate: string): boolean {
-  try {
-    return fs.statSync(candidate).isFile();
-  } catch {
-    return false;
-  }
+export function nomesExecutaveisYara(platform: NodeJS.Platform = process.platform): { yara: string; yarac: string } {
+  return platform === "win32" ? YARA_BINARIOS_POR_PLATAFORMA.win32 : YARA_BINARIOS_POR_PLATAFORMA.posix;
 }
 
+/** Directórios de sistema onde um YARA instalado (apt/dnf/brew/snap) vive. */
+const DIRECTORIOS_SISTEMA_POSIX = ["/usr/bin", "/usr/local/bin", "/snap/bin", "/opt/homebrew/bin"] as const;
+
+/** O que o resolutor sabe ler do disco; injectável para os testes não dependerem do host. */
+export type { LeitorBinarioYara };
+export { leitorBinarioReal, recusaExecutavelPosix };
+
 /**
- * Directórios candidatos, por ordem de precedência. Inclui o caminho
- * empacotado (`resources/yara`) e a árvore de desenvolvimento (`vendor/yara`),
- * esta última encontrada subindo a partir do módulo compilado.
+ * Directórios candidatos, por ordem de precedência: o caminho empacotado
+ * (`resources/yara`), a árvore de desenvolvimento (`vendor/yara`) e, só em
+ * POSIX, os directórios de sistema e o `PATH` — é assim que um `apt install
+ * yara` real chega a «disponível» sem empacotar nada.
  *
- * `CYBERSAFE_YARA_BIN_DIR` é AUTORITATIVO: quando está definido, só esse
- * directório é considerado. Um override explícito que não tenha os binários é
- * uma indisponibilidade declarada, não uma licença para carregar outro
- * executável encontrado por acaso na máquina — a proveniência do binário que
- * corre tem de ser determinística.
+ * `CYBERSAFE_YARA_BIN_DIR` é AUTORITATIVO nos dois sistemas: quando está
+ * definido, só esse directório é considerado — nem o vendor, nem o PATH. Um
+ * override explícito sem binários é uma indisponibilidade declarada, não uma
+ * licença para carregar outro executável encontrado por acaso na máquina.
  */
-function candidateDirectories(env: NodeJS.ProcessEnv): string[] {
+export function candidateDirectories(
+  env: NodeJS.ProcessEnv,
+  platform: NodeJS.Platform = process.platform,
+  raizModulo = path.dirname(fileURLToPath(import.meta.url)),
+): Array<{ dir: string; origem: YaraOrigem }> {
   const fromEnv = env[YARA_BINARY_ENV];
   if (typeof fromEnv === "string" && fromEnv.trim() !== "") {
-    return [path.resolve(fromEnv), path.join(path.resolve(fromEnv), YARA_CLASSIC_VERSION)];
+    const base = path.resolve(fromEnv);
+    return [
+      { dir: base, origem: "explicito" as YaraOrigem },
+      { dir: path.join(base, YARA_CLASSIC_VERSION), origem: "explicito" as YaraOrigem },
+    ];
   }
 
-  const candidates: string[] = [];
+  const candidates: Array<{ dir: string; origem: YaraOrigem }> = [];
   const resources = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
   if (typeof resources === "string" && resources !== "") {
-    candidates.push(path.join(resources, "yara", YARA_CLASSIC_VERSION));
-    candidates.push(path.join(resources, "yara"));
+    candidates.push({ dir: path.join(resources, "yara", YARA_CLASSIC_VERSION), origem: "pacote" });
+    candidates.push({ dir: path.join(resources, "yara"), origem: "pacote" });
   }
 
-  let dir = path.dirname(fileURLToPath(import.meta.url));
+  let dir = raizModulo;
   for (let depth = 0; depth < 6; depth += 1) {
-    candidates.push(path.join(dir, "vendor", "yara", YARA_CLASSIC_VERSION));
-    candidates.push(path.join(dir, "vendor", "yara"));
+    candidates.push({ dir: path.join(dir, "vendor", "yara", YARA_CLASSIC_VERSION), origem: "vendor" });
+    candidates.push({ dir: path.join(dir, "vendor", "yara"), origem: "vendor" });
     const parent = path.dirname(dir);
     if (parent === dir) break;
     dir = parent;
+  }
+
+  if (platform !== "win32") {
+    for (const candidato of DIRECTORIOS_SISTEMA_POSIX) candidates.push({ dir: candidato, origem: "sistema" });
+    // Este ramo é POSIX por definição: o separador é `:`. Em Windows a PATH não
+    // é lida — nada aqui depende do separador do host que corre o teste.
+    for (const entrada of (env.PATH ?? "").split(":")) {
+      const limpa = entrada.trim();
+      if (limpa) candidates.push({ dir: limpa, origem: "sistema" });
+    }
   }
   return candidates;
 }
 
 /**
- * Resolve os dois executáveis oficiais. Devolve `null` quando NÃO há binários:
- * o chamador tem de transformar isso em indisponibilidade explícita.
+ * Resolve os dois executáveis OFICIAIS DO SISTEMA QUE CORRE. Devolve `null`
+ * quando NÃO há binários utilizáveis: o chamador tem de transformar isso em
+ * indisponibilidade explícita — nunca em «sem deteções».
+ *
+ * Em Windows o comportamento é o histórico (nomes `.exe`, presença de ficheiro
+ * como critério). Em POSIX os candidatos são ainda verificados: sem bit de
+ * execução, ou com magic de PE, não são motor.
  */
-export function resolveYaraClassicBinaries(env: NodeJS.ProcessEnv = process.env): YaraClassicBinaries | null {
-  for (const dir of candidateDirectories(env)) {
-    const yara = path.join(dir, WINDOWS_EXECUTABLES.yara);
-    const yarac = path.join(dir, WINDOWS_EXECUTABLES.yarac);
-    if (isUsableFile(yara) && isUsableFile(yarac)) return { yara, yarac, dir };
+export function resolveYaraClassicBinaries(
+  env: NodeJS.ProcessEnv = process.env,
+  platform: NodeJS.Platform = process.platform,
+  leitor: LeitorBinarioYara = leitorBinarioReal,
+  raizModulo?: string,
+): YaraClassicBinaries | null {
+  const nomes = nomesExecutaveisYara(platform);
+  for (const { dir, origem } of candidateDirectories(env, platform, raizModulo)) {
+    const yara = path.join(dir, nomes.yara);
+    const yarac = path.join(dir, nomes.yarac);
+    if (!leitor.isFile(yara) || !leitor.isFile(yarac)) continue;
+    if (platform === "win32") return { yara, yarac, dir, origem };
+    const recusa =
+      recusaExecutavelPosix(yara, leitor.magic(yara), leitor.executavel(yara)) ??
+      recusaExecutavelPosix(yarac, leitor.magic(yarac), leitor.executavel(yarac));
+    if (recusa) continue;
+    return { yara, yarac, dir, origem };
   }
   return null;
+}
+
+/** Frase única que descreve a procura, partilhada pelo diagnóstico e pelo engine. */
+export function descricaoProcuraYara(platform: NodeJS.Platform = process.platform): string {
+  const nomes = nomesExecutaveisYara(platform);
+  const base = `${YARA_BINARY_ENV}, resources/yara e vendor/yara (procura em ${nomes.yara} e ${nomes.yarac})`;
+  return platform === "win32" ? base : `${base}; em POSIX os binários de Windows não são aceites`;
 }
 
 /**
@@ -238,13 +306,15 @@ export function parseYaraDiagnostics(text: string): YaraClassicDiagnostic[] {
   return diagnostics;
 }
 
-function missingBinaryDiagnostic(): YaraClassicDiagnostic {
+export function missingBinaryDiagnostic(platform: NodeJS.Platform = process.platform): YaraClassicDiagnostic {
   return {
     severity: "error",
     code: "io-error",
     message:
-      `YARA clássico ${YARA_CLASSIC_VERSION} não encontrado (procurado em ${YARA_BINARY_ENV}, ` +
-      `resources/yara e vendor/yara). Sem compilador, nenhuma fonte pode ser aceite.`,
+      `YARA clássico ${YARA_CLASSIC_VERSION} não encontrado para este sistema ` +
+      `(procurado em ${descricaoProcuraYara(platform)}). ` +
+      `Sem compilador, nenhuma fonte pode ser aceite — e um ficheiro analisado sem este motor ` +
+      `não é «limpo»: é não avaliado por este motor.`,
   };
 }
 

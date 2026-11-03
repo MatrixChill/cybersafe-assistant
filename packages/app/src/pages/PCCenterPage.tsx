@@ -20,6 +20,7 @@ import {
   Zap,
   ShieldAlert,
   HelpCircle,
+  FileSearch,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { cpuUsageDisplay } from "@/lib/cpuUsage";
@@ -53,6 +54,7 @@ import {
   diskUnavailableText,
   diskUsagePercentText,
   diskVolumeRows,
+  diskVolumeScanActions,
   formatGb,
   formatPercent,
   safeNumber,
@@ -74,6 +76,14 @@ interface PCCenterPageProps {
    * `null`/ausente em produção; nunca derivado de um ref dentro de `useMemo`.
    */
   devTraceConnection?: DevTraceConnection | null;
+  /**
+   * Pedir a análise de um volume montado (§10). A página NÃO dispara análise
+   * nenhuma: entrega o caminho ao mesmo funil que o Dashboard usa
+   * (`pendingScan` → Scanner), onde a seleção espera confirmação explícita.
+   * Sem este callback a lista de unidades não mostra ações — é a linha que o
+   * Windows continua a ver hoje.
+   */
+  onAnalisarVolume?: (mount: string) => void;
 }
 
 function formatBytes(bytes: number): string {
@@ -174,9 +184,24 @@ export function diskReadProvenance(disk: DiskSnapshot, nowMs: number): string {
  * (capacidade, usado, livre, percentagem), com as partições reservadas do
  * sistema identificadas como tal em vez de contarem como discos de trabalho.
  */
-function StorageCard({ disk }: { disk: DiskSnapshot }) {
+// Exportado para que o gesto «Analisar» seja provado em SSR sem depender do
+// comutador simple/advanced; o uso em produção continua a ser este ficheiro.
+export function StorageCard({
+  disk,
+  platform,
+  onAnalisarVolume,
+}: {
+  disk: DiskSnapshot;
+  platform?: string | null;
+  onAnalisarVolume?: (mount: string) => void;
+}) {
   const primary = disk.primary;
   const rows = diskVolumeRows(disk);
+  // As ações são a MESMA lista de volumes na MESMA ordem: ambas vêm de
+  // `disk.volumes`, por isso `acoes[i]` pertence a `rows[i]`. Um `Map` keyed na
+  // montagem não era seguro — a montagem é o rótulo que se mostra, não uma
+  // chave única garantida pelo contrato.
+  const acoes = diskVolumeScanActions(disk, platform);
   // Atividade = outra aquisição (PDH) e outro estado. Só entra quando o motor
   // mediu no intervalo actual; sem medição mostramos o motivo, nunca os números
   // do intervalo anterior.
@@ -249,7 +274,9 @@ function StorageCard({ disk }: { disk: DiskSnapshot }) {
               </span>
               <span className="text-[11px] font-mono text-muted-foreground">Livre</span>
             </div>
-            {rows.map((row) => (
+            {rows.map((row, i) => {
+              const acao = acoes[i];
+              return (
               <div key={row.mount} className="flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-xs font-mono">
                 <span className="flex items-center gap-2 min-w-0">
                   <span className="w-1.5 h-1.5 rounded-full shrink-0 bg-primary/70" />
@@ -260,11 +287,26 @@ function StorageCard({ disk }: { disk: DiskSnapshot }) {
                     {row.kind === "system-reserved" ? row.kindLabel : `${row.usedText} usados · ${row.usagePercentText}`}
                   </span>
                 </span>
-                <span className={cn("whitespace-nowrap", row.kind === "system-reserved" ? "text-muted-foreground" : getUsageColor("disk", row.usagePercent))}>
-                  {row.freeText}
+                <span className="flex items-center gap-2 whitespace-nowrap">
+                  <span className={cn(row.kind === "system-reserved" ? "text-muted-foreground" : getUsageColor("disk", row.usagePercent))}>
+                    {row.freeText}
+                  </span>
+                  {acao?.podeAnalisar && onAnalisarVolume && (
+                    <button
+                      type="button"
+                      data-testid="disk-volume-analisar"
+                      onClick={() => onAnalisarVolume(row.mount)}
+                      title={`Analisar ${row.mount} com os motores disponíveis`}
+                      className="flex items-center gap-1 rounded-md border border-border bg-secondary/50 px-2 py-0.5 text-[11px] text-foreground transition-colors hover:border-primary/50 hover:bg-primary/15"
+                    >
+                      <FileSearch className="w-3 h-3" />
+                      Analisar
+                    </button>
+                  )}
                 </span>
               </div>
-            ))}
+              );
+            })}
           </div>
         )}
         {atividade.length > 0 ? (
@@ -395,8 +437,8 @@ function CircularGauge({ value, metric, size = 100, label, showFallback }: { val
   const colorClass = getUsageColor(metric, value);
 
   return (
-    <div className="relative flex flex-col items-center justify-center" style={{ width: size, height: size }}>
-      <svg className="transform -rotate-90 w-full h-full">
+    <div className="relative shrink-0" style={{ width: size, height: size }}>
+      <svg width={size} height={size} viewBox={`0 0 ${size} ${size}`} className="absolute inset-0 -rotate-90" style={{width:size,height:size}}>
         <circle
           cx={size / 2}
           cy={size / 2}
@@ -415,7 +457,7 @@ function CircularGauge({ value, metric, size = 100, label, showFallback }: { val
           className={cn("fill-none transition-all duration-1000 ease-out", colorClass.replace("text-", "stroke-"))}
         />
       </svg>
-      <div className="absolute flex flex-col items-center justify-center">
+      <div className="absolute inset-0 flex flex-col items-center justify-center">
         <span className={cn("text-xl font-bold font-mono", showFallback ? "text-muted-foreground" : colorClass)}>
           {showFallback ? "—" : `${Math.round(value)}%`}
         </span>
@@ -697,7 +739,15 @@ export function CachedSnapshotNotice({ origin, ageText }: { origin: BatteryOrigi
     </div>
   );
 }
-export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSnapshot; batteryOrigin: BatteryOrigin }) {
+export function AdvancedView({
+  hardware,
+  batteryOrigin,
+  onAnalisarVolume,
+}: {
+  hardware: HardwareSnapshot;
+  batteryOrigin: BatteryOrigin;
+  onAnalisarVolume?: (mount: string) => void;
+}) {
   const ramUsage = ramUsageDisplay(hardware.ram);
   const nowMs = useNow();
   const ramAgeText = ramUsage.state === "stale" ? snapshotAgeText(ramUsage.updatedAt, nowMs) : null;
@@ -781,18 +831,19 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
         </div>
       )}
 
-      {/* Main Grid: items-start mantém cada cartão na altura natural. Sem
-          isto, a grelha esticava Rede/Bateria para a altura do cartão vizinho. */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
+      {/* Main Grid: colunas independentes evitam lacunas sob cartões curtos.
+          Dentro de cada coluna, cada superfície mantém a altura natural. */}
+      <div data-testid="pc-resource-overview" className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6 items-start">
 
+        <div className="min-w-0 flex flex-col gap-6" data-testid="pc-capacity-connectivity">
         {/* CPU Card */}
-        <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="min-w-0 bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <Cpu className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Processador (CPU)</h2>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             <CircularGauge value={cpuUsage.value ?? 0} metric="cpu" label={cpuUsage.value == null ? "N/A" : cpuUsage.state === "stale" ? "Última" : "Uso"} showFallback={cpuUsage.value == null} />
             <div className="flex flex-col gap-3 text-right min-w-0">
               <div>
@@ -846,14 +897,19 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
             </div>
         </div>
 
+        {/* Disk Card — a mesma regra do Dashboard vive em StorageCard/lib/diskDisplay */}
+        <StorageCard disk={hardware.disk} onAnalisarVolume={onAnalisarVolume} />
+
+        </div>
+        <div className="min-w-0 flex flex-col gap-6">
         {/* RAM Card */}
-        <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="min-w-0 bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <MemoryStick className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Memória (RAM)</h2>
           </div>
-          <div className="flex items-center justify-between">
+          <div className="flex flex-wrap items-center justify-between gap-4">
             {ramUsage.value !== null ? <CircularGauge value={ramUsage.value} metric="ram" label="Uso" /> : <span className="text-sm text-muted-foreground">{ramCardText}</span>}
             <div className="flex flex-col gap-3 text-right min-w-0">
               <div>
@@ -889,9 +945,63 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
             </div>
         </div>
 
-        {/* GPU Card */}
+        {/* Network Card */}
         <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+          <div className="flex flex-col">
+            <div className="flex items-center justify-between mb-4">
+              <div className="flex items-center gap-2">
+                <Wifi className="w-5 h-5 text-primary" />
+                <h2 className="text-lg font-semibold">Rede</h2>
+              </div>
+              <span className="text-xs font-mono bg-secondary px-2 py-1 rounded text-muted-foreground">
+                {netReading.interfaceName ? `${netReading.interfaceName}${netReading.label ? ` · ${netReading.label}` : ""}` : netReading.label}
+              </span>
+            </div>
+
+            <div className="flex flex-col gap-3">
+              {netReading.rxSec != null || netReading.txSec != null ? (
+                <>
+                  <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-border">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-cyber-cyan/10 rounded-full">
+                        <ChevronDown className="w-5 h-5 text-cyber-cyan" />
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground uppercase block">Download</span>
+                        <span className="text-xl font-bold font-mono text-cyber-cyan">
+                          {netReading.rxSec != null ? formatBytes(netReading.rxSec) : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-border">
+                    <div className="flex items-center gap-3">
+                      <div className="p-2 bg-primary/10 rounded-full">
+                        <ChevronUp className="w-5 h-5 text-primary" />
+                      </div>
+                      <div>
+                        <span className="text-xs text-muted-foreground uppercase block">Upload</span>
+                        <span className="text-xl font-bold font-mono text-primary">
+                          {netReading.txSec != null ? formatBytes(netReading.txSec) : "—"}
+                        </span>
+                      </div>
+                    </div>
+                  </div>
+                </>
+              ) : (
+                <p className="text-sm text-muted-foreground" title={netReading.hint ?? undefined}>{netReading.label}</p>
+              )}
+            </div>
+          </div>
+        </div>
+
+        </div>
+        <div className="min-w-0 flex flex-col gap-6">
+        {/* GPU Card */}
+        <div className="min-w-0 bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
+          <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
           <div className="flex items-center gap-2 mb-6">
             <Monitor className="w-5 h-5 text-primary" />
             <h2 className="text-lg font-semibold">Gráficos (GPU)</h2>
@@ -899,7 +1009,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
 
           {hardware.gpu && gpu !== "absent" ? (
             <>
-            <div className="flex items-center justify-between">
+            <div className="flex flex-wrap items-center justify-between gap-4">
               <CircularGauge value={hardware.gpu.usagePercent ?? 0} metric="workload" label={hardware.gpu.usagePercent != null ? "Uso" : "N/A"} showFallback={hardware.gpu.usagePercent == null} />
               <div className="flex flex-col gap-3 text-right min-w-0">
                 <div>
@@ -966,19 +1076,20 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
               </div>
             )}
             {(hardware.gpu.gpus?.length ?? 0) > 1 && (
-              <div data-testid="gpu-detected-list" className="mt-3 space-y-1 border-t border-border pt-2">
+              <details data-testid="gpu-detected-list" className="mt-3 space-y-2 border-t border-border pt-3">
+                <summary className="cursor-pointer text-sm font-medium">Adaptadores gráficos ({hardware.gpu.gpus?.length})</summary>
                 <span className="text-[10px] font-mono uppercase tracking-wider text-muted-foreground">
                   GPUs detetadas ({hardware.gpu.gpus?.length})
                 </span>
                 {(hardware.gpu.gpus ?? []).map((placa, idx) => (
-                  <div key={`${placa.model}-${idx}`} className="flex items-center justify-between gap-2 font-mono text-[11px]">
-                    <span className="min-w-0 truncate" title={placa.model}>{placa.model}</span>
+                  <div key={`${placa.model}-${idx}`} className="flex items-center justify-between gap-2 font-mono text-sm">
+                    <span className="min-w-0 break-words" title={placa.model}>{placa.model}</span>
                     <span className="whitespace-nowrap text-muted-foreground">
                       {placa.vramTotalMb ? `${(placa.vramTotalMb / 1024).toFixed(1)} GB` : "—"}
                     </span>
                   </div>
                 ))}
-              </div>
+              </details>
             )}
             </>
           ) : (
@@ -994,65 +1105,15 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
           )}
         </div>
 
-        {/* Disk Card — a mesma regra do Dashboard vive em StorageCard/lib/diskDisplay */}
-        <StorageCard disk={hardware.disk} />
-
-        {/* Network Card */}
-        <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-          <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
-          <div className="flex flex-col">
-            <div className="flex items-center justify-between mb-4">
-              <div className="flex items-center gap-2">
-                <Wifi className="w-5 h-5 text-primary" />
-                <h2 className="text-lg font-semibold">Rede</h2>
-              </div>
-              <span className="text-xs font-mono bg-secondary px-2 py-1 rounded text-muted-foreground">
-                {netReading.interfaceName ? `${netReading.interfaceName}${netReading.label ? ` · ${netReading.label}` : ""}` : netReading.label}
-              </span>
-            </div>
-
-            <div className="flex flex-col gap-3">
-              {netReading.rxSec != null || netReading.txSec != null ? (
-                <>
-                  <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-border">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-cyber-cyan/10 rounded-full">
-                        <ChevronDown className="w-5 h-5 text-cyber-cyan" />
-                      </div>
-                      <div>
-                        <span className="text-xs text-muted-foreground uppercase block">Download</span>
-                        <span className="text-xl font-bold font-mono text-cyber-cyan">
-                          {netReading.rxSec != null ? formatBytes(netReading.rxSec) : "—"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="flex items-center justify-between bg-black/20 p-3 rounded-lg border border-border">
-                    <div className="flex items-center gap-3">
-                      <div className="p-2 bg-primary/10 rounded-full">
-                        <ChevronUp className="w-5 h-5 text-primary" />
-                      </div>
-                      <div>
-                        <span className="text-xs text-muted-foreground uppercase block">Upload</span>
-                        <span className="text-xl font-bold font-mono text-primary">
-                          {netReading.txSec != null ? formatBytes(netReading.txSec) : "—"}
-                        </span>
-                      </div>
-                    </div>
-                  </div>
-                </>
-              ) : (
-                <p className="text-sm text-muted-foreground" title={netReading.hint ?? undefined}>{netReading.label}</p>
-              )}
-            </div>
-          </div>
-        </div>
-
         {/* Battery Card (Conditionally Rendered) */}
-        {batteryCardVisible && (
+        {batteryCardVisible && hardware.battery.status === "absent" ? (
+          <div data-testid="battery-compact" className="bg-card cyber-border rounded-xl p-4 flex items-center gap-3">
+            <Battery className="w-5 h-5 text-muted-foreground shrink-0" />
+            <div><h2 className="font-semibold">Energia · Não aplicável</h2><p className="text-sm text-muted-foreground">{batteryDisp.label}</p></div>
+          </div>
+        ) : batteryCardVisible && (
           <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-            <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+            <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
             <div className="flex flex-col">
               <div className="flex items-center justify-between mb-4">
                 <div className="flex items-center gap-2">
@@ -1123,6 +1184,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
             </div>
           </div>
         )}
+        </div>
       </div>
 
       {/* Saúde física: superfície própria FORA da grelha. Abrir os detalhes
@@ -1239,7 +1301,7 @@ export function AdvancedView({ hardware, batteryOrigin }: { hardware: HardwareSn
 }
 
 
-export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceConnection }: PCCenterPageProps) {
+export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceConnection, onAnalisarVolume }: PCCenterPageProps) {
   const [viewMode, setViewMode] = useState<"simple" | "advanced">("simple");
   // AG-07: Exatamente duas vistas. Se existia preferência antiga de "lab", migra de forma segura para "advanced".
   useEffect(() => {
@@ -1278,7 +1340,7 @@ export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceCo
   });
 
   return (
-    <div className="w-full h-full p-6 space-y-6 animate-in fade-in slide-in-from-bottom-4 overflow-y-auto" {...devTraceAttrs}>
+    <div className="w-full p-6 space-y-6 animate-in fade-in slide-in-from-bottom-4" {...devTraceAttrs}>
       {/* Header com Toggle */}
       <div className="flex flex-col md:flex-row justify-between items-start md:items-center bg-card cyber-border rounded-xl p-6 relative overflow-hidden group">
         <div className="absolute inset-0 bg-gradient-to-r from-primary/5 to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-500 pointer-events-none" />
@@ -1318,7 +1380,11 @@ export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceCo
         <SimpleView hardware={hardware} pcState={pcState} batteryOrigin={dataOrigin ?? "LIVE"} />
       ) : (
         <>
-          <AdvancedView hardware={hardware} batteryOrigin={dataOrigin ?? "LIVE"} />
+          <AdvancedView
+            hardware={hardware}
+            batteryOrigin={dataOrigin ?? "LIVE"}
+            onAnalisarVolume={onAnalisarVolume}
+          />
           <details className="cyber-border rounded-xl p-4">
             <summary className="cursor-pointer font-medium">Resumo de recursos, sensores e proveniência</summary>
             <PcCenterVisual hardware={hardware} pcState={pcState} dataOrigin={dataOrigin ?? "LIVE"} modo="avancado" />
@@ -1328,7 +1394,7 @@ export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceCo
 
       {/* Temperatures & Sensors */}
       <div className="bg-card cyber-border rounded-xl p-6 relative overflow-hidden group hover:border-primary/50 transition-colors">
-        <div className="absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
+        <div className="pointer-events-none absolute inset-0 bg-gradient-to-b from-transparent to-primary/5 opacity-0 group-hover:opacity-100 transition-opacity" />
         <div className="flex items-center gap-2 mb-6">
           <Thermometer className="w-5 h-5 text-primary" />
           <h2 className="text-lg font-semibold">Temperaturas e Sensores</h2>

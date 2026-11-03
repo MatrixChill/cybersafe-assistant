@@ -159,6 +159,17 @@ describe("P0 — zero não é resultado", () => {
   });
 });
 
+describe("P0 — a secção original de definições não está comprimida", () => {
+  test("as linhas de fonte usam a grelha de duas colunas e não a grelha de três", () => {
+    assert.match(pagina, /className="row-item optimize-source-row"/);
+    const bloco = /\.optimize-source-row\s*\{([\s\S]*?)\}/.exec(css)?.[1] ?? "";
+    assert.match(bloco, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
+    assert.match(css, /@media \(max-width: 720px\)[\s\S]*?\.optimize-source-row/);
+    assert.match(html, /Definições de segurança/);
+    assert.match(html, /O serviço não reportou a data da última atualização de definições nesta leitura/);
+  });
+});
+
 describe("P0 — o resumo traz métricas reais e não as soma", () => {
   test("a proteção vem identificada, com a origem escrita ao lado do valor", () => {
     assert.match(html, /Estado global da proteção/);
@@ -235,11 +246,14 @@ describe("P0 — a página ficou mais curta, e o que é raro saiu da frente", ()
 });
 
 describe("P0 — desenho novo, os mesmos efeitos", () => {
-  test("a página só chama as três operações que já existiam", () => {
+  test("a página só chama as quatro operações aprovadas", () => {
     const chamadas = [...pagina.matchAll(/window\.electronAPI\.(\w+)\(/g)].map((m) => m[1]);
     assert.deepEqual(
       [...new Set(chamadas)].sort(),
-      ["getWindowsHealth", "startScan", "updateDefinitions"],
+      // `getDefinitionsStatus` entrou em 2026-11-01 com a prioridade das definições:
+      // o resultado de `updateDefinitions()` por si só não confirma o estado por fonte,
+      // e a página passou a ler o estado do serviço em vez de o inferir do pedido.
+      ["getDefinitionsStatus", "getWindowsHealth", "startScan", "updateDefinitions"],
       "o redesign mudou o que a página pede ao serviço",
     );
   });

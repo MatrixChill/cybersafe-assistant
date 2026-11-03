@@ -1,0 +1,5 @@
+cmake_minimum_required(VERSION 3.20)
+cmake_policy(SET CMP0091 NEW)
+set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded")
+project(cybersafe_handoff_fixture LANGUAGES CXX)
+add_executable(benign-installer main.cpp)

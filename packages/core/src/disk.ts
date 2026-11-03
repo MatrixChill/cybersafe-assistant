@@ -194,19 +194,36 @@ export function describeDiskRead(entries: unknown, error?: string | null): DiskR
  * Volume principal: o que hospeda o Windows (C:), se existir; senão o volume de
  * trabalho mais cheio. Escolha explícita e determinística — nunca `volumes[0]`
  * cego (a lista é ordenada por ocupação, o que mudaria de disco conforme o uso).
+ *
+ * A raiz `/` é procurada depois da letra `C:` e antes do «mais cheio»: em Linux
+ * não há letras, e ficar com o mais cheio fazia o PC Center apontar para uma
+ * partilha do Windows. Medido em WSL2, sem esta regra o primário saía `/mnt/c`
+ * (9p, 84,6% de uso) em vez de `/` (ext4, o disco da máquina). Em Windows a
+ * linha é inofensiva: nenhum volume de `fsSize()` tem montagem exatamente `/`,
+ * por isso o comportamento continua a ser `C:` ou, na falta dele, o mais cheio.
  */
 export function pickPrimaryVolume(volumes: DiskVolumeSnapshot[]): DiskVolumeSnapshot | null {
   const working = volumes.filter((volume) => volume.kind === "working");
   if (working.length === 0) return null;
   const system = working.find((volume) => /^[a-z]:$/i.test(volume.mount) && volume.mount[0].toUpperCase() === "C");
-  return system ?? working[0];
+  if (system) return system;
+  return working.find((volume) => volume.mount === "/") ?? working[0];
 }
 
-/** Volume de trabalho mais cheio — é dele que sai o aviso de pouco espaço. */
+/**
+ * Volume de trabalho mais cheio — é dele que sai o aviso de pouco espaço.
+ *
+ * Volumes só-leitura ficam de fora, e não é uma preferência de Linux: o aviso
+ * diz «liberte espaço neste volume, apague ficheiros», e uma montagem que não
+ * aceita escrita não pode seguir essa recomendação. Medido em WSL2, o maior
+ * «uso» da máquina era `/usr/lib/wsl/drivers` (9p, `ro`, 84,6%) — um volume do
+ * Windows espelhado para leitura; seria ele a gerar o alarme. Em Windows isto
+ * exclui o mesmo género de superfície (DVD/ISO montado, partição protegida).
+ */
 export function worstWorkingVolume(volumes: DiskVolumeSnapshot[]): DiskVolumeSnapshot | null {
-  const working = volumes.filter((volume) => volume.kind === "working");
-  if (working.length === 0) return null;
-  return working.reduce((worst, volume) => (volume.usagePercent > worst.usagePercent ? volume : worst));
+  const gravaveis = volumes.filter((volume) => volume.kind === "working" && !volume.readOnly);
+  if (gravaveis.length === 0) return null;
+  return gravaveis.reduce((worst, volume) => (volume.usagePercent > worst.usagePercent ? volume : worst));
 }
 
 function fromVolumes(

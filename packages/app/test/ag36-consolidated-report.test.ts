@@ -12,3 +12,30 @@ test("dates, status and selection input use actual selected entries",()=>{assert
 test("privacy covers serialized model and exported HTML, including free-form limitations",()=>{const original=entry("C:\\Users\\Alice\\private",{engineLimitations:["C:\\Users\\Alice\\private token=sentinel"]});const r=buildConsolidatedScanReport([original],{hidePersonalData:true});const serialized=JSON.stringify(r)+generateConsolidatedPdfHtml(r);assert.ok(!serialized.includes("Alice"));assert.ok(!serialized.includes("sentinel"));assert.ok(!serialized.includes("private"));});
 test("HTML encodes hostile data and blocks external resources by CSP",()=>{const html=generateConsolidatedPdfHtml(buildConsolidatedScanReport([entry("<script>alert(1)</script>")]));assert.ok(!html.includes("<script>alert"));assert.ok(html.includes("&lt;script&gt;"));assert.match(html,/default-src 'none'/);});
 test("context is opt-in, minimizes credentials and never grants AI actions",()=>{const raw="CPU: 20%\npassword=fixture\nC:\\Users\\Alice\\file";assert.equal(minimizeContextForAi(raw,false),"");const safe=minimizeContextForAi(raw,true);assert.ok(!safe.includes("password"));assert.ok(!safe.includes("Alice"));assert.ok(safe.includes("20%"));assert.ok(!buildSafeProcessContext({pid:1,name:"fixture",commandLine:"-secret hidden"}).includes("hidden"));assert.equal(isActionAllowedForAI("unknown_command"),false);});
+
+
+test("consolidated export preserves measured inconclusive causes and engines privately", () => {
+  const report = buildConsolidatedScanReport([entry("private-id", {
+    filesInconclusive: 1,
+    inconclusiveByReason: [{ reason: "timeout", count: 1 }],
+    inconclusiveByEngine: [{ engine: "clamav", count: 1 }, { engine: "yara", count: 1 }],
+  })], { hidePersonalData: true });
+  const html = generateConsolidatedPdfHtml(report);
+  assert.match(html, /1 ficheiro \(tempo excedido\)/);
+  assert.match(html, /1 ficheiro \(ClamAV\)/);
+  assert.match(html, /1 ficheiro \(YARA\)/);
+  assert.match(html, /contagens por motor/);
+  assert.equal(report.stats.totalFilesInconclusive, 1);
+  assert.ok(!html.includes("private-id"));
+});
+
+test("missing causes remain unreported and malformed cause data cannot leak private paths", () => {
+  const legacy = generateConsolidatedPdfHtml(buildConsolidatedScanReport([entry("a", { filesInconclusive: 1 })]));
+  assert.match(legacy, /Motivos: não reportados/);
+  const hostile = entry("a", { filesInconclusive: 1,
+    inconclusiveByReason: [{ reason: "C:\\Users\\private-sentinel", count: 1 }] as never,
+    inconclusiveByEngine: [{ engine: "<script>private-sentinel</script>", count: 1 }] as never,
+  });
+  const serialized = JSON.stringify(buildConsolidatedScanReport([hostile], { hidePersonalData: true }));
+  assert.ok(!serialized.includes("private-sentinel"));
+});

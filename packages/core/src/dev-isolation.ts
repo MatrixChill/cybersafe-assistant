@@ -39,8 +39,15 @@ export const DEV_PIPE_NAME_ENV = "CYBERSAFE_DEV_PIPE_NAME";
 export const DEFAULT_PIPE_NAME = "\\\\.\\pipe\\cybersafe-protection-dev-v2";
 /** Default de produção da raiz de dados — `~/.cybersafe-service`. */
 export const DEFAULT_SERVICE_DIRNAME = ".cybersafe-service";
+/** Raiz de dados do CyberSafe Linux Lite — nunca partilhada com o perfil Windows. */
+export const DEFAULT_SERVICE_DIRNAME_LINUX = ".cybersafe-linux-lite";
+/** Ficheiro AF_UNIX do motor sob a raiz de dados, usado como transporte no Linux. */
+export const ENGINE_SOCKET_FILENAME = "engine.sock";
 
 type Env = Record<string, string | undefined>;
+type Platform = NodeJS.Platform;
+
+const currentPlatform = (): Platform => process.platform;
 
 /** Erro de recusa de isolamento. Razões nomeiam só variáveis, nunca valores. */
 export class DevIsolationError extends Error {
@@ -57,6 +64,7 @@ export interface IsolationProbe {
   execPath?: string;
   isElectron?: boolean;
   defaultApp?: boolean;
+  platform?: Platform;
 }
 
 const readEnv = (env?: Env): Env => env ?? process.env;
@@ -66,9 +74,28 @@ export function devIsolationRequested(env?: Env): boolean {
   return readEnv(env)[DEV_ISOLATION_FLAG_ENV] === "1";
 }
 
+/** Nome da raiz de dados por plataforma: Linux Lite tem raiz dedicada própria. */
+export function defaultServiceDirName(platform: Platform = currentPlatform()): string {
+  return platform === "linux" ? DEFAULT_SERVICE_DIRNAME_LINUX : DEFAULT_SERVICE_DIRNAME;
+}
+
 /** Default da raiz de dados de produção. Único ponto que descreve `~` + nome. */
-export function defaultServiceBaseDir(home: string = os.homedir()): string {
-  return path.join(home, DEFAULT_SERVICE_DIRNAME);
+export function defaultServiceBaseDir(home: string = os.homedir(), platform: Platform = currentPlatform()): string {
+  return path.join(home, defaultServiceDirName(platform));
+}
+
+/** Caminho AF_UNIX default do motor sob a raiz de dados (Linux). */
+export function defaultEngineSocketPath(baseDir: string): string {
+  return path.join(baseDir, ENGINE_SOCKET_FILENAME);
+}
+
+/**
+ * Transporte default por plataforma: no Linux, socket AFUNIX sob a raiz Linux
+ * Lite; fora de Linux exatamente o pipe Windows histórico (byte-idêntico).
+ */
+export function defaultEngineTransport(home: string = os.homedir(), platform: Platform = currentPlatform()): string {
+  if (platform === "linux") return defaultEngineSocketPath(defaultServiceBaseDir(home, platform));
+  return DEFAULT_PIPE_NAME;
 }
 
 /**
@@ -109,18 +136,32 @@ function isValidLocalPipeName(name: string): boolean {
 }
 
 /**
+ * Transporte isolado válido por plataforma: no Windows, pipe local estrito
+ * como sempre; no Linux, caminho absoluto de socket AFUNIX (sem NUL, não UNC).
+ * Outras plataformas mantêm a validação de pipe (comportamento histórico).
+ */
+function isValidEngineTransport(name: string, platform: Platform): boolean {
+  if (platform === "linux") {
+    if (name.includes("\0")) return false;
+    if (name.startsWith("\\\\")) return false;
+    return path.isAbsolute(name) && path.resolve(name) === name && name !== path.parse(name).root;
+  }
+  return isValidLocalPipeName(name);
+}
+
+/**
  * Candidato a raiz dedicada: absoluto, SEM NUL, NÃO UNC/device (`\\...`), não
  * a raiz do filesystem, e NEM o diretório pessoal NEM os seus DESCENDENTES.
  * Não prova ausência de reparse (isso é o preflight). Retorna false para
  * rejeitar.
  */
-function isLocalDedicatedDir(candidate: string, home: string): boolean {
+function isLocalDedicatedDir(candidate: string, home: string, platform: Platform = currentPlatform()): boolean {
   if (candidate.includes("\0")) return false;
   if (candidate.startsWith("\\\\")) return false; // UNC \\servidor e device \\?\ / \\.\
   if (!path.isAbsolute(candidate)) return false;
   const resolved = path.resolve(candidate);
   if (resolved === path.parse(resolved).root) return false;
-  if (pathIsSameOrUnder(resolved, defaultServiceBaseDir(home))) return false; // pessoal + descendentes
+  if (pathIsSameOrUnder(resolved, defaultServiceBaseDir(home, platform))) return false; // pessoal + descendentes
   if (resolved.toLowerCase() === path.resolve(home).toLowerCase()) return false; // home exato
   return true;
 }
@@ -129,7 +170,7 @@ function isLocalDedicatedDir(candidate: string, home: string): boolean {
  * Valida o par {dir, pipe} em conjunto e com o pipe NÃO a coincidir com o
  * default. Se o otim-in está ligado, AMBOS têm de estar presentes e válidos.
  */
-function validateIsolationPair(env: Env, home: string): { dir: string; pipe: string } {
+function validateIsolationPair(env: Env, home: string, platform: Platform = currentPlatform()): { dir: string; pipe: string } {
   const rawDir = env[DEV_SERVICE_DIR_ENV];
   const rawPipe = env[DEV_PIPE_NAME_ENV];
   if (rawDir === undefined || rawPipe === undefined) {
@@ -143,14 +184,14 @@ function validateIsolationPair(env: Env, home: string): { dir: string; pipe: str
   }
   const dir = rawDir.trim();
   const pipe = rawPipe.trim();
-  if (!isLocalDedicatedDir(dir, home)) {
+  if (!isLocalDedicatedDir(dir, home, platform)) {
     throw new DevIsolationError(`${DEV_SERVICE_DIR_ENV} invalido (absoluto dedicado local; nunca o pessoal nem descendentes; nunca UNC/device)`);
   }
-  if (!isValidLocalPipeName(pipe)) {
+  if (!isValidEngineTransport(pipe, platform)) {
     throw new DevIsolationError(`${DEV_PIPE_NAME_ENV} invalido (precisa da forma local estrita)`);
   }
-  if (pipe.toLowerCase() === DEFAULT_PIPE_NAME.toLowerCase()) {
-    throw new DevIsolationError(`${DEV_PIPE_NAME_ENV} nao pode coincidir com o pipe default de producao`);
+  if (pipe.toLowerCase() === defaultEngineTransport(home, platform).toLowerCase()) {
+    throw new DevIsolationError(`${DEV_PIPE_NAME_ENV} nao pode coincidir com o transporte default de producao`);
   }
   return { dir: path.resolve(dir), pipe };
 }
@@ -186,27 +227,32 @@ function refusePackagedOverride(probe: IsolationProbe): void {
 }
 
 /**
- * Nome do pipe a usar. Sem otim-in => `DEFAULT_PIPE_NAME` (idêntico). Com
- * otim-in válido => pipe isolado (nunca o default). Inválido/parcial => lança
- * (falha fechada antes de qualquer connect). Runtime empacotado com otim-in =>
+ * Nome do pipe a usar. Sem otim-in => `DEFAULT_PIPE_NAME` no Windows
+ * (idêntico) e socket AFUNIX dedicado no Linux. Com otim-in válido =>
+ * transporte isolado (nunca o default). Inválido/parcial => lança (falha
+ * fechada antes de qualquer connect). Runtime empacotado com otim-in =>
  * lança, nunca devolve o default em silêncio.
  */
 export function resolvePipeName(probe: IsolationProbe = {}): string {
   const env = readEnv(probe.env);
-  if (!devIsolationRequested(env)) return DEFAULT_PIPE_NAME;
+  const home = probe.home ?? os.homedir();
+  const platform = probe.platform ?? currentPlatform();
+  if (!devIsolationRequested(env)) return defaultEngineTransport(home, platform);
   refusePackagedOverride(probe);
-  return validateIsolationPair(env, probe.home ?? os.homedir()).pipe;
+  return validateIsolationPair(env, home, platform).pipe;
 }
 
 /**
- * Raiz de dados do serviço. Sem otim-in => `~/.cybersafe-service` (idêntico).
- * Com otim-in válido => diretório dedicado. Inválido/parcial => lança. Runtime
- * empacotado com otim-in => lança, nunca devolve a raiz pessoal em silêncio.
+ * Raiz de dados do serviço. Sem otim-in => `~/.cybersafe-service` no Windows
+ * (idêntico) e `~/.cybersafe-linux-lite` no Linux. Com otim-in válido =>
+ * diretório dedicado. Inválido/parcial => lança. Runtime empacotado com
+ * otim-in => lança, nunca devolve a raiz pessoal em silêncio.
  */
 export function resolveServiceBaseDir(probe: IsolationProbe = {}): string {
   const env = readEnv(probe.env);
   const home = probe.home ?? os.homedir();
-  if (!devIsolationRequested(env)) return defaultServiceBaseDir(home);
+  const platform = probe.platform ?? currentPlatform();
+  if (!devIsolationRequested(env)) return defaultServiceBaseDir(home, platform);
   refusePackagedOverride(probe);
-  return validateIsolationPair(env, home).dir;
+  return validateIsolationPair(env, home, platform).dir;
 }

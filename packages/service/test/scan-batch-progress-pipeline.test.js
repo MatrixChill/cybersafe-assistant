@@ -116,9 +116,11 @@ async function waitTerminal(mgr, id) {
  * aceites pelo scanner. Durante o prefetch não foi aceite nenhum — promover o
  * progresso do clamscan a `filesAnalyzed` era afirmar cobertura que um cancelamento
  * a meio deita fora (medido: 400 «analisados» com 61 aceites). O que a UI lê durante
- * a etapa é `progress` + `filesInEngineBatch`, e é isso que este filtro procura.
+ * a etapa é `filesInEngineScanned` + `filesInEngineBatch`, no eixo próprio; o
+ * `progress` do pipeline continua a 0 até o primeiro resultado aceite.
  */
-const duranteOBatch = (e) => (e.filesInEngineBatch ?? 0) > 0 && (e.progress ?? 0) > 0;
+const duranteOBatch = (e) =>
+  (e.filesInEngineBatch ?? 0) > 0 && (e.filesInEngineScanned ?? 0) > 0;
 
 describe("P0 SCANNER_REAL_BATCH_STALL — o progresso do batch chega ao consumidor", () => {
   it("publica o eixo da etapa ENQUANTO o batch decorre, sem prometer veredictos", async () => {
@@ -132,6 +134,7 @@ describe("P0 SCANNER_REAL_BATCH_STALL — o progresso do batch chega ao consumid
       if (s && duranteOBatch(s)) {
         viuProgresso = {
           filesInEngineBatch: s.filesInEngineBatch,
+          filesInEngineScanned: s.filesInEngineScanned ?? 0,
           progress: s.progress,
           filesAnalyzed: s.filesAnalyzed ?? 0,
           status: s.status,
@@ -145,7 +148,15 @@ describe("P0 SCANNER_REAL_BATCH_STALL — o progresso do batch chega ao consumid
       viuProgresso,
       "o batch reportou ficheiros varridos mas o ScanManager não publicou nada durante a etapa — a UI ficaria muda até ao fim dos ~7 s",
     );
-    assert.ok(viuProgresso.progress > 0, `progresso da etapa = ${viuProgresso.progress}`);
+    assert.ok(
+      viuProgresso.filesInEngineScanned > 0,
+      `progresso da etapa = ${viuProgresso.filesInEngineScanned}`,
+    );
+    assert.equal(
+      viuProgresso.progress,
+      0,
+      "o progresso global não pode ser escrito pelo batch; só fecha quando o pipeline aceita resultados",
+    );
     assert.ok(
       viuProgresso.filesInEngineBatch > 0,
       `filesInEngineBatch = ${viuProgresso.filesInEngineBatch} — sem este eixo não há prova de que algo está dentro do motor`,
@@ -192,10 +203,11 @@ describe("P0 SCANNER_REAL_BATCH_STALL — o progresso do batch chega ao consumid
     assert.ok(doBatch.length > 0, "o batch não emitiu nada");
     let anterior = 0;
     for (const e of doBatch) {
-      const p = e.progress ?? 0;
+      const p = e.filesInEngineScanned ?? 0;
       assert.ok(p >= anterior, `progresso da etapa recuou: ${anterior} -> ${p}`);
       anterior = p;
-      assert.ok(p >= 0 && p <= 100, `progresso fora de [0,100]: ${p}`);
+      assert.ok(p >= 0 && p <= (e.filesInEngineBatch ?? 0), `progresso da etapa fora do batch: ${p}`);
+      assert.equal(e.progress, 0, "a etapa não pode alimentar o eixo global");
       assert.ok(
         (e.filesInEngineBatch ?? 0) <= terminal.filesTotal,
         `a etapa prometeu ${e.filesInEngineBatch} ficheiros para um total de ${terminal.filesTotal}`,

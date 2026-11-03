@@ -1,4 +1,4 @@
-import { useMemo, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import {
   ShieldCheck, HardDrive, RefreshCw,
   Info, Globe,
@@ -21,6 +21,10 @@ import { cpuUsageDisplay } from "@/lib/cpuUsage"
 import { ramUsageDisplay } from "@/lib/ramUsageDisplay";
 import { definitionUpdateCard } from "@/lib/definitionUpdateResult"
 import {
+  linhasDasDefinicoes,
+  type LinhaDefinicoes,
+} from "@/lib/definitionsStatusPresentation"
+import {
   AUDITORIA_BOTOES,
   aplicarDesfecho,
   cartoesIniciais,
@@ -31,7 +35,9 @@ import {
   fraseProgresso,
   grupoDe,
   interpretaFirewall,
+  linhasDaPlataforma,
   marcarRevisaoManual,
+  notaDaPlataforma,
   ORDEM_SECOES,
   progressoDe,
   resumoEstado,
@@ -68,6 +74,16 @@ const CHIP: Record<OptimizeClassificacao["tom"] | "proc", string> = {
   critico: "state-chip state-chip--crit",
   neutro: "state-chip state-chip--na",
   proc: "state-chip state-chip--proc",
+};
+
+/* O chip do estado de uma base segue o rótulo, não a severidade agregada:
+   «Nunca verificado» não é sucesso e por isso não fica verde. */
+const CHIP_DEFINICOES: Record<string, string> = {
+  Atualizado: "state-chip state-chip--ok",
+  Desatualizado: "state-chip state-chip--warn",
+  Degradado: "state-chip state-chip--warn",
+  Indisponível: "state-chip state-chip--warn",
+  "Nunca verificado": "state-chip state-chip--na",
 };
 
 const MOSAICO: Record<OptimizeClassificacao["tom"] | "proc", string> = {
@@ -209,6 +225,29 @@ export default function OtimizarPage({
       por um botão explícito aqui em vez do chip de estado. */
   const [detalhesAbertos, setDetalhesAbertos] = useState(false);
 
+  /* Estado por fonte das definições, lido AO SERVIÇO. `null` é «sem leitura
+     disponível» — não é «nenhuma base» nem «tudo atualizado». Uma leitura por
+     montagem; `definitions.status` está na fila de leituras independentes do
+     serviço, por isso não compete com os snapshots nem se repete em cada render. */
+  const [fontesDefinicoes, setFontesDefinicoes] = useState<LinhaDefinicoes[] | null>(null);
+
+  const lerDefinicoes = useCallback(async (): Promise<LinhaDefinicoes[]> => {
+    // Preload sem este canal: sem leitura, a página não afirma nada sobre as bases.
+    if (typeof window.electronAPI?.getDefinitionsStatus !== "function") return [];
+    try {
+      const linhas = linhasDasDefinicoes(await window.electronAPI.getDefinitionsStatus());
+      setFontesDefinicoes(linhas.length > 0 ? linhas : null);
+      return linhas;
+    } catch {
+      setFontesDefinicoes(null);
+      return [];
+    }
+  }, []);
+
+  useEffect(() => {
+    void lerDefinicoes();
+  }, [lerDefinicoes]);
+
   /* As três perguntas separam-se, cada uma com o seu estado de leitura, e
      nenhuma se soma às outras: o chip é o nível GLOBAL (fonte: motor de
      proteção, via App); por baixo dizem-se o tempo real e os motores; o estado
@@ -222,22 +261,33 @@ export default function OtimizarPage({
     ? MOTORES.filter((chave) => protecao.motores?.[chave]?.status === "active").length
     : null;
 
-  const progresso = useMemo(() => progressoDe(cartoes), [cartoes]);
+  /* O catálogo é uma projeção pela plataforma PUBLICADA pelo serviço, não pelo
+     aspeto dos caminhos: sem leitura não se adivinha e a página fica como é.
+     Em Linux caem as duas linhas que só o Windows sabe responder — e com elas
+     desaparece o botão, porque não há ponte para `getWindowsHealth()` aqui. */
+  const plataformaServico = hardware?.system?.platform;
+  const visiveis = useMemo(
+    () => linhasDaPlataforma(cartoes, plataformaServico),
+    [cartoes, plataformaServico],
+  );
+  const notaPlataforma = notaDaPlataforma(plataformaServico);
+
+  const progresso = useMemo(() => progressoDe(visiveis), [visiveis]);
   const porSecao = useMemo(() => {
     const secoes: Record<OptimizeSecao, OptimizeCartao[]> = {
       verificacoes: [], manutencao: [], manuais: [],
     };
-    for (const cartao of cartoes) secoes[secaoDe(cartao)].push(cartao);
+    for (const cartao of visiveis) secoes[secaoDe(cartao)].push(cartao);
     return secoes;
-  }, [cartoes]);
+  }, [visiveis]);
   const progressoVerificacoes = useMemo(
     () => progressoDe(porSecao.verificacoes),
     [porSecao],
   );
 
   /** Problemas comprovados = medição de falha, não contagem de opiniões. */
-  const problemasComprovados = cartoes.filter((c) => grupoDe(c) === "problemas").length;
-  const porVerificar = cartoes.filter(elegivelParaVerificacaoRapida);
+  const problemasComprovados = visiveis.filter((c) => grupoDe(c) === "problemas").length;
+  const porVerificar = visiveis.filter(elegivelParaVerificacaoRapida);
 
   /** Só com uma medição a fase pode vestir o tom de concluído. */
   const tomFase = progresso.vistos >= progresso.total && progresso.falhados === 0
@@ -313,7 +363,13 @@ export default function OtimizarPage({
 
       if (cartao.id === "update") {
         const res = await window.electronAPI.updateDefinitions();
-        substituir(cartao.id, definitionUpdateCard(cartao, res));
+        const cartaoOperacao = definitionUpdateCard(cartao, res);
+        // O resultado do pedido não confirma o estado por fonte: a página volta a
+        // perguntá-lo ao serviço. Sem leitura, o cartão fica só com o confirmado.
+        const linhas = await lerDefinicoes();
+        substituir(cartao.id, linhas.length > 0
+          ? { ...cartaoOperacao, evidencia: `${cartaoOperacao.evidencia} · ${linhas.map((l) => l.texto).join(" · ")}` }
+          : cartaoOperacao);
         return;
       }
 
@@ -607,6 +663,11 @@ export default function OtimizarPage({
                 </span>
               </div>
               <p className="row-meta mt-1 max-w-[92ch]">{ROTULO_SECAO[secao].descricao}</p>
+              {/* A lacuna diz-se em vez de se calar: no Linux não há leitor de
+                  firewall neste corte, e «não lida» não pode virar «desligada». */}
+              {secao === "verificacoes" && notaPlataforma && (
+                <p role="note" className="row-note mt-1 max-w-[92ch]">{notaPlataforma}</p>
+              )}
             </div>
 
             {linhas.length === 0 ? (
@@ -638,6 +699,56 @@ export default function OtimizarPage({
           </section>
         );
       })}
+
+      {/* Estado por fonte, lido ao serviço ao montar. Não é um nível de proteção:
+          cada linha afirma uma base e nada mais. */}
+      <section className="animate-in fade-in slide-in-from-bottom-4 duration-500">
+        <div className="mb-3 flex items-center gap-2">
+          <h2 className="text-sm font-mono font-bold uppercase tracking-wider text-foreground">
+            Definições de segurança
+          </h2>
+          <span className="row-meta tabular-nums">
+            {fontesDefinicoes === null ? "sem leitura" : `${fontesDefinicoes.length} fonte(s)`}
+          </span>
+        </div>
+        <p className="row-meta -mt-2 mb-3">
+          {protecao.motores?.definitionsUpdatedAt && Number.isFinite(Date.parse(protecao.motores.definitionsUpdatedAt))
+            ? `Última atualização de definições reportada: ${new Date(protecao.motores.definitionsUpdatedAt).toLocaleString("pt-PT")}.`
+            : "O serviço não reportou a data da última atualização de definições nesta leitura."}
+        </p>
+        {fontesDefinicoes === null ? (
+          <div className="stat-card flex items-start gap-3 p-4">
+            <span className="icon-tile" aria-hidden>
+              <Info className="h-4 w-4" />
+            </span>
+            <p className="row-note">
+              O serviço não devolveu o estado por fonte. Nenhuma base é dada como atualizada —
+              o botão «Atualizar definições» mostra o que o pedido confirmou, mas não prova
+              que alguma base mudou.
+            </p>
+          </div>
+        ) : (
+          <div className="stat-card overflow-hidden">
+            <div className="row-list">
+              {fontesDefinicoes.map((fonte) => (
+                <div key={fonte.fonte} className="row-item optimize-source-row">
+                  <div className="min-w-0 flex-1">
+                    <p className="row-title">{fonte.nome}</p>
+                    <p className="row-note">
+                      {fonte.texto.startsWith(`${fonte.nome} — `)
+                        ? fonte.texto.slice(fonte.nome.length + 3)
+                        : fonte.texto}
+                    </p>
+                  </div>
+                  <span className={CHIP_DEFINICOES[fonte.rotulo] ?? "state-chip state-chip--na"}>
+                    {fonte.rotulo}
+                  </span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+      </section>
 
       {/* Progressive disclosure: a auditoria dos botões fica fechada. É prova
           técnica, não leitura de todos os dias. */}

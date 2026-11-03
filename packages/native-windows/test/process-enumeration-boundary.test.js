@@ -46,13 +46,17 @@ describe("snapshotProcesses — fronteira de verdade da enumeração", () => {
 
   it("(a) payload primário corrompido (JSON inválido) também rejeita", async () => {
     // Saída vazia do ConvertTo-Json ⇒ JSON.parse("") lança. Não é lista vazia: é ausência de verdade.
+    // A regex anterior (/indisponível|CIM|zero registos/i) pertencia a outra fronteira: o produto
+    // distingue três causas (`spawn`, `parse`, `empty`) e a do payload corrompido é `parse`
+    // (`src/index.ts:755`). Fixar o texto real é mais estrito do que a disjunção, não mais fraco:
+    // se alguém misturar `parse` com `empty`, este teste rebenta.
     await assert.rejects(
       () => snapshotProcesses({ runPrimary: async () => "" }),
-      /indisponível|CIM|zero registos/i,
+      /JSON parse: payload de processos não é JSON utilizável/,
     );
     await assert.rejects(
       () => snapshotProcesses({ runPrimary: async () => "{not-json" }),
-      /indisponível|CIM|zero registos/i,
+      /JSON parse: payload de processos não é JSON utilizável/,
     );
   });
 

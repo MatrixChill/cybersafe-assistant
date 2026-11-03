@@ -45,6 +45,14 @@ const envOK = (extra = {}) => ({
   CYBERSAFE_DEV_SERVICE_DIR: SERVICE_DIR,
   CYBERSAFE_DB_PATH: DB,
   CYBERSAFE_DEV_PIPE_NAME: PIPE,
+  // Fixado de propósito: `CYBERSAFE_REALDEV_FIXTURE_SCAN=1` é uma prova OPT-IN
+  // real, e o produto lê-a em `engine.ts:3934` como sessão não-confiável — com
+  // ela ligada o agendador de definições NÃO nasce (é o comportamento declarado
+  // no comentário do caso «USB=0 e RETOMA=0»). Sem esta linha, correr a suíte
+  // com a flag no ambiente mudava a resposta do produto e os testes falhavam
+  // por contaminação, não por defeito. Quem quiser a flag ON passa `...extra`.
+  CYBERSAFE_REALDEV_FIXTURE_SCAN: undefined,
+  CYBERSAFE_REALDEV_FIXTURE_ROOT: undefined,
   ...extra,
 });
 
@@ -323,7 +331,7 @@ describe("bootstrap: validação antes dos efeitos", () => {
 
 describe("allowlist cerrada", () => {
   it("as permitidas são um subconjunto do dispatch real, sem nomes inventados", () => {
-    assert.equal(METODOS_DO_SERVICO.size, 42, "o vocabulário do dispatch mudou");
+    assert.equal(METODOS_DO_SERVICO.size, 43, "o vocabulário do dispatch mudou");
     assert.equal(new Set(METODOS_DO_SERVICO).size, METODOS_DO_SERVICO.size);
     for (const m of LEITURAS_PERMITIDAS) assert.ok(METODOS_DO_SERVICO.has(m), `permitida fora do dispatch: ${m}`);
   });
@@ -466,7 +474,18 @@ describe("ProtectionEngineService.init real (limites duplados)", () => {
       health: { status: "active", coverage: "unknown", detail: "duplo: o load é fingido, nada foi medido" },
       load: async () => { duplos.yaraLoad += 1; },
     };
-    servico.clamav = { ...(servico.clamav ?? {}), isAvailable: async () => { duplos.clamav += 1; return false; } };
+    // Mesma armadilha do YARA acima, mesma razão: o spread só copia propriedades
+    // PRÓPRIAS e `health` é um getter do protótipo de `ClamavBridge`, por isso
+    // perdia-se e o `init()` real rebentava em `this.clamav.health.status` ao
+    // registar `engine-init clamavMs=...` (dist/engine.js). O duplo declara então
+    // o health que corresponde ao que ele próprio simula: `isAvailable()` finge o
+    // clamscan AUSENTE, logo um motor indisponível. `"unavailable"` é um valor
+    // real de `EngineSubsystemStatus` (packages/shared-types/src/index.ts:366).
+    servico.clamav = {
+      ...(servico.clamav ?? {}),
+      health: { status: "unavailable", detail: "duplo: o clamscan é fingido como ausente" },
+      isAvailable: async () => { duplos.clamav += 1; return false; },
+    };
     servico.updater = { startScheduler: () => { duplos.updater += 1; } };
     servico.startPipeServer = async () => { duplos.pipe += 1; };
 

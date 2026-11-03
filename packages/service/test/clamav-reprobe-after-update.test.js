@@ -30,7 +30,12 @@ async function defsReady(label) {
   tempDirs.push(root);
   const dir = path.join(root, "definitions", "clamav");
   await fs.mkdir(dir, { recursive: true });
+  // Base COMPLETA: desde 2026-11-01 o classificador exige o conjunto diário
+  // (medido: uma descarga interrompida deixa main.cvd e perde o daily, e esse
+  // estado já não é cobertura). O que este ficheiro testa é o RE-PROBE, não a
+  // completude — a fixture tinha por acidente uma base parcial.
   await fs.writeFile(path.join(dir, "main.cvd"), "x");
+  await fs.writeFile(path.join(dir, "daily.cld"), "y");
   return { root, definitionsDir: path.join(root, "definitions") };
 }
 

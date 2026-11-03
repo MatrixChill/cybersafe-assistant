@@ -197,7 +197,7 @@ describe("P1-B (2) — barra proporcional só com denominador real", () => {
       "a proporção voltou a estar limitada ao âmbito «computer»",
     );
     // O detalhe recebe os ficheiros já verificados dentro do batch.
-    assert.match(PAGE, /scanProgress\?\.filesAnalyzed \?\? 0/);
+    assert.match(PAGE, /scanProgress\?\.filesInEngineScanned \?\? 0/);
   });
 });
 

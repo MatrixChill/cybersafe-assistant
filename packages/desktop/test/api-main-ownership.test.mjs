@@ -14,8 +14,9 @@ const js=ts.transpileModule(source.slice(start,end),{compilerOptions:{target:ts.
 function harness(){
  const stopped=[];let calls=0, resolve;
  const pending=new Promise(r=>resolve=r);
- const create=new Function('startLocalApi','stopLocalApi',`let apiRuntime=null,apiChild=null,apiStartInFlight=false,isQuitting=false;let serviceProcess=null,updateStateUnsub=null,appUpdater=null;const logExitEvent=()=>{};
+ const create=new Function('startLocalApi','stopLocalApi',`let apiRuntime=null,apiChild=null,apiStartInFlight=false,isQuitting=false;let serviceProcess=null,updateStateUnsub=null,appUpdater=null,stopAutomaticChecks=null;const logExitEvent=()=>{};
  const app={isPackaged:true,getAppPath:()=>'',getPath:()=>''};const DEFAULT_API_PORT=4000;
+ const configureAiChild=async()=>true;const currentAiStore=()=>null;const reconcilePendingInstalledUpdate=async()=>{};const recoverPendingUpdateAfterStartupFailure=()=>{};
  const process={execPath:'fixture'};const logStartup=()=>{};const classifyStartupError=()=> 'UNKNOWN';const console={log(){},error(){}};
  ${js}
  return {start:startPackagedApi,quit:()=>{${quitPrefix}},state:()=>({apiChild,apiRuntime,apiStartInFlight})};`);

@@ -1,14 +1,30 @@
 import React, { useState, useEffect } from "react";
 import { KeyRound, Eye, EyeOff, Check, X, ShieldAlert, Sparkles, Loader2, Trash2 } from "lucide-react";
 
+/**
+ * Como a chave fica em repouso. É um eixo separado de «existe chave»: o rótulo
+ * vem do processo Main (DPAPI, Keychain, libsecret/kwallet, basic_text ou
+ * nenhum) e é a única coisa que autoriza a frase «está cifrada».
+ */
+export type MecanismoArmazenamentoIa = {
+  nivel: "seguro" | "nao-seguro" | "desconhecido";
+  rotulo: string;
+  explicacao: string;
+  remedio?: string;
+};
+
+export type OrigemCredencialIa = "cifrado" | "local-protegido";
+
 export interface MatrixConfigModalProps {
   isOpen: boolean;
   onClose: () => void;
   currentProvider?: string;
   hasConfiguredKey?: boolean;
   providerState?: string;
+  mecanismo?: MecanismoArmazenamentoIa | null;
+  origem?: OrigemCredencialIa | null;
   onVerify?: () => Promise<void>;
-  onSaveKey?: (key: string, provider: string) => Promise<{ ok: boolean; error?: string }>;
+  onSaveKey?: (key: string, provider: string, consentidoSemCifra: boolean) => Promise<{ ok: boolean; error?: string }>;
   onClearKey?: () => Promise<{ ok: boolean }>;
 }
 
@@ -17,6 +33,8 @@ export function MatrixConfigModal({
   onClose,
   currentProvider = "groq",
   hasConfiguredKey = false,
+  mecanismo = null,
+  origem = null,
   onSaveKey,
   providerState = "Ligação não verificada",
   onVerify,
@@ -26,13 +44,28 @@ export function MatrixConfigModal({
   const [apiKey, setApiKey] = useState("");
   const [showKey, setShowKey] = useState(false);
   const [loading, setLoading] = useState(false);
+  const [consentidoSemCifra, setConsentidoSemCifra] = useState(false);
   const [feedback, setFeedback] = useState<{ type: "success" | "error"; message: string } | null>(null);
 
+  // Sem mecanismo confirmado, escrever exige uma escolha explícita do utilizador.
+  const exigeConsentimento = mecanismo !== null && mecanismo.nivel !== "seguro";
+  const podeGuardar = !exigeConsentimento || consentidoSemCifra;
+
   useEffect(() => {
-    setApiKey(""); setShowKey(false); setFeedback(null);
+    setApiKey(""); setShowKey(false); setFeedback(null); setConsentidoSemCifra(false);
     if (isOpen) setProvider(currentProvider === "openai" ? "openai" : "groq");
   }, [isOpen, currentProvider]);
   if (!isOpen) return null;
+
+  const mensagemSucesso = () => {
+    if (origem === "local-protegido") {
+      return "Chave guardada em texto puro num ficheiro local protegido por permissões (0600) — não está cifrada.";
+    }
+    if (mecanismo && mecanismo.nivel === "seguro") {
+      return `Chave guardada e cifrada por ${mecanismo.rotulo}.`;
+    }
+    return "Chave guardada; ainda não confirmámos o mecanismo de cifra desta sessão.";
+  };
 
   const handleSave = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -44,14 +77,21 @@ export function MatrixConfigModal({
       setFeedback({ type: "error", message: "A chave tem de ter pelo menos 16 caracteres." });
       return;
     }
+    if (!podeGuardar) {
+      setFeedback({
+        type: "error",
+        message: "Confirma explicitamente a guarda sem cifra, ou activa um gestor de segredos desta sessão.",
+      });
+      return;
+    }
 
     setLoading(true);
     setFeedback(null);
     try {
       if (onSaveKey) {
-        const res = await onSaveKey(apiKey.trim(), provider);
+        const res = await onSaveKey(apiKey.trim(), provider, consentidoSemCifra);
         if (res.ok) {
-          setFeedback({ type: "success", message: "Chave guardada com sucesso e protegida por DPAPI." });
+          setFeedback({ type: "success", message: mensagemSucesso() });
           setApiKey("");
         } else {
           setFeedback({ type: "error", message: res.error || "Não foi possível guardar a chave." });
@@ -89,7 +129,7 @@ export function MatrixConfigModal({
       aria-modal="true"
       className="fixed inset-0 z-[120] flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-in fade-in duration-200"
     >
-      <div className="w-full max-w-md rounded-2xl border border-primary/30 bg-card p-6 shadow-2xl space-y-5">
+      <div data-cs-overlay="modal" className="w-full max-w-md rounded-2xl border border-primary/30 bg-card p-6 shadow-2xl space-y-5">
         {/* Cabeçalho */}
         <div className="flex items-center justify-between border-b border-border pb-3">
           <div className="flex items-center gap-2.5">
@@ -115,7 +155,7 @@ export function MatrixConfigModal({
           </button>
         </div>
 
-        {/* Estado Atual */}
+        {/* Estado Atual — «existe chave» e «como está protegida» são duas linhas, não uma */}
         <div className="rounded-xl border border-border bg-secondary/30 p-3 text-xs space-y-1">
           <div className="flex items-center justify-between">
             <span className="font-mono text-muted-foreground">Estado atual:</span>
@@ -123,12 +163,44 @@ export function MatrixConfigModal({
               {hasConfiguredKey ? "Chave guardada (não verifica a ligação)" : "Modo Local (Sem Chave)"}
             </span>
           </div>
+          <div className="flex items-center justify-between">
+            <span className="font-mono text-muted-foreground">Proteção em repouso:</span>
+            <span className={`font-mono font-semibold ${mecanismo?.nivel === "seguro" ? "text-cyber-green" : "text-destructive"}`}>
+              {mecanismo ? mecanismo.rotulo : "A confirmar"}
+            </span>
+          </div>
           <p className="text-[11px] text-muted-foreground">
-            {hasConfiguredKey
-              ? "A tua chave está cifrada localmente com DPAPI/safeStorage e só é utilizada para contactar o fornecedor mediante escolha online explícita."
-              : "Sem chave configurada, a Matrix funciona em modo determinístico local sem contactar servidores externos."}
+            {hasConfiguredKey && origem === "local-protegido"
+              ? "Esta chave está em texto puro num ficheiro local acessível só ao teu utilizador (0600). Qualquer processo teu consegue lê-la."
+              : hasConfiguredKey && mecanismo?.nivel === "seguro"
+                ? `A tua chave está cifrada por ${mecanismo.rotulo} e só é utilizada para contactar o fornecedor mediante escolha online explícita.`
+                : hasConfiguredKey
+                  ? "Há uma chave guardada, mas o mecanismo de cifra desta sessão não está confirmado — não afirmamos que está cifrada."
+                  : "Sem chave configurada, a Matrix funciona em modo determinístico local sem contactar servidores externos."}
           </p>
         </div>
+
+        {exigeConsentimento && (
+          <div className="rounded-xl border border-destructive/40 bg-destructive/5 p-3 text-xs space-y-2">
+            <div className="flex items-start gap-2">
+              <ShieldAlert className="w-4 h-4 shrink-0 text-destructive" />
+              <div className="space-y-1">
+                <p className="font-mono text-destructive">Sem mecanismo seguro de armazenamento</p>
+                <p className="text-[11px] text-muted-foreground">{mecanismo?.explicacao}</p>
+                {mecanismo?.remedio && <p className="text-[11px] text-muted-foreground">{mecanismo.remedio}</p>}
+              </div>
+            </div>
+            <label className="flex items-start gap-2 text-[11px] text-foreground cursor-pointer">
+              <input
+                type="checkbox"
+                className="mt-0.5"
+                checked={consentidoSemCifra}
+                onChange={(e) => setConsentidoSemCifra(e.target.checked)}
+              />
+              Autorizo a guardar a chave em texto puro neste computador, num ficheiro só do meu utilizador.
+            </label>
+          </div>
+        )}
 
         <p role="status" className="text-xs">{providerState}</p>
         <button type="button" disabled={!hasConfiguredKey || loading} onClick={async () => { setLoading(true); try { await onVerify?.(); } finally { setLoading(false); } }} className="text-xs underline disabled:opacity-50">Verificar ligação (contacta o fornecedor; não envia medições)</button>
@@ -214,7 +286,7 @@ export function MatrixConfigModal({
               </button>
               <button
                 type="submit"
-                disabled={loading || !apiKey.trim()}
+                disabled={loading || !apiKey.trim() || !podeGuardar}
                 className="inline-flex items-center gap-1.5 rounded-lg border border-primary/50 bg-primary px-3 py-1.5 font-mono text-xs font-semibold text-primary-foreground hover:bg-primary/90 transition-colors disabled:opacity-50"
               >
                 {loading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Sparkles className="w-3.5 h-3.5" />}

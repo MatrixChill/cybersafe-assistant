@@ -46,12 +46,15 @@ function fixture(name, { extra = null } = {}) {
 
 test("packaging includes a verified read-only resource separately from mutable definitions", () => {
   const input = {
+    // Manifest shape fixture: no binary is executed or packaged by this test.
+    scanEngine: path.join(ROOT, "scan-engine-fixture.exe"),
     clamavSeedDir: ROOT, productVersion: "0.1.10-internal.pap-r6.20261031",
     desktopManifest: { name: "desktop", build: { productName: "CyberSafe", directories: {}, win: {} } },
     tarballs: { "@cybersafe/core": "core.tgz", "@cybersafe/service": "service.tgz", "@cybersafe/shared-types": "shared.tgz", api: "api.tgz" }, desktopDir: ROOT, outDir: ROOT,
   };
   const manifest = buildAppManifest(input);
   assert.deepEqual(manifest.build.extraResources.find(entry => entry.to === "clamav-seed"), { from: ROOT, to: "clamav-seed" });
+  assert.deepEqual(manifest.build.extraResources.find(entry => entry.to === "cybersafe-update-launcher.exe"), { from: path.join(ROOT, "cybersafe-update-launcher.exe"), to: "cybersafe-update-launcher.exe" });
 });
 
 test("build preparer rejects unpinned input before creating output", () => {

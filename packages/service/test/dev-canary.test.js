@@ -161,7 +161,16 @@ describe("Canário dev-only — pipeline E2E scan → detection → threat event
 
     const result = await withNodeEnv("test", async () => {
       const threatEvents = [];
-      const clamav = new ClamavBridge();
+      // Nada de prova de carga neste caso: o que ele exercita é o PIPELINE de
+      // deteção, e o batch de scan continua real. Sem a opção, `new ClamavBridge()`
+      // corre `runLoadProof` no primeiro `isAvailable()` — um cold start de clamscan
+      // de ~6 s (core/src/clamav.ts:3302 decide, :3336 executa, spawn em :3434)
+      // ANTES do batch de ~6-7 s, e os 12,3 s medidos estouravam o `waitFor`.
+      // `loadProofEnabled` é a seam explícita do próprio produto (a mesma política
+      // dos modos readonly/fixture) e deixa o motor `degraded` com a razão honesta,
+      // sem spawn. O orçamento de 10 s mantém-se: é o do batch, não o de um cold
+      // start que ninguém está a testar.
+      const clamav = new ClamavBridge({ loadProofEnabled: false });
       const analyzer = createRealAnalyzer(path.join(dir, "analyzer.yar"), clamav);
       const mgr = new ScanManager(createEngineAdapter(analyzer, threatEvents, clamav));
       const finalState = await scanDir(mgr, dir);
@@ -202,7 +211,11 @@ describe("Canário dev-only — pipeline E2E scan → detection → threat event
 
     const result = await withNodeEnv("production", async () => {
       const threatEvents = [];
-      const clamav = new ClamavBridge();
+      // Idem ao caso de cima: o `loadProofEnabled: false` corta o cold start da
+      // prova de carga (~6 s) e não o batch de scan, que é o que este par de
+      // casos prova em ambas as políticas. Em produção o detector por conteúdo
+      // continua inerte — é a asserção que muda aqui, não o motor.
+      const clamav = new ClamavBridge({ loadProofEnabled: false });
       const analyzer = createRealAnalyzer(path.join(dir, "analyzer.yar"), clamav);
       const mgr = new ScanManager(createEngineAdapter(analyzer, threatEvents, clamav));
       const finalState = await scanDir(mgr, dir);

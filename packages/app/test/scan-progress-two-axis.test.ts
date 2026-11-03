@@ -139,6 +139,17 @@ describe("scanner: a etapa não inventa números", () => {
     assert.equal(stage.percent, 100);
   });
 
+  test("a etapa usa a contagem do batch, não os veredictos já aceites", () => {
+    const state = stateOf({ filesInEngineScanned: 9, filesAnalyzed: 0, filesInEngineBatch: 800 });
+    assert.deepEqual(scanAnalysisStage(state), {
+      active: true,
+      done: 9,
+      total: 800,
+      percent: 1,
+    });
+    assert.equal(scanProgressPercent(state), 0);
+  });
+
   test("sem denominador real a barra fica indeterminada, mas a etapa continua honesta", () => {
     const state = stateOf({ filesTotal: undefined });
     assert.equal(state.filesTotal, undefined);
@@ -198,4 +209,13 @@ describe("scanner: a barra global é monotónica durante um scan real", () => {
     }
     assert.equal(anterior, 100);
   });
+});
+
+test("terminal antigo com campos de lote residuais não apresenta uma etapa ativa", async () => {
+  const { scanEngineBatchElapsedSeconds } = await import("../src/lib/scanSession");
+  for (const status of ["completed", "cancelled", "failed"] as const) {
+    const terminal = stateOf({ status, filesInEngineScanned: 512, engineBatchStartedAt: MID_BATCH.startTime });
+    assert.equal(scanAnalysisStage(terminal).active, false);
+    assert.equal(scanEngineBatchElapsedSeconds(terminal, Date.parse(MID_BATCH.startTime) + 120000), null);
+  }
 });

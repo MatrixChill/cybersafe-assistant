@@ -56,12 +56,12 @@ export class DevWindowsReadonlyError extends Error {
 }
 
 /**
- * Os 39 métodos do dispatch do serviço. Lista fechada: é o que pode ser nomeado
+ * Os 43 métodos do dispatch do serviço. Lista fechada: é o que pode ser nomeado
  * num log/recusa. Um `method` fora daqui é reportado como `metodo_desconhecido`,
  * porque o valor do pedido é conteúdo do chamador, não vocabulário nosso.
  */
 export const METODOS_DO_SERVICO: ReadonlySet<string> = new Set<string>([
-  "analysis.restricted", "connections.list", "definitions.update", "events.clear", "events.list",
+  "analysis.restricted", "connections.list", "definitions.status", "definitions.update", "events.clear", "events.list",
   "exclusions.get", "exclusions.update", "hardware.snapshot", "monitor.pause", "monitor.resume",
   "monitor.start", "monitor.stop", "pcstate.get", "process.analyze", "process.killTree", "process.termination.prepare", "process.termination.confirm", "process.termination.cancel",
   "processes.list", "protection.getState", "protectionIntent.get", "protectionIntent.setOptIn",
@@ -77,6 +77,10 @@ export const METODOS_DO_SERVICO: ReadonlySet<string> = new Set<string>([
  * até ser revisto explicitamente.
  */
 export const LEITURAS_PERMITIDAS: ReadonlySet<string> = new Set<string>([
+  // `definitions.status` é leitura pura do estado das bases: precisa de funcionar
+  // na lane read-only, senão a página de definições ficaria muda justamente no
+  // modo em que uma descarga real não pode ocorrer.
+  "definitions.status",
   "protection.getState",
   "protectionIntent.get",
   "events.list",

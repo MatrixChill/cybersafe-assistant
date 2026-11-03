@@ -227,8 +227,105 @@ Nada aqui se apresenta como ensaiado sem o ter sido.
   `ok: o.success`, e a pregação de sucesso em `processActions.ts:606` só aceita
   `killed`/`already-exited`. **Reativar o delta é decisão do proprietário** (a janela
   revalidação→`taskkill` não é atómica; o delta existe precisamente para não a fingir segura) e
-  nenhuma asserção de teste foi afrouxada para esconder isto. Restam 23 falhas: `p1-3-prefetch-isolation`
-  7, `qa3-recursive` 5 (já corrigidas em `2eadccb`, total ainda não re-medido) e 11 por classificar.
+  nenhuma asserção de teste foi afrouxada para esconder isto.
+- **Re-medida a suíte completa no HEAD atual `9b7e823`** (`logs/service-full-9b7e823.log`):
+  **931 testes / 137 suítes / 878 PASS / 53 FAIL / 0 SKIP / 0 TODO**, duração **210 510 ms**. Isto
+  substitui a contagem de 58 e a frase «11 por classificar», e **retira a ideia de que a suíte
+  precisa de um teto de duração para ser exequível em CI**: ela cabe em 210 s; o que impedia o total
+  era a ausência de `dispose()`, não o tempo. Classificação por causa, medida e não inferida:
+  **38 = portão de terminação** — `process-kill` 30, `kill-budget` 5, `kill-blocked-log` 2
+  («pre-condicao: PID 4 e recusado» → `failed`; «esperava 4 linhas novas, obtive 0») e
+  `p0-runtime-isolation` 1 (o `actions.log` do kill fica vazio), tudo porque o portão devolve antes
+  de qualquer consulta e antes de qualquer `logKillBlocked`. **8 = `inconclusive` em ficheiro
+  benigno** — `p1-3-prefetch-isolation` 7 e `scan-post-batch-no-double-clamav` 1; um `*.exe` no
+  `%TEMP%` soma `dangerous_file_extension` + `suspicious_location` (15+15, `analysis.ts:207` /
+  `scoring.ts`) e no caso do `scan-post-batch` é **um `.txt` no `%TEMP%`**, em que só a localização
+  já chega. Consequência honesta: o marcador `safe` deixou de discriminar o isolamento, e as regras
+  listadas por ficheiro são as do nome/caminho do próprio ficheiro — **não há aqui prova de que o
+  defeito de isolamento tenha voltado**, mas há um facto de produto por decidir (ficheiro inofensivo
+  em `%TEMP%` reportado como não-conclusivo). **4 = harness, por classificar** — `dev-canary` 2 com
+  `Error: timed out waiting for condition` aos ~10 s e `dev-windows-readonly` 2 com
+  `TypeError: Cannot read properties of undefined (reading 'status')`. **3 = asserções no eixo
+  aposentado** — `scan-batch-terminal-reconcile`: exigem que `filesAnalyzed` suba com os terminais
+  provados pelo **batch**, e desde a decisão datada de 2026-10-23 em `scan-manager.ts:1044-1048` a
+  etapa do motor não escreve `filesAnalyzed` (promovê-los seria «afirmar cobertura que não existe —
+  400 do batch contra 61 aceites»); o valor de etapa está em `filesInEngineBatch`. **Retiro a
+  classificação anterior («possível defeito real, continua por explicar»): está refutada.** A
+  leitura do código prova que os três resultados são o contrato coerente (`filesScanned=8`,
+  `filesFailed=8`, `filesAnalyzed=0`, invariante `scanned = analisados+excluídos+falhados`
+  verificada), não perda de integridade de resultados (§7). Falta decidir se as asserções são
+  reescritas para o eixo vigente — e nessa reescrita têm de continuar a provar o que protegiam
+  (reconciliação terminal do count do batch sem double count), sem serem afrouxadas.
+- **Esse grupo está resolvido, e a reescrita foi medida.** `scan-batch-terminal-reconcile` passa
+  **5/5 PASS, exit 0** isolado (`scanbatch-axis-rewrite.log`). As três asserções deixaram de exigir
+  que `filesAnalyzed` suba com o batch e passaram a provar os dois eixos em separado: a
+  reconciliação 7 → 8 no eixo da etapa, lida na linha `SCANMANAGER_BATCH_END` do tracing opt-in
+  (`analyzedInBatch=8`, `outcomes=n/a` no contrato antigo), e a honestidade do eixo dos aceites —
+  `filesAnalyzed` tem de continuar em `0` enquanto o loop rejeita todos, e `filesInEngineBatch`
+  tem de mostrar `5` durante o batch e voltar a `0` no `finally`. **Nenhum teste ficou mais fraco:
+  se alguém voltar a promover a etapa para `filesAnalyzed`, dois deles falham** — a versão anterior
+  não era capaz de apanhar exatamente esse erro. O total da suíte `service` **ainda não foi
+  re-medido** depois desta reescrita; a linha `878 PASS / 53 FAIL` é de `9b7e823`.
+- **As 4 falhas de harness estão classificadas e corrigidas, com mudança só no fixture.**
+  (i) `dev-windows-readonly` 2 × `TypeError … reading 'status'`: o duplo da linha 469 fazia
+  spread de `servico.clamav`, e `health` é **getter do protótipo** de `ClamavBridge`
+  (`core/src/clamav.ts:3087-3096`) — o spread perde-o e o `init()` real rebentava ao registar
+  `engine-init clamavMs=… status=${this.clamav.health.status}` (`service/src/engine.ts:1007`).
+  O teste já conhecia esta armadilha e resolvia-a para o YARA (linhas 459-468); faltava-lhe só
+  no ClamAV. O duplo passou a declarar `health: { status: "unavailable", … }`, que é o estado
+  que o próprio duplo simula (`isAvailable()` finge o clamscan ausente) e é valor real de
+  `EngineSubsystemStatus` (`shared-types/src/index.ts:366`). Medido: **104/104** (antes
+  102/104). (ii) `dev-canary` 2 × `timed out waiting for condition`: o scan completava
+  (`status=completed`, `analyzed=2`) mas em **12,3 s** contra o orçamento de 10 s do `waitFor`,
+  porque o fixture construía um `ClamavBridge` real e pagava a prova de carga do produto
+  (`runLoadProof`, `core/src/clamav.ts:3336`, spawn `:3434`) — ~6 s de cold start antes do
+  batch de ~6-7 s. A correção usa a costura que o próprio produto expõe
+  (`loadProofEnabled: false`, decidido em `clamav.ts:3302`): **o `timeoutMs` de 10 s não foi
+  tocado e nenhuma asserção foi afrouxada**; medido 6,4 s / 6,3 s. A cobertura da prova de
+  carga não se perde com isto — vive em `core/test/clamav-load-proof-modes`,
+  `clamav-load-proof-rev4`, `clamav-positive-load-proof-lifecycle` e
+  `clamav-health-recovery` (existência verificada; o estado individual desses quatro ficheiros
+  não foi re-medido aqui). Log da investigação: `qoder-investigation-canary-debug.log`.
+- Estado do `ci` no `main` atualizado: run `41302290721` no SHA `9b7e823`, `conclusion: success`.
+  A workflow continua a **não** correr a suíte `service` (corre a do desktop), por isso o verde do
+  `ci` não cobre nenhuma das linhas acima.
+- **Dois factos de âmbito que a suíte do pacote escondia**, medidos em `8653f39`:
+  (i) o script `test` de `packages/service` **não corre a pasta `test/`** — lista 96 entradas de 147
+  ficheiros, pelo que 20 das 66 falhas da pasta completa nunca aparecem no número que o `npm test`
+  devolve; (ii) **não há motor nativo construído nesta linha** — `packages/native-engine/build` não
+  existe, `npm run build:native` nunca foi corrido no worktree, e os `scan-engine.exe` em disco são
+  artefactos de outras linhas (`freebuff2-packaging-p0-20261024`, `pap-autonomous-core-*-20261029`).
+  Logo, os 4 `rc22-native-regressao` são `NOT RUN` travestido de `FAIL`, e §13 ponto 14
+  (verificar dependências nativas do instalador) fica por poder cumprir até haver decisão de build.
+  Os 5 SKIP têm motivo declarado no código (ambiente sem ClamAV/clamscan real, bundle não
+  vendorizado, symlink indisponível no host, provider fora da lane); não afirmo quais os 5 que
+  dispararam nesta corrida, porque o reporter não o imprime.
+- **Retractação das duas asserções acima, medidas de novo em `42a2bfd`.** (a) «não há motor nativo
+  construído nesta linha» **deixou de ser verdade**: `npm run build:native` foi corrido neste
+  worktree a partir do código desta linha (`native-build.log`) e o `scan-engine.exe` produzido é
+  exercitado sem mocks — `rc22-native-regressao` + `rc22-native-init-guard` passam **11/11**
+  isolados. Os 5 `rc22` que falhavam eram de facto `NOT RUN`; deixaram de o ser. O reverso também é
+  verdade e fica declarado: `packages/native-engine/build/` está em `.gitignore:9`, portanto um
+  checkout limpo desta linha volta a ter essas 9 falhas. (b) «não afirmo quais os 5 que dispararam»
+  **está ultrapassado** — os 5 são legíveis no log (`﹣ … # motivo`) e batem certo com o código:
+  `session14-engine-native.test.js` 4 (`:60`, `:79`, `:103` «invocação real ainda não confirmada
+  (degraded)», `:121` «binário presente não permite testar estado unavailable via bridge») e
+  `fecho14-clamav.test.js:148` («Caso 7: clean via spawn mock — NÃO TESTÁVEL sem DB real»). Os 4 do
+  `session14` **não são limite do host, são desenho do teste**: lêem `checkAvailability()` antes de
+  qualquer invocação e o contrato só autoriza `active` depois de uma invocação comprovada, por isso
+  o gate lê `degraded` e salta. (c) As 66 falhas desta linha baixaram para **54**, com reconciliação
+  ficheiro a ficheiro na secção final.
+- **GitHub Releases: zero, medido.** `gh api repos/MatrixChill/cybersafe-assistant/releases` → `[]`;
+  `releases/latest` → `404 Not Found`; `git ls-remote --tags origin` → nenhuma `refs/tags/*`. Não
+  existe **nenhum** artefacto publicado (nem R6 nem R7), o repositório é público (`isPrivate:
+  false`) e `main` é a branch por omissão. Qualquer release é a primeira pública e depende da
+  confirmação explícita do proprietário. O canal de atualizações devolve hoje «sem release» — estado
+  correto de um canal vazio, não uma atualização disponível.
+- Nota de mecanismo, para não repetir o erro: este worktree está na branch
+  `pap/final-qoder-20261101`, não em `main`. `git push origin main` tentava empurrar um `main`
+  local **7 commits atrás** do remoto e foi rejeitado por *non-fast-forward* — a proteção fez o seu
+  trabalho, sem `--force` e sem `reset`. A integração correta é confirmar ancestralidade e
+  `git push origin HEAD:refs/heads/main`, depois verificar com `git ls-remote`.
 - Estado do `ci` no `main`: **VERDE, medido**. A run `41300363725` (SHA `596fbee`,
   2026-11-01T11:06Z, `conclusion: success`) passou em **todos os nove passos**, incluindo
   `Vendor YARA e manifesto de packaging` e `Suíte do desktop`. Nada nisto significa que o
@@ -273,3 +370,824 @@ Os ficheiros que estavam modificados na árvore de trabalho por outro agente (te
 linha a linha e **entram neste commit**; `yara-classic.ts` ganhou diagnóstico do `yara64` nos três
 lançamentos de erro sem alterar o comportamento *fail-closed*. A suíte `service` não chegou a dar
 um resumo neste HEAD — ver a linha `service` da tabela acima: é **INCOMPLETA**, não PASS.
+
+---
+
+## Motor nativo, cancelamento e cobertura re-medidos em `42a2bfd` (2026-11-01)
+
+Três pontos do pedido do proprietário, cada um com a sua medição. **Nada aqui afirma que a R7 está
+pronta**: instalador, atualização end-to-end e os portões humanos continuam pendentes.
+
+### 1. O motor C++ foi compilado a partir desta linha e funciona
+
+`npm run build:native` corrido neste worktree (`native-build.log`, `exit=0`) com CMake + MSVC a
+partir de `packages/native-engine/CMakeLists.txt`. Produto: `build/Release/scan-engine.exe`,
+324 096 bytes, SHA-256 `db92fe819dd44818d269cdfb13ed432ffc1b026c3a43b41d407e29b37d5588ed`.
+**Nenhum executável de outra worktree foi reutilizado** — a árvore `build/` não existia antes desta
+corrida (`.gitignore:9`, portanto também não chega por clone).
+
+Funcionamento real, sem mocks, dois níveis:
+
+- **Suíte**: `rc22-native-regressao` + `rc22-native-init-guard` **11/11 PASS** isolados
+  (`native-after-build.log`). Cobrem fixture benigna com SHA-256 exacto, `double_extension` com
+  score 20 e `level=safe`, ficheiro inexistente → `failure: "output"` e nunca `safe`, e a transição
+  de `degraded` para `active` **só** depois de uma invocação comprovada.
+- **Binário directamente no terminal**: `--version` → `cybersafe-scan-engine 0.1.0 (C++17)`; um `.txt`
+  benigno → `file_size=22`, `entropy=3.6069`, `level=safe`; `notepad.exe` → `valid_pe=true`,
+  `is_64=true`, `machine=34404` (0x8664), `sections=8`, `entropy=6.2092`, `level=safe`; ficheiro
+  ausente → `level=error` com `reasons=["file_not_found"]`. O SHA-256 que o motor devolve para o
+  `notepad.exe` (`468ffe12…577e`) **coincide byte a byte com `certutil -hashfile … SHA256`** — a
+  prova de hash não depende da palavra do próprio motor.
+
+Duas observações honestas, não corrigidas aqui. (i) O `--version` do C++ imprime `0.1.0`, fixo em
+`src/main.cpp:11`, enquanto a identidade do produto vive em `product-version.json`
+(`0.1.11-internal.pap-r7.20261031`): o binário não sabe a versão do produto, e isso aparece no
+diagnóstico do instalador. (ii) O motor devolve `exit=0` também no caso `level:"error"`; a ponte não
+usa o código de saída — decide pelo JSON — por isso não é um defeito observável, mas é uma
+superfície frágil.
+
+### 2. As três falhas de cancelamento eram um contrato mal lido nos testes, não defeito do produto
+
+`scan-cancel-observability` falhava 3. O código está certo: `engine.ts:5002-5011` devolve
+`{ success: desfecho === "cancelado" }`, e o comentário declara que o ACK confirma apenas um
+cancelamento aceite. O `scanManager.cancelScan` devolve `"cancelado"` **só quando há uma nova
+cancelação em curso**; para um `id` desconhecido ou um payload sem `id` devolve recusa. Os testes
+esperavam `success: true` nesses dois casos — ou seja, afirmavam que o serviço confirmava algo que
+não aconteceu. **Estava aposentado**; a asserção antiga passou a `{ success: false }` e os três
+casos que precisavam de um scan real passaram a usar `iniciarScan(t)` em vez de `servoDeVerdade(t)`
+(com o `id` correcto). Medido: **16/16 PASS** (`cancel-after-fix.log`), e as 3 falhas saíram da
+suíte completa.
+
+Distinção pedida: **nenhuma das três era limitação do ambiente** — eram contrato mal especificado
+no fixture, com o produto a responder correctamente. Não houve mudança de comportamento de produto,
+apenas de teste, e o comportamento que elas protegiam (não prometer cancelamento que não aconteceu)
+fica agora asserido em vez de contradito.
+
+### 3. Cobertura efetiva: os dois âmbitos, os 54 atribuídos e os 5 SKIP nomeados
+
+Âmbito: `packages/service/package.json` lista **96 entradas**, a pasta `test/` tem **147 ficheiros**.
+`npm test` não é a suíte. Os dois números coexistem: `npm test` = 46 FAIL; pasta completa em
+`42a2bfd` = **1282 testes / 159 suítes / 1223 PASS / 54 FAIL / 5 SKIP** em 249 s, `node_exit=1`
+(`service-full-nativenox.log`).
+
+A queda 66 → 54 está reconciliada **ficheiro a ficheiro e por assinatura de asserção**, com 54
+rodapés `test at test\…` a bater com os 54 `fail` do reporter:
+
+| Causa | n | Distribuição |
+|---|---|---|
+| Portão de terminação (`KILL_TERMINATION_DISABLED = true`, `engine.ts:748`; `killProcess` retorna `failed` em `:3995` antes de qualquer consulta) | **49** | `process-kill` 30, `tp-f1-r1-identity` 10, `kill-budget` 5, `kill-blocked-log` 2, `p0-runtime-isolation` 1, `tp-f1-process-recovery` 1 |
+| `inconclusive` vs `safe` em ficheiro benigno | **5** | `p1-3-prefetch-isolation` 3 (`:345`, `:397`, `:445`), `recovery-security-pipeline:26` 1, `scan-post-batch-no-double-clamav:148` 1 |
+
+Dentro dos 49 há três assinaturas observáveis, não uma hipótese: 38 blocos com `actual`
+`'failed'`/`false`/`undefined`/`''` contra estados que só a terminação produz (`protected`, `killed`,
+`already-exited`, `alias-stub`, `reused`, `timeout`, `access-denied`), 10 blocos de contagem
+(`0 !== 1`, `0 !== 4` — nenhuma query CIM, nenhuma tentativa) e 1 bloco com a mensagem literal do
+portão (`tp-f1-r1-identity:297`). **Isto é funcionalidade desligada no produto, não instabilidade do
+host** — a decisão de a reactivar é do proprietário (§23, task em aberto).
+
+Os 12 que saíram entre `8653f39` e `42a2bfd` têm uma causa lida no código, não uma coincidência:
+`engine.ts:3151` — `if (!nativeCompleted && analysis.verdict === "safe") analysis.verdict =
+"inconclusive"`. Sem binário nativo, **nenhum veredicto benigno pode ser conclusivo**; com o motor
+compilado, 4 casos de `p1-3-prefetch-isolation` (`:300`, `:323`, `:466`, `:494`) e os 5 `rc22`
+voltaram a poder afirmar o que afirmam. Verifiquei se seria flutuação: `p1-3-prefetch-isolation`
+isolado, três corridas seguidas, dá **sempre 8 PASS / 3 FAIL** nos mesmos três rodapés. As que saíram
+saíram por causa; as que ficaram (agora com a regra extra `scan_inconclusive`, porque o ficheiro
+perdeu o dono do prefetch e cai em `scanFile`) são o ponto de produto em aberto: um `.txt` em
+`%TEMP%` não é reportado como analisado-conclusivo.
+
+**Caveat que não retiro: `packages/native-engine/build/` é gitignored. Um checkout limpo desta
+linha reproduz as 9 falhas dependentes do binário.** O 54 pressupõe o motor compilado, e é por isso
+que o §13 ponto 14 (dependências nativas do instalador) precisa do build de distribuição, não deste.
+
+### Suítes que nenhum comando padrão seleciona (item 3 do pedido, continuado)
+
+A pergunta «que testes não são selecionados pelo comando padrão?» tem três respostas medidas nesta
+linha, e a terceira continha uma falha real:
+
+- **`scripts/test/` — 25 ficheiros, 240 testes, nenhum script os corre.** A raiz só expõe
+  `test:build-order`, `test:dev-isolation` e `test:native`. Medido à mão: **240 / 37 suítes /
+  234 PASS / 0 FAIL / 5 SKIP / 1 TODO**, `exit 0` (`scripts-test-after.log`). Os 5 SKIP são o
+  inspetor de conteúdo do pacote (`app.asar` legível, runtime dentro do asar, módulos nativos fora
+  do asar, nenhum caminho de build/máquina dentro do pacote, nenhum segredo/base/log/sourcemap) e
+  todos dizem «sem artefacto para inspecionar». **É aqui que vive a verificação de inclusão de
+  recursos do ponto 4: está escrita, é honesta, e hoje não corre porque não há artefacto** — o
+  artefacto depende do `source-freeze` aprovado.
+- **`native-windows` — o `npm test` lista 18 dos 28 ficheiros da pasta.** Pasta completa:
+  **246 / 21 suítes / 246 PASS / 0 FAIL**, `exit 0` (`native-windows-full-after.log`).
+- **`native-engine`** tem 25 vetores SHA-256/entropia (`npm run test:native`), todos verdes. Não
+  confundo com a prova de que o binário funciona: essa é `rc22-native-regressao`, acima.
+
+**A falha que só o âmbito completo apanha**: `process-enumeration-boundary.test.js:47` exigia
+`/indisponível|CIM|zero registos/i` para o payload corrompido, mas o produto distingue três causas
+(`src/index.ts:741` `spawn`, `:755` `parse`, `:797` `empty`) e a do JSON inválido é `parse`
+(«JSON parse: payload de processos não é JSON utilizável»). O comportamento estava certo —
+rejeitava, exatamente o que o teste declara —, a regex pertencia a outra fronteira. Fixei ao texto
+real do contrato, o que é **mais estrito** do que a disjunção: quem misturar `parse` com `empty`
+passa a rebentar aqui. Ficheiro isolado 6/6, pasta completa 246/246.
+
+**O segundo achado é de produto, não de teste, e fica como decisão do proprietário (task #15)**: o
+`scanner-dashboard-visibility.test.mjs` procurava as strings de UX em `DashboardPage.tsx`, que hoje
+é um contentor de dados de 70 linhas — a apresentação vive em `v2/dashboard/LabDashboard.tsx` e
+`components/visual/EngineGrid.tsx`. Reapontei as duas garantias que **existem** (legendas de
+proveniência «os cartões mostram o que o serviço reportou» / «não são uma leitura atual dos
+motores», «a ausência de leitura não significa que o histórico esteja vazio», limite de visibilidade
+`.slice(0, 3)`, zero controlos de paginação) e **não apaguei a terceira**: o pointer «o histórico
+completo está em Ameaças» perdeu-se na refactorização v2 (a shell navega pelo modelo `Page`,
+`App.tsx:573`, sem `<a>`). Mantive a asserção verdadeira e marquei-a `{todo: …}` com a razão, para
+que fique à vista como falha esperada e não como sucesso.
+
+**Numeração do `service` atualizada com o motor presente**: o âmbito `npm test` deu **931 / 137 /
+889 PASS / 42 FAIL** (`service-npmtest-d45c7b3.log`) contra os 46 publicados — a diferença de 4 é
+exatamente `p1-3-prefetch-isolation`, o efeito de `engine.ts:3151` com o binário compilado. A pasta
+completa mantém-se em 1282 / 1223 / 54 / 5.
+
+### Canais de actualização e primeira release: o que está medido e o que é armadilha (itens 5 e 7)
+
+Nada neste bloco afirma que a actualização está validada fim-a-fim — falta a chave pública do
+proprietário. Afirma factos lidos no código e no endpoint.
+
+- **O transporte funciona e o canal está vazio, não partido.** Sonda com o opener HTTPS real do
+  produto (`node-transport.ts:createNodeHttpsOpener`) contra o URL pinado em `release-trust.json`:
+  `status=404`, corpo `{"error":"Not Found"}` (21 bytes). Com `enabled:false`, o
+  `createProductionUpdater` nem chega ao pedido — devolve `unconfigured` (provado em
+  `updater-production-trust.test.mjs`, 5/5). A máquina completa do updater está coberta: o
+  `scripts/test/` deu 240 testes / 0 FAIL, e o assinador e o verificador de produção canonizam os
+  mesmos bytes (`release-signing-compat.test.mjs`).
+- **Armadilha de nomenclatura, medida em `semver.ts`.** O `product-version.json` de hoje é
+  `0.1.11-internal.pap-r7.20261031`: semver válido, **não** é core version. Por precedência SemVer,
+  `isUpgrade("0.1.11", "0.1.11-internal.pap-r7.20261031")` dá **`true`** — publicar uma release
+  `0.1.11` «seca» faria o updater oferecer como melhora o mesmo código, porque um núcleo sem
+  pré-lançamento precede qualquer pré-lançamento dele. O caminho seguro também está medido:
+  `…20261115 > …20261031` (identificadores numéricos comparam como números), logo **subir o sufixo
+  de data chega para oferecer uma atualização**. `validateManifest` (`manifest.ts:60`) exige
+  `isValidSemVer` e não `isCoreVersion`, por isso a versão canónica do produto pode viver no
+  manifesto sem mudar nada no produto.
+- **O manifesto fala de um canal que o produto não declara.** `manifest.ts:57` exige
+  `channel: "stable"` literalmente, enquanto `product-version.json` diz `channel: "internal"`. A
+  elegibilidade é do manifesto, não do produto (decisão `97469f1`). Não é incoerência de código, é
+  duas vocabulários de canal em superfícies diferentes; fica dito em vez de ser «harmonizado» à
+  pressa.
+- **Não há ferramenta de checksums.** `grep -rln "SHA256SUMS|sha256sums|checksums" scripts/ docs/`
+  devolve **zero** correspondências. O ponto 7 do pedido pede checksums; hoje só existiriam se
+  alguém os corresse à mão com `certutil`, o que não é reprodutível. Recomendo um
+  `scripts/release-checksums.mjs` (~30 linhas, mesmo formato `<hex>  <nome>`), e não o escrevo sem
+  decisão porque é superfície nova de empacotamento, não correção.
+- **Preparação da release existe como rascunho, fora do repositório**:
+  `…\qoder-goal-final-20261101\release-prep\FIRST-RELEASE-PREP.md` — modelo de manifesto com os
+  campos de artefacto por preencher, tabela do que depende de quê, rascunho das notas de lançamento a
+  partir dos **49 commits** desde `01dcfaf`, e a lista do que continua desligado. Não é documento
+  publicado nem `docs/`; enquanto não houver instalador, um `RELEASE-NOTES.md` no repo seria
+  uma promessa.
+
+### Item 4 ao limite do que se pode medir sem assinatura: pré-voo do `source-freeze`
+
+Regra lida no próprio pipeline, para não deixar ambiguidade: **não há flag de bypass** — o
+comentário em `scripts/package-windows.mjs:1237` diz «Não há flag de bypass nem re-pin silencioso»,
+e `runFreezeGatedPipeline` corre `gate("PRE")` **antes** de `stages.workspaces()`. O marcador
+`SOURCE-FREEZE-FAILED.json` (`markNotDeliverable`) só existe para a fase POS, depois do builder;
+não é uma janela para compilar sem aprovação. A única coisa que falta ao NSIS é, portanto, o registo
+de aprovação — e ele não é meu para escrever: `validateApproval` aceita um aprovador
+(`APPROVER = "Codex Lead"`), e medi com a função exportada que um registo com
+`approvedBy: "Qoder"` devolve `approval-invalid: approvedBy "Qoder" ≠ "Codex Lead"`. O cabeçalho de
+`source-freeze.mjs` é explícito: «--approval é um registo operacional, não uma assinatura
+criptográfica: a autoridade vem do **processo do integrador autorizado**, não do ficheiro».
+
+Mesmo assim o pré-voo foi medido com as funções exportadas do próprio script
+(`release-prep/freeze-readiness.mjs`, leitura apenas, nada escrito dentro do repositório):
+
+- **8 raízes cobertas, 1 769 entradas, digest `1064f33c8a46b6a37c2bcc2f272bb28fa912bd862d1691fc93691672c795e22b`**,
+  estável entre duas leituras da árvore — logo o gate não reprovaria por «ficheiro que muda durante
+  a leitura». Distribuição: `packages` 1 199, `assets` 480, `scripts` 86, `package.json`,
+  `package-lock.json`, `tsconfig.base.json`, `vendor` 1.
+- `buildManifest` **não lançou** `recursos obrigatórios ausentes`: os dois ficheiros de licença
+  exigidos mesmo em `--write` (`assets/licenses/THIRD-PARTY-NOTICES.txt`, `PROVENANCE.json`) estão
+  presentes.
+- `verifySourceFreeze` hoje devolve **exactamente um** problema: `manifest-missing` em
+  `scripts/source-freeze.approved.json`. Um registo de aprovação com `approvedBy` correcto e
+  `candidateId`/`approvedAt` preenchidos passa a validação (medi o exemplar com placeholders: zero
+  problemas). **Tudo o que separa o dia em que o NSIS corre é uma decisão de identidade, não uma
+  verificação técnica pendente.**
+
+**Dois factos de contracto que a medição revelou e que importam à release:**
+
+1. **`product-version.json` não está no conjunto congelado.** A política deste repositório declara
+   esse ficheiro como «fonte canónica da versão do produto», injetada no manifesto empacotado e no
+   renderer — e não aparece entre as 1 769 entradas do digest. Consequência concreta: duas builds a
+   partir do mesmo digest aprovado podem ter versões de produto diferentes. O freeze fecha o
+   conteúdo das fontes mas não fecha a identidade que o instalador publica. Recomendo adicionar o
+   ficheiro às raízes cobertas; **não o fiz**, porque isso muda o digest e invalida qualquer
+   aprovação já dada a este conjunto — é decisão do integrador/proprietário (task #17).
+2. **`README.md`, `CHANGELOG.md` e `product-version.json` não são cobertos** (raiz só
+   `package.json`, `package-lock.json`, `tsconfig.base.json`). Isto é útil: os meus commits de
+   documentação não invalidam uma aprovação. Mas `package.json` **é** coberto, por isso qualquer
+   mudança de dependência ou de script de workspace sim.
+
+Nota operacional para quem correr `--write`: a árvore de trabalho tem `definitions/yara/default.yar`
+marcado como modificado por diferença de fim-de-linha (LF→CRLF do checkout, já documentado e
+deliberadamente não staged). O `--write` calcularia o digest contra essa árvore, portanto o
+candidato sairia com `dirty` git e o ponto 4 do pedido («a partir de commit limpo») não ficaria
+cumprido. Antes de aprovar convém resolver o EOL desse ficheiro, não ignorá-lo.
+
+### Motores reais: o que só corre com opt-in, e o que isso muda na atribuição
+
+A pergunta «os motores estão validados?» tinha uma resposta escondida no mesmo sítio que a
+cobertura: **três provas reais estão atrás de flags de ambiente que nenhum comando default ativa.**
+
+| Flag | Quem a usa | Estado quando ativada nesta linha |
+|---|---|---|
+| `CYBERSAFE_REAL_CLAMSCAN=1` | `core/test/rc22-motores-clamav`, `clamav-resource-cap`, `eicar-manual-opt-in`, `service/test/p1-3-prefetch-isolation`, `p1-4-cancel-before-controller` | `rc22-motores-clamav` **6/6 PASS** em 15,4 s (`clamav-real-optin.log`): o `clamscan.exe` vendorizado (ClamAV 1.5.4, `--version` = exit 0) carrega uma `.ndb` nossa e **deteta o marcador benigno**, deixando o ficheiro limpo; com a base oficial da app (14,8 s de init) também `active` e benigno limpo. **Sem EICAR escrito em disco** — a política está em `eicar-manual-opt-in.test.js` e existe porque o Defender do host bloqueia esses ficheiros. |
+| `CYBERSAFE_REALDEV_FIXTURE_SCAN=1` | 9 ficheiros (`clamav-load-proof-modes`, `dev-windows-readonly*`, `rc22-native-init-guard`, `rc22-engines-yara-recovery-guard`, `individual-process-termination`, etc.) | não exercitado nesta corrida — fica declarado como por medir, não como passou |
+| `CYBERSAFE_STAGING_E2E=1` | `scripts/test/staging-sqlite-runtime` | o próprio skip diz «define CYBERSAFE_STAGING_E2E=1 para correr (build de workspaces + npm install…)» — depende do build de distribuição, logo de #13 |
+
+**YARA clássico já corre de verdade sem flag**: `engine-integrity`, `yara-classic-engine` e
+`yara-engine-provenance` juntos dão **61 testes / 59 PASS / 0 FAIL / 2 SKIP**
+(`yara-real-tests.log`), e os 2 SKIP são os casos em que o antivírus do host nega leitura do alvo
+temporário — ambiente, não produto.
+
+**A consequência para a atribuição das 54 falhas, medida e não inferida.** Como
+`p1-3-prefetch-isolation` também lê `CYBERSAFE_REAL_CLAMSCAN`, usei-a como contra-experiência:
+com o motor ClamAV **real** ligado, `p1-3` + `p1-4` dão 18 testes / 15 PASS / **3 FAIL** — os mesmos
+três rodapés de sempre (`:345`, `:397`, `:445`) (`p13-p14-realclamscan.log`). Ou seja, **aquelas três
+falhas não são limitação do ambiente nem ausência de motor**: com o motor verdadeiro a responder, o
+veredicto continua `inconclusive` onde o teste espera `safe`. Ficam na classe da decisão #11
+(«basta a localização `%TEMP%` para um ficheiro benigno deixar de ser conclusivo?»), e a pergunta ao
+proprietário mantém-se exactamente como foi escrita.
+
+Para o peso da palavra «FINAL»: dos quatro motores, três têm agora prova de execução real nesta
+linha (nativo C++, YARA 4.6.0, ClamAV 1.5.4 — o último apenas via opt-in, que é por si um facto a
+corrigir: uma prova que só existe quando alguém se lembra de a activar não é uma prova de suíte).
+O quarto ponto em falta não é um motor: é o instalador, e esse depende de #13.
+
+### A segunda flag opt-in não tapava um defeito: tapava dois testes mal isolados
+
+`CYBERSAFE_REALDEV_FIXTURE_SCAN=1` corre 8 ficheiros (173 testes). Com a flag no ambiente, dois
+casos falhavam — `individual-process-termination:42` e `dev-windows-readonly:523` — e nenhum dos
+dois era defeito do produto. O produto **honra a flag de propósito**: `engine.ts:3934` trata
+`CYBERSAFE_REALDEV_FIXTURE_SCAN === "1"` como sessão não-confiável e `:3938` devolve o veto
+`critical-operation-or-untrusted-session`; e o comentário do próprio caso «USB=0 e RETOMA=0»
+declara que nos modos readonly/fixture/teste o agendador de definições **continua a NÃO nascer**.
+Os dois testes asseriam o comportamento do modo *normal* sem isolar o ambiente — ao contrário dos
+seus irmãos no mesmo ficheiro, que apagam as variáveis à volta da asserção.
+
+Correcções, ambas em fixture:
+
+- `individual-process-termination.test.js:42` passou a isolar `CYBERSAFE_DEV_WINDOWS_READONLY` e
+  `CYBERSAFE_REALDEV_FIXTURE_SCAN` como os irmãos fazem **e ganhou uma asserção nova**: com a flag
+  ligada, `terminationBlocked()` tem de devolver o veto. A garantia do produto fica lockada em vez
+  de ser apenas tolerada.
+- `dev-windows-readonly.test.js` — `envOK()` é o helper partilhado por muitos casos e não pinava a
+  flag de fixture; ficou com `CYBERSAFE_REALDEV_FIXTURE_SCAN: undefined` e
+  `CYBERSAFE_REALDEV_FIXTURE_ROOT: undefined` no mapa base (o ficheiro já documenta que
+  `process.env.X = undefined` NÃO apaga X — é `aplicarEnv` que apaga). Quem quiser a flag ON passa
+  `...extra` e ganha.
+
+**Medido nos dois sentidos, que é o que separa «passou» de «fica a passar»:** os dois ficheiros dão
+**109/109 com a flag ON e 109/109 com a flag OFF**; o lote completo das 8 fichas passa de
+164 PASS / 2 FAIL para **166 PASS / 0 FAIL / 7 SKIP**, `exit 0`
+(`realdev-fixture-scan.log` → `realdev-fixture-scan-after.log`).
+
+Os 7 SKIP que ficam são os casos que exigem *ainda mais* ambiente (base ClamAV oficial ausente,
+symlink real, etc.) e não foram contados como PASS em lado nenhum.
+
+### Ressalva ao número «54»: a contagem depende do modo de execução
+
+Re-corri a pasta completa do `service` depois das correções de `4f6a0c9` e obtive **1282 / 1220 PASS / 57 FAIL**, não 54. Não foi regressão: os três a mais são `dev-canary` (2 falhas a **exactamente ~10 s**, o `timeoutMs = 10_000`) e `p0-rpc-queue` (1). Cada um deles passa isolado — `dev-canary` 2/2 e `p0-rpc-queue` 3/3 em três corridas seguidas. O que muda é a concorrência: 147 ficheiros em paralelo estouram orçamentos de tempo, e o `npm test` do pacote, que corre com `--test-concurrency=1`, deu **962 testes / 920 PASS / 42 FAIL**, o mesmo 42 do baseline anterior às mudanças (logo: sem regressão, e com +31 testes novos de feed de hashes a passar).
+
+Publicar «54» sem dizer que a contagem depende do modo de execução foi um erro meu, e fica corrigido aqui e no `README.md`. A classificação por assinatura das causas mantém-se válida: 49 portão de terminação + 5 `inconclusive` contra `safe`; o que não é estável é o total, e dizê-lo é melhor do que fingir que é.
+
+### Definições ClamAV no percurso REAL — primeiro fornecedor validado de ponta a ponta
+
+Isto é uma **chamada real ao fornecedor** (espelho oficial `database.clamav.net`), feita de caso
+num directório próprio fora do repositório (`clamav-real-db/`), sem tocar na base da aplicação, na
+seed empacotada ou no perfil do utilizador. Config e argumentos vieram das funções do **produto**
+(`ensureFreshclamConfig`, `buildFreshclamArgs`), não de linhas escritas por mim.
+
+- **freshclam vendorizado, sem PATH**: `vendor/clamav/freshclam.exe` invocado por caminho absoluto;
+  `resolveFreshclamExecutable` (`updater.ts:312-347`) fixa o irmão do `clamscan` empacotado — e é
+  medido que o bundle publica o `freshclam.exe`: `ALLOWED_EXECUTABLES` e a lista
+  `required = ["clamscan.exe","freshclam.exe","COPYING.txt"]` em `scripts/vendor-clamav.mjs:148,645`.
+  As CVDs **não** vêm no instalador por decisão documentada (`:761): obtidas por freshclam, por
+  utilizador. Isso separa também as duas coisas que o pedido exige distinguir: actualizar
+  assinaturas (este caminho) ≠ actualizar o binário ClamAV (outro processo de distribuição).
+- **Descarga real, 1ª passagem**: exit 0 em 16,6 s; 112 829 214 bytes em `main.cvd` (89 072 577),
+  `daily.cvd` (23 447 611, versão remota 28171), `bytecode.cvd` (281 702) **com os `.sign`**
+  correspondentes. Segunda passagem exit 0 sem reescrever o que já era igual — o comportamento
+  estatuído que o pedido pede («sem alterações» é um resultado, não um erro).
+- **Carga real e saúde**: com a prova de carga ACTIVADA (como em produção), o `ClamavBridge` do core
+  sobre essa base real deu `isAvailable=true` (6,4 s), `health = active — "3 signature database
+  file(s)"` e `scanFile` de um ficheiro benigno → `verdict: clean`, `status.active`. A base oficial
+  de 112 MB carrega-se e usa-se, portanto, de facto.
+- **A minha primeira leitura estava errada, e corrijo-a aqui**: na mesma corrida, com
+  `loadProofEnabled: false`, o bridge devolveu `isAvailable=false` e `degraded` («a prova de carga
+  falhou»). Não é defeito do produto — é o fail-closed dele a funcionar: sem prova de carga não se
+  publica `active**. O que estava errado era a minha injecção. Ficou registado porque é exactamente o
+  tipo de «degradado» que, lido à pressa, se transformaria num falso defeito na ficha.
+
+Ainda **não** medido neste percurso: a preservação da base anterior quando o freshclam falha a meio
+da descarga (requisito 1, pontos 4 e 5) e a recuperação de saúde depois dessa falha. O
+`ClamDatabaseGate` (`updater.ts:362-420`) foi desenhado para isso e tem testes com duplos, mas
+falta a variação com o fornecedor real a interromper-se. Task #19 fica em curso por essa razão.
+
+### Interrupção REAL de uma descarga: as bases antigas sobrevivem, e a saúde mentia
+
+Provoquei a falha que ainda não tinha provas (requisito 1, pontos 4 e 5): na base oficial já
+descarregada em `clamav-real-db/database`, removi o `daily.cvd` para forçar uma descarga nova, lancei
+o `freshclam` do produto e **matei o processo a meio** (SIGTERM aos 1,5 s). Script
+`logs/real-clamav-interrupt.mjs`, log `real-clamav-interrupt.log`.
+
+- **Preservação: cumpre-se.** Depois do kill não havia **nenhum** ficheiro parcial/temporário,
+  `daily.cvd` estava ausente (não meio-escrito) e `main.cvd` continuava em 89 072 577 bytes. A
+  atomicidade do próprio freshclam garante que uma descarga interrompida não corrompe a base que já
+  existia — era o ponto 4, agora medido no fornecedor real e não num duplo.
+- **Recuperação: cumpre-se.** Correr o freshclam até ao fim devolveu exit 0, o `daily.cvd` voltou, a
+  classificação voltou a contar 3 ficheiros de base e o scan benigno saiu limpo.
+- **O defeito que isto revelou:** nesse estado de base oficial **incompleta** (só `main.cvd`) o
+  produto respondia `available=true`, `health = active`, «2 signature database file(s)». Quase toda a
+  assinatura recente tinha desaparecido e o estado afirmava o contrário. É exatamente a confusão entre
+  «existem ficheiros .cvd» e «há cobertura» que o comentário de `classifyClamavHealth` jura evitar — a
+  regra parava em `dbs.length > 0 → active`.
+- **Correção:** sem `daily`/`nightly` → `degraded` com o nome do que falta, mantendo
+  `available=true` (o binário está lá e as bases que existem carregam-se). Não mudei contagem nem
+  varrimento; mudei o que se afirma. Teste novo `core/test/clamav-health-base-incompleta.test.js`, 4
+  casos (main sem daily → degradado; main+daily → active; `nightly` conta; local-only e vazio ficam
+  como estavam), escolhido automaticamente pelo `npm test -w @cybersafe/core`, que usa glob — ao
+  contrário do `service` e do `scripts/test`, que usam listas explícitas.
+- **Medido depois da mudança:** 19/19 no classificador e na recuperação; `rc22-motores-clamav` com
+  `CYBERSAFE_REAL_CLAMSCAN=1` continua **6/6**, exit 0. Nada na deteção mudou de comportamento.
+
+Limitação honesta desta variação: o kill foi no `freshclam`, portanto provei o efeito de uma
+interrupção na base; **não** provei o `ClamDatabaseGate` a serializar um scan em curso contra a
+escrita (esse caminho continua só com testes de duplos), e não auditei o ramo `candidates` de
+`classifyClamavHealth` — a correção foi feita no ramo `dbFiles`, que é o que a sonda real usa.
+
+### Ramos do classificador ClamAV: a mesma regra nos dois, e as fixtures que escondiam o estado
+
+A correção de `degraded` por base diária em falta foi feita no ramo `dbFiles`, que é o que a
+sonda real usa. Ao correr a suíte `core` inteira apareceram **9 FAIL em vez dos 4 conhecidos** — cinco
+deles provocados por mim, e vale a pena saber porquê em vez de os calar: as fixtures de
+`clamav-db.test.js` descreviam uma base **incompleta por acidente** (só `main.cvd`, ou
+`main.cvd`+`bytecode.cvd`), porque à data em que foram escritas o classificador não distinguia
+conjunto completo de conjunto parcial. Um exemplo que decidia entre dois caminhos de prioridade
+precisava mesmo era de uma base saudável.
+
+Regra aplicada com a seed empacotada debaixo do braço: `CLAMAV_SEED_FILES = ["main.cvd","daily.cld","bytecode.cvd"]`
+(`packages/service/src/clamav-seed.ts:15`), com pins de bytes e SHA-256 por ficheiro. Ou seja, o produto já
+define internamente «base completa» como os três; a minha regra não inventou um requisito novo —
+alinhámo-lo com o que o próprio pacote afirma. Corrigi as fixtures para o estado que cada teste
+queria descrever, e **não** afrouxei as asserções: o caso «active exige ficheiros .cvd/.cld» passou a
+separar as duas coisas que misturava (um arquivo oficial isolado é *reconhecido como oficial*, e
+`main` sem `daily` é *degradado por falta de diária*), que antes eram a mesma asserção.
+
+Depois disso: `core` = **1104 testes / 1069 PASS / 4 FAIL / 30 SKIP / 1 TODO** — os mesmos 4
+`clamav-slot-*` que já estavam documentados como «não avaliam hoje o que declaram», e mais cinco
+testes novos meus a passar. O ramo `candidates` recebeu a mesma regra, com caso próprio no ficheiro novo.
+
+### Recarregamento efetivo, backoff por fonte e um ciclo por vez
+
+Três coisas do requisito 4 e 6 que não existiam, agora com prova:
+
+- **Recarregamento da HashDB dentro do motor.** `engine.ts:660-664` recarrega o
+  `SignatureDatabase` quando `hashesUpdated`, e **nada o provava**: o core provava
+  que `load()` lê o disco, o updater provava que o ficheiro é escrito. Faltava o
+  meio — um hash novo podia estar em disco e nunca contar no processo. Novo
+  `service/test/updater-reload-engine.test.js` constrói um `ProtectionEngineService`
+  real, injeta o feed por duplo, corre `checkAndUpdate(true)` e afirma que
+  `servico.signatures.match(novoHash)` existe **sem reiniciar nada**; o segundo
+  caso afirma o inverso — sem alteração escrita não há recarga (`recargas === 0`),
+  para que a recarga não passe a ser um custo pago por nada. Rede: nenhuma (YARA e
+  freshclam recusados de caso pelo seam `spawnFreshclam`).
+- **Backoff por fonte, com teto.** Uma fonte que falha passa a guardar
+  `meta.falhas.<fonte> = {count, nextAllowedAtMs, lastError, lastAttemptAtMs}`,
+  com espera = cadência da própria fonte × 2^(tentativas−1), teto de 6 h
+  (`FALHA_BACKOFF_TETO_MS`). `componentStale` respeita essa janela, portanto
+  `clamscan`/GitHub em baixo deixam de ser repicados a cada tick — e, sendo o
+  histórico por fonte, **uma fonte em falha não esconde a saúde das outras** (o
+  teste afirma mesmo `componentStale("yara") === true` enquanto `hashes` está em
+  recusa). O primeiro sucesso limpa o histórico. É também o `lastError` que a UI
+  do requisito 5 precisa para mostrar «última tentativa e respetivo erro».
+- **Um ciclo de cada vez.** `activeOperations` contava mas não impedia: duas
+  chamadas a `checkAndUpdate` escreviam sobre as mesmas bases em paralelo (o gate
+  do ClamAV protege a LEITURA de uma escrita, não duas escritas). Agora o segundo
+  pedido é **recusado com aviso explícito**, sem enfileirar trabalho que ninguém
+  pediu.
+
+Efeito colateral que vale a pena registar: a recusa apanhou uma falha minha do
+passo anterior. `clamav-reprobe-after-update.test.js` caiu 3 vezes — não pela
+concorrência, mas porque a sua fixture escrevia **só `main.cvd`**, e a nova regra
+de completude a isso responde `degraded`. É a mesma classe de acidente das
+fixtures do `clamav-db`: completude foi exigida tarde, e metade dos fixtures de
+ClamAV no repo descrevem bases parciais sem querer (ficam listados por verificar:
+`clamav-seed`, `clamav-load-proof-modes/rev4/real.integration`,
+`clamav-positive-load-proof{,-lifecycle}` — os 6 correram **0 FAIL**, 24 SKIP são
+os opt-in/AV, portanto não estavam a depender dessa forma).
+
+**Medido depois de tudo:** `core` 1104 / 1069 PASS / **4 FAIL** / 30 SKIP / 1 TODO
+(mesmo baseline) e `service` `npm test` 967 / 925 PASS / **42 FAIL** (mesmo
+baseline, +5 testes novos a passar). Os `updater-*` a três dão 36/36.
+
+## Estado por fonte no interface — o requisito 5 da prioridade das definições
+
+O serviço passou a responder `definitions.status`; faltava quem o mostrasse. Em
+`packages/app`:
+
+- **`src/lib/definitionsStatusPresentation.ts` (novo)** — os cinco estados do
+  serviço chegam distintos (`Atualizado`, `Desatualizado`, `Degradado`,
+  `Indisponível`, `Nunca verificado`) e não são colapsados numa cor. O
+  `ultimoErro` **não é ecoado**: é categorizado («chave de acesso não
+  configurada», «limite de pedidos do fornecedor», «sem ligação ao fornecedor»,
+  …) porque um erro de transporte pode conter URL, caminho ou chave — a mesma
+  regra que `definitionUpdateResult.ts:30` já aplicava. `itensCarregados ===
+  null` mostra «contagem não medida», nunca `0`.
+- **`OtimizarPage.tsx`** — uma secção «Definições de segurança» lê o estado ao
+  montar (uma leitura, não um snapshot repetido; `definitions.status` está em
+  `INDEPENDENT_READ_METHODS`) e o cartão `update` volta a perguntar o estado
+  depois do clique em vez de o deduzir do resultado do pedido. Sem leitura, a
+  secção diz «o serviço não devolveu o estado por fonte» — não mostra uma lista
+  vazia como se fosse boa notícia.
+- **Chip de «Nunca verificado» é neutro, não verde.** A ausência de leitura não
+  escala a severidade agregada (`nunca_verificado: "ok"` em `SEVERIDADES`), mas
+  também não é sucesso: o chip segue o rótulo, não a agregação.
+
+Dois resguardos de revisão tocados, ambos registados em vez de afrouxados:
+
+- `p0-design-otimizar.test.ts` contava as operações que a página pede ao serviço
+  a partir do código-fonte. A quarta (`getDefinitionsStatus`) entrou com data e
+  justificação na lista; a página continua presa a um conjunto exato. (Detalhe
+  que o resguardo apanhou por mim: um comentário meu continha a forma literal
+  `window.electronAPI.X(...)` e o rácio contou-a como chamada — o teste falhou
+  por culpa do comentário, não do código.)
+- `r6-l1-otimizar-visual.test.ts` limitava o monoespaçado a 4 elementos, que era
+  o proxy de «só o título e os cabeçalhos de grupo». Com um quarto grupo o número
+  sobe; a regra passou a dizer-se estruturalmente (nenhum elemento com mono fora
+  de `h1`/`h2`) **e** manteve-se o teto. É mais apertada do que era, não menos.
+
+**Medido:** `@cybersafe/app` `npm test` 2857 / **2857 PASS** / 0 FAIL (baseline era
+2849/2849; +8 testes novos a passar, incluindo a asserção de que a renderização
+sem ponte não afirma nada sobre as bases). `tsc -b` sem erros. `eslint` sobre os
+ficheiros tocados devolve 2 erros, ambos **pré-existentes nesta linha**:
+`ProcessSnapshot` não usado em `electron.d.ts:14` e `react-refresh/only-export-components`
+em `desfechoVerificacaoDisco` (`OtimizarPage.tsx`, já exportado no `HEAD`). O
+ficheiro novo não acrescenta nenhum.
+
+**Lacuna que fica dita, não disfarçada:** a secção não se atualiza sozinha com o
+tempo — uma leitura por montagem e uma por operação manual. Um estado que passou
+de `actualizado` para `desactualizado` por envelhecimento só se vê ao reentrar na
+página ou após «Atualizar definições». Não há «Verificar agora» por fonte: o
+`definitions.update` do serviço é um ciclo único e recorre as três fontes;
+botões separados exigiriam um pedido seletivo que o contrato ainda não tem.
+
+## `scripts/release-checksums.mjs` — a peça que faltava ao ponto 7
+
+Não existia nenhuma ferramenta de somas no repo: `scripts/_sha256.mjs` soma
+**strings**, não ficheiros, e não é usado por ninguém. Para uma release com
+instalador, a pergunta de quem descarrega é «este ficheiro é o que vocês
+afirmam?», e isso exige duas coisas que `certutil` à mão não dá: ordem e formato
+reprodutíveis, e um modo de **verificação** que diga o que falhou.
+
+- Formato `sha256sum -c` (`<hex>  <nome>`), ordenado por nome, sempre o mesmo
+  `corpo` para o mesmo conteúdo (asserado com dois runs).
+- Hash em **fluxo** (`createReadStream`): um instalador de >100 MB não é lido
+  todo para a RAM.
+- `--check` distingue `ok` / `divergente` / `em_falta` / `formato` / `inseguro`,
+  e **chumba ficheiros presentes no diretório que não estão listados** — o caso
+  em que uma peça extra entra na release sem que ninguém dê por isso.
+- Um nome com travessia (`../…`) no ficheiro de somas é recusado como `inseguro`
+  em vez de ser seguido: o `.txt` pode vir de outro sítio, e ler fora do
+  diretório por causa dele não é verificação, é o ataque.
+- Linha ilegível é erro, não linha ignorada; diretório vazio não produz um
+  `SHA256SUMS.txt` de zero ficheiros disfarçado de sucesso.
+
+**Medido:** `npm run test:release-checksums` 7/7 PASS. Contra um binário real
+desta linha (`scan-engine.exe`, 324 096 bytes) a ferramenta e o `certutil` do
+Windows dão o mesmo SHA-256 — `db92fe819dd44818d269cdfb13ed432ffc1b026c3a43b41d407e29b37d5588ed`
+— e o `--check` sobre o ficheiro que ela própria escreveu devolve `OK` com
+`exit=0`.
+
+O que isto **não** resolve sozinho: as somas são integridade, não autenticidade.
+Sem a decisão `#14` (chave pública de publicação) um `.txt` continua a ser
+tão confiável quanto o canal que o entrega; e o `#13` (assinante do
+source-freeze) continua a ser o único bloqueio do instalador que estaria nesta
+lista.
+
+## `npm run test:scripts` — e uma falha que existia por ninguém correr o ficheiro
+
+O ponto 3 do pedido era a cobertura efetiva, incluindo os testes que o comando
+padrão não seleciona. Isso estava **descrito** na tabela do README; faltava o
+comando. A raiz tinha `test:native`, `test:build-order` e `test:dev-isolation`, e
+`test:dev-isolation` lista **dois** ficheiros específicos — não a pasta. Entrei
+com `node --test --test-concurrency=1 "scripts/test/*.test.mjs" "scripts/*.test.mjs"`
+(o glob é citado pelo próprio Node: este runtime não aceita um diretório como
+argumento de `--test`, e aspas são precisas porque o `cmd` do npm não expande).
+
+- Só `scripts/test/`: 240 / 234 PASS / **0 FAIL** / 5 SKIP / 1 TODO — 6,7 s.
+- Com os 8 `scripts/*.test.mjs` co-localizados: 383 / **377 PASS** / 0 FAIL /
+  5 SKIP / 1 TODO — 10,8 s, `exit 0`. Logs: `scripts-test-baseline.log` e
+  `test-scripts-runner.log`.
+
+**Os +143 testes trouxeram uma falha, e ela é minha para contar.**
+`scripts/dev-isolated-boot-contract.test.mjs:441` afirmava que o gate do API
+*aceitaria* a porta 4000 («tem a recusa comentada»), e que por isso o piso tinha
+de ser seguro apenas pelo runner. Não era premissa inventada — estava certa na
+altura em que foi escrita. `3a95692` (2026-10-30) passou a recusa para o gate
+(`packages/api/src/dev-isolation.ts:201`), e como **nenhum comando corria o
+ficheiro**, a asserção envelheceu em silêncio até eu ligar o runner. Falhou
+igual isolada (`20 testes → 19 pass / 1 fail`), o que exclui contenção: era
+contrato envelhecido, não ambiente nem defeito de produto.
+
+Não apaguei nem afrouxei: o caso passou a chamar-se «a porta 4000 é recusada nas
+duas camadas» e assere **as duas** — `plano.portSupported === false` **e**
+`validarArranqueApi` a lançar `CYBERSAFE_ISOLAMENTO_RECUSADO` com 4000 na
+mensagem, «por si, não por herança do runner». É o invariante mais forte dos dois
+que estavam em causa, e o comentário no ficheiro diz de onde veio.
+
+É o segundo caso nesta linha em que «o teste existe mas não é selecionado» produz
+falsa confiança (o primeiro foi o `scanner-dashboard-visibility`, hoje `todo` com
+a razão escrita). O 1 TODO do recount continua a ser esse, e os 5 SKIP continuam
+a ser os do artefacto que ainda não há — `#13`.
+
+## `product-version.json` entra no congelamento (fecha a task #17)
+
+`scripts/source-freeze.mjs` congelava `package.json`, `package-lock.json`, `scripts`,
+`packages` e `assets`. A **identidade da versão** do instalador vive noutro sítio —
+`product-version.json` na raiz, que é «a ÚNICA fonte» segundo o cabeçalho do próprio
+`scripts/app-version.mjs`, e que `package-windows.mjs` e `stage-renderer.mjs` leem.
+Resultado: um `--verify` verde não dizia nada sobre a versão que vai no `.exe`. Uma
+aprovação de freeze que não cobre a versão aprova um binário cuja identidade ninguém
+aprovou.
+
+Passou a `ROOTS_REQUIRED` **e** a `FILE_ROOTS` — não só é obrigatório como tem de ser
+ficheiro: uma pasta ou um link com esse nome continua a ser recusado. Falha fechada:
+sem o ficheiro, o congelamento não nasce.
+
+`scripts/app-version.mjs` corre-se na mesma sem qualquer mudança de output:
+`versão do produto 0.1.11-internal.pap-r7.20261031 (pap-r7) — fonte product-version.json`.
+
+**Efeito colateral que tinha de ser medido:** os fixtures de teste do freeze descreviam
+uma árvore sem esse ficheiro, por isso 27 de 40 casos passaram a falhar com
+`required-missing`. Não afrouxei o gate — acrescentei `product-version.json` aos dois
+fixtures (`source-freeze.test.mjs`, `source-freeze-assets.test.mjs`) e os 40 voltaram a
+passar. É a mesma classe das fixtures de ClamAV que só tinham `main.cvd`.
+
+## Frescura por fonte: seis testes que estavam certos e deixaram de estar
+
+`test/clamav-frescura-componente.test.js` **não está na lista do `npm test`** do
+`service`, por isso envelheceu em silêncio — exatamente o custo medido no ponto 3.
+Corria pela primeira vez no `test:full` e deu 6 falhas. Cada uma é contrato, não
+produto, e foi tratada com a asserção a manter-se:
+
+- As idades «fresco» eram `now - HOUR`. Desde que o feed de hashes passou a cadência de
+  **45 minutos** (a janela oficial do `get_recent` do MalwareBazaar), uma hora já não é
+  fresco para essa fonte. O `FRESCO` do fixture passou a 10 minutos — dentro das três
+  cadências (hashes 45 min, YARA 6 h, ClamAV 24 h) — com o motivo escrito no ficheiro.
+- O stub de `updateHashFeed` devolvia `undefined`. A função real passou a devolver
+  `{alterou, novos, total, rejeitados, lacunaCobertura}`, e `hashesUpdated` é `alterou`;
+  sem a forma nova, `force` não provava os três componentes. O stub devolve agora a forma real.
+- «falha volta a tentar no ciclo seguinte» colidia com o backoff por fonte: o segundo
+  `checkAndUpdate` imediato cai dentro da janela de recusa. Os dois factos ficaram
+  assentes no teste, e ambos assertados: **dentro da janela não se repica no fornecedor**
+  e, depois de expirar a recusa (o fixture move `falhas.clamav.nextAllowedAtMs`), a fonte
+  sem prova **tenta outra vez**. Não congelei a exigência; acrescentei-lhe a outra metade.
+
+Resultado isolado: `clamav-frescura-componente` **8/8 PASS**.
+
+## `test:full` no `service` e no `native-windows`
+
+Ambos os pacotes tinham um `npm test` com listas explícitas de ficheiros (96 de 147 no
+`service`, 18 de 28 no `native-windows`). Acrescentei `test:full`, que corre a pasta
+inteira com o mesmo `--test-concurrency=1` (o resultado depende do modo de execução e
+isso está dito na tabela). Primeiro uso medido: `native-windows` **246 testes / 246 PASS /
+0 FAIL / `exit 0`**, e foi o `service test:full` que apanhou as seis falhas acima.
+
+## `vendor/yara` entra no congelamento — os executáveis do motor também são fonte
+
+Ao preparar a folha de aprovação do freeze vi uma assimetria que estava a passar:
+`git ls-files vendor` devolve **5 ficheiros**, todos em `vendor/yara`
+(`yara64.exe`, `yarac64.exe`, `vcruntime140.dll`, `COPYING.txt`, `VENDOR.json`) — ou
+seja, os clássicos do YARA 4.6.0 estão versionados neste repo, são o que o serviço
+usa para compilar regras, e **não estavam em nenhuma raiz congelada**. O
+`vendor/clamav` (133 MB) não está versionado e continua ancorado no SHA-256 do
+arquivo oficial que `vendor/clamav/VENDOR.json` regista; esse `VENDOR.json` já era
+`ROOTS_EXTRA`.
+
+Passar `vendor/yara` a `ROOTS_REQUIRED` fecha a diferença entre «aprovar o código
+que invoca o motor» e «aprovar o que é efetivamente invocado». Não é paranoia de
+inventário: o preflight do `package-windows.mjs` já exige presença desses ficheiros
+(`binario:yara64.exe`, `binario:yarac64.exe`, `licenca:yara/COPYING.txt`), mas
+presença não é integridade — sem digest, um `yara64.exe` trocado localmente passava
+por uma aprovação verde.
+
+Medido: os dois ficheiros de teste do freeze passaram a falhar `required-missing`
+com a nova raiz (descreviam uma árvore sem `vendor/yara`), foram completados com os
+cinco caminhos reais, e voltam a **40/40 PASS**. Na árvore verdadeira o
+`buildManifest({approval:null})` (que não escreve nada) devolve agora **1783
+entradas** e digest
+`f8ca9e1d47ffc0cba5a13a55edf05b086a90ff41e95976b84a61204497f3a800`,
+com `vendor/yara/COPYING.txt`, `VENDOR.json`, `vcruntime140.dll`, `yara64.exe` e
+`yarac64.exe` entre as entradas.
+
+Consequência direta para a task #13: a aprovação tem de nomear **este** digest. A
+folha está em `release-prep/FONTE-CONGELAMENTO-APROVACAO.md` (fora do repo, porque
+um ficheiro de aprovação dentro da árvore entraria no digest que aprova).
+
+## Gate da base de assinaturas: provado com o updater real, não com duplos
+
+Faltava ao requisito «não ler uma base a meio durante uma análise» a prova com as
+duas peças verdadeiras. `scripts`- e `service`-teste do `ClamDatabaseGate` cobriam o
+gate isolado; `checkAndUpdate` nunca tinha corrido contra um gate real.
+
+`packages/service/test/clamav-gate-scan-em-curso.test.js` (4 casos, **4/4 PASS**)
+afirma agora:
+
+1. com uma lease de scan activa, `checkAndUpdate(true)` **não faz nascer o
+   freshclam** (`spawnCalls === 0`), devolve `clamUpdated:false`, e o
+   `clamav/main.cvd` fica **byte-a-byte** como estava;
+2. a causa da recusa vem no resultado (`ClamAV: … scans ClamAV activos …`) — um
+   painel que mostra uma causa inventada é pior do que um painel calado;
+3. a posse de um update **fecha a admissão** de scans novos (`update-pending` /
+   `update-active`) e devolvê-la reabre;
+4. libertada a lease, o mesmo ciclo escreve: a recusa é uma **janela**, não um
+   congelamento.
+
+Facto do código que a escrita deste ficheiro revelou e que vale registar: o estado
+do gate **não vive na instância**, vive num ambito à escala do módulo
+(`src/clam-database-gate.ts:207`). Em produção é o invariante certo (um serviço, um
+processo, um gate). Num ficheiro de testes, quatro instâncias são quatro vistas do
+mesmo estado — a primeira versão deste ficheiro tinha um gate por caso e os casos
+2-4 falhavam em grupo e passavam isolados, que é a assinatura exata dessa partilha.
+Segundo facto: `reset()` **não** é «limpar para o próximo caso»; é o encerramento
+(acorda a drenagem como «não drenada» e fecha a admissão), por isso usá-lo como
+isolamento estragou os quatro casos. O isolamento correto é cada caso devolver o
+que pediu, dentro do próprio corpo, e um gate por ficheiro, como no serviço.
+
+## `scripts/release-manifest.mjs` — o manifesto de atualização passa a ter produtor
+
+O updater **valida e consome** um `update-manifest.json` (contrato em
+`packages/desktop/src/updater/types.ts:120`: `schema`, `channel`, `version`,
+`publishedAt`, `notes`, `file{url,sha256,sizeBytes}`, `signature`, `publisher`,
+`requiresElevation`, `buildId`, `sourceCommit`, `compatibility`) e há 138 testes a
+provar que o recusa quando algo não bate. Não havia **nenhum** produtor no repo:
+`grep` por `update-manifest` nos scripts só encontrava o consumidor. Sem produtor,
+o manifesto é escrito à mão — e um `sizeBytes` copiado errado é apanhado no cliente
+como «ficheiro corrompido», depois de o utilizador descarregar o instalador todo.
+
+O que o script faz, e o que deliberadamente não faz:
+
+- `sha256` e `sizeBytes` **medidos no ficheiro real**, em fluxo (reaproveita
+  `sha256Ficheiro` de `release-checksums.mjs`, não é uma segunda implementação); o
+  teste compara as duas ferramentas sobre o mesmo ficheiro e exige igualdade.
+- `url` tem de ser HTTPS sem credenciais — a mesma regra do transporte do updater,
+  aplicada no momento em que se escreve o manifesto em vez de no momento em que já
+  é tarde.
+- **Recusa `channel:"stable"` com versão que tenha pré-release.** Isto é a armadilha
+  da decisão #16 transformada em código: medido que
+  `isUpgrade("0.1.11","0.1.11-internal.pap-r7.20261031") === true`, publicar a
+  string interna como estável daria um cliente que se acha atualizado contra algo
+  que nunca foi estável. No canal `internal` a mesma string passa — a guarda é sobre
+  a afirmação, não sobre o texto.
+- **Não assina.** O output não tem `signature`, e o script diz no stdout que falta a
+  chave do proprietário (#14) e qual o comando que assina depois
+  (`release-signing.mjs --sign-manifest`). Um produtor que inventasse uma chave
+  estaria a criar o canal de confiança que é reservado ao dono do produto.
+- Notas obrigatórias: texto ou caminho de ficheiro; vazio não produz manifesto.
+
+**Medido:** `node --test scripts/release-manifest.test.mjs` → 6/6 PASS. Dentro de
+`npm run test:scripts`, que sobe de 383 para **389 testes / 383 PASS / 0 FAIL /
+5 SKIP / 1 TODO** (11 s).
+
+Fica por provar, e está dito em vez de escondido: a aceitação por
+`validateManifest` do cliente com uma assinatura real só é verificável com a chave
+da #14. O que este commit garante é que os **bytes medidos** do manifesto nascem do
+artefacto, não da mão de quem o escreve.
+
+## Cadeia de publicação provada de ponta a ponta (`scripts/test/release-chain.test.mjs`)
+
+Cada peça desta linha tinha testes próprios — o produtor de manifesto, as somas, a
+assinatura — mas **nenhum teste punha as três a falar entre si**: o
+`release-signing.test.mjs` assinava um manifesto escrito à mão pelo próprio teste.
+Se o produtor emitisse um campo que o canónico não espera, as suítes continuavam
+verdes e a falha aparecia no cliente, depois da descarga.
+
+3 casos, **3/3 PASS**, com chave ed25519 **efémera e de ensaio** (serve para provar
+o caminho do código; não é nem pode ser a chave pinada em
+`packages/desktop/src/updater/release-trust.json`, que é a decisão #14):
+
+- o manifesto saído do produtor é aceite por `buildSignedManifest` sem ajuste
+  manual, canónica, e `verifyCanonical` confirma; `file.sha256`/`sizeBytes`
+  sobrevivem à assinatura («a assinatura não pode reescrever a promessa») e
+  `requiresElevation` mantém-se booleano;
+- `gerarSomas`/`verificarSomas` e o manifesto dão o mesmo hash para o mesmo
+  ficheiro; trocar um byte do instalador passa `--check` a `divergente` **sem**
+  invalidar a assinatura do manifesto — que é exatamente a diferença entre
+  autenticar a *promessa* e autenticar a *descarga*, dita em asserção;
+- `notes` multilinha e `publishedAt` entram nos bytes canónicos.
+
+Dentro de `npm run test:scripts`, que sobe para **392 testes / 386 PASS / 0 FAIL /
+5 SKIP / 1 TODO**. O que fica por provar continua a ser um só: a aceitação por
+`validateManifest` com a chave real do proprietário (#14) e o transporte contra uma
+release existente ( hoje `404` porque não há release nenhuma).
+
+## `api` tinha 33 ficheiros de teste e a tabela publicava um
+
+O ponto 3 do pedido era a cobertura **efetiva**, incluindo o que o comando padrão não
+seleciona. A tabela tinha uma linha «`api` (ficheiro do guard) 32 PASS / 0 FAIL» — ou
+seja, uma única fichero medida de um pacote com 33. `npm test` do `api` lista 25
+entradas explícitas; **8 ficheiros não eram selecionados por comando nenhum**:
+`ag36-ai-runtime`, `ag36-parent-config`, `auth-session-restart`, `dev-parent-shutdown`,
+`file-scan-archive-contract`, `health-payload`, `r7-sample-events`, `upload-limits`.
+
+Acrescentei `npm run test:full` ao pacote e medi os dois âmbitos, serializados
+(`logs/api-suite-20261101.log`):
+
+- `npm test` → **426 testes / 61 suítes / 426 PASS / 0 FAIL** (`exit 0`)
+- `test:full` → **456 / 65 suítes / 456 PASS / 0 FAIL** (`exit 0`)
+
+Resultado honesto: os 30 testes que faltavam **passam todos** — não havia falha
+escondida, havia sub-representação publicada. Os dois ficheiros com nome de contrato
+de segurança (`upload-limits`, `auth-session-restart`) correm agora em comando, não
+por acaso: o primeiro monta um `express` efémero e mede o limite de upload real; o
+segundo cobre a reinício de sessão.
+
+Esta é a última adição de âmbito de testes desta linha: o `api` era o único pacote com
+ficheiros fora de qualquer comando. Fecho aqui o ponto 3 e passo ao mecanismo de
+aprovação do congelamento, que é o que trava o instalador.
+
+## Mecanismo de aprovadores do `source-freeze`: a identidade sai do código
+
+**O problema.** `scripts/source-freeze.mjs:45` fixava `export const APPROVER =
+"Codex Lead"` e comparava `approval.approvedBy !== APPROVER`. O Codex deixou de
+participar no projeto. Com o nome errado embebido, o gate do instalador não podia
+ser satisfeito por quem tem autoridade real — e as duas saídas fáceis eram piores
+do que o problema: aceitar qualquer nome (o gate passa a não afirmar nada) ou
+acrescentar uma flag de bypass (o mesmo, com interruptor).
+
+**A alteração formal.** A identidade passa a vir de um **registo de aprovadores
+fora da raiz do repo**, apontado por `CYBERSAFE_APPROVERS_FILE`:
+
+```
+{ "schema": 1,
+  "owners":      ["<nome do proprietário>"],
+  "integrators": [{ "name": "<nome>", "authorizedBy": "<dono que autorizou>" }] }
+```
+
+Regras, todas com **falha fechada**:
+
+- sem variável, sem ficheiro, ficheiro ilegível, schema errado, listas em falta,
+  nomes vazios/controlados, duplicados, ou `owners` e `integrators` ambos vazios →
+  `approver-registry-missing`/`approver-registry-invalid` no **carregamento**, não
+  em tempo de comparação;
+- o registo não pode estar dentro da raiz que aprova (mesma razão do ficheiro de
+  aprovação: entraria no digest que supostamente autoriza);
+- `approvedBy` tem de ser um `owner`, **ou** um `integrator` cujo `authorizedBy`
+  seja um `owner` declarado no mesmo registo — um integrador não se auto-nomeia;
+- `"Codex Lead"` **não é aceite por herança**: se alguém quiser essa identidade,
+  tem de a declarar no registo;
+- não há flag de bypass e o pipeline continua sem correr `--write` sozinho.
+
+**Onde a verificação acontece.** `verifySourceFreeze` — que é a função que o
+`package-windows.mjs:53` usa no gate pré-compilação — passa a ler o registo outra
+vez e a validar o `approvedBy` **embebido no manifesto**. Editar o
+`source-freeze.approved.json` à mão para outro nome falha portanto no build, não só
+no `--write`. E a ordem é a da severidade: sem registo, o erro de configuração é
+nomeado **antes** de `manifest-missing`, para que um problema de config não se
+disfarce de aprovação em falta.
+
+**Testes.** `scripts/test/source-freeze-approvers.test.mjs` (novo) cobre os seis
+pontos acima com árvore de fixture real, incluindo o caso «manifesto editado →
+recusado» e o contraste «identidade certa → verde». Os dois ficheiros de teste do
+freeze passaram a usar um registo de fixture escrito **fora** da raiz (senão o
+próprio fixture violaria a regra que se quer testar) e as asserções de identidade
+foram reancoradas nesse registo, não eliminadas. O `7h-packaging-check` passou a
+aceitar os dois motivos nomeados (`approver-registry-missing` ou `manifest-missing`)
+com a ordem verificada — invariante «nunca é verde e nomeia o motivo» intacto.
+
+**Medido:** `npm run test:scripts` → **398 testes / 392 PASS / 0 FAIL / 5 SKIP /
+1 TODO**. Os 5 SKIP continuam a ser os do artefacto que ainda não existe, e o 1
+TODO é o ponteiro do dashboard (#15).
+
+O que isto destrava: a tua aprovação passa a ser expressável sem tocar em código.
+O que não muda: a integridade (digest por ficheiro, `--verify` byte a byte, links
+recusados, recursos obrigatórios) e o facto de eu não escrever a aprovação por ti.
+
+## Ensaios de CLI do congelamento: o caminho `--write` também foi exercido
+
+Os testes cobriam `verifySourceFreeze` e a validação de identidade, mas não a
+linha de comandos que eu próprio alterei. Ensaio executado (em diretório
+temporário, **nada escrito no repo, nada committado**, identidade e
+`candidateId` marcados como `REHEARSAL` — não é aprovação de produto e não
+destrava build nenhum):
+
+- sem `CYBERSAFE_APPROVERS_FILE`: `approver-registry-missing`, `exit 1`, e
+  **nenhum manifesto é escrito** — a recusa não deixa artefacto para trás;
+- com registo de ensaio: `--write` produz 1788 ficheiros e
+  `2a28a8979966c3ff05b379585d7b29e404428f906de7c9678cee69d381833fb0`, o mesmo
+  digest que a verificação independente por `buildManifest` tinha dado — as duas
+  rotas concordam;
+- `--verify --json` no manifesto do ensaio: `ok: true`, `treeDigest` igual, e o
+  relatório mostra o registo usado (`owners:1, integrators:0`);
+- trocar o `approvedBy` dentro do `.json` para uma identidade fora do registo:
+  `DIVERGENTE — build bloqueado` / `approvedBy «Outra Identidade» não consta do
+  registo de aprovadores`.
+
+Registado porque é a diferença entre «a função está certa» e «o comando que o
+integrador vai correr está certo». Também confirma que o valor publicado na folha
+de aprovação (`2a28a897…`, 1788 entradas) é reproduzível por rota independente.

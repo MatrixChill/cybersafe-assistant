@@ -39,6 +39,10 @@
         "to": "scan-engine.exe"
       },
       {
+        "from": "../native-engine/build/Release/cybersafe-update-launcher.exe",
+        "to": "cybersafe-update-launcher.exe"
+      },
+      {
         "from": "../../vendor/clamav",
         "to": "clamav"
       }
@@ -62,6 +66,7 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
+      "include": "installer/cybersafe-installer.nsh",
       "installerHeader": "installer/installerHeader.bmp",
       "installerSidebar": "installer/installerSidebar.bmp",
       "uninstallerSidebar": "installer/uninstallerSidebar.bmp"

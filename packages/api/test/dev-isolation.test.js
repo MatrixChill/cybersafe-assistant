@@ -314,3 +314,36 @@ describe("integração real — o import não escreve nada quando recusa", () =>
     fs.rmSync(base, { recursive: true, force: true });
   });
 });
+
+describe("LP-20261102 — a raiz da DB pessoal é a da plataforma, não um nome fixo", () => {
+  // Medido no `.deb` de 9907c0f (WSL2, Ubuntu): o api do pacote Linux Lite criava
+  // `~/.cybersafe-service/cybersafe.db` FORA do `--user-data-dir` — a raiz com o
+  // nome do produto Windows. §1/§9 proíbem partilhar a base entre versões.
+  test("win32 e darwin continuam byte-idênticos a `.cybersafe-service`", () => {
+    for (const plataforma of ["win32", "darwin"]) {
+      assert.equal(
+        dbPessoalApi("/home/u", plataforma),
+        path.join("/home/u", ".cybersafe-service", "cybersafe.db"),
+        `${plataforma} tinha de manter o caminho histórico`,
+      );
+    }
+  });
+
+  test("linux usa a raiz exclusiva do Linux Lite", () => {
+    const obtido = dbPessoalApi("/home/u", "linux");
+    assert.equal(obtido, path.join("/home/u", ".cybersafe-linux-lite", "cybersafe.db"));
+    assert.ok(!obtido.includes(".cybersafe-service"), `Linux não pode escrever na raiz Windows: ${obtido}`);
+  });
+
+  test("a guarda DEV recusa a DB pessoal da plataforma atual, pela razão certa", () => {
+    assert.throws(
+      () => validarArranqueApi({
+        entrypoint: SRC_ENTRY,
+        env: { ...ENV_DEV, CYBERSAFE_DB_PATH: dbPessoalApi() },
+        fsLike: fsSoLeitura(),
+      }),
+      (e) => e.code === ERRO_ISOLAMENTO && /DB pessoal/.test(e.message),
+      "apontar para a DB da instalação tem de ser recusa nomeada, não a genérica «fora da raiz»",
+    );
+  });
+});

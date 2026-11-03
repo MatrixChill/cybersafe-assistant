@@ -28,6 +28,28 @@ export const AI_CONFIG = (() => {
   };
 })();
 
+/**
+ * Política de tokens por complexidade. O limite fixo de 400 cortava explicações
+ * técnicas a meio e obrigava o utilizador a pedir «explica melhor» várias vezes;
+ * um limite único alto desperdiçaria em perguntas curtas. O teto continua
+ * explícito (custo controlado), apenas deixa de ser o mesmo para tudo.
+ */
+const TOKEN_POLICY = { simples: 400, normal: 700, tecnico: 1100, teto: 1400 } as const;
+
+const PEDIDO_TECNICO =
+  /(?<![\p{L}\p{N}])(explica|explicar|detalha|detalhe|como funciona|porque|por que|an[áa]lise|analise|diagn[óo]stico|diagnostico|passo a passo|arquitetura|diferen[çc]a|compara|compara[çc][ãa]o)(?![\p{L}\p{N}])/iu;
+
+export function resolveMaxTokens(input: { messages?: Array<{ content?: unknown }> } = {}): number {
+  const texto = (input.messages ?? [])
+    .map((m) => (typeof m?.content === "string" ? m.content : ""))
+    .join(" ")
+    .slice(-2000);
+  const tecnico = PEDIDO_TECNICO.test(texto);
+  const longo = texto.length > 220;
+  const base = tecnico ? TOKEN_POLICY.tecnico : longo ? TOKEN_POLICY.normal : TOKEN_POLICY.simples;
+  return Math.min(TOKEN_POLICY.teto, Math.max(TOKEN_POLICY.simples, base));
+}
+
 export let aiEnabled = AI_CONFIG.apiKey.length > 0;
 
 // Nunca logamos a chave — apenas provider/modelo (sem segredos).
@@ -57,7 +79,7 @@ REGRA DE OURO — RESPONDE PRIMEIRO AO QUE FOI PEDIDO:
 - Se ele disser "resumido", "curto", "só...", "mais nada", obedece estritamente ao que foi pedido.
 
 COMPRIMENTO — REGRA RÍGIDA:
-- Por defeito: MÁXIMO 1 a 3 frases. Uma pergunta simples = uma resposta curta. NUNCA mais de 4 frases sem pedido explícito de detalhe.
+- Perguntas simples: 1 a 3 frases. Perguntas técnicas, diagnósticos ou pedidos de explicação: o detalhe necessário (até ~8 frases), sem encher nem repetir. Nunca truncar uma explicação a meio só para caber numa frase.
 - Nunca listes "8 motivos", "5 dicas" ou listas longas por iniciativa própria. Se tiveres vários pontos, escolhe os 1-2 mais relevantes.
 - Expande APENAS quando o utilizador pedir explicitamente ("detalha", "explica mais", "passo a passo", "relatório completo").
 - NUNCA respondas com tabelas, headings markdown ou listas numeradas em perguntas simples. Responde em prosa curta.
@@ -74,6 +96,9 @@ EMOJIS: no máximo 0-1, apenas quando combinar com a conversa. Nada de 🚀🛡�
 
 HONESTIDADE — nunca inventar:
 - Podes receber um bloco [CONTEXTO CYBERSAFE] com dados reais do PC. Usa-os para responder com precisão, mas NUNCA os recites de fonte formada — o contexto serve para RESPONDER, não para ser repetido.
+- Quando houver medições relevantes, responde com os valores concretos e a limitação que afeta a conclusão. Não substituas dados disponíveis por uma lista genérica de causas.
+- Para motores, distingue status, busy e coverage: busy=true significa ocupação/prova adiada, não uma avaria; coverage=unknown não prova cobertura completa. Sem motivo estruturado, não inventes a causa da degradação.
+- Para tendências de processos, usa apenas amostras da mesma instância (PID e início), indica intervalo, número de amostras e recência quando disponíveis. Uma única amostra não prova aumento; RAM elevada não prova malware nem fuga de memória.
 - Distingue observação de hipótese. Se não houver dados que respondam, diz isso naturalmente, ou pede a informação que falta.
 - Se a proteção estiver degradada, não digas "está 100% seguro". Diz algo como: "Não há ameaça crítica agora, mas a proteção está degradada porque alguns componentes precisam de atenção."
 SEGURANÇA — continua a ser defensiva:
@@ -140,6 +165,7 @@ interface SecretPattern {
 
 // Regex sem flag /g: stateless, sem estado lastIndex entre chamadas.
 const SECRET_PATTERNS: SecretPattern[] = [
+  { name: "groq-key", re: /\bgsk_[A-Za-z0-9_-]{20,}\b/ },
   { name: "private-key", re: /-----BEGIN (?:RSA |EC |DSA |OPENSSH |PGP )?PRIVATE KEY-----/i },
   { name: "putty-key", re: /PuTTY-User-Key-File-\d+/i },
   { name: "jwt", re: /\beyJ[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\.[A-Za-z0-9_-]{8,}\b/ },
@@ -407,7 +433,7 @@ export async function chatCompletion(
         model: AI_CONFIG.model,
         messages: messages as any,
         temperature: AI_CONFIG.temperature,
-        max_tokens: AI_CONFIG.maxTokens,
+        max_tokens: resolveMaxTokens({ messages }),
       },
       { timeout: AI_REQUEST_TIMEOUT_MS, signal },
     );
@@ -482,7 +508,7 @@ export async function streamChatCompletion(
         model: AI_CONFIG.model,
         messages: messages as any,
         temperature: AI_CONFIG.temperature,
-        max_tokens: AI_CONFIG.maxTokens,
+        max_tokens: resolveMaxTokens({ messages }),
         stream: true,
       },
       { signal: AbortSignal.any([controller.signal, configurationAbort.signal]) },

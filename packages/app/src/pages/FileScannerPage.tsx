@@ -38,6 +38,7 @@ import {
   formatScanDurationLabel,
   isActiveUiStatus,
   failureReasonsLabel,
+  excludedReasonsLabel,
   isTerminalScanStatus,
   isTerminalUiStatus,
   normalizeScanState,
@@ -45,6 +46,7 @@ import {
   resultFollowUpNote,
   scanAnalysisStage,
   scanElapsedSeconds,
+  scanEngineBatchElapsedSeconds,
   scanEtaSeconds,
   scanPrimaryBar,
   scanProgressReadout,
@@ -58,6 +60,7 @@ import {
   terminalResultLabels,
   uiStatusForState,
   inconclusiveReasonsLabel,
+  inconclusiveEnginesLabel,
   PER_FILE_ENGINE_COVERAGE_NOTE,
   PER_FILE_NATIVE_LABELS,
   PER_FILE_PASTA_NOTE,
@@ -1137,6 +1140,13 @@ export default function FileScannerPage({ pendingScan, onScanConsumed, onOpenThr
   const bar = scanPrimaryBar(scanProgress)
   // Eixo SEPARADO: o batch do ClamAV e' uma etapa do pipeline, nao o pipeline.
   const scanStage = scanAnalysisStage(scanProgress)
+  const engineBatchElapsed = scanEngineBatchElapsedSeconds(scanProgress)
+  const activeInconclusiveReasons = (scanProgress?.filesInconclusive ?? 0) > 0
+    ? inconclusiveReasonsLabel((scanProgress as ScanStateExtended).inconclusiveByReason)
+    : null
+  const activeExcludedReasons = (scanProgress?.filesExcluded ?? 0) > 0
+    ? excludedReasonsLabel(scanProgress?.filesExcludedBy ?? [])
+    : null
   const etaLabel = formatEta(scanEtaSeconds(scanProgress))
   // DECOMPOSIÇÃO do resultado: considerados = analisados + ignorados + falhados.
   // É o que responde (com números do motor) a "se eram 800, onde ficaram os
@@ -1258,7 +1268,8 @@ export default function FileScannerPage({ pendingScan, onScanConsumed, onOpenThr
                 uiStatus,
                 targetName,
                 scanProgress?.filesInEngineBatch ?? 0,
-                scanProgress?.filesAnalyzed ?? 0,
+                scanProgress?.filesInEngineScanned ?? 0,
+                engineBatchElapsed ?? undefined,
               )}
               {etaLabel ? ` ${etaLabel}.` : ""}
             </p>
@@ -1276,6 +1287,16 @@ export default function FileScannerPage({ pendingScan, onScanConsumed, onOpenThr
               <p className="text-xs text-muted-foreground mt-1">
                 Motor de assinaturas: {scanStage.done}/{scanStage.total} ficheiros verificados
                 {scanStage.percent !== null ? ` (${scanStage.percent}%)` : ""}
+                {scanStage.done === 0 && engineBatchElapsed !== null
+                  ? ` · ${engineBatchElapsed}s sem primeiro resultado`
+                  : ""}
+              </p>
+            )}
+            {uiStatus === "scanning" && (activeInconclusiveReasons || activeExcludedReasons) && (
+              <p className="text-xs text-muted-foreground mt-1">
+                {activeInconclusiveReasons ? `Inconclusivos: ${activeInconclusiveReasons}.` : ""}
+                {activeInconclusiveReasons && activeExcludedReasons ? " " : ""}
+                {activeExcludedReasons ? `Excluídos: ${activeExcludedReasons}.` : ""}
               </p>
             )}
           </div>
@@ -1353,6 +1374,9 @@ export default function FileScannerPage({ pendingScan, onScanConsumed, onOpenThr
           : null;
         const motivosInconclusivos = (scanProgress.filesInconclusive ?? 0) > 0
           ? inconclusiveReasonsLabel((scanProgress as ScanStateExtended).inconclusiveByReason)
+          : null;
+        const motoresInconclusivos = (scanProgress.filesInconclusive ?? 0) > 0
+          ? inconclusiveEnginesLabel((scanProgress as ScanStateExtended).inconclusiveByEngine)
           : null;
         const tomClasse =
           tom === "green" ? "text-cyber-green" : tom === "yellow" ? "text-cyber-yellow" : "text-cyber-red";
@@ -1435,6 +1459,12 @@ export default function FileScannerPage({ pendingScan, onScanConsumed, onOpenThr
                 <p className="text-xs text-muted-foreground mt-2">
                   <span className="font-semibold">Motivos dos inconclusivos: </span>
                   {motivosInconclusivos}
+                </p>
+              )}
+              {motoresInconclusivos && (
+                <p className="text-xs text-muted-foreground mt-2">
+                  <span className="font-semibold">Motores com lacunas: </span>
+                  {motoresInconclusivos}
                 </p>
               )}
               {showNoThreatsReassurance(uiStatus, scanProgress) && (

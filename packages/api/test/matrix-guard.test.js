@@ -130,7 +130,9 @@ const CONTEXT_SECRET = "postgres://admin:S3cr3tP4ss@db.local:5432/app";
 const PAGE_SECRET = "https://exemplo.pt/entrar?token=abc12345def67890ghi12345";
 const SAFE_MESSAGE = "como está o meu computador hoje?";
 
+const GROQ_FIXTURE = "gsk_" + "offlineFixtureOnly".repeat(3);
 const blockedCases = [
+  ...[false, true].map(stream => ({ nome: `Groq fixture bloqueada (stream=${stream})`, payload: {stream, messages:[{role:"user",content:GROQ_FIXTURE}]}, segredo:GROQ_FIXTURE })),
   { nome: "secreto na mensagem nova (JSON)", payload: { stream: false, messages: [{ role: "user", content: MSG_SECRET }] }, segredo: MSG_SECRET },
   { nome: "secreto no histórico (JSON)", payload: { stream: false, messages: [{ role: "user", content: HIST_SECRET }, { role: "assistant", content: "tudo bem" }] }, segredo: HIST_SECRET },
   { nome: "secreto no context (JSON)", payload: { stream: false, messages: [{ role: "user", content: SAFE_MESSAGE }], context: CONTEXT_SECRET }, segredo: CONTEXT_SECRET },

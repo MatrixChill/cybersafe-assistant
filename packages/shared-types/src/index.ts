@@ -287,12 +287,39 @@ export interface ProcessKillResult {
 }
 
 /** Individual termination: the service owns a pinned handle until confirmation. */
-export interface ProcessTerminationSelection { pid: number; startedAt: string; }
+/**
+ * O sinal que o bilhete vai entregar. `sigterm` é o pedido normal; `sigkill`
+ * NÃO é uma variante do mesmo pedido — é uma operação separada, excecional e
+ * explicitamente confirmada, por isso é escolhida no `prepare` (o bilhete fica
+ * pinado a um modo) e nunca pode ser trocada no `confirm`.
+ */
+export type ProcessTerminationMode = "sigterm" | "sigkill";
+export interface ProcessTerminationSelection { pid: number; startedAt: string; mode?: ProcessTerminationMode; }
 export interface ProcessTerminationTarget extends ProcessTerminationSelection { name: string; }
 export type ProcessTerminationPreparation =
-  | { ok: true; ticket: string; target: ProcessTerminationTarget; expiresAt: number }
+  /**
+   * `mode` é o que este bilhete pinou; `modes` é o que esta plataforma sabe
+   * oferecer. Um Windows com apenas `["sigterm"]` não pode mostrar uma
+   * terminação forçada que não tem mecanismo para cumprir.
+   */
+  | { ok: true; ticket: string; target: ProcessTerminationTarget; expiresAt: number; mode: ProcessTerminationMode; modes: ProcessTerminationMode[] }
   | { ok: false; status: ProcessKillStatus; error: string; win32Code?: number };
-export interface ProcessTerminationResult extends ProcessKillResult { win32Code?: number; confirmation?: "handle-signaled"; scope?: "single-process"; }
+export interface ProcessTerminationResult extends ProcessKillResult {
+  win32Code?: number;
+  /** O sinal que foi efetivamente pedido. `undefined` = antes de haver bilhete. */
+  signal?: ProcessTerminationMode;
+  /**
+   * O que prendeu realmente o objeto entre a preparação e o sinal.
+   * `handle-signaled`: um handle do Windows aberto na preparação e sinalizado
+   * sem nova consulta (Linux/POSIX não tem handle equivalente sem `pidfd`, e
+   * Node não expõe `pidfd_open`, por isso o caminho POSIX usa o outro valor).
+   * `identity-reconfirmed`: o `/proc` foi relido imediatamente antes do sinal e
+   * o `starttime` batia certo; é mais fraco do que um handle pinado e dizê-lo
+   * como `handle-signaled` seria uma mentira sobre atomicidade.
+   */
+  confirmation?: "handle-signaled" | "identity-reconfirmed";
+  scope?: "single-process";
+}
 export const PROCESS_TERMINATION_WAIT_MS = 2000;
 export const PROCESS_TERMINATION_TICKET_MS = 60000;
 
@@ -394,6 +421,12 @@ export interface EngineSubsystemHealth {
   status: EngineSubsystemStatus;
   detail?: string;
   /**
+   * Prova de carga adiada por o motor estar ocupado, sem falha observada.
+   * `status` mantém a última confirmação; `busy` impede que a ocupação seja
+   * lida como degradação. Ausente = sem prova adiada.
+   */
+  busy?: boolean;
+  /**
    * Cobertura do que está carregado. Ausente = motor antigo que não envia o
    * campo; o consumidor tem de o tratar como `unknown`, nunca como `normal`.
    */
@@ -475,6 +508,24 @@ export interface EngineHealth {
   anyEngineDegraded?: boolean;
 }
 
+export type QuarantinePolicy = "warn" | "ask" | "automatic-high-confidence";
+
+export interface QuarantinePolicyState {
+  policy: QuarantinePolicy;
+}
+
+export interface QuarantinePolicyUpdate {
+  policy: QuarantinePolicy;
+  /** Obrigatorio e literal `true` apenas para `automatic-high-confidence`. */
+  consent?: boolean;
+}
+
+export interface QuarantinePolicyResult {
+  ok: boolean;
+  policy: QuarantinePolicy;
+  error?: string;
+}
+
 export interface ProtectionStats {
   riskScore: number;
   totalEvents: number;
@@ -487,7 +538,7 @@ export interface ProtectionStats {
    * de `protection-policy.json` (ausente/invalido = "warn"). Opcional por
    * compatibilidade: sem o campo a UI diz "desconhecido", nunca assume OFF.
    */
-  quarantinePolicy?: "warn" | "ask" | "automatic-high-confidence";
+  quarantinePolicy?: QuarantinePolicy;
 }
 
 export interface SecurityEvent<T = unknown> {
@@ -498,6 +549,8 @@ export interface SecurityEvent<T = unknown> {
   severity: Severity;
   summary: string;
   data: T;
+  /** Correlaciona eventos do mesmo scan; o serviço já o publica no topo. */
+  scanId?: string;
 }
 
 export interface ProtectionState {
@@ -577,6 +630,17 @@ export interface ScanState {
    * só cresce quando o batch devolve. Zero quando não há batch a correr.
    */
   filesInEngineBatch?: number;
+  /**
+   * Quantos ficheiros o batch já confirmou como varridos, no MESMO eixo de
+   * `filesInEngineBatch`. É a prova por ficheiro publicada pelo clamscan.
+   *
+   * NÃO é `filesAnalyzed`: este último é o eixo dos resultados ACEITES pelo
+   * pipeline, e durante o batch ainda é 0. Misturar os dois fazia a UI mostrar
+   * 0/800 enquanto o motor já tinha verificado 9/800.
+   */
+  filesInEngineScanned?: number;
+  /** Início do batch de assinaturas em curso; ausente quando não há batch. */
+  engineBatchStartedAt?: string;
   /** Ficheiros que passaram pelo pipeline (analisados, excluídos ou falhados) */
   filesProcessed?: number;
   /** Ficheiros que chegaram efetivamente aos motores de análise aplicáveis */
@@ -585,6 +649,8 @@ export interface ScanState {
   filesInconclusive?: number;
   /** Motivo agregado dos inconclusivos; ausente quando não foi medido. */
   inconclusiveByReason?: InconclusiveReasonCount[];
+  /** Motor agregado que não concluiu; ausente quando não foi medido. */
+  inconclusiveByEngine?: InconclusiveEngineCount[];
   /** Ficheiros ignorados pela política de exclusões (não passaram por nenhum motor) */
   filesExcluded?: number;
   /**
@@ -636,10 +702,23 @@ export type InconclusiveReason =
   | "engine-unavailable"
   | "engine-failed"
   | "no-verdict"
-  | "coverage-incomplete";
+  | "coverage-incomplete"
+  | "timeout"
+  | "invalid-output"
+  | "file-changed"
+  | "archive-incomplete"
+  | "cancelled";
 
 export interface InconclusiveReasonCount {
   reason: InconclusiveReason;
+  count: number;
+}
+
+/** Motor que não concluiu a análise de um ficheiro. */
+export type InconclusiveEngine = "clamav" | "yara" | "native" | "archive" | "filesystem";
+
+export interface InconclusiveEngineCount {
+  engine: InconclusiveEngine;
   count: number;
 }
 
@@ -667,12 +746,16 @@ export interface ScanHistoryEntry {
   filesAnalyzed: number;
   /** Ignorados pela política de exclusões (nenhum motor os viu). */
   filesExcluded: number;
+  /** Razões agregadas das exclusões; sem caminhos e ausente no histórico legado. */
+  filesExcludedBy?: ExclusionReasonCount[];
   /** Não foi possível analisar (erro de leitura/motor). */
   filesFailed: number;
   /** Ficheiros analisados sem veredicto conclusivo de todos os motores aplicáveis. */
   filesInconclusive?: number;
   /** Motivo agregado dos inconclusivos; ausente quando não foi medido. */
   inconclusiveByReason?: InconclusiveReasonCount[];
+  /** Motor agregado dos inconclusivos; ausente quando não foi medido. */
+  inconclusiveByEngine?: InconclusiveEngineCount[];
   threatsFound: number;
   /** Só o que o MOTOR reportou. Ausente quando não houve limitação medida. */
   engineLimitations?: string[];
@@ -844,6 +927,10 @@ export interface FileScanResult {
   /** Optional for compatibility with older service responses. */
   nativeEngine?: NativeFileScanStatus;
   analysisState?: "completed" | "excluded" | "failed" | "engine-unavailable" | "inconclusive";
+  /** Código estruturado da lacuna; nunca inferido de `detail`. */
+  inconclusiveReason?: InconclusiveReason;
+  /** Motores concretos que não concluíram, quando atribuíveis. */
+  inconclusiveEngines?: InconclusiveEngine[];
   detail?: string;
   fileName: string;
   size: number;
@@ -893,7 +980,18 @@ export interface ServiceSnapshot {
   quarantine: QuarantineEntry[];
 }
 
+export interface ExclusionRule {
+  id: string;
+  type: "file" | "folder" | "extension";
+  value: string;
+  enabled: boolean;
+  createdAt: string;
+  reason?: string;
+}
+
 export interface ExclusionConfig {
+  rules?: ExclusionRule[];
+  error?: string;
   paths: string[];
   extensions: string[];
   files: string[];
@@ -922,6 +1020,50 @@ export interface ProtectionOptInResult {
   motivo?: string;
 }
 
+/**
+ * Estado de UMA fonte de definições de segurança (ClamAV / YARA / HashDB).
+ *
+ * Os IDs são estáveis e a legenda PT-PT vive no renderer — mas a distinção entre
+ * os cinco estados é do serviço, porque só o serviço sabe se houve uma tentativa
+ * ou um sucesso. `nunca_verificado` não é `indisponivel`, e `degradado` (o motor
+ * analisa, a cobertura não é completa) não é `desactualizado` (a base é completa
+ * mas antiga). Colapsá-los seria a UI a inventar o que o serviço não mediu.
+ */
+export type DefinitionsSourceState =
+  | "actualizado"
+  | "desactualizado"
+  | "degradado"
+  | "indisponivel"
+  | "nunca_verificado";
+
+export interface DefinitionsSourceStatus {
+  fonte: "clamav" | "yara" | "hashes";
+  estado: DefinitionsSourceState;
+  /** Epoch ms do último SUCESSO; `null` se nunca houve um. */
+  ultimaBemSucedidaAtMs: number | null;
+  /** Epoch ms da última TENTATIVA (pode ter falhado). */
+  ultimaTentativaAtMs: number | null;
+  /** Último erro observado, com a causa; nunca uma falha inventada. */
+  ultimoErro: string | null;
+  /** Tentativas falhadas consecutivas; 0 com sucesso limpo. */
+  tentativasConsecutivas: number;
+  /** Quando a próxima verificação vai realmente acontecer (inclui backoff). */
+  proximaVerificacaoAtMs: number;
+  /** Cadência normal desta fonte, para a UI não a presumir igual para todas. */
+  cadenciaMs: number;
+  /** Versão/identificador da base, quando a fonte o publica (ex.: daily 28171). */
+  identificadorBase: string | null;
+  /** Quantidade efetivamente carregada, quando mensurável; `null` = não medido. */
+  itensCarregados: number | null;
+}
+
+export interface DefinitionsStatus {
+  fontes: DefinitionsSourceStatus[];
+  /** `true` enquanto um ciclo corre — a UI não pode oferecer um segundo. */
+  cicloEmCurso: boolean;
+  geradoEmMs: number;
+}
+
 export interface ServiceCommandMap {
   "protection.getState": undefined;
   "events.list": { limit?: number; cursor?: number } | undefined;
@@ -929,6 +1071,8 @@ export interface ServiceCommandMap {
   "processes.list": undefined;
   "connections.list": undefined;
   "quarantine.list": undefined;
+  "quarantine.policy.get": undefined;
+  "quarantine.policy.set": QuarantinePolicyUpdate;
   "events.clear": undefined;
   "scan.artifact": { path: string };
   "scan.fullSystem": undefined;
@@ -959,12 +1103,15 @@ export interface ServiceCommandMap {
   "trust.allowHash": { sha256: string };
   "trust.allowPublisher": { publisher: string };
   "definitions.update": { source?: string } | undefined;
+  // Leitura pura do estado por fonte — sem side-effect, sem rede, e por
+  // isso não entra na lista de trabalho novo proibido no encerramento.
+  "definitions.status": undefined;
   "analysis.restricted": { path: string };
   "hardware.snapshot": undefined;
   "windows.healthSnapshot": undefined;
   "pcstate.get": undefined;
   "exclusions.get": undefined;
-  "exclusions.update": Partial<ExclusionConfig>;
+  "exclusions.update": { rules: ExclusionRule[] };
   "scan.start": { type: ScanType; targetPath?: string };
   /** Estado da análise ativa (ressincronização da UI após remount/navegação). */
   "scan.getActive": undefined;
@@ -1050,6 +1197,8 @@ export interface ServiceResponseMap {
   "processes.list": ProcessListResult;
   "connections.list": ConnectionSnapshot[];
   "quarantine.list": QuarantineEntry[];
+  "quarantine.policy.get": QuarantinePolicyState;
+  "quarantine.policy.set": QuarantinePolicyResult;
   "events.clear": { success: boolean };
   "scan.artifact": FileScanResponse | null;
   "scan.fullSystem": { success: boolean };
@@ -1070,12 +1219,13 @@ export interface ServiceResponseMap {
   "trust.allowHash": { success: boolean };
   "trust.allowPublisher": { success: boolean };
   "definitions.update": { success: boolean; updatedAt: string };
+  "definitions.status": DefinitionsStatus;
   "analysis.restricted": AnalysisResult | null;
   "hardware.snapshot": HardwareSnapshot;
   "windows.healthSnapshot": WindowsHealthSnapshot;
   "pcstate.get": PcState;
   "exclusions.get": ExclusionConfig;
-  "exclusions.update": { success: boolean };
+  "exclusions.update": { success: boolean; error?: string };
   "scan.start": { id: string; success: boolean; error?: string };
   "scan.getActive": ScanState | null;
   "scan.getLast": ScanState | null;

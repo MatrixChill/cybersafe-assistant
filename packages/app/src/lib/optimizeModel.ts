@@ -12,6 +12,8 @@
  * classificação, os estados e a matemática do progresso sem DOM nem Electron.
  */
 
+import { plataformaPublicada } from "./platformTruth";
+
 /** O que o cartão é, antes de qualquer medição. */
 export type OptimizeTipo = "problema-potencial" | "manutencao" | "boa-pratica";
 
@@ -159,15 +161,83 @@ export interface OptimizeCartao extends OptimizeCartaoBase {
   mensagem: string;
 }
 
-export function cartoesIniciais(): OptimizeCartao[] {
-  return CARTOES.map((base) => ({
+function estadoInicial(base: OptimizeCartaoBase): OptimizeCartao {
+  return {
     ...base,
     estado: "pendente" as OptimizeEstado,
     resultado: null,
     severidade: null,
     evidencia: "",
     mensagem: "",
-  }));
+  };
+}
+
+export function cartoesIniciais(): OptimizeCartao[] {
+  return CARTOES.map(estadoInicial);
+}
+
+/* ═══ CATÁLOGO PELA PLATAFORMA PUBLICADA ═══════════════════════════════════
+   Dois cartões perguntam ao Windows por coisas que só existem no Windows:
+   `firewall` lê os perfis do Defender e `saude-windows` lê o centro de
+   segurança da plataforma — ambos por `getWindowsHealth()`. No Linux essa
+   ponte não devolve nada de verificável, e um botão «Verificar estado» sobre
+   uma leitura inexistente é exatamente o defeito que este projeto persegue:
+   oferecer uma funcionalidade de um sistema operativo como se estivesse no
+   outro. Não é preferência estética — é a régua da honestidade.
+
+   A plataforma vem do serviço, em `hardware.system.platform` (o `osInfo()` do
+   `systeminformation`), o mesmo ponto que `diskDisplay.ts` usa para decidir o
+   que se pode analisar. Sem publicação não se adivinha pelo aspeto dos
+   caminhos: o catálogo é o de origem. O Windows, onde estes cartões têm
+   leitura real, recebe de volta o mesmo objeto que tinha. */
+
+/** Cartões cuja única fonte é uma leitura exclusiva do Windows. */
+export const LINHAS_SO_WINDOWS = new Set(["firewall", "saude-windows"]);
+
+/**
+ * Linhas que nomeiam o Windows onde aquilo que se mede é a máquina toda. Não é
+ * edição cosmética: `startup` dizia «Gestor de Tarefas, separador Arranque», um
+ * caminho que não existe em Linux, e a pessoa seguiria uma instrução falsa.
+ */
+const REDACCO_LINUX: Record<string, Partial<OptimizeCartaoBase>> = {
+  disco: {
+    motivo: "Sem espaço, o sistema falha, não instala atualizações e os programas deixam de abrir.",
+  },
+  startup: {
+    titulo: "Programas que arrancam com a sessão",
+    instrucao:
+      "Revisa a lista de aplicações de arranque da tua distribuição (Definições → Arranque automático). Desativar é decisão tua.",
+  },
+};
+
+/**
+ * O que a página Otimizar mostra nesta plataforma. Em Linux cai o que só o
+ * Windows pode responder; o resto mantém a ordem e o estado já medido — a
+ * função é uma projeção sobre o catálogo, não um novo catálogo.
+ */
+export function linhasDaPlataforma(
+  cartoes: OptimizeCartao[],
+  plataforma: string | null | undefined,
+): OptimizeCartao[] {
+  if (plataformaPublicada(plataforma) !== "linux") return cartoes;
+  return cartoes
+    .filter((c) => !LINHAS_SO_WINDOWS.has(c.id))
+    .map((c) => {
+      const overrides = REDACCO_LINUX[c.id];
+      return overrides ? { ...c, ...overrides } : c;
+    });
+}
+
+/**
+ * A lacuna dita em voz alta, em vez de silêncio. Não existe leitor de UFW,
+ * firewalld ou nftables neste corte do Linux Lite, por isso a página não tem
+ * firewall nenhuma para afirmar — e «não lida» não é «desligada».
+ */
+export const NOTA_FIREWALL_LINUX =
+  "A firewall deste sistema não é verificada por esta versão: não consultamos UFW, firewalld nem nftables. Nada é afirmado sobre ela — ausência de leitura não é firewall desligada.";
+
+export function notaDaPlataforma(plataforma: string | null | undefined): string | null {
+  return plataformaPublicada(plataforma) === "linux" ? NOTA_FIREWALL_LINUX : null;
 }
 
 /* ═══ GRUPOS ═══════════════════════════════════════════════════════════════

@@ -1,0 +1,149 @@
+# CyberSafe Assistant — relatório técnico e checkpoint
+
+Data: 2 de novembro de 2026. Estado: desenvolvimento funcional em curso; candidata final ainda não validada em instalação. Este documento relata apenas trabalho e evidência observados nesta conversa. Não substitui os registos históricos nem transforma testes anteriores em provas atuais.
+
+## 1. Git e preservação
+
+- Worktree: `C:/Users/caioc/.cybersafe-integration/freebuff-r7-continuacao-20261101/repo`.
+- Branch canónica: `codex/pap-final-integration-20261102`.
+- HEAD no início deste checkpoint: `a44d379f1fad9e7b30f7add4e634d4f1de2d9f11`.
+- Versão canónica preservada: `0.1.11-internal.pap-r7.20261031`.
+- Remoto consultado agora: main `21fefa69352516c188f99c665966d4443588aa2b`; R7 `83ee706e7a8cce6e9093d9e6352e6c974c0bb990`.
+- Relação com origin/main: 0 commits exclusivos da main, 50 exclusivos do HEAD. A R7 e `94ac447` são antecessores do HEAD.
+- A branch Codex ainda não existe no remoto. O proprietário autorizou publicar apenas esta branch após testes e revisão de segredos; essa publicação ainda não aconteceu.
+- Não houve merge na main, tag, Release, source freeze ou novo instalador nesta execução.
+- Sete worktrees localizados. As linhas Freebuff, Qoder e restantes foram preservadas. O stash preexistente não foi aplicado nem eliminado.
+- Os cinco BMPs modificados do instalador, `output/` e `tmp-installer-preview/` continuam preservados e fora dos commits.
+
+## 2. Commits concluídos
+
+| Commit | Alteração | Evidência e limite |
+|---|---|---|
+| `6de1121` | Merge da prioridade ClamAV de `94ac447`, preservando a recuperação e busy da R7 | Dois pais: `83ee706` e `94ac447`. Conflitos resolvidos mantendo fixtures recentes. 7 testes de prioridade/backpressure passaram. |
+| `4521ccf` | Fixtures de provas ClamAV incluem base diária | 8 testes de ciclo de vida passaram; 1 teste com binário real e base truncada passou. Antes falhavam por não atingir a prova de carga. |
+| `9acff02` | PDF consolidado conserva motivos/motores dos inconclusivos | 141 testes relacionados passaram; app typecheck/build passaram. Não houve validação visual do PDF instalado. |
+| `a44d379` | Regressão da fila health perante morte não confirmada e checkpoint | Teste falha removendo a drenagem, passa ao repor. Saúde degradada e nenhum novo spawn nesse cenário. |
+
+A correção ClamAV não aumentou artificialmente o timeout nem publicou ACTIVE sem prova. Mantém `user > health > background`, espera limitada, backpressure e recusa quando não se confirma a morte do filho.
+
+## 3. ClamAV real — ensaio mais recente
+
+Novo teste ainda não commitado: `packages/core/test/clamav-health-real.integration.test.js`.
+
+Foi executado explicitamente com o binário vendor e a base oficial local em `.r7-evidence/definitions/clamav`, apenas para leitura. Criou um ficheiro benigno próprio em pasta temporária e submeteu três análises pequenas, com concorrência global limitada a um processo.
+
+Resultado observado: PASS em aproximadamente 26 973 ms; ordem de spawn `load-proof`, `background`, `controlled-user`, `background`; pico de filhos 1; órfãos 0. Depois de dispose, a bridge não tinha filhos e o SO confirmou a ausência dos PIDs criados.
+
+A prova de saúde foi adiada devido à ocupação legítima, mantendo a carga previamente comprovada; a análise positiva eliminou busy. Neste ensaio, não nasceu uma segunda prova de saúde: a recuperação ocorreu pela evidência positiva do batch. O teste determinista anterior cobre a ordem de prioridade da prova quando recebe a vaga.
+
+Limites: este cenário não reproduz uma fila grande instalada, não prova ausência de todos os tipos de órfão no produto, não mede os 800 ficheiros históricos e não comprova a meta de cinco minutos. Não houve stress pesado nem análise de ficheiros pessoais. Faltam execução na candidata instalada e VM autorizada.
+
+Comando reproduzível:
+
+```powershell
+$env:CYBERSAFE_CLAMAV_REAL_BASE = (Resolve-Path .r7-evidence/definitions/clamav).Path
+$env:CYBERSAFE_CLAMSCAN_PATH = (Resolve-Path vendor/clamav/clamscan.exe).Path
+node --test packages/core/test/clamav-health-real.integration.test.js
+```
+
+## 4. Scanner, histórico e PDF
+
+O serviço já guardava causas e motores dos inconclusivos. O relatório consolidado descartava esses agregados. A correção preserva a informação até ao HTML destinado ao PDF, com rótulos PT-PT existentes, normalização de códigos, proteção de privacidade e indicação de que contagens por motor podem referir-se ao mesmo ficheiro. Resultados parciais deixam de usar o indicador verde.
+
+Dois testes novos falharam antes e passaram depois. Foram executados 141 testes relacionados de sessão, histórico, relatórios e inconclusivos, todos PASS, usando o tsconfig correto. Uma invocação inicial sem tsconfig falhou na resolução de aliases; a execução corrigida passou.
+
+Não houve otimização especulativa. Instrumentação e scripts de benchmark existentes permanecem. O benchmark histórico de 301 ficheiros não foi usado como prova do Scanner completo. Faltam medição comparável instalada, validação visual/exportação, propagação detalhada por ficheiro/fase/identidade/limites e política de retry seguro.
+
+## 5. Gestor de Tarefas e quarentena
+
+Foram executados 70 testes desktop de terminação individual e atualizador, e 26 testes de serviço de terminação, classificação e quarentena: todos PASS. Build do serviço passou.
+
+Cobertura inclui validação de pedidos, frames não confiáveis, preload com canais fixos, modo readonly, recusa do kill legado, auditoria sem ação, caminhos protegidos, consentimento literal, digest de restauro, traversal, destino existente e corrida de criação de destino. Os processos nativos nesses testes são simulados. Nenhum processo pessoal foi terminado.
+
+Falta completar prova conjunta de quarentena UI/preload/main/serviço, e validar terminação individual instalada em VM com processo benigno criado para ensaio. `KILL_TERMINATION_DISABLED` continua preservado. Não foi criada ou iniciada VM nesta execução; o roteiro e preflight existentes permanecem disponíveis.
+
+## 6. MATRIX — alterações locais ainda sem commit
+
+Ficheiros: `packages/api/src/ai.ts`, `packages/api/test/matrix-guard.test.js`, `packages/app/src/lib/matrixContext.ts`, `packages/app/test/process-matrix-context.test.ts`.
+
+- O contexto geral agora inclui ClamAV, YARA, HashDB e Native com status, busy e coverage. Campos ausentes permanecem unknown. Detalhes livres do motor não são enviados porque podem conter caminhos ou segredos.
+- Instruções da persona exigem valores concretos quando disponíveis, distinção de ocupação/degradação/cobertura, mesma instância PID+início, intervalo/amostras/recência e ausência de conclusão de tendência a partir de uma amostra.
+- Adicionado reconhecimento explícito de tokens Groq no filtro de segredos de saída. Duas fixtures sintéticas provaram a falha anterior nos modos JSON e streaming; após a correção são recusadas antes do fornecedor fake e não são ecoadas em logs/respostas.
+- 64 testes API offline de guard, política, erros, contexto e consentimento passaram. 19 testes app de contexto de processos passaram.
+- API build passou com `npm --prefix packages/api run build`. O nome do pacote é `api`, não `@cybersafe/api`; uma primeira tentativa com o nome errado não compilou. Testes foram repetidos após o build correto.
+- A dependência existente better-sqlite3 foi reconstruída para o Node atual, pois faltava o binário nativo. Não houve mudança de versão/lockfile nem migração de dados pessoais.
+
+A credencial foi anteriormente guardada com safeStorage/DPAPI no perfil CyberSafe Assistant e verificada após reabrir. Não se voltou a tentar o acesso online bloqueado. O proprietário chamou-lhe credencial nova, mas não existe prova de revogação no fornecedor da chave antiga. Como a nova também foi colada no chat, a rotação fora da conversa continua recomendada; não foi alegada revogação automática.
+
+Melhorias de contexto e prompt não demonstram a qualidade final das respostas de um modelo real. Faltam aceitação online autorizada e prova da configuração na API da aplicação instalada após recarga.
+
+## 7. Atualizador
+
+Infraestrutura existente preservada: assinatura Ed25519, SHA-256, versões, allowlist de URL, cancelamento e verificação antes de instalar. Os testes executados cobrem trust fechada, assinatura inválida, downgrade, integridade, cache adulterada, scan ativo/desconhecido, publisher, pedidos concorrentes e cancelamento. Os 70 PASS desktop incluem estes percursos e os quatro testes de terminação individual.
+
+Não foi ativada confiança de produção. Ainda faltam revisão específica de testes com chaves efémeras e servidor local, upgrade entre duas candidatas em VM, preservação de dados nesse upgrade, chave pública/fingerprint aprovados e feed oficial. Não foi executado instalador.
+
+## 8. Configurações, Otimizar, frontend e setup
+
+A reorganização de Configurações foi iniciada apenas pelo teste de aceitação: `packages/app/test/settings-quarantine-policy.test.ts` contém um teste novo que exige categorias Geral, Aparência, Proteção, Exclusões, Atualizações, MATRIX e Avançado com destinos acessíveis e controlos preservados. Esse teste está VERMELHO: a navegação por categorias ainda não foi implementada. Os dois testes existentes de quarentena nesse ficheiro passaram.
+
+Este estado é intencionalmente registado como trabalho incompleto, não como regressão resolvida. Não houve alteração da página SettingsPage nesta etapa. Falta implementar categorias, verificar controlos/consentimento/persistência e validar runtime. Otimizar não recebeu alterações nesta etapa.
+
+Laboratório Orbital Glass V3, protótipos e BMPs foram preservados. Não foram acrescentados efeitos premium, partículas ou 3D. Design final e setup personalizado continuam sujeitos à aprovação visual posterior.
+
+## 9. Estado exato do checkpoint
+
+HEAD continua `a44d379` antes do commit deste relatório. Alterações funcionais acima permanecem no working tree, junto do teste vermelho de Configurações e do novo teste real ClamAV. Não foram incluídas automaticamente num commit sem revisão final. `git diff --check` passou nesta recolha.
+
+Não há prova de suíte completa atual, revisão final de segredos, candidata instalada, VM, upgrade, source freeze, assinatura Authenticode, tag ou Release. Os totais de testes de blocos diferentes não devem ser somados como uma suíte única; alguns percursos foram repetidos.
+
+## 10. Próxima sequência técnica
+
+1. Rever/fortalecer o teste real ClamAV, registar a evidência e criar commit próprio.
+2. Concluir revisão de MATRIX, testar variantes de contexto e resposta, build/typecheck app/API e commit lógico.
+3. Implementar as categorias de Configurações até passar o teste vermelho, preservando controlos e contratos; validar acessibilidade e runtime.
+4. Completar integração de quarentena e testes do atualizador com chaves isoladas/manifestos válidos e inválidos.
+5. Medir Scanner com corpus comparável e instrumentação existente; corrigir apenas gargalos demonstrados.
+6. Preparar pacote de aceitação VM com comandos e critérios, sem declarar execução inexistente.
+7. Executar verificações adequadas, revisão de segredos e diff, depois publicar exclusivamente a branch Codex já autorizada. Confirmar SHA remoto.
+8. Obter autorizações específicas para VM/instalação quando necessárias, trust de produção, aprovação visual, freeze, main, tag e Release. Continuar trabalho independente enquanto esses gates estiverem pendentes.
+
+O objetivo mantém-se: candidata interna funcional e verificável antes do acabamento visual e instalador definitivo.
+
+## Continuação funcional — marco 2 (2026-11-02)
+
+- `5126587`: Configurações organizadas em sete categorias; o teste novo passou e o typecheck passou. Interação real Electron ainda pendente.
+- `b26d71c`: contexto de motores e filtro Groq concluídos; evidência offline anterior preservada, sem repetição nesta etapa.
+- `a18aa21`: teste benigno real ClamAV guardado; não foi repetido.
+- `4788e66`: cancelamento durante abertura HTTP fecha a resposta e recusa prosseguimento. Regressão vermelha antes; 21 testes relacionados PASS e desktop typecheck PASS depois. Procedimento manual MATRIX em `docs/MATRIX-VALIDACAO-ONLINE-MANUAL.md`; online não executado.
+- `d7f0f4b`: restauro recusa consentimento não booleano antes de efeitos, evitando confiança automática por string truthy. Regressão vermelha antes; 7 testes relacionados PASS e build serviço PASS depois.
+- `225353b`: Otimizar apresenta respostas parciais sem undefined/NaN, valida nomes próprios dos catálogos. Regressão vermelha antes; 8 testes PASS e app typecheck PASS depois.
+- 20 testes adicionais da cadeia manifesto/Ed25519/SHA e estado/recarga das definições PASS. Fontes externas simuladas: não é atualização online real.
+- Builds app e desktop PASS. Avisos: chunks acima de 500 kB e opções Vite deprecated/invalid; ainda não resolvidos.
+- Branch Codex publicada por autorização: SHA remoto confirmado `225353bf85f7df39772a613912274173bc6670f9`; main permaneceu `21fefa69352516c188f99c665966d4443588aa2b`. Sem PR, merge, freeze, tag ou Release. Revisão dos 25 ficheiros commitados desde R7 não encontrou padrões reconhecíveis Groq/GitHub/chave privada; não é uma auditoria universal de segredos.
+- Preflight packaging: binários/bundle presentes; seed e registo de aprovadores pendentes. Tentativa de preparar seed com a cache oficial local recusada antes da criação do output por ausência de daily.cld. A cache tem daily.cvd; não foi renomeada nem foram alterados os pinos.
+- Probe Scanner existente: expectativa antiga para pasta vazia corrigida contra contrato explícito atual; exige failed, progresso 0 e erro exato de zero candidatos. Timer de 30 s limpo após terminal. Três cenários PASS em execução local, motor mínimo benigno; não prova desempenho completo, USB, instalação nem meta de cinco minutos.
+
+Próximo trabalho: integração conjunta de quarentena e exclusões; ensaio instalado do protocolo individual em VM autorizada; validação visual/teclado das categorias; seed oficial correspondente aos pinos; testes de upgrade entre candidatas. A candidata Windows instalável final ainda não foi produzida. Aprovações visuais, instalação/VM e cadeia de publicação mantêm-se separadas.
+
+## Marco seed e integração Electron — 2026-11-02
+
+- Seed resolvida: a fonte anteriormente tentada era a cache CVD errada para os pinos da candidata. A seed R7 externa foi localizada nos logs, revalidada byte a byte e copiada pelo preparador existente para `output/clamav-seed-codex-20261102`. Quatro ficheiros/175916377 bytes; sem mudança de nomes, hashes ou gates. ClamAV real 1.5.4 carregou a nova cópia em 6005 ms. `package-windows --check` com CYBERSAFE_CLAMAV_SEED_DIR aceita seed/bundle; permanece gate de aprovadores/fontes.
+- Preparação freeze em `docs/CANDIDATA-CODEX-SEED-E-FREEZE.md`. Inventário DRAFT-NOT-APPROVED guardado em output, sem approval. Inclui BMPs locais rejeitados e não pode autorizar freeze/packaging. Nenhum registo/aprovação criado.
+- `node scripts/dev-quarantine-electron-proof.mjs`: PASS, perfil temporário `cybersafe-dev-run-9244CS`, evidências no respetivo diretório `evidence`. UI real, preload/IPC real, serviço com camada de fixture restrita. Isolamento, restauro com bytes iguais, segunda quarentena e eliminação confirmados; auditoria com 2 quarentenas/1 restauro/1 eliminação, zero post-checks/release falhados. Cleanup allDead=true, zero survivors. DEV pipe sem autenticação por desenho deste harness: não comprova autenticação de produção nem instalação em VM.
+- Novo modo `--settings-proof` reutiliza esse launcher, sem executar operações de quarentena. Verifica sete regiões/âncoras, foco do destino, IPC após fragmentos de URL, Tab até controlo e ausência de overflow a 900px. Primeiro ensaio falhou por sintaxe de seletor no harness; corrigido. Ensaios finais PASS com cleanup allDead=true, zero survivors. Perfil final `cybersafe-dev-run-TfIiuI`.
+- `e800da4`: categorias fixas no topo das Configurações, espaço de scroll para títulos e harness reproduzível. Typecheck e build app PASS; aviso de chunks grandes permanece. Ajuste final da margem de scroll ocorreu após as capturas; não altera identidade visual.
+- Capturas reais de referência preservadas em `output/codex-visual-review-20261102`: Dashboard atual e Configurações a 900px. Não são mockups nem aprovação Orbital Glass. Dados visíveis de conta/estado são da sessão sintética; engines limitados nesse perfil não são medição da instalação pessoal.
+- O harness recusou quarantine.policy.get no perfil de fixture (limitação conhecida da allowlist). A página apresentou ausência de leitura nas Configurações; não foi ativada quarentena automática nem consentimento. O estado warn mostrado na aba Ameaças veio do snapshot do serviço, não de sucesso desse pedido recusado.
+
+Pendências reais: seed tecnicamente fechada; registo externo e aprovação final de fontes pendentes; ensaio instalado/VM, terminação individual real, upgrade entre candidatas, aceitação visual final e setup definitivo ainda pendentes. Não se criou instalador novo, freeze, main, tag, Release ou aprovação visual nesta etapa.
+
+## Marco funcional e propostas isoladas — continuação de 94d3b7e
+
+- `4cf84b7`: novo ensaio HTTPS real local da cadeia do updater, Ed25519 efémero, SHA-256, cache real, assinatura/bytes adulterados e cancelamento a 1024 bytes. 4 cenários PASS; inválido não descarrega, falhas sem cache residual. CA apenas no processo filho; zero instaladores/upgrade executados, trust de produção preservada.
+- `7d63ce8`: pipe real da quarentena com autenticação exigida; prova inválida recusada sem efeitos, depois isolamento/restauro byte-exact/manifesto reaberto/eliminação PASS. Não é UI empacotada; não se repetiu o ensaio Electron anterior.
+- `bad06e8`: helper VM benigno e procedimento de terminação individual preparados. Sintaxe PASS e falta de autorização recusada antes de efeitos. Não compilado/executado no PC pessoal; kill legado continua desativado.
+- `15f1f7c`: novos controlos de movimento/desempenho/WebGL nas Configurações ligados aos setters/persistência existentes. Teste novo falhou antes e passou depois. Typecheck PASS. Electron --appearance-proof confirmou persistência após reload e escalas emuladas sem overflow; não é DPI Windows nativo. Cleanup allDead=true.
+- `943accb`: proposta Orbital V3 DEV-only, dois planos independentes, sem núcleo CSS sobreposto. 2 testes geométricos PASS; Electron --orbital-proof confirmou WebGL/reduced-motion/fallback. Capturas reais; produção mantém visual anterior. Build app PASS, legenda de proposta ausente do bundle de produção. GPU não foi medida.
+- `5acb9cd`: estudo NSIS nativo separado compilado/executado. Ícone oficial, composição sem BMP, seleção de proposta exercitada; zero operações de instalação. Capturas e limites documentados. Não é setup final.
+- Revisão visual específica e evidência: `docs/REVISAO-VISUAL-ORBITAL-E-SETUP-20261102.md`. Capturas preservadas em output/codex-review-20261102. Aprovação visual da proposta pendente. Seed, freeze e BMPs não foram reimplementados nem aprovados por inferência.

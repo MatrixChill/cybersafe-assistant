@@ -1,3 +1,4 @@
+import {databaseReadyForUpdate} from './database-update-readiness.js';
 import Database from 'better-sqlite3';
 import fs from 'fs';
 import path from 'path';
@@ -332,3 +333,6 @@ export async function seedSampleThreatEvents(env: NodeJS.ProcessEnv = process.en
     createThreatEvents: (data) => prisma.threatEvent.createMany({ data }),
   });
 }
+
+/** Invoked after module initialization/migrations; never writes or repairs data. */
+export function confirmDatabaseReadyForUpdate(): boolean { return databaseReadyForUpdate(db); }

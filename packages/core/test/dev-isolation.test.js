@@ -8,8 +8,12 @@ import {
   looksLikePackagedRuntime,
   stripDevIsolationEnv,
   pathIsSameOrUnder,
+  defaultServiceDirName,
+  defaultEngineTransport,
   DEFAULT_PIPE_NAME,
   DEFAULT_SERVICE_DIRNAME,
+  DEFAULT_SERVICE_DIRNAME_LINUX,
+  ENGINE_SOCKET_FILENAME,
   DEV_ISOLATION_FLAG_ENV,
   DEV_SERVICE_DIR_ENV,
   DEV_PIPE_NAME_ENV,
@@ -23,7 +27,8 @@ const PERSONAL = path.join(HOME, DEFAULT_SERVICE_DIRNAME);
 const ENV_OK = { [DEV_ISOLATION_FLAG_ENV]: "1", [DEV_SERVICE_DIR_ENV]: GOOD_DIR, [DEV_PIPE_NAME_ENV]: GOOD_PIPE };
 
 // execPath/plano sem Electron: isElectron=false, defaultApp=false.
-const base = { home: HOME, argv: [], execPath: "C:\\Program Files\\nodejs\\node.exe", isElectron: false, defaultApp: false };
+// `platform: "win32"` explicito: as asserções históricas valem em qualquer host.
+const base = { home: HOME, argv: [], execPath: "C:\\Program Files\\nodejs\\node.exe", isElectron: false, defaultApp: false, platform: "win32" };
 
 test("default sem otim-in: pipe e dir byte-identicos ao historico", () => {
   assert.equal(resolvePipeName(base), "\\\\.\\pipe\\cybersafe-protection-dev-v2");
@@ -131,4 +136,54 @@ test("stripDevIsolationEnv remove as 3 vars (filho empacotado); dev preserva (na
   assert.equal(child[DEV_SERVICE_DIR_ENV], undefined);
   assert.equal(child[DEV_PIPE_NAME_ENV], undefined);
   assert.equal(child.OTHER, "x", "nao deve apagar outras env");
+});
+
+// ── Linux Lite: transporte AFUNIX e raiz de dados dedicadas ─────────────────
+const HOME_LIN = "/home/tester";
+const linuxBase = { ...base, home: HOME_LIN, platform: "linux" };
+
+test("linux: raiz default e transporte default sao dedicadas ao Linux Lite", () => {
+  assert.equal(defaultServiceDirName("linux"), DEFAULT_SERVICE_DIRNAME_LINUX);
+  assert.equal(defaultServiceDirName("win32"), DEFAULT_SERVICE_DIRNAME);
+  assert.equal(resolveServiceBaseDir(linuxBase), path.join(HOME_LIN, DEFAULT_SERVICE_DIRNAME_LINUX));
+  assert.equal(
+    resolvePipeName(linuxBase),
+    path.join(HOME_LIN, DEFAULT_SERVICE_DIRNAME_LINUX, ENGINE_SOCKET_FILENAME),
+  );
+  assert.equal(defaultEngineTransport(HOME_LIN, "win32"), DEFAULT_PIPE_NAME);
+});
+
+test("linux: otim-in sem flag continua no default dedicado (nao no pipe Windows)", () => {
+  const probe = { ...linuxBase, env: {} };
+  assert.equal(resolvePipeName(probe), defaultEngineTransport(HOME_LIN, "linux"));
+});
+
+test("win32 explícito: comportamento historico byte-identico mesmo em host linux", () => {
+  const probeWin = { ...base, env: ENV_OK };
+  assert.equal(resolvePipeName(probeWin), GOOD_PIPE);
+  assert.equal(resolveServiceBaseDir(base), path.join(HOME, DEFAULT_SERVICE_DIRNAME));
+});
+
+const soLinux = process.platform === "linux" ? test : test.skip;
+soLinux("linux real: otim-in aceita socket absoluto dedicado e recusa lixo", () => {
+  const dir = "/tmp/cs-linux-lite-iso";
+  const pipe = "/tmp/cs-linux-lite-run/engine.sock";
+  const env = { [DEV_ISOLATION_FLAG_ENV]: "1", [DEV_SERVICE_DIR_ENV]: dir, [DEV_PIPE_NAME_ENV]: pipe };
+  const probe = { home: HOME_LIN, env, argv: [], execPath: "/usr/bin/node", isElectron: false, defaultApp: false, platform: "linux" };
+  assert.equal(resolvePipeName(probe), pipe);
+  assert.throws(
+    () => resolvePipeName({ ...probe, env: { ...env, [DEV_PIPE_NAME_ENV]: "relative/engine.sock" } }),
+    DevIsolationError,
+  );
+  assert.throws(
+    () => resolvePipeName({ ...probe, env: { ...env, [DEV_PIPE_NAME_ENV]: "\\.\pipe\cybersafe-dev-iso-1" } }),
+    DevIsolationError,
+  );
+  assert.throws(
+    () => resolvePipeName({
+      ...probe,
+      env: { ...env, [DEV_PIPE_NAME_ENV]: path.join(HOME_LIN, DEFAULT_SERVICE_DIRNAME_LINUX, ENGINE_SOCKET_FILENAME) },
+    }),
+    DevIsolationError,
+  );
 });

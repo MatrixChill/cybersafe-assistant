@@ -29,7 +29,7 @@ function fixture(packaged = false) {
   const frame = { url: expected };
   const contents = { mainFrame: frame, isDestroyed: () => false };
   const sandbox = {
-    ipcRegistered: false, isQuitting: false,
+    ipcRegistered: false, isQuitting: false, perfil: {autoStart: packaged}, fronteiraLeituraWindows: {activo:false},
     ipcMain: { handle(channel, handler) { assert.ok(!handlers.has(channel)); handlers.set(channel, handler); } },
     mainWindow: { webContents: contents },
     app: { isPackaged: packaged, setLoginItemSettings(config) { effects.push(["settings", config]); } },
@@ -99,8 +99,10 @@ for (const packaged of [false, true]) {
     // + service:get-protection-intent e service:set-protection-intent (intenção de
     //   proteção persistida no serviço, 19/10).
     // Qualquer mudança de superfície passa por esta auditoria.
+    // + service:get-definitions-status (estado das definicoes de seguranca por fonte,
+    //   leitura sem efeito; revisado a 2026-11-01 junto com o contrato `definitions.status`).
     // Six additional guarded channels: three AI credentials and three protected termination.
-    assert.equal(f.handlers.size, 63, "audit covers every currently registered channel; review any surface change");
+    assert.equal(f.handlers.size, 68, "audit covers every currently registered channel; review any surface change");
     assert.ok(f.handlers.has("app:update-reveal")); // folder reveal: same trusted document guard
     assert.ok(f.handlers.has("service:usb-scan"));
     assert.ok(f.handlers.has("service:usb-cancel"));
@@ -175,7 +177,7 @@ test("remote main-frame document cannot use sensitive methods exposed by the act
 });
 
 test("prototype keys in IPC arguments do not pollute prototypes at tested desktop boundary", async () => {
-  const f = fixture();
+  const f = fixture(true);
   const {api} = bridge(f);
   const payload = JSON.parse('{"limit":5,"__proto__":{"r6l13Polluted":true},"constructor":{"prototype":{"r6l13Polluted":true}},"enabled":true,"startMinimized":false}');
   assert.equal(Object.prototype.r6l13Polluted, undefined);
@@ -216,13 +218,13 @@ test("report window has no privileged preload; missing main window fails closed"
   assert.throws(() => handler({sender:{},senderFrame:{url:"http://localhost:5173/"}}), /Emissor IPC não autorizado/);
   assert.equal(effects, 0);
 });
-test("preload surface is explicitly limited to the 56 reviewed capabilities", () => {
+test("preload surface is explicitly limited to the 61 reviewed capabilities", () => {
   const {api} = bridge(fixture());
   // 52 revistas originalmente + getProtectionIntent/setProtectionIntent (intenção de
   // proteção, 19/10) + appUpdate (objecto de actualização da app, 19/10). O sub-objecto
   // é auditado à parte abaixo: contar `appUpdate` como capacidade e não verificar as
   // suas 8 chaves seria um ledger mais fraco do que antes.
-  const expected = "aiCredentials,prepareProcessTermination,confirmProcessTermination,cancelProcessTermination,beginShutdown,getProtectionState,setProtection,pauseProtection,getServiceConnectionState,onServiceConnectionState,getSecurityEvents,getThreatEvents,getProcesses,getConnections,getQuarantineFiles,clearThreatEvents,scanFile,scanFullSystem,killProcessTree,analyzeProcess,getHardwareSnapshot,getWindowsHealth,getPCState,restoreQuarantine,deleteQuarantine,allowHash,allowPublisher,runRestrictedAnalysis,updateDefinitions,startScan,getActiveScan,getLastScan,getScanHistory,cancelScan,threatAction,openFileDialog,getPathForFile,openFolderDialog,onSecurityEvent,onScanProgress,onScanSession,onExitConfirmRequest,respondExitConfirm,ackExitConfirm,onNavigateRequest,getAutoStart,setAutoStart,getNotificationsEnabled,setNotificationsEnabled,setTitleBarOverlay,openReportWindow,exportReportPdf,getUsbProtection,configureUsbProtection,usbScan,usbCancel,getProtectionIntent,setProtectionIntent,appUpdate,authSession".split(",");
+  const expected = "aiCredentials,prepareProcessTermination,confirmProcessTermination,cancelProcessTermination,beginShutdown,getProtectionState,setProtection,pauseProtection,getServiceConnectionState,onServiceConnectionState,getSecurityEvents,getThreatEvents,getProcesses,getConnections,getQuarantineFiles,clearThreatEvents,scanFile,scanFullSystem,killProcessTree,analyzeProcess,getHardwareSnapshot,getWindowsHealth,getPCState,restoreQuarantine,deleteQuarantine,allowHash,allowPublisher,runRestrictedAnalysis,updateDefinitions,getDefinitionsStatus,startScan,getActiveScan,getLastScan,getScanHistory,cancelScan,threatAction,openFileDialog,getPathForFile,openFolderDialog,onSecurityEvent,onScanProgress,onScanSession,onExitConfirmRequest,respondExitConfirm,ackExitConfirm,onNavigateRequest,getAutoStart,setAutoStart,getNotificationsEnabled,setNotificationsEnabled,setTitleBarOverlay,openReportWindow,exportReportPdf,getUsbProtection,configureUsbProtection,usbScan,usbCancel,getProtectionIntent,setProtectionIntent,appUpdate,authSession,getExclusions,updateExclusions,getQuarantinePolicy,setQuarantinePolicy".split(",");
   assert.deepEqual(Object.keys(api).sort(), expected.sort());
   for (const [nome, method] of Object.entries(api)) {
     if (nome === "appUpdate" || nome === "authSession" || nome === "aiCredentials") continue;

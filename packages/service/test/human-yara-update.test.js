@@ -1,5 +1,6 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import fs from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
@@ -27,7 +28,37 @@ const SOURCE_NAMES = [
   "RANSOM_MS17-010_Wannacrypt.yar",
 ];
 
-async function makeUpdater() {
+/* Desde a decisão D4 o updater só aceita uma fonte cujo conteúdo corresponda ao
+   SHA-256 pinado no commit. Estes casos são a transacção YARA, não a verificação
+   do pin (essa tem ficheiro próprio): por isso o fixture pinia o conteúdo que ele
+   próprio serve, e o que continua a ser exercitado é «inválido não substitui o
+   corpus». A função abaixo é só isso — o digest do que o mock devolve. */
+const ARQUIVOS = {
+  "MALW_Eicar.yar": "malware/MALW_Eicar.yar",
+  "packer_compiler_signatures.yar": "packers/packer_compiler_signatures.yar",
+  "crypto_signatures.yar": "crypto/crypto_signatures.yar",
+  "RANSOM_MS17-010_Wannacrypt.yar": "malware/RANSOM_MS17-010_Wannacrypt.yar",
+};
+const CLASSES = {
+  "MALW_Eicar.yar": "test",
+  "packer_compiler_signatures.yar": "reference",
+  "crypto_signatures.yar": "reference",
+  "RANSOM_MS17-010_Wannacrypt.yar": "production",
+};
+const REVISÃO_FIXTURE = "0".repeat(40);
+
+function pinDe(conteúdos) {
+  return SOURCE_NAMES.map((nome) => ({
+    id: nome,
+    repo: "fixture/yara",
+    file: ARQUIVOS[nome],
+    revision: REVISÃO_FIXTURE,
+    sha256: createHash("sha256").update(conteúdos.get(nome) ?? "", "utf8").digest("hex"),
+    ruleClass: CLASSES[nome],
+  }));
+}
+
+async function makeUpdater(conteúdos = new Map()) {
   const dir = await fs.mkdtemp(path.join(os.tmpdir(), "cs-human-yara-update-"));
   const yaraDir = path.join(dir, "yara");
   await fs.mkdir(yaraDir, { recursive: true });
@@ -35,7 +66,7 @@ async function makeUpdater() {
   const previous = "rule previous_corpus { condition: filesize > 0 }\n";
   await fs.writeFile(corpusPath, previous, "utf-8");
 
-  const updater = new DefinitionUpdater(dir);
+  const updater = new DefinitionUpdater(dir, { yaraPin: pinDe(conteúdos) });
   // Sem ClamAV/hashes reais: este lote é só a transação YARA.
   updater.updateClamAV = async () => {
     throw new Error("freshclam disabled in isolated test");
@@ -76,10 +107,16 @@ describe("transação YARA — corpus anterior preservado quando não há candid
   });
 
   it("todas as fontes inválidas (HTML/incompletas): mantém o corpus e reporta cada fonte", async () => {
-    const { corpusPath, previous, updater } = await makeUpdater();
+    const servido = new Map([
+      ["MALW_Eicar.yar", "<!DOCTYPE html><html>404</html>"],
+      ["packer_compiler_signatures.yar", "texto sem regras"],
+      ["crypto_signatures.yar", "texto sem regras"],
+      ["RANSOM_MS17-010_Wannacrypt.yar", "texto sem regras"],
+    ]);
+    const { corpusPath, previous, updater } = await makeUpdater(servido);
     updater.downloadText = async (url) => {
-      if (url.endsWith("MALW_Eicar.yar")) return "<!DOCTYPE html><html>404</html>";
-      return "texto sem regras";
+      const nome = SOURCE_NAMES.find((candidato) => url.endsWith(candidato));
+      return servido.get(nome);
     };
 
     try {
@@ -97,13 +134,13 @@ describe("transação YARA — corpus anterior preservado quando não há candid
 
 describe("transação YARA — sucesso parcial publica o válido e não esconde a falha", () => {
   it("reference com 404 não impede production/test; reference válida fica fora do corpus", async () => {
-    const { corpusPath, updater } = await makeUpdater();
     const valid = new Map([
       ["MALW_Eicar.yar", "rule source_eicar { condition: true }\n"],
       ["packer_compiler_signatures.yar", "rule source_packer { condition: true }\n"],
       ["crypto_signatures.yar", "rule source_crypto { condition: true }\n"],
       ["RANSOM_MS17-010_Wannacrypt.yar", "rule source_ransomware { condition: true }\n"],
     ]);
+    const { corpusPath, updater } = await makeUpdater(valid);
     updater.downloadText = async (url) => {
       const name = SOURCE_NAMES.find((candidate) => url.endsWith(candidate));
       assert.ok(name, `fonte inesperada: ${url}`);

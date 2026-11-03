@@ -1,5 +1,6 @@
 import {
   createYaraClassicScanner,
+  descricaoProcuraYara,
   YaraClassicScanError,
   parseRuleMeta,
   resolveYaraClassicBinaries,
@@ -639,8 +640,8 @@ export class YaraEngine {
       const binaries = resolveYaraClassicBinaries();
       if (!binaries) {
         throw new Error(
-          "YARA clássico não encontrado (CYBERSAFE_YARA_BIN_DIR, resources/yara ou vendor/yara). " +
-            "Sem o motor oficial nenhuma regra pode ser carregada.",
+          `YARA clássico indisponível neste sistema (procurado em ${descricaoProcuraYara()}). ` +
+            "Sem o motor oficial do platform que corre, nenhuma regra pode ser carregada.",
         );
       }
       // A validação corre sobre o FICHEIRO quando é ele que está a ser usado:

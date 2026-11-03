@@ -221,11 +221,11 @@ describe("orçamento do batch — contrato do default novo vs override antigo", 
     assert.equal(fake.state.batchTimeouts[0], 120);
   });
 
-  it("cap 600 s aplica-se também ao default (N grande)", async () => {
+  it("cap 30 min aplica-se também ao default (N grande)", async () => {
     const { bridge, tmp, fake } = await makeShared();
-    const muitos = Array.from({ length: 60 }, (_, i) => path.join(tmp, `f${i}.txt`));
+    const muitos = Array.from({ length: 200 }, (_, i) => path.join(tmp, `f${i}.txt`));
     await bridge.scanFiles(muitos);
-    assert.equal(fake.state.batchTimeouts[0], 600_000, "10 s + 60 × 10 s = 610 s => cap 600 s");
+    assert.equal(fake.state.batchTimeouts[0], 1_800_000, "10 s + 200 × 10 s = 2010 s => cap 1 800 s");
   });
 });
 

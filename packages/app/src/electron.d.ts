@@ -3,6 +3,7 @@ import type {
   AppUpdateBridge,
   ConnectionSnapshot,
   DefinitionsUpdateResult,
+  DefinitionsStatus,
   PcState,
   ProtectionIntentState,
   ProtectionOptInResult,
@@ -13,6 +14,9 @@ import type {
   ProcessTerminationResult,
   ProcessSnapshot,
   QuarantineEntry,
+  QuarantinePolicyState,
+  QuarantinePolicyResult,
+  QuarantinePolicyUpdate,
   ScanHistoryPage,
   SecurityEvent,
   ThreatEvent,
@@ -24,6 +28,29 @@ import type {
   UsbCancelRequest,
   UsbCancelResult,
 } from "@cybersafe/shared-types";
+
+/** Como a chave de IA fica em repouso — eixo separado de «existe chave». */
+export interface AiMecanismoArmazenamento {
+  nivel: "seguro" | "nao-seguro" | "desconhecido";
+  rotulo: string;
+  explicacao: string;
+  remedio?: string;
+}
+
+export interface AiCredentialsEstado {
+  hasKey: boolean;
+  provider: string;
+  origem?: "cifrado" | "local-protegido" | null;
+  mecanismo?: AiMecanismoArmazenamento;
+  state: string;
+}
+
+export interface AiCredentialsResultado extends Partial<AiCredentialsEstado> {
+  ok: boolean;
+  applied?: boolean;
+  error?: string;
+  codigo?: "mecanismo-insuficiente" | "sem-consentimento" | "cifra-segura-disponivel";
+}
 
 export interface ElectronAPI {
   getServiceConnectionState: () => Promise<{ connected: boolean }>;
@@ -70,9 +97,15 @@ export interface ElectronAPI {
   getProcesses: () => Promise<import("@cybersafe/shared-types").ProcessListResult>;
   getConnections: () => Promise<ConnectionSnapshot[]>;
   getQuarantineFiles: () => Promise<QuarantineEntry[]>;
+  /** Política efetiva lida do serviço; nunca inferida do renderer. */
+  getQuarantinePolicy: () => Promise<QuarantinePolicyState>;
+  /** `consent:true` é obrigatório para ativar `automatic-high-confidence`. */
+  setQuarantinePolicy: (payload: QuarantinePolicyUpdate) => Promise<QuarantinePolicyResult>;
+  getExclusions: () => Promise<import("@cybersafe/shared-types").ExclusionConfig | null>;
+  updateExclusions: (config: { rules: import("@cybersafe/shared-types").ExclusionRule[] }) => Promise<{ success: boolean; error?: string } | null>;
   clearThreatEvents: () => Promise<{ success: boolean }>;
   scanFile: (filePath: string) => Promise<FileScanResponse | null>;
-  prepareProcessTermination: (selection: {pid:number;startedAt:string}) => Promise<ProcessTerminationPreparation>;
+  prepareProcessTermination: (selection: {pid:number;startedAt:string;mode?:import("@cybersafe/shared-types").ProcessTerminationMode}) => Promise<ProcessTerminationPreparation>;
   confirmProcessTermination: (ticket:string) => Promise<ProcessTerminationResult>;
   cancelProcessTermination: (ticket:string) => Promise<{cancelled:boolean}>;
   killProcessTree: (pid: number) => Promise<ProcessKillResult>;
@@ -86,6 +119,7 @@ export interface ElectronAPI {
   allowPublisher: (publisher: string) => Promise<{ success: boolean }>;
   runRestrictedAnalysis: (filePath: string) => Promise<AnalysisResult | null>;
   updateDefinitions: () => Promise<DefinitionsUpdateResult>;
+  getDefinitionsStatus: () => Promise<DefinitionsStatus | null>;
   /** Preferencia de retoma ao arrancar. Le o que o servico confirma em disco. */
   getProtectionIntent: () => Promise<ProtectionIntentState>;
   /** Unica forma de escrever a preferencia. `guardado:false` = nao foi guardada. */
@@ -137,9 +171,9 @@ export interface ElectronAPI {
   openReportWindow: (html: string) => Promise<{ success: boolean }>;
   /** Guarda o relatório como PDF real (diálogo de escolha + renderização A4). */
   aiCredentials: {
-    getStatus: () => Promise<{ hasKey: boolean; provider: string; state: string }>;
-    save: (key: string, provider: string) => Promise<{ ok: boolean; applied?: boolean; hasKey?: boolean; provider?: string; state?: string; error?: string }>;
-    clear: () => Promise<{ ok: boolean; applied?: boolean; hasKey?: boolean; provider?: string; state?: string; error?: string }>;
+    getStatus: () => Promise<AiCredentialsEstado>;
+    save: (key: string, provider: string, consentidoSemCifra?: boolean) => Promise<AiCredentialsResultado>;
+    clear: () => Promise<AiCredentialsResultado>;
   };
   exportReportPdf: (html: string, suggestedName: string) => Promise<{ success: boolean; path?: string; canceled?: boolean; error?: string }>;
 }

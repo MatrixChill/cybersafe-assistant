@@ -112,8 +112,8 @@ describe("eixo de superfície — o valor é sempre um dos três", () => {
     // As capacidades dependem da preferencia do sistema: sem `systemReduced` na
     // chamada e nas dependencias, uma mudanca do SO deixava `animate`, `gpu` e o
     // atributo `data-reduced` no valor antigo (revisao do Codex, 28/10).
-    assert.match(ctx, /deriveV2Capabilities\(prefs, systemReduced\), \[prefs, systemReduced\]/);
-    assert.match(ctx, /writeV2Preferences\(prefs, systemReduced\)/);
+    assert.match(ctx, /deriveV2Capabilities\(prefs, systemReduced,\{unstable,webglAvailable\}\), \[prefs, systemReduced,unstable,webglAvailable\]/);
+    assert.match(ctx, /writeV2Preferences\(prefs, systemReduced, caps\)/);
     assert.match(ctx, /writeAppearance\(\{ \.\.\.v2ToLegacy\(prefs, caps\), accent \}\)/);
     assert.equal(/documentElement/.test(ctx), false, "o contexto não escreve atributos à mão");
     assert.equal(/documentElement\.className\s*=/.test(ctx), false, "atribuição a className apaga classes alheias");

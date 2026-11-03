@@ -83,16 +83,17 @@ async function runScan({ label, type, targetPath, expectFiles, expectKind, verbo
   check(events.length >= 1, "o primeiro evento é emitido antes da resposta de startScan (contrato do renderer)");
 
   await new Promise((resolve) => {
-    const interval = setInterval(() => {
-      if (events.some((event) => ["completed", "cancelled", "failed"].includes(event.status))) {
-        clearInterval(interval);
-        resolve();
-      }
-    }, 50);
-    setTimeout(() => {
+    const timeout = setTimeout(() => {
       clearInterval(interval);
       resolve();
     }, 30_000);
+    const interval = setInterval(() => {
+      if (events.some((event) => ["completed", "cancelled", "failed"].includes(event.status))) {
+        clearInterval(interval);
+        clearTimeout(timeout);
+        resolve();
+      }
+    }, 50);
   });
 
   const ids = new Set(events.map((event) => event.id));
@@ -109,10 +110,17 @@ async function runScan({ label, type, targetPath, expectFiles, expectKind, verbo
   if (expectFiles > 0) {
     check(scanning.length > 0, "houve progresso na fase scanning");
   } else {
-    console.log("[probe]   (sem ficheiros: não há fase de scanning — termina em finalizing/completed)");
+    console.log("[probe]   (sem ficheiros: não há fase de scanning — termina em finalizing/failed, sem análise efetuada)");
   }
-  check(terminal?.status === "completed", `estado terminal concluído (recebido: ${terminal?.status})`);
-  check(terminal?.progress === 100, `progresso terminal 100 (recebido: ${terminal?.progress})`);
+  if (expectFiles === 0) {
+    // Contrato explícito do ScanManager: zero candidatos não é uma análise concluída.
+    check(terminal?.status === "failed", `alvo vazio recusado (recebido: ${terminal?.status})`);
+    check(terminal?.progress === 0, "alvo vazio não apresenta progresso concluído");
+    check(terminal?.error === "Nenhum ficheiro para analisar no alvo selecionado.", "recusa explica a ausência de candidatos");
+  } else {
+    check(terminal?.status === "completed", `estado terminal concluído (recebido: ${terminal?.status})`);
+    check(terminal?.progress === 100, `progresso terminal 100 (recebido: ${terminal?.progress})`);
+  }
   check(terminal?.filesScanned === expectFiles, `ficheiros analisados=${expectFiles} (recebido: ${terminal?.filesScanned})`);
   check(terminal?.filesTotal === expectFiles, `denominador = candidatos reais (${expectFiles}) (recebido: ${terminal?.filesTotal})`);
   // Cada evento scanning usa o total real (nunca o cap de 50000).

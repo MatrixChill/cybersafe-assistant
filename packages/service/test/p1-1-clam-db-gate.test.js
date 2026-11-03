@@ -18,8 +18,27 @@
 import { describe, it, beforeEach } from "node:test";
 import assert from "node:assert/strict";
 import { EventEmitter } from "node:events";
+import { createHash } from "node:crypto";
 
 import { ClamDatabaseGate, reiniciarAmbitoDeTeste } from "../dist/clam-database-gate.js";
+
+/** Pins só das fixtures: o transporte simulado tem de passar a validação real
+ * de integridade ANTES de exercitar compilação, publicação e rollback. */
+function fixturePins(contents) {
+  return [
+    ["MALW_Eicar.yar", "malware/MALW_Eicar.yar", "test"],
+    ["packer_compiler_signatures.yar", "packers/packer_compiler_signatures.yar", "reference"],
+    ["crypto_signatures.yar", "crypto/crypto_signatures.yar", "reference"],
+    ["RANSOM_MS17-010_Wannacrypt.yar", "malware/RANSOM_MS17-010_Wannacrypt.yar", "production"],
+  ].map(([id, file, ruleClass]) => {
+    const content = typeof contents === "string" ? contents : contents.get(id);
+    assert.equal(typeof content, "string", `conteúdo da fixture em falta: ${id}`);
+    return {
+      id, file, ruleClass, repo: "fixture/yara", revision: "0".repeat(40),
+      sha256: createHash("sha256").update(content, "utf8").digest("hex"),
+    };
+  });
+}
 
 /** Lease obtida, ou recusa. Lanza se aLease nao foi concedida. */
 function lease(gate) {
@@ -537,12 +556,15 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
     const rulesPath = path.join(definitionsDir, "yara", "default.yar");
     const previousRules = "rule previous_corpus { condition: true }";
     const candidateRules = "rule updated_corpus { condition: true }";
+    let publications = 0;
 
     try {
       await fsPromises.mkdir(path.dirname(rulesPath), { recursive: true });
       await fsPromises.writeFile(rulesPath, previousRules, "utf8");
       const updater = new DefinitionUpdater(definitionsDir, {
+        yaraPin: fixturePins(candidateRules),
         renameYaraRules: async () => {
+          publications += 1;
           throw new Error("simulated atomic publication failure");
         },
       });
@@ -557,6 +579,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
       const result = await updater.checkAndUpdate(true);
 
       assert.equal(result.yaraUpdated, false);
+      assert.equal(publications, 1, "o candidato chegou à publicação depois de validar os pins");
       assert.match(result.errors[0], /simulated atomic publication failure/);
       assert.equal(await fsPromises.readFile(rulesPath, "utf8"), previousRules);
       assert.deepEqual(await fsPromises.readdir(path.dirname(rulesPath)), ["default.yar"]);
@@ -583,10 +606,16 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
       const yara = new YaraEngine(rulesPath);
       await yara.load(rulesPath);
       const updater = new DefinitionUpdater(definitionsDir, {
+        yaraPin: fixturePins(candidateRules),
         afterYaraUpdated: async () => {
           reloads += 1;
           await yara.load(rulesPath);
           if (reloads === 1) {
+            assert.deepEqual(
+              yara.match(Buffer.from("updated-marker")).map((match) => match.ruleId),
+              ["updated_corpus"],
+              "o candidato foi publicado e carregado antes da falha simulada",
+            );
             throw new Error("simulated YARA reload failure");
           }
         },
@@ -605,6 +634,8 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
       assert.equal(reloads, 2, "após restaurar o corpus anterior, o motor tem de o recarregar");
       assert.match(result.errors.join("\n"), /simulated YARA reload failure/);
       assert.equal(await fsPromises.readFile(rulesPath, "utf8"), previousRules);
+      assert.equal(yara.isAvailable, true, "o motor restaurado continua utilizável");
+      assert.deepEqual(await fsPromises.readdir(path.dirname(rulesPath)), ["default.yar"]);
       assert.deepEqual(
         yara.match(Buffer.from("previous-marker")).map((match) => match.ruleId),
         ["previous_corpus"],
@@ -633,6 +664,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
       const yara = new YaraEngine(rulesPath);
       await yara.load(rulesPath);
       const updater = new DefinitionUpdater(definitionsDir, {
+        yaraPin: fixturePins(candidateRules),
         afterYaraUpdated: async () => {
           reloads += 1;
           await yara.load(rulesPath);
@@ -653,6 +685,8 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
       assert.equal(result.yaraUpdated, false);
       assert.match(result.errors.join("\n"), /previous corpus could not be reloaded/);
       assert.equal(reloads, 2);
+      assert.equal(await fsPromises.readFile(rulesPath, "utf8"), previousRules);
+      assert.deepEqual(await fsPromises.readdir(path.dirname(rulesPath)), ["default.yar"]);
       assert.equal(yara.isAvailable, false);
       assert.equal(yara.health.status, "error");
       assert.throws(() => yara.match(Buffer.from("previous-marker")), /unavailable/i);
@@ -673,7 +707,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
     try {
       await fsPromises.mkdir(path.dirname(rulesPath), { recursive: true });
       await fsPromises.writeFile(rulesPath, "rule previous_corpus { condition: true }", "utf8");
-      const updater = new DefinitionUpdater(definitionsDir);
+      const updater = new DefinitionUpdater(definitionsDir, { yaraPin: fixturePins(candidateRules) });
       updater.downloadText = async () => candidateRules;
       updater.updateClamAV = async () => {
         throw new Error("ClamAV disabled in isolated test");
@@ -711,7 +745,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
     ]);
 
     try {
-      const updater = new DefinitionUpdater(definitionsDir);
+      const updater = new DefinitionUpdater(definitionsDir, { yaraPin: fixturePins(rulesBySource) });
       updater.downloadText = async (url) => {
         const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
         assert.ok(source, `fonte YARA inesperada: ${url}`);
@@ -756,7 +790,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
     ]);
 
     try {
-      const updater = new DefinitionUpdater(definitionsDir);
+      const updater = new DefinitionUpdater(definitionsDir, { yaraPin: fixturePins(rulesBySource) });
       updater.downloadText = async (url) => {
         const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
         assert.ok(source, `fonte YARA inesperada: ${url}`);
@@ -799,7 +833,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
     ]);
 
     try {
-      const updater = new DefinitionUpdater(definitionsDir);
+      const updater = new DefinitionUpdater(definitionsDir, { yaraPin: fixturePins(rulesBySource) });
       updater.downloadText = async (url) => {
         const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
         assert.ok(source, `fonte YARA inesperada: ${url}`);
@@ -846,7 +880,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
     ]);
 
     try {
-      const updater = new DefinitionUpdater(definitionsDir);
+      const updater = new DefinitionUpdater(definitionsDir, { yaraPin: fixturePins(rulesBySource) });
       updater.downloadText = async (url) => {
         const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
         assert.ok(source, `fonte YARA inesperada: ${url}`);
@@ -896,7 +930,7 @@ describe("P1-1 — CLAM DATABASE GATE", () => {
     ]);
 
     try {
-      const updater = new DefinitionUpdater(definitionsDir);
+      const updater = new DefinitionUpdater(definitionsDir, { yaraPin: fixturePins(rulesBySource) });
       updater.downloadText = async (url) => {
         const source = [...rulesBySource.keys()].find((name) => url.endsWith(name));
         assert.ok(source, `fonte YARA inesperada: ${url}`);

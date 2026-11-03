@@ -17,8 +17,14 @@
  *    terminal; «emitido» não prova «gravado»; e «processado» NÃO prova «persistido» —
  *    `ScanHistory.record` absorve a falha do append e resolve de qualquer forma, por isso a
  *    gravação é provada à parte, pela consulta do histórico;
- *  - a resposta de `scan.cancel` NÃO muda (continua `{ success: true }`) em qualquer
- *    desfecho, incluindo id desconhecido e duplo pedido;
+ *  - o ACK de `scan.cancel` diz se uma NOVA cancelação foi aceite: `true` só com
+ *    `desfecho=cancelado`; `false` para id desconhecido, sem id, ou já terminal
+ *    (`engine.ts:5010 return { success: desfecho === "cancelado" }`). É o contrato
+ *    UI-D1, que o renderer foi construído para consumir
+ *    (`app/src/pages/FileScannerPage.tsx:945-948`, `app/src/lib/scanSession.ts:590-595`):
+ *    uma recusa deixa o botão activo em vez de prometer «cancelamento pedido».
+ *    A asserção antiga — «a resposta NÃO muda em qualquer desfecho» — estava
+ *    aposentada e é retiradas daqui; o que estes casos provam são os ESTÁGIOS.
  *  - só fala em DEV verificado (isolamento + gate de fixture montado, provado pelo registo
  *    privado do módulo de instalação e não pelo texto da função); fora disso, zero linhas
  *    novas — produção e modo desligado não ganham ruído;
@@ -129,7 +135,9 @@ test("o ACK sozinho não prova o terminal: sem scan em curso o desfecho é desco
   const cap = capturar();
   try {
     const resp = await cancelar(svc, "00000000-0000-4000-8000-000000000000");
-    assert.deepEqual(resp.result, { success: true }, "id desconhecido não pode mudar a resposta");
+    // Sem scan em curso nao existe nova cancelacao para aceitar: o ACK e' false,
+    // e e' isso que a UI usa para nao anunciar um cancelamento inexistente.
+    assert.deepEqual(resp.result, { success: false }, "id desconhecido nao pode ser reportado como cancelacao aceite");
     const linhas = cap.cancelamento();
     assert.ok(linhas.some((l) => l.includes("stage=processado") && l.includes("desfecho=desconhecido")), `esperava desfecho=desconhecido: ${JSON.stringify(linhas)}`);
     assert.ok(!linhas.some((l) => l.startsWith("[ScanCancel] stage=terminal") || l.includes("stage=terminal_")), `desconhecido não pode sintetizar terminal: ${JSON.stringify(linhas)}`);
@@ -170,7 +178,8 @@ test("payload sem id também é honesto: recebido com scanId=invalido, desfecho 
   const cap = capturar();
   try {
     const resp = await cancelar(svc, undefined);
-    assert.deepEqual(resp.result, { success: true });
+    // Sem `id` nao ha nada a cancelar; o ACK nao finge que houve accao (UI-D1).
+    assert.deepEqual(resp.result, { success: false }, "pedido sem id nao pode dizer que cancelou");
     const linhas = cap.cancelamento();
     assert.ok(linhas.some((l) => l.includes("stage=recebido") && l.includes("scanId=invalido")), JSON.stringify(linhas));
     assert.ok(linhas.some((l) => l.includes("desfecho=desconhecido")), JSON.stringify(linhas));
@@ -201,7 +210,11 @@ async function iniciarScanComPortaDesligada(t) {
 }
 
 test("isolamento declarado mas gate nao montado nao autoriza registo novo", async (t) => {
-  const { svc, id } = await servoDeVerdade(t);
+  // `servoDeVerdade` nao inicia scan nenhum e nao devolve `id`: usar esse piso
+  // deixava este caso a cancelar o nada, e o `cancelamento() === []` seria
+  // verdadeiro por vacuidade. Aqui ha um scan a correr, entao o silencio do
+  // registo e' o que esta realmente em teste.
+  const { svc, id } = await iniciarScan(t);
   // O gate e montado por cima da INSTANCIA (propriedade propria). Apagar essa propriedade e
   // exatamente o estado de quem declara isolamento sem o gate: o readOnly deixa de estar
   // efetivamente forcado, e o registo do cancelamento tem de calar.
@@ -217,23 +230,25 @@ test("isolamento declarado mas gate nao montado nao autoriza registo novo", asyn
 });
 
 test("sem a sessao de fixture montada, o isolamento sozinho nao autoriza registo", async (t) => {
-  const { svc, id } = await servoDeVerdade(t);
+  const { svc, id } = await iniciarScan(t);
   process.env[FIXTURE_SCAN_FLAG] = "";
   const cap = capturar();
   try {
-    await cancelar(svc, id);
+    const resp = await cancelar(svc, id);
+    assert.deepEqual(resp.result, { success: true }, "o cancelamento de um scan em curso tem de ser aceite mesmo sem registo");
     await new Promise((r) => setTimeout(r, 200));
     assert.deepEqual(cap.cancelamento(), [], "isolamento sem sessao de fixture nao pode autorizar registo" + JSON.stringify(cap.cancelamento()));
   } finally { cap.restaurar(); }
 });
 
 test("pipe de outra instancia nao e isolamento deste run", async (t) => {
-  const { svc, id } = await servoDeVerdade(t);
+  const { svc, id } = await iniciarScan(t);
   const BARRA = String.fromCharCode(92);
   process.env.CYBERSAFE_DEV_PIPE_NAME = BARRA + BARRA + "." + BARRA + "pipe" + BARRA + "cybersafe-service";
   const cap = capturar();
   try {
-    await cancelar(svc, id);
+    const resp = await cancelar(svc, id);
+    assert.deepEqual(resp.result, { success: true }, "pipe alheio nao pode impedir o cancelamento");
     await new Promise((r) => setTimeout(r, 200));
     assert.deepEqual(cap.cancelamento(), [], "pipe partilhado nao pode autorizar registo" + JSON.stringify(cap.cancelamento()));
   } finally { cap.restaurar(); }

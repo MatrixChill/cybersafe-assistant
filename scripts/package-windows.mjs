@@ -127,6 +127,11 @@ const PREFLIGHT = [
     path: path.join(root, "packages", "native-engine", "build", "Release", "scan-engine.exe"),
     fix: "npm run build:native",
   },
+  {
+    id: "binario:cybersafe-update-launcher.exe",
+    path: path.join(root, "packages", "native-engine", "build", "Release", "cybersafe-update-launcher.exe"),
+    fix: "npm run build:native",
+  },
   // Bundle ClamAV: existe ⇒ o pacote leva motor. Sem ele, `resources/clamav`
   // não é publicado e o pin do desktop fica sem efeito (falha FECHADA: o
   // serviço cai no PATH, como antes).
@@ -606,6 +611,7 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
       // exactamente onde o pin `CYBERSAFE_CLAMSCAN_PATH` do main.ts o procura.
       extraResources: [
         { from: scanEngine, to: "scan-engine.exe" },
+        { from: path.join(path.dirname(scanEngine), "cybersafe-update-launcher.exe"), to: "cybersafe-update-launcher.exe" },
         // YARA clássico oficial: `resolveYaraClassicBinaries()` procura
         // `resources/yara` no artefacto empacotado. Sem esta entrada, o build
         // sai com o motor indisponível e nenhum aviso no setup.
@@ -1924,6 +1930,25 @@ function stagePromote({ stagingRoot }) {
 }
 
 
+/**
+ * Contagem única dos bloqueios do `--check`. Cada gate que falha conta no
+ * mínimo uma vez e nunca menos do que os problemas que declara. A seed e o
+ * YARA entram na conta: antes só inputs, bundle, fontes e licenças entravam,
+ * pelo que uma candidata sem seed podia dizer "0 problema(s)" com `ok:false`.
+ */
+export function contarProblemasPreCheck(report) {
+  const porGate = (ok, problemas) => (ok ? 0 : Math.max(1, (problemas ?? []).length));
+  const faltam = (report.checks ?? []).filter((check) => !check.exists).length;
+  return (
+    faltam +
+    porGate(report.bundle?.ok, report.bundle?.problems) +
+    porGate(report.yara?.ok, report.yara?.problems) +
+    porGate(report.freeze?.ok, report.freeze?.problems) +
+    porGate(report.seed ? report.seed.ok : true, report.seed?.problems) +
+    (report.licensing?.estado === "prova-fecha" ? 0 : 1)
+  );
+}
+
 if (isMain) {
   if (argv.includes("--help") || argv.includes("-h")) {
     console.log(usage());
@@ -1952,7 +1977,16 @@ if (isMain) {
       if (report.licensing.estado !== "prova-fecha") {
         console.error(`[package] BLOQUEIO ${report.licensing.estado === "obrigacao-vigente" ? "licencas-obrigacao-em-aberto" : "licencas-manifesto-de-obrigacao-insuficiente"}: ${report.licensing.detalhe}`);
       }
-      const problems = missing.length + report.bundle.problems.length + report.freeze.problems.length + (report.licensing.estado === "prova-fecha" ? 0 : 1);
+      if (report.seed?.dir) {
+        log(report.seed.ok
+          ? "OK    seed-clamav  " + report.seed.dir + "  (" + report.seed.filesChecked + " ficheiros, " + (report.seed.bytesChecked / 1024 / 1024).toFixed(1) + " MiB, versão " + report.seed.version + ")"
+          : "FALTA seed-clamav  " + report.seed.dir + "  → node scripts/prepare-clamav-seed.mjs --check --out <pasta>");
+      } else if (report.seed) {
+        log("FALTA seed-clamav  → node scripts/prepare-clamav-seed.mjs --source <cache oficial verificada> --out <pasta>");
+      }
+      for (const problem of report.seed?.problems ?? []) log("      seed: " + problem);
+      for (const problem of report.yara.problems) log("      yara: " + problem);
+      const problems = contarProblemasPreCheck(report);
       log(
         problems === 0
           ? "pré-verificação: inputs presentes, bundle íntegro, fontes congeladas e obrigação documental encerrada; não comprova instalação"

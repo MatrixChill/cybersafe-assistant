@@ -24,8 +24,9 @@ import * as path from "node:path";
 import * as url from "node:url";
 
 import {
-  APPROVER,
+  APPROVERS_ENV,
   buildManifest,
+  carregarRegistoAprovadores,
   digestEntries,
   validateApproval,
   validateEntryPath,
@@ -34,7 +35,20 @@ import {
 import { runFreezeGatedPipeline } from "../package-windows.mjs";
 
 const HERE = path.dirname(url.fileURLToPath(import.meta.url));
-const APPROVAL = { approvedBy: APPROVER, candidateId: "cand25-test", approvedAt: "2026-10-25T00:00:00.000Z" };
+/*
+ * Registo de aprovadores de fixture, escrito FORA da raiz do repo — a própria
+ * regra diz que o registo não pode viver dentro do que aprova, por isso um
+ * fixture dentro de `test/` seria o caso que o gate tem de recusar.
+ */
+const APROVADOR = "Proprietária do CyberSafe (fixture)";
+const INTEGRADOR = "Integrador autorizado (fixture)";
+const REGISTO_DIR = fs.mkdtempSync(path.join(os.tmpdir(), "cs-approvers-"));
+const REGISTO = path.join(REGISTO_DIR, "approvers.json");
+fs.writeFileSync(REGISTO, `${JSON.stringify({ schema: 1, owners: [APROVADOR], integrators: [{ name: INTEGRADOR, authorizedBy: APROVADOR }] }, null, 2)}\n`, "utf8");
+process.env[APPROVERS_ENV] = REGISTO;
+process.on("exit", () => fs.rmSync(REGISTO_DIR, { recursive: true, force: true }));
+const REGISTO_FIXTURE = carregarRegistoAprovadores().registry;
+const APPROVAL = { approvedBy: APROVADOR, candidateId: "cand25-test", approvedAt: "2026-10-25T00:00:00.000Z" };
 
 function fixture(t) {
   const root = fs.mkdtempSync(path.join(os.tmpdir(), "cs-freeze-"));
@@ -47,10 +61,16 @@ function fixture(t) {
   };
   put("package.json", "{}\n");
   put("package-lock.json", "{}\n");
+  put("product-version.json", '{"version":"0.1.11","channel":"internal","codename":"fixture"}\n');
   put("scripts/a.mjs", "export const a = 1;\n");
   put("packages/core/src/index.ts", "export const b = 2;\n");
   put("packages/native-engine/build/Release/scan-engine.exe", "MZ\n");
+  put("packages/native-engine/build/Release/cybersafe-update-launcher.exe", "MZ-launcher\n");
   put("vendor/clamav/VENDOR.json", "{}\n");
+  put("vendor/yara/VENDOR.json", '{"schema":1,"engine":"yara-classic","version":"4.6.0"}\n');
+  put("vendor/yara/yara64.exe", "MZ\n");
+  put("vendor/yara/yarac64.exe", "MZ\n");
+  put("vendor/yara/COPYING.txt", "BSD-3-Clause (fixture)\n");
   put("assets/branding/logo.svg", "<svg/>\n");
   put("assets/licenses/THIRD-PARTY-NOTICES.txt", "Avisos de terceiros (fixture).\n");
   put("assets/licenses/PROVENANCE.json", '{"schema":1,"obrigacaoPorResolver":{"bloqueador":false,"evidencia":["fixture"]}}\n');
@@ -241,15 +261,15 @@ describe("source-freeze (manifesto aprovado, fail-closed)", () => {
   });
 
   it("--write sem approval autorizado é recusado", () => {
-    assert.ok(validateApproval({ approvedBy: "outro", candidateId: "x", approvedAt: APPROVAL.approvedAt }).length > 0);
-    assert.ok(validateApproval({ approvedBy: APPROVER, candidateId: "", approvedAt: APPROVAL.approvedAt }).length > 0);
-    assert.ok(validateApproval({ approvedBy: APPROVER, candidateId: "x", approvedAt: "nao-e-data" }).length > 0);
-    assert.deepEqual(validateApproval(APPROVAL), []);
+    assert.ok(validateApproval({ approvedBy: "outro", candidateId: "x", approvedAt: APPROVAL.approvedAt }, { registry: REGISTO_FIXTURE }).length > 0);
+    assert.ok(validateApproval({ approvedBy: APROVADOR, candidateId: "", approvedAt: APPROVAL.approvedAt }, { registry: REGISTO_FIXTURE }).length > 0);
+    assert.ok(validateApproval({ approvedBy: APROVADOR, candidateId: "x", approvedAt: "nao-e-data" }, { registry: REGISTO_FIXTURE }).length > 0);
+    assert.deepEqual(validateApproval(APPROVAL, { registry: REGISTO_FIXTURE }), []);
   });
 
   it("approval dentro da raiz é recusado (não há auto-aprovação)", (t) => {
     const { root } = fixture(t);
-    const problems = validateApproval(APPROVAL, { root, approvalPath: path.join(root, "approval.json") });
+    const problems = validateApproval(APPROVAL, { root, approvalPath: path.join(root, "approval.json"), registry: REGISTO_FIXTURE });
     assert.ok(problems.some((problem) => problem.detail === "approval dentro da raiz"));
   });
 
@@ -321,6 +341,42 @@ describe("source-freeze (manifesto aprovado, fail-closed)", () => {
     const config = verifySourceFreeze({ root, manifestPath });
     assert.equal(config.ok, false);
     assert.ok(config.counts.modified >= 1);
+  });
+
+  it("recursos fonte do instalador entram no freeze apesar do nome build", (t) => {
+    const { root, manifestPath, writeManifest, put } = fixture(t);
+    const hook = "packages/desktop/build/installer/cybersafe-installer.nsh";
+    const controls = "packages/desktop/build/installer/cybersafe-controls.nsh";
+    const bitmap = "packages/desktop/build/installer/background.bmp";
+    put(hook, "; original installer hook");
+    put(controls, "; native controls");
+    put(bitmap, "BM-fixture");
+    const manifest = writeManifest();
+    for (const file of [hook, controls, bitmap]) {
+      assert.ok(manifest.entries.some(entry => entry.path === file), file);
+    }
+    assert.equal(verifySourceFreeze({ root, manifestPath }).ok, true);
+    put(hook, "; changed installer hook");
+    const changed = verifySourceFreeze({ root, manifestPath });
+    assert.equal(changed.ok, false);
+    assert.equal(changed.counts.modified, 1);
+    assert.ok(changed.samples.modified.some(entry => entry.path === hook));
+  });
+
+  it("adicionar ou remover recursos do instalador invalida o freeze", (t) => {
+    const { root, manifestPath, writeManifest, put } = fixture(t);
+    const bitmap = "packages/desktop/build/installer/background.bmp";
+    put(bitmap, "BM-fixture");
+    writeManifest();
+    fs.unlinkSync(path.join(root, bitmap));
+    const removed = verifySourceFreeze({ root, manifestPath });
+    assert.equal(removed.ok, false);
+    assert.equal(removed.counts.removed, 1);
+    put(bitmap, "BM-fixture");
+    put("packages/desktop/build/installer/new.bmp", "BM-new");
+    const added = verifySourceFreeze({ root, manifestPath });
+    assert.equal(added.ok, false);
+    assert.equal(added.counts.added, 1);
   });
 
   it("o pipeline usa o driver com os três gates (PRE, PRE-builder, POS)", () => {
@@ -457,4 +513,10 @@ describe("configs de raiz (tipo não importa: link/pasta nunca passam)", () => {
     assert.equal(report.ok, false);
     assert.ok(report.problems.some((problem) => problem.kind === "roots-divergentes"));
   });
+});
+it('pins the update launcher bytes even though build directories are normally excluded',t=>{
+ const {root,put,manifestPath,writeManifest}=fixture(t);
+ const relative='packages/native-engine/build/Release/cybersafe-update-launcher.exe';put(relative,'MZ-launcher-fixture');
+ const manifest=writeManifest();assert.ok(manifest.entries.some(entry=>entry.path===relative));
+ put(relative,'MZ-altered-launcher');const result=verifySourceFreeze({root,manifestPath});assert.equal(result.ok,false);assert.ok(result.counts.modified>=1);
 });

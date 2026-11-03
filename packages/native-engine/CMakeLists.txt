@@ -21,6 +21,12 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 
 project(cybersafe_scan_engine LANGUAGES CXX)
 
+if(WIN32)
+  add_executable(cybersafe-update-launcher src/update_launcher.cpp)
+  set_target_properties(cybersafe-update-launcher PROPERTIES
+    RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release")
+endif()
+
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 set(CMAKE_CXX_EXTENSIONS OFF)

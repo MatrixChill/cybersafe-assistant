@@ -473,3 +473,18 @@ test("usb.cancel: ids inválidos são recusados com ok:false", async (t) => {
   }
   await runtime.dispose();
 });
+
+test('baseline enumerated by runtime can be scanned manually without reinsertion', async t => {
+ const {deteccao,scans,runtime}=await cenario(t,{enabled:true,intervaloMs:60000});
+ t.after(()=>runtime.dispose());
+ deteccao.definir([dispositivo('baseline-pen','E:' + String.fromCharCode(92))]);
+ const baseline=await runtime.iniciar();
+ assert.equal(estado(baseline,'baseline-pen').present,true);
+ assert.equal(scans.iniciados.length,0,'baseline must not auto-scan');
+ assert.match(estado(baseline,'baseline-pen').limitation,/baseline|já presente/i);
+ const manual=await runtime.scan({deviceId:'baseline-pen',requestId:'baseline-manual',consent:true});
+ assert.equal(manual.ok,true,JSON.stringify(manual));
+ assert.equal(scans.iniciados.length,1);
+ assert.deepEqual(scans.iniciados[0].options,{readOnly:true});
+ assert.equal(runtime.snapshot().enabled,true,'manual scan must not modify persisted consent');
+});

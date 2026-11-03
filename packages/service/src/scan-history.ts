@@ -1,5 +1,5 @@
 import * as fs from "node:fs/promises";
-import type { ScanHistoryEntry, ScanHistoryPage, ScanHistoryStatus } from "@cybersafe/shared-types";
+import type { ExclusionReasonCount, InconclusiveEngineCount, ScanHistoryEntry, ScanHistoryPage, ScanHistoryStatus } from "@cybersafe/shared-types";
 import type { ExtendedScanState, InconclusiveReasonCount } from "./scan-manager.js";
 
 /**
@@ -9,6 +9,7 @@ import type { ExtendedScanState, InconclusiveReasonCount } from "./scan-manager.
  */
 type HistoryEntryWithInconclusive = ScanHistoryEntry & {
   inconclusiveByReason?: InconclusiveReasonCount[];
+  inconclusiveByEngine?: InconclusiveEngineCount[];
 };
 
 /**
@@ -40,6 +41,15 @@ const INCONCLUSIVE_REASONS: ReadonlyArray<string> = [
   "engine-failed",
   "no-verdict",
   "coverage-incomplete",
+  "timeout",
+  "invalid-output",
+  "file-changed",
+  "archive-incomplete",
+  "cancelled",
+];
+
+const INCONCLUSIVE_ENGINES: ReadonlyArray<string> = [
+  "clamav", "yara", "native", "archive", "filesystem",
 ];
 
 /** Teto de retenção a partir do env; valor inválido = default. */
@@ -76,8 +86,30 @@ export function historyFilesConsidered(state: ExtendedScanState): number {
   return nonNegativeInt(total);
 }
 
+function isHistoryExclusion(value: unknown): value is ExclusionReasonCount {
+  if (!value || typeof value !== "object") return false;
+  const item = value as Record<string, unknown>;
+  return ["extension", "filename", "path"].includes(item.reason as string)
+    && Number.isInteger(item.count) && (item.count as number) > 0
+    && (item.detail === undefined || (item.reason !== "path" && typeof item.detail === "string"
+      && item.detail.length <= 255 && !/[\\/:\x00-\x1f]/.test(item.detail)))
+    && Object.keys(item).every(key => ["reason", "detail", "count"].includes(key));
+}
+
+/** Only aggregate categories and safe policy tokens enter persistent history. */
+function historyExclusions(value: ExclusionReasonCount[] | undefined): ExclusionReasonCount[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter(item => item && ["extension", "filename", "path"].includes(item.reason)
+    && Number.isInteger(item.count) && item.count > 0).map(({ reason, detail, count }) => ({
+      reason, count,
+      ...(reason !== "path" && typeof detail === "string" && detail.length <= 255
+        && !/[\\/:\x00-\x1f]/.test(detail) ? { detail } : {}),
+    }));
+}
+
 /** Mapeia o estado terminal real para a entrada do histórico. Sem limitação medida, o campo fica ausente. */
 export function toScanHistoryEntry(state: ExtendedScanState): HistoryEntryWithInconclusive {
+  const filesExcludedBy = historyExclusions(state.filesExcludedBy);
   return {
     id: state.id,
     type: state.type,
@@ -89,6 +121,7 @@ export function toScanHistoryEntry(state: ExtendedScanState): HistoryEntryWithIn
     filesConsidered: historyFilesConsidered(state),
     filesAnalyzed: nonNegativeInt(state.filesAnalyzed),
     filesExcluded: nonNegativeInt(state.filesExcluded),
+    ...(filesExcludedBy.length > 0 ? { filesExcludedBy } : {}),
     filesFailed: nonNegativeInt(state.filesFailed),
     ...(typeof state.filesInconclusive === "number" &&
       Number.isInteger(state.filesInconclusive) && state.filesInconclusive >= 0
@@ -96,6 +129,9 @@ export function toScanHistoryEntry(state: ExtendedScanState): HistoryEntryWithIn
       : {}),
     ...(Array.isArray(state.inconclusiveByReason) && state.inconclusiveByReason.length > 0
       ? { inconclusiveByReason: state.inconclusiveByReason }
+      : {}),
+    ...(Array.isArray(state.inconclusiveByEngine) && state.inconclusiveByEngine.length > 0
+      ? { inconclusiveByEngine: state.inconclusiveByEngine }
       : {}),
     threatsFound: nonNegativeInt(state.threatsFound),
   };
@@ -121,6 +157,8 @@ function isScanHistoryEntry(value: unknown): value is ScanHistoryEntry {
     !Number.isFinite(entry.filesConsidered) ||
     !Number.isFinite(entry.filesAnalyzed) ||
     !Number.isFinite(entry.filesExcluded) ||
+    (entry.filesExcludedBy !== undefined && (!Array.isArray(entry.filesExcludedBy)
+      || !entry.filesExcludedBy.every(isHistoryExclusion))) ||
     !Number.isFinite(entry.filesFailed) ||
     (entry.filesInconclusive !== undefined &&
       (typeof entry.filesInconclusive !== "number" ||
@@ -133,6 +171,17 @@ function isScanHistoryEntry(value: unknown): value is ScanHistoryEntry {
             !item ||
             typeof item !== "object" ||
             !INCONCLUSIVE_REASONS.includes((item as { reason?: unknown }).reason as string) ||
+            typeof (item as { count?: unknown }).count !== "number" ||
+            !Number.isFinite((item as { count: number }).count) ||
+            (item as { count: number }).count <= 0,
+        ))) ||
+    (entry.inconclusiveByEngine !== undefined &&
+      (!Array.isArray(entry.inconclusiveByEngine) ||
+        entry.inconclusiveByEngine.some(
+          (item) =>
+            !item ||
+            typeof item !== "object" ||
+            !INCONCLUSIVE_ENGINES.includes((item as { engine?: unknown }).engine as string) ||
             typeof (item as { count?: unknown }).count !== "number" ||
             !Number.isFinite((item as { count: number }).count) ||
             (item as { count: number }).count <= 0,
@@ -216,20 +265,23 @@ export class ScanHistory {
    */
   record(state: ExtendedScanState): Promise<void> {
     const run = async (): Promise<void> => {
+      const startedAt = Date.now();
+      let outcome = "ok";
       try {
         // Nunca regista um estado não terminal (defesa em profundidade:
         // quem chama já só chega aqui na transição terminal).
-        if (!isTerminalScanStatus(state.status)) return;
+        if (!isTerminalScanStatus(state.status)) { outcome = "skipped"; return; }
         const entry = toScanHistoryEntry(state);
         const existing = await this.readEntries();
         // Idempotente: no máximo uma linha por scanId, mesmo a
         // chamada duplicada (reinstalação, retry do caller).
-        if (existing.some((prior) => prior.id === entry.id)) return;
+        if (existing.some((prior) => prior.id === entry.id)) { outcome = "duplicate"; return; }
         await fs.appendFile(this.filePath, `${JSON.stringify(entry)}\n`, "utf8");
         if (existing.length + 1 > this.max) {
           await this.compact(existing.concat(entry));
         }
       } catch (error) {
+        outcome = "error";
         // Sem caminhos no log: a mensagem de erro do fs pode conter o
         // caminho do serviço (casa do utilizador).
         console.error(
@@ -237,6 +289,10 @@ export class ScanHistory {
             error instanceof Error ? error.name : "erro"
           }`,
         );
+      } finally {
+        if (process.env.CYBERSAFE_DEBUG_SCAN === "1") {
+          console.log(`[ScanPerf] HISTORY_RECORD scanId=${state.id} elapsedMs=${Date.now() - startedAt} outcome=${outcome}`);
+        }
       }
     };
     this.chain = this.chain.then(run, run);

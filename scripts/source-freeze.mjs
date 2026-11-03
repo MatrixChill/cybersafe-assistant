@@ -12,7 +12,8 @@
  * Cobertura: package.json, package-lock.json, tsconfig*, vite config e .npmrc da
  * raiz; scripts/**, packages/** (fontes, configs, assets, contratos) e assets/**
  * (branding e o corpus de licenças publicado), excepto
- * node_modules/dist/release/logs/coverage/build/output; scan-engine.exe e
+ * node_modules/dist/release/logs/coverage/build/output (excepto os recursos fonte
+ * em packages/desktop/build); scan-engine.exe e
  * vendor/clamav/VENDOR.json. `dist`/`release` são gerados e nunca entram.
  * `assets/licenses/THIRD-PARTY-NOTICES.txt` e `assets/licenses/PROVENANCE.json`
  * são obrigatórios mesmo num `--write`: sem eles o contrato nasce incompleto.
@@ -25,11 +26,34 @@
  *
  * --approval é um registo operacional, não uma assinatura criptográfica: a
  * autoridade vem do processo do integrador autorizado, não do ficheiro.
- * Transferência temporária (2026-10-25): o Codex Lead atingiu o limite e o
- * utilizador autorizou o Freebuff 2 como único integrador da U. O aprovador
- * aceite é um só (`APPROVER`); quando a autoridade regressar ao Codex, esta
- * constante volta a "Codex Lead" — nunca se aceitam ambos em simultâneo.
- * O pipeline nunca corre `--write` e nunca re-pina sozinho.
+ *
+ * Mecanismo de aprovadores (2026-11-01): o nome aceite deixou de estar fixado no
+ * código. Antes exigia `approvedBy === "Codex Lead"`, uma constante; o Codex já não
+ * participa no projeto, e a alternativa fácil — aceitar «qualquer» nome ou pôr uma
+ * flag de bypass — era apodrecer o gate por dentro. Agora a identidade vem de um
+ * **registo de aprovadores** fora da raiz do repo, apontado por
+ * `CYBERSAFE_APPROVERS_FILE`:
+ *
+ *   { "schema": 1,
+ *     "owners":       ["<nome do proprietário>"],
+ *     "integrators":  [{ "name": "<nome>", "authorizedBy": "<dono que autorizou>" }] }
+ *
+ * Regras, todas com falha fechada:
+ *   - sem variável, sem ficheiro, ficheiro dentro do repo, JSON ilegível ou schema
+ *     errado → `approver-registry-missing`/`approver-registry-invalid` e o build é
+ *     bloqueado;
+ * - o `approvedBy` do manifesto tem de ser um `owner`, ou um `integrator` cujo
+ *     `authorizedBy` seja um `owner` **declarado no mesmo registo** — um integrador
+ *     não se auto-nomeia;
+ *   - nomes duplicados, vazios ou fora destes formatos são recusados no carregamento,
+ *     não em tempo de comparação;
+ *   - `verifySourceFreeze` (o gate que o `package-windows.mjs` usa) volta a ler o
+ *     registo: alterar o `.approved.json` à mão para outro nome falha no build, não
+ *     só no `--write`.
+ *
+ * Não há flag de bypass, não há re-pin silencioso, e o pipeline nunca corre
+ * `--write` sozinho. O valor histórico `"Codex Lead"` não é aceite por herança: se
+ * alguém quiser essa identidade, tem de a declarar no registo.
  *
  * Uso: node scripts/source-freeze.mjs [--verify] [--json]
  *      node scripts/source-freeze.mjs --write --approval <ficheiro.json>
@@ -42,7 +66,9 @@ import { fileURLToPath } from "node:url";
 
 export const SCHEMA = 1;
 export const ALGORITHM = "sha256";
-export const APPROVER = "Codex Lead";
+/** Onde vive o registo de aprovadores. Não tem default apontando para o repo. */
+export const APPROVERS_ENV = "CYBERSAFE_APPROVERS_FILE";
+export const APPROVERS_SCHEMA = 1;
 
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const DEFAULT_ROOT = path.resolve(HERE, "..");
@@ -62,11 +88,22 @@ const EXCLUDED_DIRS = new Set([
 ]);
 const EXCLUDED_FILES = [/\.log$/i, /\.tmp$/i, /\.tsbuildinfo$/i];
 const RETRYABLE = new Set(["EBUSY", "EPERM", "EACCES", "EMFILE", "ENFILE"]);
-const ROOTS_REQUIRED = ["package.json", "package-lock.json", "scripts", "packages", "assets"];
+/* `product-version.json` é a fonte única da versão que vai no instalador
+   (`app-version.mjs`, `package-windows.mjs` e `stage-renderer.mjs` leem-na).
+   Fora do conjunto congelado, um `--verify` verde não dizia nada sobre a versão
+   distribuída — a aprovação tem de a cobrir, ou o congelamento aprova um binário
+   cuja identidade ninguém aprovou.
+   `vendor/yara` pelo mesmo motivo e com mais peso: os executáveis clássicos do
+   YARA (yara64/yarac64/vcruntime140 + COPYING.txt) estão versionados neste repo,
+   são usados pelo serviço para compilar regras e vão no pacote. Ficar de fora do
+   digest era aprovar o código que os invoca sem aprovar o que é invocado. O
+   `vendor/clamav` mantém-se por `VENDOR.json` (133 MB não versionados; a âncora
+   correta é o SHA-256 do arquivo oficial que esse registo guarda). */
+const ROOTS_REQUIRED = ["package.json", "package-lock.json", "product-version.json", "scripts", "packages", "assets", "vendor/yara"];
 const ROOTS_OPTIONAL = [/^tsconfig(\..+)?\.json$/i, /^vite\.config\..+$/i, /^\.npmrc$/i];
-const ROOTS_EXTRA = ["packages/native-engine/build/Release/scan-engine.exe", "vendor/clamav/VENDOR.json"];
+const ROOTS_EXTRA = ["packages/native-engine/build/Release/scan-engine.exe", "packages/native-engine/build/Release/cybersafe-update-launcher.exe", "vendor/clamav/VENDOR.json"];
 /** Roots que têm de ser FICHEIROS: um link/pasta com esse nome nunca é fonte válida. */
-const FILE_ROOTS = new Set(["package.json", "package-lock.json", ...ROOTS_EXTRA]);
+const FILE_ROOTS = new Set(["package.json", "package-lock.json", "product-version.json", ...ROOTS_EXTRA]);
 const isFileRoot = (rel) => FILE_ROOTS.has(rel) || ROOTS_OPTIONAL.some((re) => re.test(path.posix.basename(rel)));
 const SAMPLE_LIMIT = 20;
 
@@ -219,7 +256,9 @@ function walk({ root, relRoot, api, problems }) {
       if (entry.isSymbolicLink()) {
         problems.push({ kind: "link", path: rel, detail: "link/junction na árvore" });
       } else if (entry.isDirectory()) {
-        if (!EXCLUDED_DIRS.has(entry.name.toLowerCase())) pending.push(rel);
+        // electron-builder's buildResources directory contains authored NSIS,
+        // branding and bitmaps, not compiler output. Freeze these exact inputs.
+        if (rel === "packages/desktop/build" || !EXCLUDED_DIRS.has(entry.name.toLowerCase())) pending.push(rel);
         else if (isPublishedAsset(rel)) {
           // `assets/` alimenta recursos publicados (licenças via extraResources,
           // branding via sync-branding). Um diretório que o walker ignora noutros
@@ -300,7 +339,81 @@ function collect({ root, api, roots, excluded = [] }) {
   return { entries, problems };
 }
 
-function manifestProblems(manifest) {
+/** Nome de pessoa/handle: sem controlos, sem orlas vazias, ≤ 120. */
+function nomeValido(valor) {
+  if (typeof valor !== "string" || valor.length === 0 || valor.length > 120) return false;
+  if (valor !== valor.trim()) return false;
+  for (let i = 0; i < valor.length; i += 1) if (valor.codePointAt(i) < 0x20) return false;
+  return true;
+}
+
+/**
+ * Carrega o registo de aprovadores (ver cabeçalho). Falha fechada em qualquer
+ * anomalia — sem variável, dentro do repo, ilegível, schema errado, nomes duros
+ * ou integrador sem autorizador declarado. Não existe forma de «saltar» isto:
+ * sem registo não há aprovação possível, e o gate do empacotamento bloqueia.
+ */
+export function carregarRegistoAprovadores({ root = DEFAULT_ROOT, env = process.env, deps = DEFAULT_DEPS } = {}) {
+  const api = io(deps);
+  const recusa = (kind, path_, detail) => ({ registry: null, problems: [{ kind, path: path_, detail }] });
+  const caminho = String(env[APPROVERS_ENV] ?? "").trim();
+  if (!caminho) {
+    return recusa("approver-registry-missing", APPROVERS_ENV, `${APPROVERS_ENV} não está definida; sem registo ninguém pode aprovar`);
+  }
+  const absoluto = path.resolve(caminho);
+  if (inside(path.resolve(root), absoluto)) {
+    return recusa("approver-registry-invalid", absoluto, "o registo de aprovadores não pode estar dentro da raiz do projeto");
+  }
+  let cru;
+  try {
+    cru = JSON.parse(api.readFileSync(absoluto, "utf8"));
+  } catch (error) {
+    return recusa("approver-registry-missing", absoluto, String(error?.message ?? "ficheiro ilegível").slice(0, 200));
+  }
+  if (!cru || typeof cru !== "object" || Array.isArray(cru)) return recusa("approver-registry-invalid", absoluto, "não é um objecto JSON");
+  if (cru.schema !== APPROVERS_SCHEMA) return recusa("approver-registry-invalid", absoluto, `schema ${cru.schema} ≠ ${APPROVERS_SCHEMA}`);
+  if (!Array.isArray(cru.owners) || !Array.isArray(cru.integrators)) {
+    return recusa("approver-registry-invalid", absoluto, "faltam as listas `owners` e/ou `integrators`");
+  }
+  const owners = [];
+  for (const nomeof of cru.owners) {
+    if (!nomeValido(nomeof)) return recusa("approver-registry-invalid", absoluto, `nome de proprietário inválido: ${JSON.stringify(nomeof)}`);
+    owners.push(nomeof);
+  }
+  const integrators = [];
+  for (const entrada of cru.integrators) {
+    if (!entrada || typeof entrada !== "object") return recusa("approver-registry-invalid", absoluto, "integrador sem objecto");
+    if (!nomeValido(entrada.name)) return recusa("approver-registry-invalid", absoluto, `nome de integrador inválido: ${JSON.stringify(entrada.name)}`);
+    if (!nomeValido(entrada.authorizedBy)) return recusa("approver-registry-invalid", absoluto, `integrador «${entrada.name}» sem autorizador declarado`);
+    integrators.push({ name: entrada.name, authorizedBy: entrada.authorizedBy });
+  }
+  const vistos = new Set();
+  for (const nome of [...owners, ...integrators.map((i) => i.name)]) {
+    if (vistos.has(nome)) return recusa("approver-registry-invalid", absoluto, `nome duplicado no registo: ${nome}`);
+    vistos.add(nome);
+  }
+  if (owners.length + integrators.length === 0) {
+    return recusa("approver-registry-invalid", absoluto, "registo sem nenhum aprovador declarado");
+  }
+  return { registry: { path: absoluto, owners, integrators }, problems: [] };
+}
+
+/** Regras de identidade: dono, ou integrador autorizado por um dono DO MESMO registo. */
+export function aprovaçãoProblemas(approval, registry) {
+  if (!registry) return ["registo de aprovadores indisponível"];
+  if (!approval || typeof approval !== "object") return ["approval não é objecto"];
+  const nome = approval.approvedBy;
+  if (!nomeValido(String(nome ?? ""))) return ["approvedBy não é um nome utilizável"];
+  if (registry.owners.includes(nome)) return [];
+  const integrador = registry.integrators.find((i) => i.name === nome);
+  if (!integrador) return [`approvedBy «${nome}» não consta do registo de aprovadores`];
+  if (!registry.owners.includes(integrador.authorizedBy)) {
+    return [`integrador «${nome}» autorizado por «${integrador.authorizedBy}», que não é proprietário declarado`];
+  }
+  return [];
+}
+
+function manifestProblems(manifest, registry) {
   const problems = [];
   const add = (pathRel, detail) => problems.push({ kind: "manifest-invalid", path: pathRel, detail });
   if (!manifest || typeof manifest !== "object" || Array.isArray(manifest)) {
@@ -313,7 +426,7 @@ function manifestProblems(manifest) {
   if (!approval || typeof approval !== "object") {
     add("", "approval ausente");
   } else {
-    if (approval.approvedBy !== APPROVER) add("", `approvedBy "${approval.approvedBy}" ≠ "${APPROVER}"`);
+    for (const detalhe of aprovaçãoProblemas(approval, registry)) add("", detalhe);
     if (typeof approval.candidateId !== "string" || !approval.candidateId.trim()) add("", "candidateId vazio");
     if (typeof approval.approvedAt !== "string" || Number.isNaN(Date.parse(approval.approvedAt))) add("", "approvedAt inválido");
   }
@@ -356,24 +469,26 @@ export function buildManifest({ root = DEFAULT_ROOT, approval, approvalPath = nu
   return { schema: SCHEMA, algorithm: ALGORITHM, generatedAt: new Date().toISOString(), approval, roots, entries, digest: digestEntries(entries) };
 }
 
-export function validateApproval(approval, { root = DEFAULT_ROOT, approvalPath = "" } = {}) {
+export function validateApproval(approval, { root = DEFAULT_ROOT, approvalPath = "", registry = null } = {}) {
   const problems = [];
   const add = (detail) => problems.push({ kind: "approval-invalid", path: approvalPath, detail });
   if (!approval || typeof approval !== "object") return [{ kind: "approval-invalid", path: approvalPath, detail: "não é objecto" }];
-  if (approval.approvedBy !== APPROVER) add(`approvedBy "${approval.approvedBy}" ≠ "${APPROVER}"`);
+  for (const detalhe of aprovaçãoProblemas(approval, registry)) add(detalhe);
   if (typeof approval.candidateId !== "string" || !approval.candidateId.trim()) add("candidateId vazio");
   if (typeof approval.approvedAt !== "string" || Number.isNaN(Date.parse(approval.approvedAt))) add("approvedAt inválido");
   if (approvalPath && inside(path.resolve(root), path.resolve(approvalPath))) add("approval dentro da raiz");
   return problems;
 }
 
-export function verifySourceFreeze({ root = DEFAULT_ROOT, manifestPath = DEFAULT_MANIFEST, deps = DEFAULT_DEPS } = {}) {
+export function verifySourceFreeze({ root = DEFAULT_ROOT, manifestPath = DEFAULT_MANIFEST, deps = DEFAULT_DEPS, env = process.env } = {}) {
   const api = io(deps);
+  const registro = carregarRegistoAprovadores({ root, env, deps: api });
   const report = {
     ok: false,
     mode: "verify",
     root,
     manifestPath,
+    approvers: registro.registry ? { path: registro.registry.path, owners: registro.registry.owners.length, integrators: registro.registry.integrators.length } : null,
     manifestPresent: api.existsSync(manifestPath),
     manifestDigest: null,
     treeDigest: null,
@@ -381,6 +496,12 @@ export function verifySourceFreeze({ root = DEFAULT_ROOT, manifestPath = DEFAULT
     problems: [],
     samples: { added: [], removed: [], modified: [], unreadable: [], links: [], mutated: [], required: [] },
   };
+  // Primeiro o registo: sem ele não há quem possa ter aprovado, e um erro de
+  // configuração não pode ser disfarçado por um `manifest-missing` mais tarde.
+  if (registro.problems.length > 0) {
+    report.problems.push(...registro.problems);
+    return report;
+  }
   if (!report.manifestPresent) {
     report.problems.push({ kind: "manifest-missing", path: manifestPath, detail: "sem manifesto aprovado" });
     return report;
@@ -392,7 +513,7 @@ export function verifySourceFreeze({ root = DEFAULT_ROOT, manifestPath = DEFAULT
     report.problems.push({ kind: "manifest-invalid", path: manifestPath, detail: error?.message ?? "JSON inválido" });
     return report;
   }
-  report.problems.push(...manifestProblems(manifest));
+  report.problems.push(...manifestProblems(manifest, registro.registry));
   if (report.problems.length > 0) return report;
   report.manifestDigest = manifest.digest;
 
@@ -465,7 +586,9 @@ const usage = () =>
     "",
     "  --verify    compara a árvore com o manifesto (por omissão); nunca escreve",
     "  --write     cria o manifesto; exige --approval e nunca é chamado pelo pipeline",
-    `  --approval  registo {approvedBy:'${APPROVER}',candidateId,approvedAt}; não é assinatura`,
+    `  --approval  registo {approvedBy,candidateId,approvedAt}; não é assinatura`,
+    `  --root/--manifest  árvore e manifesto (para testes e candidatas fora do default)`,
+    `  ambiente  ${APPROVERS_ENV}=<caminho fora do repo> — lista de aprovadores; sem ela ninguém aprova`,
     "  --json      relatório legível por máquina",
     "",
     "Códigos de saída: 0 = ok, 1 = divergente/ilegível/manifesto inválido, 2 = uso.",
@@ -527,7 +650,12 @@ function main(argv) {
       console.error(`approval ilegível: ${error?.message ?? error}`);
       return 1;
     }
-    const problems = validateApproval(approval, { root: options.root, approvalPath: options.approval });
+    const registro = carregarRegistoAprovadores({ root: options.root });
+    if (registro.problems.length > 0) {
+      for (const problem of registro.problems) console.error(`${problem.kind}: ${problem.path} ${problem.detail}`);
+      return 1;
+    }
+    const problems = validateApproval(approval, { root: options.root, approvalPath: options.approval, registry: registro.registry });
     if (problems.length > 0) {
       for (const problem of problems) console.error(`${problem.kind}: ${problem.path} ${problem.detail}`);
       return 1;
