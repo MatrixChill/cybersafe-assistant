@@ -59,6 +59,7 @@ function fixture(t) {
   put("scripts/a.mjs", "export const a = 1;\n");
   put("packages/core/src/index.ts", "export const b = 2;\n");
   put("packages/native-engine/build/Release/scan-engine.exe", "MZ\n");
+  put("packages/native-engine/build/Release/cybersafe-update-launcher.exe", "MZ-launcher\n");
   put("vendor/clamav/VENDOR.json", "{}\n");
   put("vendor/yara/VENDOR.json", '{"schema":1,"engine":"yara-classic","version":"4.6.0"}\n');
   put("vendor/yara/yara64.exe", "MZ\n");

@@ -65,6 +65,7 @@ function fixture(t) {
   put("scripts/a.mjs", "export const a = 1;\n");
   put("packages/core/src/index.ts", "export const b = 2;\n");
   put("packages/native-engine/build/Release/scan-engine.exe", "MZ\n");
+  put("packages/native-engine/build/Release/cybersafe-update-launcher.exe", "MZ-launcher\n");
   put("vendor/clamav/VENDOR.json", "{}\n");
   put("vendor/yara/VENDOR.json", '{"schema":1,"engine":"yara-classic","version":"4.6.0"}\n');
   put("vendor/yara/yara64.exe", "MZ\n");
@@ -512,4 +513,10 @@ describe("configs de raiz (tipo não importa: link/pasta nunca passam)", () => {
     assert.equal(report.ok, false);
     assert.ok(report.problems.some((problem) => problem.kind === "roots-divergentes"));
   });
+});
+it('pins the update launcher bytes even though build directories are normally excluded',t=>{
+ const {root,put,manifestPath,writeManifest}=fixture(t);
+ const relative='packages/native-engine/build/Release/cybersafe-update-launcher.exe';put(relative,'MZ-launcher-fixture');
+ const manifest=writeManifest();assert.ok(manifest.entries.some(entry=>entry.path===relative));
+ put(relative,'MZ-altered-launcher');const result=verifySourceFreeze({root,manifestPath});assert.equal(result.ok,false);assert.ok(result.counts.modified>=1);
 });

@@ -163,8 +163,8 @@ describe("manifesto da aplicação empacotada", () => {
     // dizem agora o mesmo que a implementação; nenhum recurso foi retirado.
     assert.equal(
       m.build.extraResources.length,
-      4,
-      "scan-engine.exe + YARA clássico + ClamAV + licenças: o número tem de vir do contrato, não de uma contagem permissiva",
+      5,
+      "scan-engine.exe + launcher + YARA clássico + ClamAV + licenças: o número tem de vir do contrato, não de uma contagem permissiva",
     );
     assert.equal(m.build.extraResources[0].to, "scan-engine.exe");
     assert.equal(path.basename(m.build.extraResources[0].from), "scan-engine.exe");
@@ -229,4 +229,9 @@ describe("pré-verificação dos inputs", () => {
       assert.equal(check.exists, fs.existsSync(check.path), `"${check.id}": o resultado tem de vir do disco`);
     }
   });
+});
+it('includes the native update launcher as an explicit absolute resource',()=>{
+ const m=manifest();const resource=m.build.extraResources.find(item=>item.to==='cybersafe-update-launcher.exe');
+ assert.ok(resource,'the handoff cannot work from a missing packaged helper');assert.ok(path.isAbsolute(resource.from));
+ assert.equal(path.basename(resource.from),'cybersafe-update-launcher.exe');
 });

@@ -127,6 +127,11 @@ const PREFLIGHT = [
     path: path.join(root, "packages", "native-engine", "build", "Release", "scan-engine.exe"),
     fix: "npm run build:native",
   },
+  {
+    id: "binario:cybersafe-update-launcher.exe",
+    path: path.join(root, "packages", "native-engine", "build", "Release", "cybersafe-update-launcher.exe"),
+    fix: "npm run build:native",
+  },
   // Bundle ClamAV: existe ⇒ o pacote leva motor. Sem ele, `resources/clamav`
   // não é publicado e o pin do desktop fica sem efeito (falha FECHADA: o
   // serviço cai no PATH, como antes).
@@ -606,6 +611,7 @@ export function buildAppManifest({ desktopManifest, tarballs, electronVersion, s
       // exactamente onde o pin `CYBERSAFE_CLAMSCAN_PATH` do main.ts o procura.
       extraResources: [
         { from: scanEngine, to: "scan-engine.exe" },
+        { from: path.join(path.dirname(scanEngine), "cybersafe-update-launcher.exe"), to: "cybersafe-update-launcher.exe" },
         // YARA clássico oficial: `resolveYaraClassicBinaries()` procura
         // `resources/yara` no artefacto empacotado. Sem esta entrada, o build
         // sai com o motor indisponível e nenhum aviso no setup.

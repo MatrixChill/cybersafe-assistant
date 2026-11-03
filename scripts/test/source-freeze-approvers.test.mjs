@@ -58,6 +58,7 @@ function escreverRaiz() {
   escreve("scripts/a.mjs", "export const a = 1;\n");
   escreve("packages/core/src/index.ts", "export const b = 2;\n");
   escreve("packages/native-engine/build/Release/scan-engine.exe", "MZ\n");
+  escreve("packages/native-engine/build/Release/cybersafe-update-launcher.exe", "MZ-launcher\n");
   escreve("vendor/clamav/VENDOR.json", "{}\n");
   escreve("assets/licenses/THIRD-PARTY-NOTICES.txt", "Avisos.\n");
   escreve("assets/licenses/PROVENANCE.json", '{"schema":1,"obrigacaoPorResolver":{"bloqueador":false,"evidencia":["fixture"]}}\n');

@@ -39,6 +39,10 @@
         "to": "scan-engine.exe"
       },
       {
+        "from": "../native-engine/build/Release/cybersafe-update-launcher.exe",
+        "to": "cybersafe-update-launcher.exe"
+      },
+      {
         "from": "../../vendor/clamav",
         "to": "clamav"
       }
