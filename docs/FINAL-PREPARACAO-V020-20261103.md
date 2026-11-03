@@ -52,7 +52,7 @@ A RC1 LAB 497e634 anteriormente instalada no PC principal abriu, preservou sess�
 
 ## Preflight, integridade e inventário
 Pré-verificação oficial --check --json: inputs presentes; bundle ClamAV 1.5.4 (45 ficheiros), YARA 4.6.0 (4 ficheiros), seed ClamAV (4 ficheiros) e licenças prova-fecha aprovados. Resultado global bloqueado pelo freeze antigo divergente. Não é uma falha a contornar.
-Inventário oficial recalculado de fontes em 68c2d06: 1891 entradas; digest 0663dde63b8e4ad0bc1fd00eef9684fc6f1f1ca4874ae75e0a605aa2ba019ee6. Comparação com manifesto RC1: 12 adicionadas, 14 modificadas, zero removidas/ilegíveis/links/mutações/obrigatórios ausentes. Este digest NÃO está aprovado. A documentação e workflows são revistos por Git além das raízes do contrato de inventário.
+Inventário oficial recalculado de fontes em d42c683: 1891 entradas; digest b1a38dc8e19df247e328300f6273fee7567b2bf7d12dd41fae420dcbc195a4e8. Comparação com manifesto RC1: 12 adicionadas, 15 modificadas, zero removidas/ilegíveis/links/mutações/obrigatórios ausentes. Este digest NÃO está aprovado. A documentação e workflows são revistos por Git além das raízes do contrato de inventário.
 Manifesto aprovado antigo preservado: SHA-256 df81b7992507cfd959901ae921493b2e777d4bee896bf172455bd2a57cc6846b.
 Setup RC1 LAB preservado: SHA-256 155862f6453201d052a32f1d48fe1f349d86a1f32f517097e9ed8168133896a6. Nenhum setup novo empacotado/reassinado, nenhuma versão alterada.
 
@@ -68,3 +68,11 @@ Artefactos desta ronda em output/: final-integration-build.log, final-integratio
 7. Aprovação própria para merge main, tag e Release pública. Nenhuma dessas operações foi executada.
 
 Resultado: engenharia de apresentação integrada e lacunas de tooling corrigidas; GO para revisão e continuação controlada. NO-GO para anunciar v0.2.0 final ou atualizador público funcional.
+
+
+## Verificação adicional num runner Windows limpo
+A primeira execução remota (41674507216, HEAD 3d115c0) passou o build e a aplicação, mas encontrou duas falhas desktop: launcher C++ ausente no checkout limpo e isolamento não confirmado na fixture da ponte de segurança. A aprovação local não foi apresentada como aprovação remota.
+O commit d42c683 acrescenta o build do launcher e do simulador inerte antes da suíte desktop. A fixture passa a resolver o caminho temporário canónico antes de criar os seus ficheiros: aliases de nome curto/junction não são um alvo adequado para o percurso que exige ausência de redirecionamento. Acrescentou-se diagnóstico dos eventos à asserção para identificar recusas persistentes. As verificações de caminhos e identidade do produto não foram alteradas.
+Validação local dirigida: 3 testes da ponte de segurança e 5 ensaios de handoff aprovados, sem instalação. Revisão de padrões de segredos no diff: zero correspondências nos padrões inspecionados; não equivale a garantia universal.
+
+Resultado remoto confirmado: https://github.com/MatrixChill/cybersafe-assistant/actions/runs/41675848542 — success, código d42c6834055a6bf6cbad51a83ea93d4ce9b11295. Build dos workspaces aprovado; aplicação 2914/2914, desktop 673/673 (zero skips), handoff Windows 5/5. Todos os restantes passos dirigidos do workflow passaram. Log completo local: output/final-github-ci-success.log. Isto continua a ser build/testes em runner limpo, não instalação NSIS nem upgrade real. O commit documental seguinte regista esta evidência e não modifica os fontes inventariados.
