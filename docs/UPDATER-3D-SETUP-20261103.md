@@ -48,3 +48,9 @@ O helper temporário `output/updater-original-3d-preview.cjs` abre só esse URL 
 ## Integridade e limites
 RC1 LAB 497e634 permanece inalterada: SHA-256 155862f6453201d052a32f1d48fe1f349d86a1f32f517097e9ed8168133896a6 novamente confirmado. Nenhuma nova candidata, freeze, assinatura, instalação, publicação, tag, Release ou ativação de confiança.
 Futura candidata exige inventário/manifesto e aprovação novos. Pendentes: revisão visual humana, cenários reais de driver/movimento reduzido/DPI, medição de recursos, ligação segura aos eventos do diário e validação instalada dos novos recursos. Não declarar prontidão de release com base neste trabalho visual.
+## Atualização 3 nov 2026 — cena real no Setup
+O gerador do instalador passou a compor a captura real da cena Orbital B
+(`assets/branding/scene/orbital-b-scene.png`) em vez do orbital vetorial sintético.
+A captura é chaveada contra o fundo do render, cortada e reduzida sem redesenho; o vetor
+continua como recurso de reserva. Detalhe, evidência e limites em
+`docs/SETUP-ORBITAL-B-INTEGRACAO-20261103.md`. O NSIS mantém-se estático e sem WebGL.
