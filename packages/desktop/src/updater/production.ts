@@ -1,3 +1,6 @@
+import {createWindowsInstaller} from './windows-installer.js';
+import {createWindowsPublisherVerifier} from './windows-publisher.js';
+import type {InstallGateContext, ScanState} from './types.js';
 import trust from './release-trust.json';
 import { createUnconfiguredUpdater, BLOCKED_PUBLISHER } from './bridge.ts';
 import { createUpdater, BLOCKED_INSTALLER } from './updater.ts';
@@ -8,8 +11,14 @@ import { createNodeHttpsOpener, createHttpsFeedFetcher, createHttpsArtifactDownl
 import { createGitHubReleaseOpener, isGitHubReleaseUrl } from './github-transport.ts';
 import { HttpsFeedSource } from './sources.ts';
 
-/** Build-pinned public trust, never renderer/env-controlled. No installer execution. */
-export function createProductionUpdater(opts: {runtimeSupported: boolean; automaticCheckEnabled?: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string}) {
+interface InstallationRuntime {
+  stagingRoot:string; journalFile:string; launcherPath:string;
+  requestShutdown:()=>Promise<void>;
+  confirmConsent:(context:InstallGateContext)=>Promise<boolean>;
+  scanProbe:()=>Promise<ScanState>;
+}
+/** Build-pinned trust; assisted installation remains a separately disabled gate. */
+export function createProductionUpdater(opts: {runtimeSupported: boolean; installation?: InstallationRuntime; automaticCheckEnabled?: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string}) {
   const unavailable = () => createUnconfiguredUpdater(opts);
   if (!trust.enabled || !isGitHubReleaseUrl(trust.feedManifestUrl)) return unavailable();
   try {
@@ -24,13 +33,19 @@ export function createProductionUpdater(opts: {runtimeSupported: boolean; automa
   });
   if (!config.ok) return unavailable();
   const transport = createGitHubReleaseOpener(createNodeHttpsOpener());
+  const assisted=trust.assistedInstallationEnabled===true&&opts.runtimeSupported&&opts.installation!==undefined;
+  const signatureVerifier=createEd25519ManifestVerifier({publicKey:trust.publicKeyPem,pinnedFingerprint:trust.pinnedKeyFingerprint});
+  const publisherVerifier=assisted?createWindowsPublisherVerifier():BLOCKED_PUBLISHER;
+  const installer=assisted&&opts.installation?createWindowsInstaller({
+    ...opts.installation,signatureVerifier,publisherVerifier,expectedPublisher:trust.publisherLabel,authorizeExecution:()=>assisted,
+  }):BLOCKED_INSTALLER;
   return createUpdater({
     config, runtimeSupported: opts.runtimeSupported, installed: {version: opts.installedVersion, build: opts.installedBuild, commit: opts.installedCommit},
-    manualDownloadOnly: true,
+    manualDownloadOnly: !assisted,
     source: new HttpsFeedSource(config.config, createHttpsFeedFetcher(config.config, transport)),
     downloader: createHttpsArtifactDownloader(config.config, transport),
-    signatureVerifier: createEd25519ManifestVerifier({publicKey: trust.publicKeyPem, pinnedFingerprint: trust.pinnedKeyFingerprint}),
-    publisherVerifier: BLOCKED_PUBLISHER, installer: BLOCKED_INSTALLER,
-    cacheFs: createNodeCacheFileSystem(opts.cacheDir), scanProbe: async () => 'unknown',
+    signatureVerifier,
+    publisherVerifier, installer,
+    cacheFs: createNodeCacheFileSystem(opts.cacheDir), scanProbe: opts.installation?.scanProbe ?? (async () => 'unknown'),
   });
 }

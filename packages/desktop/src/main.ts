@@ -1,3 +1,5 @@
+import { UpdateJournal } from './updater/install-journal.js';
+import { reconcileInstalledUpdate } from './updater/installed-startup.js';
 import { atomicWriteJsonSync } from "./atomic-json.js";
 import { installNavigationPolicy } from "./navigation-policy.js";
 import { installInitialWindowReveal } from "./window-foreground.js";
@@ -586,6 +588,49 @@ async function startServiceProcess(): Promise<ServiceStartOutcome> {
  * guardado em `userData` (nunca dentro do pacote). A falha é declarada e NÃO
  * impede o serviço de proteção nem a janela de arrancar.
  */
+async function reconcilePendingInstalledUpdate(runtime: ApiRuntime): Promise<void> {
+  if (!app.isPackaged || isQuitting) return;
+  const journal = new UpdateJournal(path.join(app.getPath("userData"), "updater-operation.json"));
+  try {
+    if (!journal.read()) return;
+    const operation = await reconcileInstalledUpdate({
+      journal, installedVersion: app.getVersion(), isQuitting: () => isQuitting,
+      dataReady: async () => {
+        if (!runtime.bootId || runtime.child.exitCode !== null || !client.isConnected) return false;
+        const response = await fetch(`http://127.0.0.1:${runtime.port}/health`, { signal: AbortSignal.timeout(3000) });
+        if (!response.ok) return false;
+        const value = await response.json() as Record<string, unknown>;
+        if (value.bootId !== runtime.bootId || value.service !== "cybersafe-api" || value.databaseReady !== true) return false;
+        if (fs.existsSync(settingsFilePath())) {
+          const settings: unknown = JSON.parse(fs.readFileSync(settingsFilePath(), "utf8"));
+          if (!settings || typeof settings !== "object" || Array.isArray(settings)) return false;
+        }
+        return !isQuitting && runtime.child.exitCode === null;
+      },
+    });
+    if (operation) {
+      logStartup("update-startup", { status: operation.stage });
+      if (operation.stage === "recovery-required") dialog.showErrorBox(
+        "CyberSafe — Recuperação da atualização",
+        "Não foi possível confirmar a versão e os dados após a atualização. Não será iniciada outra instalação automaticamente. Preserve os dados e utilize o procedimento de recuperação com um instalador verificado."
+      );
+    }
+  } catch {
+    logStartup("update-startup", { status: "recovery-required", classification: "INVALID_UPDATE_EVIDENCE" });
+  }
+}
+
+function recoverPendingUpdateAfterStartupFailure(): void {
+  if (!app.isPackaged) return;
+  try {
+    const journal = new UpdateJournal(path.join(app.getPath("userData"), "updater-operation.json"));
+    if (journal.read()) {
+      journal.recoverInterrupted();
+      logStartup("update-startup", { status: "recovery-required", classification: "API_STARTUP_FAILED" });
+    }
+  } catch { logStartup("update-startup", { status: "recovery-required", classification: "INVALID_UPDATE_EVIDENCE" }); }
+}
+
 function startPackagedApi(): void {
   if (!app.isPackaged) {
     console.log("[Electron] Modo dev: API assumida via npm run dev:api");
@@ -621,10 +666,12 @@ function startPackagedApi(): void {
         apiRuntime = result.runtime;
         void configureAiChild(result.runtime.child, currentAiStore()).then((applied) => {
           if (!applied) stopLocalApi(result.runtime.child);
+          else void reconcilePendingInstalledUpdate(result.runtime);
         }).catch(() => stopLocalApi(result.runtime.child));
       }
       return;
     }
+    recoverPendingUpdateAfterStartupFailure();
     // Sem "API pronta" quando não está: o estado é declarado tal como é.
     console.error(`[Electron] API local não arrancou (${result.status}): ${result.reason}`);
     if (result.status === "failed" && result.error) {
@@ -633,6 +680,7 @@ function startPackagedApi(): void {
   }).catch((error) => {
     logStartup("api-unavailable", { status: "failed", port: DEFAULT_API_PORT, classification: classifyStartupError(error) });
     console.error("[Electron] Falha inesperada no arranque da API:", error);
+    recoverPendingUpdateAfterStartupFailure();
   }).finally(() => { apiStartInFlight = false; });
 }
 
@@ -1871,6 +1919,24 @@ if (!gotTheLock) {
       runtimeSupported: app.isPackaged && process.platform === "win32",
       installedVersion: app.getVersion(),
       automaticCheckEnabled: preferences.automaticUpdateCheckEnabled === true,
+      installation: {
+        stagingRoot: path.join(app.getPath("userData"), "update-staging"),
+        journalFile: path.join(app.getPath("userData"), "updater-operation.json"),
+        launcherPath: path.join(process.resourcesPath, "cybersafe-update-launcher.exe"),
+        // Reuse service/watcher/API shutdown and the existing before-quit cleanup.
+        requestShutdown: async () => { if (isQuitting) throw new Error("Shutdown already started"); await quitCyberSafe(); },
+        confirmConsent: async (context) => !isQuitting && context.confirmed === true
+          && appUpdater?.snapshotCopy().phase === "installing"
+          && appUpdater.snapshotCopy().latest?.version === context.expectedVersion,
+        scanProbe: async () => {
+          if (!client.isConnected) return "unknown";
+          try {
+            const state = await client.request("scan.getActive", undefined);
+            if (state === null) return "idle";
+            return state.status === "running" || state.status === "queued" ? "running" : "unknown";
+          } catch { return "unknown"; }
+        },
+      },
       installedBuild: installedIdentity.build,
       installedCommit: installedIdentity.commit,
     });

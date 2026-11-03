@@ -24,7 +24,7 @@ import { DATABASE_FILE_PATH } from "./db.js";
 import { createLifecycleRecorder, installProcessDiagnostics, resolveLifecycleLogPath } from "./lifecycle.js";
 import { validarArranqueApi } from "./dev-isolation.js";
 import { installDevParentShutdown } from "./dev-parent-shutdown.js";
-import { closeDb } from "./db.js";
+import { closeDb, confirmDatabaseReadyForUpdate } from "./db.js";
 
 // ── Guarda de isolamento ──
 // Chamada aqui, e não só em `db.ts`, para que a ordem dos imports nunca deixe o registo de
@@ -646,8 +646,11 @@ app.get("/api/stream", requireAuth, (req, res) => {
 });
 
 // ── Health ──
+const databaseReadyForInstalledUpdate = confirmDatabaseReadyForUpdate();
 app.get("/health", (_req, res) => {
-  res.json(apiHealthPayload(process.env));
+  res.status(databaseReadyForInstalledUpdate ? 200 : 503).json({
+    ...apiHealthPayload(process.env), databaseReady: databaseReadyForInstalledUpdate,
+  });
 });
 
 // ── AI Chat (streaming + fallback JSON; persona Matrix em ./ai.ts) ──

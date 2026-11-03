@@ -100,3 +100,10 @@ describe("updater de produção — gate de confiança, medido no código real",
     );
   });
 });
+
+it("assisted installation is separately disabled in the current build trust",()=>{
+ assert.equal(trust.assistedInstallationEnabled,false);
+ const u=createProductionUpdater(opts({installation:{requestShutdown:()=>{throw Error("must never shut down")}}}));
+ assert.equal(u.snapshotCopy().canInstall,false);
+ assert.equal(u.snapshotCopy().phase,'unconfigured');
+});

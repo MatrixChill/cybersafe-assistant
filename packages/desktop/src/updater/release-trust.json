@@ -1,5 +1,6 @@
 {
   "enabled": false,
+  "assistedInstallationEnabled": false,
   "feedManifestUrl": "https://github.com/MatrixChill/cybersafe-assistant/releases/latest/download/update-manifest.json",
   "publicKeyPem": "",
   "pinnedKeyFingerprint": "",

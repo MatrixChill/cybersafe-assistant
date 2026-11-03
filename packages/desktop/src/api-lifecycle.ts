@@ -47,6 +47,7 @@ export interface InstallationSecret {
 }
 
 export interface ApiRuntime {
+  bootId?: string;
   child: ChildProcess;
   entryPath: string;
   port: number;
@@ -446,6 +447,7 @@ export async function startLocalApi(options: StartApiOptions): Promise<StartApiR
   return {
     status: "started",
     runtime: {
+      bootId,
       child,
       entryPath,
       port,
