@@ -14,7 +14,7 @@ public class Ctl {
   [StructLayout(LayoutKind.Sequential)] public struct RECT { public int L,T,R,B; }
 }
 "@
-function ClientW($h) { $r = New-Object Ctl+RECT; [void][Ctl]::GetClientRect($h, [ref]$r); return $r.R }
+function ClientW($h) { $r = New-Object Ctl+RECT; [void][Ctl]::GetClientRect($h, [ref]$r); return [int]$r.R }
 function Shot($h, $name) {
   $r = New-Object Ctl+RECT; [void][Ctl]::GetClientRect($h, [ref]$r)
   $b = New-Object System.Drawing.Bitmap($r.R, $r.B)
@@ -24,7 +24,9 @@ function Shot($h, $name) {
 }
 function ClickBtn($h, $index) {
   $cw = ClientW $h
-  $x = @($cw - 151, $cw - 97, $cw - 43)[$index]
+  $x = [int]$cw - 151
+  if ($index -eq 1) { $x = [int]$cw - 97 }
+  if ($index -eq 2) { $x = [int]$cw - 43 }
   $lp = [IntPtr]((28 -shl 16) -bor $x)
   [void][Ctl]::PostMessage($h, 0x0200, [IntPtr]::Zero, $lp)
   [void][Ctl]::PostMessage($h, 0x0201, [IntPtr]1, $lp)
