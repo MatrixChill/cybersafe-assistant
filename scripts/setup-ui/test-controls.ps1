@@ -17,6 +17,7 @@ public class Ctl {
 function ClientW($h) { $r = New-Object Ctl+RECT; [void][Ctl]::GetClientRect($h, [ref]$r); return [int]$r.R }
 function Shot($h, $name) {
   $r = New-Object Ctl+RECT; [void][Ctl]::GetClientRect($h, [ref]$r)
+  if ($r.R -le 0 -or $r.B -le 0) { Write-Host 'shot skipped: no client area'; return }
   $b = New-Object System.Drawing.Bitmap($r.R, $r.B)
   $g = [System.Drawing.Graphics]::FromImage($b); $dc = $g.GetHdc()
   [void][Ctl]::PrintWindow($h, $dc, 2); $g.ReleaseHdc($dc); $g.Dispose()
@@ -35,9 +36,10 @@ function ClickBtn($h, $index) {
 }
 New-Item -ItemType Directory -Force -Path $OutDir | Out-Null
 $p = Start-Process -FilePath $Exe -WorkingDirectory (Get-Location) -PassThru
-Start-Sleep -Milliseconds 1500
-$h = $p.MainWindowHandle
+$h = [IntPtr]::Zero
+for ($i = 0; $i -lt 50 -and $h -eq [IntPtr]::Zero; $i++) { Start-Sleep -Milliseconds 150; $p.Refresh(); $h = $p.MainWindowHandle }
 if ($h -eq [IntPtr]::Zero) { throw 'no window' }
+Start-Sleep -Milliseconds 700
 Shot $h 'state-normal.png'
 Write-Host ("client=" + (ClientW $h))
 ClickBtn $h 0
