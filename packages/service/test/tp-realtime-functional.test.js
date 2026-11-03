@@ -103,3 +103,47 @@ test('TP realtime: inaccessible authorized root refuses activation and publishes
   assert.equal(e.watcher.watcher, null);
   assert.ok(e.eventBus.getReplay().some(x => x.type === 'protection.changed' && x.data.protectionEnabled === false));
 });
+
+test('TP realtime: real watcher recovers named files after controlled queue saturation', { timeout: 35000 }, async t => {
+  const { e, root } = await fixture(t);
+  const { RealtimeFileQueue } = await import('../dist/realtime-file-queue.js');
+  e.realtimeQueue = new RealtimeFileQueue(1);
+  const analyze = e.analyzer.analyze.bind(e.analyzer);
+  let release;
+  const gate = new Promise(resolve => { release = resolve; });
+  let entered = false;
+  e.analyzer.analyze = async (...args) => {
+    if (!entered) {
+      entered = true;
+      await gate;
+    }
+    return analyze(...args);
+  };
+  const expected = new Map();
+  async function create(index) {
+    const name = 'coverage-' + index + '.txt';
+    const content = 'Benign coverage fixture ' + index;
+    expected.set(name, createHash('sha256').update(content).digest('hex'));
+    await fs.writeFile(path.join(root, name), content);
+  }
+  try {
+    assert.equal((await e.startProtection()).ok, true);
+    await create(0);
+    await waitFor(() => entered);
+    for (let index = 1; index < 6; index++) await create(index);
+    await waitFor(() => e.getProtectionState().engine.realtimeLoss.queueRejections > 0);
+  } finally {
+    release();
+  }
+  const observed = () => new Set(e.eventBus.getReplay()
+    .filter(event => event.type === 'artifact.analyzed').map(event => event.data.sha256));
+  try {
+    await waitFor(() => [...expected.values()].every(hash => observed().has(hash)), 16000);
+  } finally {
+    const hashes = observed();
+    const covered = [...expected].filter(([, hash]) => hashes.has(hash)).map(([name]) => name);
+    const missing = [...expected.keys()].filter(name => !covered.includes(name));
+    console.log(JSON.stringify({ covered, missing, recovery: e.realtimeRecovery.snapshot() }));
+  }
+  assert.ok(e.realtimeRecovery.snapshot().recovered > 0);
+});
