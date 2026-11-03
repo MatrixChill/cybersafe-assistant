@@ -898,7 +898,7 @@ export function AdvancedView({
         </div>
 
         {/* Disk Card — a mesma regra do Dashboard vive em StorageCard/lib/diskDisplay */}
-        <StorageCard disk={hardware.disk} />
+        <StorageCard disk={hardware.disk} onAnalisarVolume={onAnalisarVolume} />
 
         </div>
         <div className="min-w-0 flex flex-col gap-6">

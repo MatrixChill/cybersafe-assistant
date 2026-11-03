@@ -32,8 +32,9 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 |---|---|---|
 | MATRIX (base 7de8b59) | **PASS** | suite app 2932/2932, typecheck e build limpos |
 | Merge Linux ↔ MATRIX | **PASS (merge)** | 2 conflitos, ambos resolvidos e revistos |
-| Árvore integrada — typecheck | **BLOCKED** | worktree novo sem `node_modules` próprio; os links de workspace resolvem para `dist` não construído |
-| Árvore integrada — suite | **BLOCKED** | mesma causa; `@cybersafe/shared-types` não resolve |
+| Árvore integrada — typecheck | **PASS** | `tsc --noEmit` limpo após `tsc -b` de shared-types, core, native-windows e service |
+| Árvore integrada — suite | **PASS** | **2971/2971** testes, 0 falhas |
+| Build da app integrada | **PASS** | `npm run build -w @cybersafe/app` concluído |
 | Instalador Orbital B | **NOT TESTED** | UI Win32 existe; handoff NSIS por fazer |
 | Updater GitHub | **BLOCKED** | Ed25519 + Authenticode ausentes (`docs/ASSINATURA-E-GITHUB-V020-20261103.md`) |
 | Pacotes Linux (.deb/.AppImage) | **NOT TESTED** | exige ambiente Linux nativo; WSL2 não equivale |
@@ -44,7 +45,8 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 
 ## Riscos
 
-1. A árvore integrada nunca foi compilada: o merge pode ter regressões ainda não vistas.
+1. A árvore integrada está verde em app/serviço, mas o updater e o instalador
+   não foram exercitados neste HEAD.
 2. Versões divergentes entre pacotes impedem uma Release coerente.
 3. Linux Lite toca `AIAssistant.tsx`, `App.tsx` e `service/engine.ts` — precisa de
    regressão completa antes de qualquer merge para `main`.
@@ -60,13 +62,13 @@ Documento único de prontidão. Regra: **PASS / FAIL / BLOCKED / NOT TESTED**.
 
 ## Próximo passo técnico (ordem)
 
-1. Instalar dependências no worktree de release (`npm ci --ignore-scripts`) e
-   construir `@cybersafe/shared-types`; repetir typecheck, suite e build.
-2. Corrigir a divergência de versões para uma única versão canónica.
-3. Regressão do serviço e do updater no HEAD integrado.
-4. Só depois: instalador, pacotes Linux, CI, merge e Release.
+1. Corrigir a divergência de versões para uma única versão canónica.
+2. Regressão do updater e do instalador no HEAD integrado.
+3. Pacotes Linux num ambiente com desktop nativo.
+4. CI sobre esta branch; depois merge e Release, com autorização.
 
 ## Declaração
 
-Estado global: **NO-GO**. O merge está feito e revisto; a verificação da árvore
-integrada e todos os gates de distribuição continuam por concluir.
+Estado global: **NO-GO** para publicação, **PASS** para a integração de código.
+O merge está feito, a árvore integrada compila e passa 2971 testes. Continuam
+por fechar: versão canónica, instalador, updater assinado, pacotes Linux e CI.
