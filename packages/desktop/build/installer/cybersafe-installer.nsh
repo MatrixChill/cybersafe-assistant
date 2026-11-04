@@ -40,6 +40,8 @@ Var CSW
 Var CSH
 Var CSBg
 Var CSBgImage
+Var CSProgressArt
+Var CSProgressImage
 Var CSFontTitle
 Var CSFontHeading
 Var CSMode
@@ -329,6 +331,7 @@ Var CSSpaceState
   FunctionEnd
   Function CS_ProgressShow
     Call CS_ApplyFrame
+    Call CS_OrbitalProgress
     SetCtlColors $mui.InstFilesPage 0xEDF8F8 0x07151A
     SetCtlColors $mui.InstFilesPage.Text 0xEDF8F8 0x07151A
     SetCtlColors $mui.InstFilesPage.Log 0xEDF8F8 0x07151A
@@ -340,7 +343,45 @@ Var CSSpaceState
   FunctionEnd
   Function CS_FinishShow
     Call CS_ApplyFrame
+    ; Keep MUI's full-window Orbital sidebar, title and all native actions.
+    ; Styling must not change consent, run state or the reboot decision.
+    SetCtlColors $mui.FinishPage 0xEDF8F8 0x07151A
+    SetCtlColors $mui.FinishPage.Title 0xEDF8F8 0x07151A
+    SetCtlColors $mui.FinishPage.Text 0xEDF8F8 0x07151A
+    !ifndef HIDE_RUN_AFTER_FINISH
+      ${If} $mui.FinishPage.Run != 0
+        System::Call 'uxtheme::SetWindowTheme(p $mui.FinishPage.Run,w "",w "")'
+        SetCtlColors $mui.FinishPage.Run 0xEDF8F8 0x07151A
+      ${EndIf}
+    !endif
+    !ifndef MUI_FINISHPAGE_NOREBOOTSUPPORT
+      ${If} $mui.FinishPage.RebootNow != 0
+        System::Call 'uxtheme::SetWindowTheme(p $mui.FinishPage.RebootNow,w "",w "")'
+        System::Call 'uxtheme::SetWindowTheme(p $mui.FinishPage.RebootLater,w "",w "")'
+        SetCtlColors $mui.FinishPage.RebootNow 0xEDF8F8 0x07151A
+        SetCtlColors $mui.FinishPage.RebootLater 0xEDF8F8 0x07151A
+      ${EndIf}
+    !endif
     Call CS_StyleFooter
+  FunctionEnd
+  ; Decorative STATIC inside the real MUI page. MUI/Nsis7z owns all progress,
+  ; cancellation and completion. No external process or simulated percent.
+  Function CS_OrbitalProgress
+    InitPluginsDir
+    SetDetailsPrint none
+    File "/oname=$PLUGINSDIR\page-progress.bmp" "${CS_ASSET_DIR}\page-progress.bmp"
+    SetDetailsPrint lastused
+    StrCpy $CSDialog $mui.InstFilesPage
+    Call CS_Measure
+    System::Call 'user32::CreateWindowEx(i 0,t "STATIC",t "",i 0x5000000E,i 0,i 0,i $CSW,i $CSH,p $mui.InstFilesPage,p 0,p 0,p 0)p.r0'
+    StrCpy $CSProgressArt $0
+    ${If} $CSProgressArt != 0
+      ${NSD_SetStretchedImage} $CSProgressArt "$PLUGINSDIR\page-progress.bmp" $CSProgressImage
+      System::Call 'user32::SetWindowPos(p $CSProgressArt,p 1,i 0,i 0,i 0,i 0,i 0x13)'
+      !insertmacro CS_Place $mui.InstFilesPage.Text 6 57 88 9
+      !insertmacro CS_Place $mui.InstFilesPage.ProgressBar 6 68 88 6
+      !insertmacro CS_Place $mui.InstFilesPage.Log 6 77 88 21
+    ${EndIf}
   FunctionEnd
   Function CS_StyleFooter
     InitPluginsDir
@@ -371,6 +412,9 @@ Var CSSpaceState
 FunctionEnd
   Function .onGUIEnd
     Call CSFreeButtonImages
+    ${If} $CSProgressImage != ""
+      ${NSD_FreeImage} $CSProgressImage
+    ${EndIf}
   FunctionEnd
 
 

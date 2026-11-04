@@ -116,6 +116,7 @@ const BUILD_WORKSPACES = [
 ];
 
 const PREFLIGHT = [
+  { id: "instalador:OrbitalSetup.dll", path: path.join(desktopDir, "build", "x86-unicode", "OrbitalSetup.dll"), fix: "scripts/setup-ui/build.bat (x86 Unicode), depois novo freeze aprovado" },
   { id: "manifesto:@cybersafe/desktop", path: path.join(desktopDir, "package.json"), fix: "repor packages/desktop/package.json" },
   { id: "npm-cli.js", path: npmCli, fix: "instalar Node/npm (o npm-cli.js vem com o Node)" },
   { id: "electron instalado", path: path.join(root, "node_modules", "electron", "package.json"), fix: "npm install (na raiz do repo)" },

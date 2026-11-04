@@ -74,7 +74,7 @@ describe("manifesto da aplicação empacotada", () => {
   it("wires the custom assisted NSIS and preserves installation contracts", () => {
     const m = manifest();
     const n = m.build.nsis;
-    assert.equal(n.include, path.join(DESKTOP_DIR, "build", "installer", "cybersafe-installer.nsh"));
+    assert.equal(n.include, path.join(DESKTOP_DIR, "build", "installer", "orbital-installer.nsh"));
     assert.equal(n.script, undefined);
     assert.equal(n.oneClick, false);
     assert.equal(n.perMachine, false);
@@ -89,14 +89,14 @@ describe("manifesto da aplicação empacotada", () => {
     assert.equal(n.installerSidebar, path.join(DESKTOP_DIR, "build", "installer", "installerSidebar.bmp"));
     assert.equal(n.uninstallerSidebar, path.join(DESKTOP_DIR, "build", "installer", "uninstallerSidebar.bmp"));
     const raw = desktopManifest.build.nsis;
-    assert.equal(raw.include, "installer/cybersafe-installer.nsh", "direct electron-builder use must use the same custom surface");
+    assert.equal(raw.include, "installer/orbital-installer.nsh", "direct electron-builder use must use the same custom surface");
     assert.equal(raw.script, undefined, "the stock electron-builder script remains the engine");
-    const nshPath = path.join(DESKTOP_DIR, "build", "installer", "cybersafe-installer.nsh");
+    const nshPath = path.join(DESKTOP_DIR, "build", "installer", "orbital-installer.nsh");
     assert.ok(fs.existsSync(nshPath), "o include do NSIS tem de existir no pacote");
     const nsh = fs.readFileSync(nshPath, "utf8");
-    assert.match(nsh, /!macro customWelcomePage/, "o ecra de boas-vindas e o ponto de entrada do setup");
-    assert.match(nsh, /CS_ShowLicense/, "as licencas reais tem de estar acessiveis no setup");
-    assert.match(nsh, /CSStartMenuShortcut/, "o atalho do menu iniciar tem de ser uma escolha explicita");
+    assert.match(nsh, /OrbitalSetup::Start/, "a interface Win32 original e o ponto de entrada do setup");
+    assert.match(nsh, /THIRD-PARTY-NOTICES/, "as licencas reais tem de estar acessiveis no setup");
+    assert.match(nsh, /CSOrbitalMenu/, "o atalho do menu iniciar tem de ser uma escolha explicita");
   });
 
   it("leva productName: sem ele o userData cai em %APPDATA%\\@cybersafe\\desktop", () => {

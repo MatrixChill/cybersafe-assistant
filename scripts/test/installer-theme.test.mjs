@@ -18,6 +18,7 @@ function bmpHeader(name) {
 for (const [name, width, height] of [
   ['page-welcome.bmp', 503, 287],
   ['page-config.bmp', 503, 287],
+  ['page-progress.bmp', 503, 287],
   ['installerSidebar.bmp', 164, 314],
   ['uninstallerSidebar.bmp', 164, 314],
   ['installerHeader.bmp', 150, 57],
@@ -56,7 +57,8 @@ test('o nome do produto é o título localizado em todas as línguas', () => {
 });
 
 test('o manifesto liga o include personalizado ao NSIS', () => {
-  assert.equal(pkg.build.nsis.include, 'installer/cybersafe-installer.nsh');
+  assert.equal(pkg.build.nsis.include, 'installer/orbital-installer.nsh');
+  assert.ok(fs.existsSync(path.join(dir,'cybersafe-installer.nsh')), 'previous MUI work is retained');
 });
 
 test('o bitmap de fundo fica atrás dos controlos', () => {
@@ -83,4 +85,23 @@ test('preview labels are raised above the stretched artwork', () => {
 test('native preview state changes use opaque labels to erase previous text', () => {
   const preview=fs.readFileSync(path.join(root,'scripts/prototypes/installer-native-preview.nsi'),'utf8');
   for(const control of ['Heading','Body','Status']) assert.ok(preview.includes(`SetCtlColors $${control} ${control==='Status'?'9E9BFF':'EDF8F8'} 07151A`),control);
+});
+
+test('finish styling preserves the real MUI run and reboot controls', () => {
+ const finish = /Function CS_FinishShow([\s\S]*?)FunctionEnd/.exec(nsh)?.[1] ?? '';
+ for (const control of ['mui.FinishPage', 'mui.FinishPage.Title', 'mui.FinishPage.Text']) {
+  assert.ok(finish.includes(`SetCtlColors $${control} 0xEDF8F8 0x07151A`), control);
+ }
+ assert.match(finish, /SetWindowTheme\(p \$mui\.FinishPage\.Run/);
+ assert.match(finish, /SetWindowTheme\(p \$mui\.FinishPage\.RebootNow/);
+ assert.match(finish, /SetWindowTheme\(p \$mui\.FinishPage\.RebootLater/);
+ assert.doesNotMatch(finish, /NSD_SetState|BST_CHECKED|Reboot\s|ExecShell/);
+});
+
+test('Orbital progress decorates the real MUI progress page without a second installer',()=>{
+ assert.match(nsh,/Call CS_OrbitalProgress/);
+ assert.match(nsh,/Function CS_OrbitalProgress/);
+ assert.match(nsh,/page-progress\.bmp/);
+ assert.match(nsh,/CS_Place \$mui\.InstFilesPage\.ProgressBar/);
+ assert.doesNotMatch(nsh,/CyberSafeSetupUI\.exe|PBM_SETPOS|SetTimer/);
 });

@@ -1,6 +1,6 @@
 // CyberSafe setup presentation layer.
-// Native Win32 + GDI+. One small exe, no extra runtime.
-// PREVIEW build: buttons move between pages; nothing is installed.
+// Original Win32/GDI+ Orbital B drawing; in-process frontend of the NSIS engine.
+// No standalone installer process and no timed installation simulation.
 #define _WIN32_WINNT 0x0A00
 #define UNICODE
 #define _UNICODE
@@ -13,6 +13,7 @@
 #include <cmath>
 #include <vector>
 using namespace Gdiplus;
+#include "nsis-plugin.h"
 
 static const wchar_t* kClass = L"CyberSafeSetupUI";
 static const wchar_t* kTitle = L"CyberSafe Assistant \u2014 Instala\u00e7\u00e3o";
@@ -27,8 +28,8 @@ static Bitmap *g_scene = nullptr, *g_sceneSoft = nullptr, *g_lockup = nullptr, *
 static void BuildSceneSoft(int w);
 static void BuildCore();
 static void DrawContain(Graphics& g, Bitmap* b, RectF box);
-static int g_progress = 0;
-static bool g_openApp = true;
+static HWND g_licenseEdit = nullptr;
+static std::wstring g_notices;
 static std::wstring g_note;
 static Bitmap *g_core = nullptr;
 static double g_phase = 0.0;
@@ -47,6 +48,10 @@ static bool FileExistsW(const std::wstring& p){
   return a != INVALID_FILE_ATTRIBUTES;
 }
 static std::wstring FindAsset(const wchar_t* rel){
+  if(g_backend) {
+    const std::wstring full = g_assets + L"/" + rel;
+    return FileExistsW(full) ? full : L"";
+  }
   wchar_t exe[MAX_PATH];
   GetModuleFileNameW(nullptr, exe, MAX_PATH);
   std::wstring dir(exe);
@@ -321,7 +326,7 @@ static void Layout(HWND hwnd){
     g_buttons.push_back(b);
   };
   if(g_page == 0){
-    add(0, L"Instalar", 0, true, true);
+    add(0, L"Instalar", 0, true, g_backend);
     add(1, L"Reparar", 1, false, false);
     add(2, L"Desinstalar", 2, false, false);
     add(3, L"Licen\u00e7a", 3, false, true);
@@ -335,13 +340,22 @@ static void Layout(HWND hwnd){
     c.r = { (LONG)(W - S(56) - w), (LONG)by, (LONG)(W - S(56)), (LONG)(by+bh) };
     g_buttons.push_back(c);
   } else if(g_page == 3){
-    Btn c; c.id = 0; c.label = L"Cancelar"; c.icon = -1; c.primary = false; c.enabled = true;
+    Btn c; c.id = 0; c.label = L"Cancelar"; c.icon = -1; c.primary = false; c.enabled = !g_mutating;
     c.r = { (LONG)(W - S(56) - S(200)), (LONG)by, (LONG)(W - S(56)), (LONG)(by+bh) };
     g_buttons.push_back(c);
   } else {
     Btn c; c.id = 0; c.label = L"Concluir"; c.icon = -1; c.primary = true; c.enabled = true;
+    if(g_page == 6) c.label = L"Voltar";
     c.r = { (LONG)(W - S(56) - S(200)), (LONG)by, (LONG)(W - S(56)), (LONG)(by+bh) };
     g_buttons.push_back(c);
+  }
+  if(g_pathEdit) {
+    ShowWindow(g_pathEdit, g_page == 2 ? SW_SHOW : SW_HIDE);
+    MoveWindow(g_pathEdit,(int)(W * 0.536f + S(14)),(int)S(244),(int)(W-W*0.536f-S(84)),(int)S(30),TRUE);
+  }
+  if(g_licenseEdit) {
+    ShowWindow(g_licenseEdit,g_page==6?SW_SHOW:SW_HIDE);
+    MoveWindow(g_licenseEdit,(int)(W*0.536f),(int)S(212),(int)(W-W*0.536f-S(56)),(int)(by-S(232)),TRUE);
   }
 }
 
@@ -424,15 +438,15 @@ static void Paint(HWND hwnd, HDC hdc){
       FillRound(g, info, S(10), ib);
       StrokeRound(g, info, S(10), Color(90,18,59,68), S(1));
       Icon(g, 4, RectF(cx+S(18), S(346), S(18), S(18)), kCyan);
-      DrawTextAt(g, L"Vers\u00e3o 0.2.0-rc.1", RectF(cx+S(46), S(348), S(220), S(22)), S(15), kText, FontStyleBold);
+      DrawTextAt(g, (L"Vers\u00e3o " + g_version).c_str(), RectF(cx+S(46), S(348), S(220), S(22)), S(15), kText, FontStyleBold);
       { Pen p(Color(90,18,59,68), S(1)); g.DrawLine(&p, cx+S(296), S(342), cx+S(296), S(380)); }
       Icon(g, 5, RectF(cx+S(316), S(346), S(18), S(18)), kMuted);
-      DrawTextAt(g, L"Ainda n\u00e3o instalado", RectF(cx+S(342), S(348), S(212), S(22)), S(13), kMuted);
+      DrawTextAt(g, g_installed.empty()?L"N\u00e3o detetado":g_installed.c_str(), RectF(cx+S(342), S(348), S(212), S(22)), S(13), kMuted);
     } else if(g_page == 1){
       DrawTextAt(g, L"02  /  MODO", RectF(cx, S(120), S(200), S(20)), S(11), kCyan, FontStyleBold);
       DrawTextAt(g, L"Para quem deve ser instalado?", RectF(cx, S(150), W-cx-S(64), S(44)), S(28), kText, FontStyleBold);
       const wchar_t* opts[2] = { L"Apenas para mim", L"Para todos os utilizadores" };
-      const wchar_t* sub[2] = { L"Sem privil\u00e9gios de administrador.", L"Requer eleva\u00e7\u00e3o UAC." };
+      const wchar_t* sub[2] = { L"Sem privil\u00e9gios de administrador.", L"Indispon\u00edvel neste percurso. Sem eleva\u00e7\u00e3o autom\u00e1tica." };
       for(int i = 0; i < 2; i++){
         RectF o(cx, S(222) + i*S(78), W - cx - S(56), S(64));
         bool sel = (i == 0);
@@ -453,54 +467,57 @@ static void Paint(HWND hwnd, HDC hdc){
       SolidBrush fb(Color(120,6,24,31));
       FillRound(g, field, S(9), fb);
       StrokeRound(g, field, S(9), Color(100,18,59,68), S(1));
-      DrawTextAt(g, L"%LOCALAPPDATA%\\Programs\\CyberSafe Assistant", RectF(cx+S(14), S(248), field.Width-S(28), S(22)), S(13), kText);
+      // Real editable destination is a dark native EDIT inside this original card.
       const wchar_t* cb[2] = { L"Atalho no ambiente de trabalho", L"Atalho no menu Iniciar" };
       for(int i = 0; i < 2; i++){
         float y = S(294) + i*S(32);
         RectF box(cx, y, S(18), S(18));
         StrokeRound(g, box, S(4), Color(150,22,214,193), S(1.2f));
-        Pen p(kCyan, S(2));
-        g.DrawLine(&p, cx+S(4), y+S(9), cx+S(8), y+S(13));
-        g.DrawLine(&p, cx+S(8), y+S(13), cx+S(14), y+S(5));
+        if(g_shortcuts[i]) {
+          Pen p(kCyan, S(2));
+          g.DrawLine(&p, cx+S(4), y+S(9), cx+S(8), y+S(13));
+          g.DrawLine(&p, cx+S(8), y+S(13), cx+S(14), y+S(5));
+        }
         DrawTextAt(g, cb[i], RectF(cx+S(28), y, S(360), S(20)), S(13), kText);
       }
       RectF space(cx, S(366), W - cx - S(56), S(70));
       SolidBrush sb(Color(90,6,24,31));
       FillRound(g, space, S(10), sb);
       StrokeRound(g, space, S(10), Color(80,18,59,68), S(1));
-      DrawTextAt(g, L"Espa\u00e7o necess\u00e1rio", RectF(cx+S(16), S(376), S(200), S(18)), S(12), kMuted);
-      DrawTextAt(g, L"318 MB", RectF(cx+S(16), S(396), S(200), S(24)), S(15), kText, FontStyleBold);
+      DrawTextAt(g, L"Tamanho do payload", RectF(cx+S(16), S(376), S(200), S(18)), S(12), kMuted);
+      DrawTextAt(g, (g_required + L" KB (payload)").c_str(), RectF(cx+S(16), S(396), S(200), S(24)), S(15), kText, FontStyleBold);
       DrawTextAt(g, L"Espa\u00e7o dispon\u00edvel", RectF(cx+S(240), S(376), S(200), S(18)), S(12), kMuted);
-      DrawTextAt(g, L"64,2 GB", RectF(cx+S(240), S(396), S(200), S(24)), S(15), kText, FontStyleBold);
+      ULARGE_INTEGER freeBytes{};
+      std::wstring probe=g_destination;
+      while(!probe.empty() && !FileExistsW(probe)) { const auto cut=probe.find_last_of(L'\\'); if(cut==std::wstring::npos) break; probe.resize(cut); }
+      if(probe.size()==2) probe+=L"\\";
+      const std::wstring freeText=GetDiskFreeSpaceExW(probe.c_str(),&freeBytes,nullptr,nullptr)?std::to_wstring(freeBytes.QuadPart/(1024*1024))+L" MB":L"N\u00e3o verificado";
+      DrawTextAt(g, freeText.c_str(), RectF(cx+S(240), S(396), S(200), S(24)), S(15), kText, FontStyleBold);
     } else if(g_page == 3){
       DrawTextAt(g, L"04  /  INSTALA\u00c7\u00c3O", RectF(cx, S(120), S(230), S(20)), S(11), kCyan, FontStyleBold);
       DrawTextAt(g, L"A instalar o CyberSafe Assistant", RectF(cx, S(150), W-cx-S(64), S(44)), S(28), kText, FontStyleBold);
-      DrawTextAt(g, L"A copiar os ficheiros da aplica\u00e7\u00e3o. N\u00e3o feche esta janela.", RectF(cx, S(206), W-cx-S(64), S(24)), S(14), kMuted);
+      DrawTextAt(g, g_status.c_str(), RectF(cx, S(206), W-cx-S(64), S(58)), S(14), kMuted, FontStyleRegular, StringAlignmentNear, true);
       RectF track(cx, S(270), W - cx - S(56), S(8));
       SolidBrush tb(Color(255,12,40,48));
       FillRound(g, track, S(4), tb);
-      float pw = track.Width * (g_progress / 100.0f);
+      float pw = track.Width * 0.2f;
       if(pw > 2){
-        RectF fill(track.X, track.Y, pw, track.Height);
+        // Indeterminate indicator only. Orbit animation does not measure extraction.
+        RectF fill(track.X + (track.Width-pw)*(0.5f+0.5f*sinf((float)g_phase*2)), track.Y, pw, track.Height);
         LinearGradientBrush gb(PointF(track.X,0), PointF(track.X+track.Width,0), kCyan, kCyanBright);
         FillRound(g, fill, S(4), gb);
       }
-      wchar_t pct[16]; swprintf_s(pct, L"%d%%", g_progress);
-      DrawTextAt(g, pct, RectF(cx, S(288), S(80), S(20)), S(12), kMuted);
-      DrawTextAt(g, L"Extrair application.asar", RectF(cx, S(310), W-cx-S(64), S(20)), S(12), kMuted);
+      DrawTextAt(g, L"Progresso indeterminado — fase real do NSIS", RectF(cx, S(288), W-cx-S(64), S(26)), S(12), kMuted);
+      DrawTextAt(g, g_mutating?L"Cancelamento indispon\u00edvel nesta fase cr\u00edtica. N\u00e3o force o encerramento.":L"Pode cancelar antes de o NSIS alterar o destino.", RectF(cx, S(326), W-cx-S(64), S(62)), S(13), kMuted, FontStyleRegular, StringAlignmentNear, true);
+    } else if(g_page==6) {
+      DrawTextAt(g,L"LICEN\u00c7AS E AVISOS",RectF(cx,S(120),W-cx-S(64),S(28)),S(16),kCyan,FontStyleBold);
+      DrawTextAt(g,L"Avisos reais inclu\u00eddos no Setup. Sem EULA adicional definida.",RectF(cx,S(158),W-cx-S(64),S(42)),S(13),kMuted,FontStyleRegular,StringAlignmentNear,true);
     } else {
-      DrawTextAt(g, L"05  /  CONCLU\u00cdDO", RectF(cx, S(120), S(220), S(20)), S(11), Color(255,72,214,160), FontStyleBold);
-      DrawTextAt(g, L"Instala\u00e7\u00e3o conclu\u00edda", RectF(cx, S(150), W-cx-S(64), S(44)), S(28), kText, FontStyleBold);
-      DrawTextAt(g, L"O CyberSafe Assistant foi instalado neste computador.", RectF(cx, S(206), W-cx-S(64), S(24)), S(14), kMuted);
-      float y = S(262);
-      RectF box(cx, y, S(18), S(18));
-      StrokeRound(g, box, S(4), Color(150,22,214,193), S(1.2f));
-      if(g_openApp){
-        Pen p(kCyan, S(2));
-        g.DrawLine(&p, cx+S(4), y+S(9), cx+S(8), y+S(13));
-        g.DrawLine(&p, cx+S(8), y+S(13), cx+S(14), y+S(5));
-      }
-      DrawTextAt(g, L"Abrir o CyberSafe Assistant", RectF(cx+S(28), y-S(1), S(360), S(22)), S(13), kText);
+      DrawTextAt(g, g_success?L"05  /  CONCLU\u00cdDO":L"05  /  N\u00c3O CONCLU\u00cdDO", RectF(cx, S(120), S(220), S(20)), S(11), g_success?Color(255,72,214,160):Color(255,255,160,130), FontStyleBold);
+      DrawTextAt(g, g_success?L"Instala\u00e7\u00e3o conclu\u00edda":L"Instala\u00e7\u00e3o n\u00e3o conclu\u00edda", RectF(cx, S(150), W-cx-S(64), S(44)), S(28), kText, FontStyleBold);
+      DrawTextAt(g, g_status.c_str(), RectF(cx, S(206), W-cx-S(64), S(76)), S(14), kMuted, FontStyleRegular, StringAlignmentNear, true);
+      /* No launch checkbox: this path does not yet implement user-context launch. */
+      if(g_success) DrawTextAt(g,L"Pode abrir a aplica\u00e7\u00e3o pelo menu Iniciar ou pela pasta escolhida.",RectF(cx,S(310),W-cx-S(64),S(54)),S(13),kMuted,FontStyleRegular,StringAlignmentNear,true);
     }
 
     for(size_t i = 0; i < g_buttons.size(); i++){
@@ -545,12 +562,10 @@ static void Paint(HWND hwnd, HDC hdc){
 }
 
 static void Go(HWND hwnd, int page){
-  g_page = page; g_progress = 0; g_hover = -1; g_focus = 0;
+  g_page = page; g_hover = -1; g_focus = 0;
   Layout(hwnd);
   InvalidateRect(hwnd, nullptr, FALSE);
-  KillTimer(hwnd, 1);
-  KillTimer(hwnd, 2);
-  if(page == 3) SetTimer(hwnd, 1, 120, nullptr);
+  // No installation timers. NSIS alone signals phase/result.
 }
 
 static void Click(HWND hwnd, int id){
@@ -559,21 +574,31 @@ static void Click(HWND hwnd, int id){
   int local = g_buttons[id].id;
   if(g_page == 0){
     if(local == 0) Go(hwnd, 1);
-    else if(local == 3){ g_note = L"Licen\u00e7as de terceiros s\u00e3o inclu\u00eddas no instalador final."; InvalidateRect(hwnd, nullptr, FALSE); }
+    else if(local == 3) Go(hwnd,6);
   } else if(g_page == 1){
     Go(hwnd, local == 0 ? 0 : 2);
   } else if(g_page == 2){
-    Go(hwnd, local == 0 ? 1 : 3);
+    if(local==0) { Go(hwnd,1); return; }
+    wchar_t path[512]; GetWindowTextW(g_pathEdit,path,512); g_destination=path;
+    if(!ValidDestination(g_destination)) { g_note=L"Destino inv\u00e1lido: escolha uma pasta local absoluta, sem liga\u00e7\u00f5es ou caminhos de sistema."; InvalidateRect(hwnd,nullptr,FALSE); return; }
+    g_note=L""; g_action=1; Go(hwnd,3); SetEvent(g_decisionEvent);
   } else if(g_page == 3){
-    if(local == 0) Go(hwnd, 0);
+    if(local == 0 && !g_mutating) { g_action=0; DestroyWindow(hwnd); }
   } else {
-    if(local == 0) DestroyWindow(hwnd);
+    if(local == 0) { if(g_page==6) Go(hwnd,0); else DestroyWindow(hwnd); }
   }
 }
 
 static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
   switch(msg){
     case WM_CREATE:
+      g_pathEdit=CreateWindowExW(0,L"EDIT",g_destination.c_str(),WS_CHILD|ES_AUTOHSCROLL|WS_TABSTOP,0,0,0,0,hwnd,(HMENU)100,g_module,nullptr);
+      g_editFont=CreateFontW(-16,0,0,0,FW_NORMAL,FALSE,FALSE,FALSE,DEFAULT_CHARSET,0,0,CLEARTYPE_QUALITY,0,L"Segoe UI");
+      SendMessageW(g_pathEdit,WM_SETFONT,(WPARAM)g_editFont,TRUE);
+      SendMessageW(g_pathEdit,EM_SETLIMITTEXT,220,0);
+      g_licenseEdit=CreateWindowExW(0,L"EDIT",g_notices.c_str(),WS_CHILD|WS_VSCROLL|ES_MULTILINE|ES_READONLY,0,0,0,0,hwnd,(HMENU)101,g_module,nullptr);
+      SendMessageW(g_licenseEdit,WM_SETFONT,(WPARAM)g_editFont,TRUE);
+      g_note=L"Reparar e Desinstalar: indispon\u00edveis neste percurso. Use o desinstalador instalado nas Defini\u00e7\u00f5es do Windows.";
       Layout(hwnd);
       if(g_anim){ g_last = GetTickCount64(); SetTimer(hwnd, 3, 33, nullptr); }
       return 0;
@@ -625,9 +650,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
         if(inside){
           if(w == 0) ShowWindow(hwnd, SW_MINIMIZE);
           else if(w == 1) ShowWindow(hwnd, IsZoomed(hwnd) ? SW_RESTORE : SW_MAXIMIZE);
-          else DestroyWindow(hwnd);
+          else SendMessageW(hwnd,WM_CLOSE,0,0);
         }
         return 0;
+      }
+      if(g_page==2) {
+        RECT client; GetClientRect(hwnd,&client);
+        if(x>=client.right*0.536f && x<client.right-S(56)) for(int i=0;i<2;i++) {
+          if(y>=S(294+i*32) && y<S(318+i*32)) { g_shortcuts[i]=!g_shortcuts[i]; InvalidateRect(hwnd,nullptr,FALSE); return 0; }
+        }
       }
       for(size_t i = 0; i < g_buttons.size(); i++){
         RECT r = g_buttons[i].r;
@@ -648,7 +679,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
         return 0;
       }
       if(wp == VK_RETURN || wp == VK_SPACE){ Click(hwnd, g_focus); return 0; }
-      if(wp == VK_ESCAPE){ DestroyWindow(hwnd); return 0; }
+      if(wp == VK_ESCAPE){ SendMessageW(hwnd,WM_CLOSE,0,0); return 0; }
+      if(g_page==2 && (wp=='D'||wp=='M')) { g_shortcuts[wp=='D'?0:1]=!g_shortcuts[wp=='D'?0:1]; InvalidateRect(hwnd,nullptr,FALSE); return 0; }
       if(wp >= VK_LEFT && wp <= VK_DOWN && !g_buttons.empty()){
         int n = (int)g_buttons.size();
         int d = (wp == VK_LEFT || wp == VK_UP) ? -1 : 1;
@@ -659,14 +691,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       return 0;
     }
     case WM_TIMER:
-      if(wp == 1){
-        g_progress += 4;
-        if(g_progress >= 100){ g_progress = 100; KillTimer(hwnd, 1); SetTimer(hwnd, 2, 500, nullptr); }
-        InvalidateRect(hwnd, nullptr, FALSE);
-      } else if(wp == 2){
-        KillTimer(hwnd, 2);
-        Go(hwnd, 4);
-      } else if(wp == 3){
+      if(wp == 3){
         ULONGLONG now = GetTickCount64();
         double dt = (double)(now - g_last) / 1000.0;
         g_last = now;
@@ -718,7 +743,38 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       }
       return 0;
     }
+    case WM_COMMAND:
+      if(LOWORD(wp)==100 && HIWORD(wp)==EN_CHANGE && g_page==2) {
+        wchar_t text[512]; GetWindowTextW(g_pathEdit,text,512);
+        g_destination=text;
+        InvalidateRect(hwnd,nullptr,FALSE);
+      }
+      return 0;
+    case WM_CTLCOLOREDIT:
+    case WM_CTLCOLORSTATIC:
+      SetTextColor((HDC)wp,RGB(237,248,248)); SetBkColor((HDC)wp,RGB(6,24,31));
+      { static HBRUSH brush=CreateSolidBrush(RGB(6,24,31)); return (LRESULT)brush; }
+    case WM_ORBITAL_PHASE:
+      if(wp==1) {
+        if(g_action!=1) return FALSE;
+        g_mutating=true; g_note=L"";
+      }
+      g_status=(const wchar_t*)lp; Layout(hwnd); InvalidateRect(hwnd,nullptr,FALSE); return TRUE;
+    case WM_ORBITAL_RESULT:
+      g_mutating=false; g_resultShown=true; g_success=wp!=0; g_status=(const wchar_t*)lp;
+      Go(hwnd,4); return 0;
+    case WM_ORBITAL_FALLBACK:
+      if(g_mutating && !g_resultShown) {
+        g_mutating=false; g_resultShown=true; g_success=false;
+        g_status=L"O motor terminou sem confirmar a instala\u00e7\u00e3o. Podem existir ficheiros parciais; o resultado n\u00e3o foi aprovado.";
+        Go(hwnd,4); return TRUE;
+      }
+      return FALSE;
+    case WM_ORBITAL_STOP:
+      DestroyWindow(hwnd); return 0;
     case WM_CLOSE:
+      if(g_mutating) { g_note=L"O NSIS est\u00e1 numa fase cr\u00edtica. Aguarde; n\u00e3o se for\u00e7a a termina\u00e7\u00e3o."; InvalidateRect(hwnd,nullptr,FALSE); return 0; }
+      if(!g_resultShown) g_action=0;
       DestroyWindow(hwnd);
       return 0;
     case WM_NCLBUTTONDBLCLK:
@@ -731,14 +787,23 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
     case WM_ERASEBKGND:
       return 1;
     case WM_DESTROY:
+      g_window=nullptr;
+      SetEvent(g_decisionEvent);
       PostQuitMessage(0);
       return 0;
   }
   return DefWindowProc(hwnd, msg, wp, lp);
 }
 
-int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
-  SetProcessDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+static DWORD WINAPI RunOrbital(void*) {
+  const HINSTANCE hInst=g_module;
+  SetThreadDpiAwarenessContext(DPI_AWARENESS_CONTEXT_PER_MONITOR_AWARE_V2);
+  // Read the actual bundled notice document, never launch a PATH-resolved tool.
+  std::ifstream input(g_assets+L"/THIRD-PARTY-NOTICES.txt",std::ios::binary);
+  const std::string bytes((std::istreambuf_iterator<char>(input)),{});
+  const int chars=MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,bytes.data(),(int)bytes.size(),nullptr,0);
+  if(chars>0) { g_notices.resize(chars); MultiByteToWideChar(CP_UTF8,MB_ERR_INVALID_CHARS,bytes.data(),(int)bytes.size(),g_notices.data(),chars); }
+  else g_notices=L"N\u00e3o foi poss\u00edvel ler os avisos de licen\u00e7a.";
   BOOL animPref = TRUE;
   SystemParametersInfoW(0x1042, 0, &animPref, 0);
   g_anim = animPref != FALSE;
@@ -768,6 +833,8 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
   std::wstring icoPath = FindAsset(L"assets/branding/icon/cybersafe.ico");
   if(!icoPath.empty()) g_appIcon = (HICON)LoadImageW(nullptr, icoPath.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
   HWND hwnd = CreateWindowExW(WS_EX_APPWINDOW, kClass, kTitle, WS_POPUP, x, y, w, h, nullptr, nullptr, hInst, nullptr);
+  if(!hwnd) { g_action=2; SetEvent(g_decisionEvent); return 1; }
+  g_window=hwnd;
   if(g_appIcon){
     SendMessageW(hwnd, WM_SETICON, ICON_BIG, (LPARAM)g_appIcon);
     SendMessageW(hwnd, WM_SETICON, ICON_SMALL, (LPARAM)g_appIcon);
@@ -779,6 +846,10 @@ int APIENTRY wWinMain(HINSTANCE hInst, HINSTANCE, LPWSTR, int){
 
   MSG msg;
   while(GetMessage(&msg, nullptr, 0, 0)){ TranslateMessage(&msg); DispatchMessage(&msg); }
+  delete g_core; delete g_sceneSoft; delete g_scene; delete g_lockup; delete g_symbol;
+  if(g_appIcon) DestroyIcon(g_appIcon);
+  if(g_editFont) DeleteObject(g_editFont);
+  UnregisterClassW(kClass,hInst);
   GdiplusShutdown(token);
   return 0;
 }

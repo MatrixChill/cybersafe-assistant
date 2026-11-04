@@ -66,7 +66,7 @@
       "createStartMenuShortcut": true,
       "runAfterFinish": true,
       "deleteAppDataOnUninstall": false,
-      "include": "installer/cybersafe-installer.nsh",
+      "include": "installer/orbital-installer.nsh",
       "installerHeader": "installer/installerHeader.bmp",
       "installerSidebar": "installer/installerSidebar.bmp",
       "uninstallerSidebar": "installer/uninstallerSidebar.bmp"

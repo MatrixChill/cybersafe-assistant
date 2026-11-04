@@ -58,6 +58,7 @@ function fixture(t) {
   put("product-version.json", '{"version":"0.1.11","channel":"internal","codename":"fixture"}\n');
   put("scripts/a.mjs", "export const a = 1;\n");
   put("packages/core/src/index.ts", "export const b = 2;\n");
+  put("packages/desktop/build/x86-unicode/OrbitalSetup.dll", "MZ-Orbital-fixture\n");
   put("packages/native-engine/build/Release/scan-engine.exe", "MZ\n");
   put("packages/native-engine/build/Release/cybersafe-update-launcher.exe", "MZ-launcher\n");
   put("vendor/clamav/VENDOR.json", "{}\n");

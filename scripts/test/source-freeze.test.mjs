@@ -64,6 +64,7 @@ function fixture(t) {
   put("product-version.json", '{"version":"0.1.11","channel":"internal","codename":"fixture"}\n');
   put("scripts/a.mjs", "export const a = 1;\n");
   put("packages/core/src/index.ts", "export const b = 2;\n");
+  put("packages/desktop/build/x86-unicode/OrbitalSetup.dll", "MZ-Orbital-fixture\n");
   put("packages/native-engine/build/Release/scan-engine.exe", "MZ\n");
   put("packages/native-engine/build/Release/cybersafe-update-launcher.exe", "MZ-launcher\n");
   put("vendor/clamav/VENDOR.json", "{}\n");
@@ -513,6 +514,13 @@ describe("configs de raiz (tipo não importa: link/pasta nunca passam)", () => {
     assert.equal(report.ok, false);
     assert.ok(report.problems.some((problem) => problem.kind === "roots-divergentes"));
   });
+});
+it('pins Orbital bytes and refuses a missing embedded frontend',t=>{
+ const {root,put,manifestPath,writeManifest}=fixture(t);
+ const relative='packages/desktop/build/x86-unicode/OrbitalSetup.dll';
+ const manifest=writeManifest();assert.ok(manifest.entries.some(entry=>entry.path===relative));
+ put(relative,'MZ-altered-Orbital');let result=verifySourceFreeze({root,manifestPath});assert.equal(result.ok,false);assert.ok(result.counts.modified>=1);
+ fs.unlinkSync(path.join(root,relative));result=verifySourceFreeze({root,manifestPath});assert.equal(result.ok,false);assert.ok(result.problems.some(p=>p.kind==='missing-root'));
 });
 it('pins the update launcher bytes even though build directories are normally excluded',t=>{
  const {root,put,manifestPath,writeManifest}=fixture(t);

@@ -1,5 +1,7 @@
 # CyberSafe v0.2.0 — prontidão atual (3 novembro 2026)
 
+Atualização posterior: a candidata Windows foi instalada no PC físico com autorização expressa e backup verificável. Resultados e limites em [VALIDACAO-WINDOWS-FISICO-20261103.md](VALIDACAO-WINDOWS-FISICO-20261103.md). As declarações abaixo de instalação NOT TESTED descrevem a preparação anterior; não substituem os resultados desta validação. Release e atualização de produção continuam bloqueadas.
+
 Estados: PASS / FAIL / BLOCKED / NOT TESTED. Fonte de continuidade: main consolidado 78aff29341d99767dfb97b2ef458db810b049b00. Worktree: C:/Users/caioc/.cybersafe-integration/main-merge-20261103/repo. Versão canónica preservada: 0.2.0-rc.1, canal internal. As versões internas dos workspaces não foram alteradas.
 
 ## Windows — candidata preservada
@@ -57,6 +59,12 @@ Diretório Windows acessível: C:/Users/caioc/.cybersafe-integration/main-merge-
 Contém cópias verificadas dos dois pacotes Linux, setup Windows e blockmap, SHA256SUMS real e provenance.json. Os originais Windows não mudaram. O primeiro build Linux desta sessão, anterior ao ajuste de licença/lock, foi preservado em release-linux/archive-first-78aff29 no clone WSL.
 
 Evidência local em output/: candidate-78aff29-payload.json, components.json, vendor-integrity.json, clamav-contract.json (todos com prefixo candidate-78aff29-), hygiene.log, secrets.json/md; linux-existing-inventory.log, linux-final-build.log, linux-final-runtime-v2.log, main-service-regression.log, main-updater-directed.log, main-runtime-isolation.log e main-ci-contracts-fixed.log. Logs brutos não são publicados.
+
+## Atualização 2026-11-04 — Orbital B nativo
+
+O frontend Win32/GDI+ original é agora plugin x86 Unicode embutido no Setup NSIS, selecionado por `installer/orbital-installer.nsh`; o trabalho MUI anterior foi preservado, não é a interface final. Foram ensaiados 11 cenários de fronteira/erro e o script completo stock com 7z benigno, instalação interativa A, atualização silenciosa A→B, 22 SHA-256 por versão e desinstalação legítima com dados separados preservados. Evidência: `output/orbital-full-lab/run-SHHHvF/observations.json`. **Não é candidata da aplicação nem A→B instalado CyberSafe**. Reparar/Desinstalar na UI, all-users e abertura automática continuam indisponíveis e explicitados. Relatório: `docs/ORBITAL-B-INTEGRATION.md`.
+
+Regressões atuais: scripts 467 PASS/5 skip/0 FAIL; serviço 1012 PASS/1 skip/0 FAIL mais 12/12 no segundo bloco; handoff nativo existente 5/5; contratos finais Orbital 6/6. O novo freeze está BLOCKED: fontes mudaram e `CYBERSAFE_APPROVERS_FILE` não está definida nesta sessão. Nenhum `--write`, candidata real, instalação pessoal, confiança pública, tag ou publicação foi efetuado. Os hashes/estados anteriores abaixo aplicam-se aos artefactos antigos identificados, não às fontes atuais; Linux ainda precisa rebuild das alterações partilhadas.
 
 ## Gates finais
 

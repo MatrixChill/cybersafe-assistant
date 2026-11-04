@@ -101,7 +101,8 @@ const RETRYABLE = new Set(["EBUSY", "EPERM", "EACCES", "EMFILE", "ENFILE"]);
    correta é o SHA-256 do arquivo oficial que esse registo guarda). */
 const ROOTS_REQUIRED = ["package.json", "package-lock.json", "product-version.json", "scripts", "packages", "assets", "vendor/yara"];
 const ROOTS_OPTIONAL = [/^tsconfig(\..+)?\.json$/i, /^vite\.config\..+$/i, /^\.npmrc$/i];
-const ROOTS_EXTRA = ["packages/native-engine/build/Release/scan-engine.exe", "packages/native-engine/build/Release/cybersafe-update-launcher.exe", "vendor/clamav/VENDOR.json"];
+// The embedded frontend is a distributed binary, not disposable build output.
+const ROOTS_EXTRA = ["packages/desktop/build/x86-unicode/OrbitalSetup.dll", "packages/native-engine/build/Release/scan-engine.exe", "packages/native-engine/build/Release/cybersafe-update-launcher.exe", "vendor/clamav/VENDOR.json"];
 /** Roots que têm de ser FICHEIROS: um link/pasta com esse nome nunca é fonte válida. */
 const FILE_ROOTS = new Set(["package.json", "package-lock.json", "product-version.json", ...ROOTS_EXTRA]);
 const isFileRoot = (rel) => FILE_ROOTS.has(rel) || ROOTS_OPTIONAL.some((re) => re.test(path.posix.basename(rel)));

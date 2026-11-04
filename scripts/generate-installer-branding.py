@@ -257,6 +257,17 @@ def page_art(active: int) -> Image.Image:
     return image.convert("RGB")
 
 
+def progress_art() -> Image.Image:
+    # Shared Orbital B capture, central hero. Status and progress are never
+    # baked into this surface: the real MUI controls occupy the lower half.
+    image = linear(503, 287, (8, 31, 37), BG)
+    image = glow(image, (100, -70, 403, 170), CYAN, 20, 38)
+    image = hero(image, 251, 77, 260, 145)
+    ImageDraw.Draw(image).line((30, 157, 473, 157), fill=LINE + (180,))
+    image.putpixel((502, 286), BG + (255,))
+    return image.convert("RGB")
+
+
 def sidebar_art() -> Image.Image:
     w, h = 164, 314
     image = linear(w, h, (8, 32, 38), (4, 13, 17))
@@ -345,6 +356,7 @@ def render(out: Path) -> None:
 
     save(page_art(0), "page-welcome.bmp")
     save(page_art(1), "page-config.bmp")
+    save(progress_art(), "page-progress.bmp")
     save(sidebar_art(), "installerSidebar.bmp")
     save(sidebar_art(), "uninstallerSidebar.bmp")
     save(header_art(), "installerHeader.bmp")
