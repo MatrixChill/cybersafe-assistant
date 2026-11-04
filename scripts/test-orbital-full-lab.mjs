@@ -15,7 +15,7 @@ const resources=process.env.CYBERSAFE_TEST_NSIS_RESOURCES_DIR??path.join(process
 const templates=path.join(root,'node_modules/app-builder-lib/templates/nsis');
 const win=p=>p.replaceAll('/','\\');
 const sha=p=>createHash('sha256').update(fs.readFileSync(p)).digest('hex');
-const name='CyberSafe-Orbital-Benign-LAB';
+const name='CyberSafe Orbital Benign LAB';
 const id=`CyberSafeOrbitalBenign-${randomUUID()}`;
 const initial=path.join(dir,'offered',name),target=path.join(dir,'selected',name);
 const payloadDir=path.join(dir,'payload'),archive=path.join(dir,'benign.7z');

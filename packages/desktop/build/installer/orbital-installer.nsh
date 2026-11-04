@@ -14,6 +14,18 @@ Var CSOrbitalAction
 Var CSOrbitalSavedDir
 Var CSOrbitalRegisteredDir
 Var CSOrbitalTrace
+Var CSOrbitalCommandDir
+
+; NSIS owns /D parsing (unquoted, final argument, spaces included). The
+; electron-builder initMultiUser fallback reparses it with StdUtils, which
+; truncates unquoted spaces. Preserve the native value before that macro.
+!macro preInit
+  StrCpy $CSOrbitalCommandDir ""
+  ${StdUtils.GetParameter} $R0 "D" ""
+  ${If} $R0 != ""
+    StrCpy $CSOrbitalCommandDir "$INSTDIR"
+  ${EndIf}
+!macroend
 
 ; Keep one trace per attempt outside the installation tree and plugin temp.
 ; Record fixed stage labels only: no profile paths, credentials or options.
@@ -35,6 +47,9 @@ Var CSOrbitalTrace
   StrCpy $CSOrbitalVerified 0
   ; /S is owned by the verified launcher/updater: no UI, no option overrides.
   ${IfNot} ${Silent}
+    ${If} $CSOrbitalCommandDir != ""
+      StrCpy $INSTDIR "$CSOrbitalCommandDir"
+    ${EndIf}
     StrCpy $CSOrbitalActive 1
     CreateDirectory "$TEMP\CyberSafe-Setup-Logs"
     GetTempFileName $CSOrbitalTrace "$TEMP\CyberSafe-Setup-Logs"
@@ -78,7 +93,7 @@ Var CSOrbitalTrace
     OrbitalSetup::Validate "$INSTDIR" "$CSOrbitalRegisteredDir" "${APP_FILENAME}"
     Pop $0
     ${If} $0 != "ok"
-      !insertmacro CSOrbitalTrace "exit=2 destination-refused"
+      !insertmacro CSOrbitalTrace "exit=2 destination-refused reason=$0"
       OrbitalSetup::Finish "error" "Destino recusado. Nao foram extraidos ficheiros da aplicacao."
       SetErrorLevel 2
       Quit

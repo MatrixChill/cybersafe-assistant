@@ -67,14 +67,14 @@ static bool ValidDestination(const std::wstring& path) {
 // Stock electron-builder uninstallation removes the whole installation tree.
 // New installs must use an empty product-named directory; never an arbitrary
 // existing folder. An upgrade is locked to the registered product location.
-static bool SafeInstallTarget(const std::wstring& path,const std::wstring& registered,const std::wstring& product) {
-  if(!ValidDestination(path)) return false;
-  if(!registered.empty()) return _wcsicmp(path.c_str(),registered.c_str())==0;
+static const wchar_t* InstallTargetResult(const std::wstring& path,const std::wstring& registered,const std::wstring& product) {
+  if(!ValidDestination(path)) return L"invalid-path";
+  if(!registered.empty()) return _wcsicmp(path.c_str(),registered.c_str())==0 ? L"ok" : L"registered-path-mismatch";
   const auto cut=path.find_last_of(L'\\');
-  if(cut==std::wstring::npos || _wcsicmp(path.substr(cut+1).c_str(),product.c_str())!=0) return false;
+  if(cut==std::wstring::npos || _wcsicmp(path.substr(cut+1).c_str(),product.c_str())!=0) return L"product-leaf-mismatch";
   try {
-    return !std::filesystem::exists(path) || std::filesystem::is_empty(path);
-  } catch(const std::filesystem::filesystem_error&) { return false; }
+    return !std::filesystem::exists(path) || std::filesystem::is_empty(path) ? L"ok" : L"unregistered-occupied-directory";
+  } catch(const std::filesystem::filesystem_error&) { return L"destination-inspection-failed"; }
 }
 static DWORD WINAPI RunOrbital(void*);
 static UINT_PTR __cdecl OrbitalLifetime(int message) {
@@ -115,7 +115,7 @@ ORBITAL_EXPORT(Start) {
 }
 ORBITAL_EXPORT(Validate) {
   const auto path=PopNsis(stack), registered=PopNsis(stack), product=PopNsis(stack);
-  PushNsis(stack,size,SafeInstallTarget(path,registered,product)?L"ok":L"invalid");
+  PushNsis(stack,size,InstallTargetResult(path,registered,product));
 }
 ORBITAL_EXPORT(Begin) {
   // Synchronous on the UI thread: cancel/critical transition has one owner.

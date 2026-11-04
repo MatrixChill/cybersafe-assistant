@@ -1,4 +1,4 @@
-param([switch]$CleanupOnly,[ValidateSet('Open','Tampered','Missing','Close','WriteLocked','InvalidImage')][string]$LaunchCase='Open')
+param([switch]$CleanupOnly,[switch]$InteractiveUpgrade,[ValidateSet('Open','Tampered','Missing','Close','WriteLocked','InvalidImage')][string]$LaunchCase='Open')
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot\test-backend.ps1" -FunctionsOnly
 $full=Get-Content -Raw 'output/orbital-full-lab/latest.json' | ConvertFrom-Json
@@ -95,7 +95,20 @@ try {
  Write-Host 'PASS: Abrir executed the installed benign image after verified completion'
  # Real stock A -> B upgrade with /S --updated. No trust keys or launcher
  # publisher bypass: this is an isolated NSIS engine compatibility check.
- $b=Start-Process -FilePath $full.exeB -ArgumentList @('/S','--updated','/currentuser') -PassThru
+ $upgradeArgs=if($InteractiveUpgrade){@('/currentuser',"/D=$($full.target)")}else{@('/S','--updated','/currentuser')}
+ $b=Start-Process -FilePath $full.exeB -ArgumentList $upgradeArgs -PassThru
+ if($InteractiveUpgrade){
+  $bh=Wait-Window $b
+  Key $bh 13;Key $bh 39;Key $bh 13
+  $be=[NativeOrbital]::GetDlgItem($bh,100)
+  $bt=New-Object Text.StringBuilder 512
+  [NativeOrbital]::GetText($be,0xD,[IntPtr]512,$bt)|Out-Null
+  if($bt.ToString() -ne $full.target){throw 'Interactive upgrade did not offer the registered destination'}
+  Key $bh 68;Key $bh 77;Key $bh 39;Key $bh 13
+  Start-Sleep -Seconds 3
+  Shot $bh (Join-Path $full.dir 'interactive-upgrade.png')
+  Key $bh 13
+ }
  if(!$b.WaitForExit(20000) -or $b.ExitCode -ne 0){throw 'Silent A to B upgrade failed'}
  if([NativeOrbital]::Find($b.Id) -ne [IntPtr]::Zero){throw 'Silent B opened interactive frontend'}
  foreach($file in $full.filesB){if((Get-FileHash (Join-Path $full.target $file.relative) -Algorithm SHA256).Hash.ToLowerInvariant() -ne $file.sha256){throw 'Version B installed payload mismatch'}}
@@ -114,7 +127,10 @@ try {
  # Remove only the uniquely named installer cache the stock template created.
  $cache=Join-Path $env:LOCALAPPDATA "$($full.id).exe"
  if(Test-Path $cache){if((Get-FileHash $cache -Algorithm SHA256).Hash.ToLowerInvariant() -ne $full.sha256B){throw 'Unexpected cache bytes; not deleting'};Remove-Item -LiteralPath $cache}
- $result=@{status='PASS';scope='benign payload only; not CyberSafe candidate';stock7z=$true;chosenDestination=$true;sha256Verified=$full.files.Count;registryVersion='0.2.0-rc.2-LAB';silentUpgradeExit=$b.ExitCode;versionBHashes=$full.filesB.Count;installExit=$p.ExitCode;uninstallExit=$u.ExitCode;separateDataPreserved=$true;registryRemoved=$true;actualNoticesVerified=$true}
+ $result=@{status='PASS';scope='benign payload only; not CyberSafe candidate';stock7z=$true;chosenDestination=$true;sha256Verified=$full.files.Count;registryVersion='0.2.0-rc.2-LAB';interactiveUpgrade=[bool]$InteractiveUpgrade;upgradeExit=$b.ExitCode;versionBHashes=$full.filesB.Count;installExit=$p.ExitCode;uninstallExit=$u.ExitCode;separateDataPreserved=$true;registryRemoved=$true;actualNoticesVerified=$true}
  $result|ConvertTo-Json|Set-Content -Encoding UTF8 (Join-Path $full.dir 'observations.json')
  $result|ConvertTo-Json
-}finally{if(!$p.HasExited){Stop-Process -Id $p.Id -Force}}
+}finally{
+ if(!$p.HasExited){Stop-Process -Id $p.Id -Force}
+ if($b -and !$b.HasExited){$b.CloseMainWindow()|Out-Null;$b.WaitForExit(5000)|Out-Null}
+}
