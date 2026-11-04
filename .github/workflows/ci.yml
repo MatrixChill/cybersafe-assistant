@@ -59,6 +59,12 @@ jobs:
       - name: Launcher Windows e ensaio isolado de handoff (sem instalar)
         run: node scripts/test-updater-handoff-lab.mjs
 
+      - name: Preview nativo com chave RFC e simulador inerte (sem instalar)
+        run: node scripts/test-preview-handoff-lab.mjs
+
+      - name: Exclusão de análises durante atualização
+        run: node --test packages/service/test/update-scan-lease.test.js
+
       - name: Suíte do desktop
         run: npm test -w @cybersafe/desktop
 

@@ -1131,6 +1131,7 @@ describe("VirusTotal scope policy", () => {
     const events = [];
     const vtCalls = [];
     Object.assign(engine, {
+      scanManager: { updateLeaseActive: () => false },
       exclusions: { exclusionReason: () => null },
       analyzer: { analyze: async () => ({
         fileName: "fixture.txt", size: 10, sha256: "fixture-hash", riskScore: 55,
@@ -1182,6 +1183,7 @@ describe("VirusTotal scope policy", () => {
 
   it("single-file IPC leaves skipVirusTotal unset", async () => {
     const engine = Object.create(ProtectionEngineService.prototype);
+    engine.scanManager = { updateLeaseActive: () => false };
     let received;
     const expected = { totalFiles: 1 };
     engine.scanArtifact = async (...args) => { received = args; return expected; };

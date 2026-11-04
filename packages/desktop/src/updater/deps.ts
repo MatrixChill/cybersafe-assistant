@@ -18,6 +18,8 @@ export interface UpdaterDeps {
   config: ConfigResolution;
   /** Academic policy: reveal verified bytes only, never execute. */
   manualDownloadOnly?: boolean;
+  /** Explicit Preview-only adapter backed by the pinned native launcher. */
+  previewAssistedInstallation?: boolean;
   /** `app.isPackaged && !portable` (e win32 para publisher NSIS); senão `unsupported`. */
   runtimeSupported: boolean;
   installed: VersionInfo;

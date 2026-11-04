@@ -160,6 +160,8 @@ error aqui deve prolongar o encerramento.
 const SHUTDOWN_BLOCKED_METHODS = new Set<string>([
   "exclusions.update",
   "scan.start",
+  "update.acquireScanLease",
+  "update.renewScanLease",
   "scan.fullSystem",
   "definitions.update",
   "monitor.start",
@@ -5227,6 +5229,7 @@ if (processInfo.path) {
     // while another client requests termination. Track the complete async span.
     const critical = /^(scan\.|quarantine\.|trust\.)/.test(method) && !["scan.history","scan.getActive","scan.getLast","quarantine.list"].includes(method)
       || ["definitions.update","analysis.restricted","process.analyze","threat.action"].includes(method);
+    if(critical && this.scanManager.updateLeaseActive()) throw new Error("Atualização em preparação: aguarde ou cancele a atualização.");
     if(critical) ++this.criticalRpcOperations;
     try { return await this.dispatchTracked(method,payload); }
     finally { if(critical) --this.criticalRpcOperations; }
@@ -5283,7 +5286,11 @@ if (processInfo.path) {
           priority: "user",
         });
       case "scan.fullSystem":
-        this.runFullSystemScan();
+        // This legacy entry returns before its worker settles. Retain its
+        // activity count so an updater cannot mistake that ACK for an idle scan.
+        ++this.criticalRpcOperations;
+        void this.runFullSystemScan().catch(error=>console.error("[FullScan] Worker failed",error))
+          .finally(()=>{--this.criticalRpcOperations;});
         return { success: true };
       case "monitor.start":
         // Nada é gravado: ligar agora não é pedir a retoma ao próximo arranque.
@@ -5394,6 +5401,12 @@ if (processInfo.path) {
         console.log(`[ScanService] ${formatScanLog(id, `scan.start accepted type=${String(type)} target=${String(targetPath)} at=${new Date().toISOString()}`)}`);
         return { id, success: true };
       }
+      case "update.acquireScanLease":
+        return {token:this.criticalRpcOperations===0?this.scanManager.acquireUpdateLease():null};
+      case "update.renewScanLease":
+        return {ok:this.scanManager.renewUpdateLease((payload as {token?:unknown})?.token)};
+      case "update.releaseScanLease":
+        return {ok:this.scanManager.releaseUpdateLease((payload as {token?:unknown})?.token)};
       case "scan.getActive": {
         // Snapshot for UI resync (remount / page navigation / missed event).
         return this.scanManager.getActiveScan() ?? null;

@@ -425,6 +425,27 @@ export class ScanManager {
    */
   private readonly scansSomenteLeitura = new Set<string>();
   private currentScanPromise: Promise<void> | null = null;
+  private updateLease: {token:string; expires:number} | null = null;
+  public acquireUpdateLease():string|null {
+    if(this.currentScanPromise || this.getActiveScan() || this.updateLeaseActive()) return null;
+    const token=randomUUID();
+    this.updateLease={token,expires:Date.now()+120_000};
+    return token;
+  }
+  public renewUpdateLease(token:unknown):boolean {
+    if(!this.updateLeaseActive() || !this.updateLease || this.updateLease.token!==token) return false;
+    this.updateLease.expires=Date.now()+120_000;
+    return true;
+  }
+  public releaseUpdateLease(token:unknown):boolean {
+    if(!this.updateLease || this.updateLease.token!==token) return false;
+    this.updateLease=null;
+    return true;
+  }
+  public updateLeaseActive():boolean {
+    if(this.updateLease && this.updateLease.expires<=Date.now()) this.updateLease=null;
+    return this.updateLease!==null;
+  }
   private isCancelled = new Set<string>();
   /** A ZIP candidate is incomplete if any internal entry could not be evaluated. */
   private readonly archiveCoverageGaps = new Set<string>();
@@ -710,7 +731,7 @@ if (state.status === "running" || state.status === "queued") {
     if (type !== "quick" && type !== "full" && type !== "custom") {
       throw new Error(`Tipo de análise inválido: "${String(type)}". Use quick, full ou custom.`);
     }
-    if (this.currentScanPromise || this.getActiveScan()) {
+    if (this.currentScanPromise || this.getActiveScan() || this.updateLeaseActive()) {
       return null;
     }
 

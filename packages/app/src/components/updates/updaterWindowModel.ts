@@ -32,6 +32,6 @@ export function mapUpdaterSnapshot(snapshot: AppUpdateSnapshot): UpdaterWindowVi
 phase: phases[status], currentVersion: snapshot.installed.version, nextVersion: snapshot.latest?.version,
     percent: status === "downloading" && snapshot.progress ? progressInfo(snapshot.progress).percent : null,
     cancelable: status === "downloading" || status === "verifying", primaryAction, notes: snapshot.latest?.notes,
-    detail: snapshot.error ? errorCodeMessage(snapshot.error.code) : status === "downloaded" && !snapshot.canInstall ? "A instalação está bloqueada pelas condições de segurança." : status === "idle" || status === "deferred" ? "Nenhuma atualização em curso." : undefined
+    detail: snapshot.error ? errorCodeMessage(snapshot.error.code) : snapshot.channel === "preview" ? "Canal Preview: Setup sem Authenticode; editor não verificado pelo Windows. A instalação é interativa e requer a sua confirmação." : status === "downloaded" && !snapshot.canInstall ? "A instalação está bloqueada pelas condições de segurança." : status === "idle" || status === "deferred" ? "Nenhuma atualização em curso." : undefined
 };
 }

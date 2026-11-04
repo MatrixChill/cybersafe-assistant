@@ -37,7 +37,7 @@ if(WIN32)
     third-party/monocypher/monocypher.c
     third-party/monocypher/monocypher-ed25519.c)
   target_include_directories(cybersafe-update-launcher PRIVATE third-party/monocypher)
-  target_link_libraries(cybersafe-update-launcher PRIVATE crypt32 bcrypt)
+  target_link_libraries(cybersafe-update-launcher PRIVATE crypt32 bcrypt advapi32)
   set(product_version_file "${CMAKE_CURRENT_SOURCE_DIR}/../../product-version.json")
   set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${product_version_file}")
   file(READ "${product_version_file}" product_identity)
@@ -48,6 +48,14 @@ if(WIN32)
   target_compile_definitions(cybersafe-update-launcher PRIVATE CYBERSAFE_LAUNCHER_VERSION=L\"${launcher_version}\")
   set_target_properties(cybersafe-update-launcher PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release")
+  # EXCLUDE_FROM_ALL: never a packaging dependency, name or output location.
+  # Uses a public RFC test vector and an isolated registry namespace only.
+  add_executable(cybersafe-update-launcher-lab EXCLUDE_FROM_ALL src/update_launcher.cpp "${handoff_header}"
+    third-party/monocypher/monocypher.c third-party/monocypher/monocypher-ed25519.c)
+  target_include_directories(cybersafe-update-launcher-lab PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" third-party/monocypher)
+  target_compile_definitions(cybersafe-update-launcher-lab PRIVATE CYBERSAFE_LAUNCHER_LAB=1 CYBERSAFE_LAUNCHER_VERSION=L\"${launcher_version}\")
+  target_link_libraries(cybersafe-update-launcher-lab PRIVATE crypt32 bcrypt advapi32)
+  set_target_properties(cybersafe-update-launcher-lab PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/lab")
 endif()
 
 set(CMAKE_CXX_STANDARD 17)

@@ -1,5 +1,22 @@
 import test from 'node:test';import assert from 'node:assert/strict';
-import {createWindowsInstaller} from '../src/updater/windows-installer.ts';
+import {createWindowsInstaller,createPreviewWindowsInstaller} from '../src/updater/windows-installer.ts';
+
+test('Preview requires an idle service lease before staging and releases it on failure',async()=>{
+  for (const granted of [false,true]) {
+    const reached=[];
+    const adapter=createPreviewWindowsInstaller({
+      stagingRoot:'C:/fixture',journalFile:'C:/fixture/op.json',authorizeExecution:()=>true,
+      confirmConsent:async()=>true,signatureVerifier:{verify:async()=>({ok:true})},
+      acquireScanLease:async()=>{reached.push('lease');return granted?{renew:async()=>true,release:async()=>{reached.push('release')}}:null;},
+      requestShutdown:async()=>{reached.push('shutdown');},
+    });
+    const result=await adapter.install({confirmed:true,scanState:'idle',expectedVersion:'0.2.0-rc.6',
+      artifactPath:'C:/missing/setup.exe',manifest:{channel:'preview',version:'0.2.0-rc.6',
+      file:{sizeBytes:1},signature:{value:'invalid',signedByFingerprint:'unknown'}}});
+    assert.equal(result.ok,false);
+    if(process.platform==='win32') assert.deepEqual(reached,granted?['lease','release']:['lease']);
+  }
+});
 test('default installer refuses execution before staging or shutdown',async()=>{
  const adapter=createWindowsInstaller({stagingRoot:'C:/fixture',journalFile:'C:/fixture/op.json',expectedPublisher:'CyberSafe',signatureVerifier:{verify:async()=>({ok:true})},publisherVerifier:{verify:async()=>({ok:true})},requestShutdown:async()=>{throw Error('must not shut down')}});
  const r=await adapter.install({confirmed:true,expectedVersion:'0.2.0',scanState:'idle',artifactPath:'C:/missing/setup.exe',manifest:{version:'0.2.0'}});assert.equal(r.ok,false);

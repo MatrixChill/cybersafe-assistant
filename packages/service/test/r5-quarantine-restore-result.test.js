@@ -5,6 +5,7 @@ import { ProtectionEngineService } from "../dist/engine.js";
 function fixture(result) {
   // Exercise the real methods without constructing or starting OS adapters.
   const engine = Object.create(ProtectionEngineService.prototype);
+  engine.scanManager = {updateLeaseActive:()=>false};
   const calls = { trusted: [], events: [], history: [], restored: [] };
   engine.quarantine = {
     list: () => [{ id: "entry", sha256: "test-hash" }],

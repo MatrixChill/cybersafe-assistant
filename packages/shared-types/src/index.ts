@@ -1115,6 +1115,9 @@ export interface ServiceCommandMap {
   "scan.start": { type: ScanType; targetPath?: string };
   /** Estado da análise ativa (ressincronização da UI após remount/navegação). */
   "scan.getActive": undefined;
+  "update.acquireScanLease": undefined;
+  "update.renewScanLease": {token:string};
+  "update.releaseScanLease": {token:string};
   "scan.getLast": { id?: string } | undefined;
   /** Histórico persistente de análises (paginado, mais recente primeiro). */
   "scan.history": { limit?: number; cursor?: string } | undefined;
@@ -1228,6 +1231,9 @@ export interface ServiceResponseMap {
   "exclusions.update": { success: boolean; error?: string };
   "scan.start": { id: string; success: boolean; error?: string };
   "scan.getActive": ScanState | null;
+  "update.acquireScanLease": {token:string|null};
+  "update.renewScanLease": {ok:boolean};
+  "update.releaseScanLease": {ok:boolean};
   "scan.getLast": ScanState | null;
   "scan.history": ScanHistoryPage;
   "usb.getState": UsbProtectionSnapshot;

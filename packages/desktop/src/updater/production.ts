@@ -1,5 +1,5 @@
 import {release} from 'node:os';
-import {createWindowsInstaller} from './windows-installer.js';
+import {createWindowsInstaller,createPreviewWindowsInstaller,type ScanLease} from './windows-installer.js';
 import {createWindowsPublisherVerifier} from './windows-publisher.js';
 import type {InstallGateContext, ScanState} from './types.js';
 import stableTrust from './release-trust.json';
@@ -18,6 +18,7 @@ interface InstallationRuntime {
   requestShutdown:()=>Promise<void>;
   confirmConsent:(context:InstallGateContext)=>Promise<boolean>;
   scanProbe:()=>Promise<ScanState>;
+  acquireScanLease?:()=>Promise<ScanLease|null>;
 }
 /** Build-pinned trust; assisted installation remains a separately disabled gate. */
 export function createProductionUpdater(opts: {previewOptIn?: boolean; runtimeSupported: boolean; installation?: InstallationRuntime; automaticCheckEnabled?: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string}) {
@@ -38,14 +39,18 @@ export function createProductionUpdater(opts: {previewOptIn?: boolean; runtimeSu
   if (!config.ok) return unavailable();
   const transport = createGitHubReleaseOpener(createNodeHttpsOpener());
   const assisted=!preview&&stableTrust.assistedInstallationEnabled===true&&opts.runtimeSupported&&opts.installation!==undefined;
+  const previewAssisted=preview&&opts.runtimeSupported&&opts.installation?.acquireScanLease!==undefined;
   const signatureVerifier=createEd25519ManifestVerifier({publicKey:trust.publicKeyPem,pinnedFingerprint:trust.pinnedKeyFingerprint});
   const publisherVerifier=assisted?createWindowsPublisherVerifier():BLOCKED_PUBLISHER;
-  const installer=assisted&&opts.installation?createWindowsInstaller({
+  const installer=previewAssisted&&opts.installation?.acquireScanLease?createPreviewWindowsInstaller({
+    ...opts.installation,acquireScanLease:opts.installation.acquireScanLease,signatureVerifier,authorizeExecution:()=>previewAssisted,
+  }):assisted&&opts.installation?createWindowsInstaller({
     ...opts.installation,signatureVerifier,publisherVerifier,expectedPublisher:trust.publisherLabel,authorizeExecution:()=>assisted,
   }):BLOCKED_INSTALLER;
   return createUpdater({
     config, runtimeSupported: opts.runtimeSupported, installed: {version: opts.installedVersion, build: opts.installedBuild, commit: opts.installedCommit},
-    manualDownloadOnly: !assisted,
+    manualDownloadOnly: !assisted&&!previewAssisted,
+    previewAssistedInstallation:previewAssisted,
     previewWindowsBuild: preview ? Number(release().split(".")[2]) : undefined,
     source: new HttpsFeedSource(config.config, createHttpsFeedFetcher(config.config, transport)),
     downloader: createHttpsArtifactDownloader(config.config, transport),

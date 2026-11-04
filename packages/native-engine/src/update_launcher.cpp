@@ -6,6 +6,7 @@
 #include <array>
 #include <regex>
 #include <tuple>
+#include <algorithm>
 #include "update_launcher_program.h"
 #include <wincrypt.h>
 #include <bcrypt.h>
@@ -13,8 +14,14 @@
 
 // Ed25519 SPKI SHA-256: 3982C36398918D077A417DDA02E6E7FF6C1F70622684DA4FB43673652E4C8FB6.
 static constexpr std::array<uint8_t,32> kPreviewKey{
+#ifdef CYBERSAFE_LAUNCHER_LAB
+  // RFC 8032 test vector, exclusively in the separate laboratory target.
+  0xd7,0x5a,0x98,0x01,0x82,0xb1,0x0a,0xb7,0xd5,0x4b,0xfe,0xd3,0xc9,0x64,0x07,0x3a,
+  0x0e,0xe1,0x72,0xf3,0xda,0xa6,0x23,0x25,0xaf,0x02,0x1a,0x68,0xf7,0x07,0x51,0x1a
+#else
   0x6d,0x9b,0x98,0xe3,0xe1,0x37,0x44,0x01,0x05,0x67,0x5d,0x83,0x4c,0x7f,0xcd,0x46,
   0x86,0x15,0x33,0x28,0xe8,0xd1,0x20,0x21,0xa8,0x7f,0x29,0x39,0x02,0x3c,0x6d,0x14
+#endif
 };
 
 static bool DecodeBase64(const std::wstring& input, size_t maxLength, std::vector<uint8_t>& out) {
@@ -90,6 +97,8 @@ class LockedArtifact {
   std::vector<HANDLE> handles;
 };
 
+#include "preview-parent.h"
+
 static bool MatchLockedArtifact(HANDLE file, unsigned long long expectedSize, const std::string& expectedHash) {
   BY_HANDLE_FILE_INFORMATION info{};
   bool ok = GetFileInformationByHandle(file, &info) &&
@@ -123,7 +132,8 @@ static bool MatchLockedArtifact(HANDLE file, unsigned long long expectedSize, co
 // Read only the exact signed canonical representation. Reject duplicate keys,
 // unknown fields, alternate URL spellings and unexpected JSON representations.
 static int InspectPreviewManifest(const wchar_t* bytes, const wchar_t* signature,
-                                  const wchar_t* installed, const wchar_t* windowsBuild, const wchar_t* artifact) {
+                                  const wchar_t* installed, const wchar_t* windowsBuild, const wchar_t* artifact,
+                                  LockedArtifact* retained = nullptr) {
   std::vector<uint8_t> message;
   const int result = ReadSignedPreviewBytes(bytes, signature, message);
   if (result != 0) return result;
@@ -149,7 +159,8 @@ static int InspectPreviewManifest(const wchar_t* bytes, const wchar_t* signature
     if (!ParseRc(minimum.substr(1, minimum.size()-2) + "-rc.1", min) || source < min) return 8;
   }
   if (!artifact) return 0;
-  LockedArtifact locked;
+  LockedArtifact temporary;
+  LockedArtifact& locked = retained ? *retained : temporary;
   return locked.Open(artifact) && MatchLockedArtifact(locked.file, std::stoull(match[6]), match[5]) ? 0 : 9;
 }
 
@@ -166,6 +177,8 @@ static std::wstring InstalledWindowsBuild() {
 }
 
 int wmain(int argc, wchar_t** argv) {
+  LockedArtifact previewArtifact;
+  PreviewParent previewParent;
   if (argc == 4 && std::wstring(argv[1]) == L"--verify-preview-signature") {
     std::vector<uint8_t> message;
     return ReadSignedPreviewBytes(argv[2], argv[3], message);
@@ -177,8 +190,23 @@ int wmain(int argc, wchar_t** argv) {
     const auto windowsBuild = InstalledWindowsBuild();
     return InspectPreviewManifest(argv[2], argv[3], CYBERSAFE_LAUNCHER_VERSION, windowsBuild.c_str(), argv[4]);
   }
-  if (argc != 2) return 2;
-  const std::wstring encoded(argv[1]);
+  const bool preview = argc == 5 && std::wstring(argv[1]) == L"--preview-handoff";
+  if (preview) {
+    if (!previewParent.Validate()) return 10;
+    const auto build = InstalledWindowsBuild();
+    const int verified = InspectPreviewManifest(argv[2], argv[3], CYBERSAFE_LAUNCHER_VERSION,
+                                                build.c_str(), argv[4], &previewArtifact);
+    if (verified) return verified;
+    const std::wstring artifact(argv[4]);
+    const auto separator = artifact.find_last_of(L'\\');
+    if (separator == std::wstring::npos || artifact.substr(separator + 1) != L"installer.exe") return 11;
+    const auto stage = artifact.substr(0, separator);
+    // Override rather than trust environment paths/parent IDs from the caller.
+    if (!SetEnvironmentVariableW(L"CS_UPDATE_STAGE", stage.c_str()) ||
+        !SetEnvironmentVariableW(L"CS_UPDATE_RESULT", (stage + L"\\result.json").c_str()) ||
+        !SetEnvironmentVariableW(L"CS_UPDATE_EXECUTION", L"authorized")) return 11;
+  } else if (argc != 2) return 2;
+  const std::wstring encoded(preview ? kHandoffProgram : argv[1]);
   // Base64 is an encoding, not an authorization to run caller-supplied code.
   if (encoded != kHandoffProgram) return 2;
   wchar_t windows[MAX_PATH + 1]{};

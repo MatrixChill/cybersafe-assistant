@@ -342,7 +342,7 @@ export class Updater {
       this.artifactPath = finalPath;
 
       if (manifest.channel === "preview" || this.deps.manualDownloadOnly === true) {
-        this.set({ phase: "downloaded", canInstall: false, progress: { downloadedBytes: data.length, totalBytes: data.length }, error: undefined });
+        this.set({ phase: "downloaded", canInstall: manifest.channel === "preview" && this.deps.previewAssistedInstallation === true && !this.deps.manualDownloadOnly, progress: { downloadedBytes: data.length, totalBytes: data.length }, error: undefined });
         return this.ok();
       }
 
@@ -385,7 +385,8 @@ export class Updater {
   }
 
   async install(request: { confirmed: boolean; expectedVersion: string }): Promise<UpdaterResult> {
-    if (this.resolvedConfig?.channel === "preview" || this.deps.manualDownloadOnly) return this.fail("publisher", "instalação automática indisponível: instalador sem assinatura Authenticode validada");
+    const preview = this.resolvedConfig?.channel === "preview";
+    if ((preview && this.deps.previewAssistedInstallation !== true) || this.deps.manualDownloadOnly) return this.fail("publisher", "instalação automática indisponível: instalador sem assinatura Authenticode validada");
     const blocked = this.gate();
     if (blocked) return blocked;
     if (this.busy) return this.busyResult();
@@ -413,12 +414,18 @@ export class Updater {
       if (data.length !== manifest.file.sizeBytes) return this.fail("installation", `tamanho mudou (${data.length} ≠ ${manifest.file.sizeBytes})`);
       if (sha256Hex(data) !== manifest.file.sha256.toLowerCase()) return this.fail("installation", "SHA-256 mudou desde a verificação");
 
-      // 2) RE-VERIFICAR o editor (Authenticode) antes de executar.
+      const signature = manifest.signature;
+      if (!(await this.deps.signatureVerifier.verify(canonicalManifestBytes(manifest), signature.value, signature.signedByFingerprint)).ok)
+        return this.fail("untrusted-metadata", "assinatura do manifesto recusada antes da instalação");
+      // Stable always requires Authenticode. Preview uses the explicit native
+      // Ed25519 path, and never claims an authenticated Windows publisher.
+      if (!preview) {
       try {
         const publisher = await this.deps.publisherVerifier.verify(artifactPath, this.resolvedConfig!.expectedPublisherName);
         if (!publisher.ok) return this.fail("publisher", `editor não verificado antes de instalar (${publisher.reason ?? "?"})`);
       } catch {
         return this.fail("publisher", "verificador de editor falhou (fail-closed)");
+      }
       }
 
       // 3) scan CONFIRMADO IDLE como ÚLTIMO gate antes de executar. Revalidação de

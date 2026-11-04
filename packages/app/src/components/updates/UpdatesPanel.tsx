@@ -284,7 +284,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
             )}
           </div>
 
-          {snapshot.channel === "preview" && <p>Canal Preview · Setup sem assinatura Authenticode. Instalação manual.</p>}
+          {snapshot.channel === "preview" && <p>Canal Preview · Setup sem assinatura Authenticode; editor não verificado pelo Windows. {snapshot.manualDownloadOnly ? "Instalação manual." : "Instalação interativa após confirmação; não ignore avisos do Windows."}</p>}
           {snapshot.manualDownloadOnly && (
             <div role="note" className="rounded border border-border p-3 text-sm">
               {snapshot.status === "downloaded"

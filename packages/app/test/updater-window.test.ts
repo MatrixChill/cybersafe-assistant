@@ -5,6 +5,14 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { mapUpdaterSnapshot } from "../src/components/updates/updaterWindowModel";
 import { UpdaterWindow } from "../src/components/updates/UpdaterWindow";
 import type { AppUpdateSnapshot } from "@cybersafe/shared-types";
+import {buildAmbitoAtualizacoes} from '../src/components/updates/updateScope';
+
+test('assisted Preview never claims a Windows authenticated publisher',()=>{
+  const snapshot={...base,channel:'preview' as const,status:'downloaded' as const,canInstall:true};
+  const scope=buildAmbitoAtualizacoes({bridgeAvailable:true,snapshot});
+  assert.match(scope.verificacao,/sem Authenticode/);
+  assert.match(mapUpdaterSnapshot(snapshot).detail??'',/sem Authenticode/);
+});
 const base: AppUpdateSnapshot = { status: "unconfigured", channel: "stable", installed: { version: "0.2.0-rc.1" }, canInstall: false, automaticCheckEnabled: false };
 test("unconfigured snapshot never offers downloading or installation", () => {
   const v = mapUpdaterSnapshot(base); assert.equal(v.phase, "unavailable"); assert.equal(v.primaryAction, undefined);

@@ -8,7 +8,7 @@ import path from 'node:path';
 function service() {
  const s=Object.create(ProtectionEngineService.prototype);
  Object.assign(s,{killRequestSeq:0,actionsLog:{write:async()=>{}},pipeAuthRequired:true,pipeToken:'synthetic-not-secret',disposed:false,isShuttingDown:false,startupStateValue:'ready',criticalRpcOperations:0,
-  clamDatabaseGate:{state:{activeScans:0,updatePending:false,updateActive:false}},protectionState:false,protectionTransition:null,protectionStopUnconfirmed:false,fileObservationReads:0,realtimeQueue:{size:0,active:0},clamavPrefetches:new Map(),scanAbortControllers:new Map(),scanManager:{getActiveScan:()=>null},updater:{operationInProgress:false},ownChildPids:new Map(),processes:[]});
+  clamDatabaseGate:{state:{activeScans:0,updatePending:false,updateActive:false}},protectionState:false,protectionTransition:null,protectionStopUnconfirmed:false,fileObservationReads:0,realtimeQueue:{size:0,active:0},clamavPrefetches:new Map(),scanAbortControllers:new Map(),scanManager:{getActiveScan:()=>null,updateLeaseActive:()=>false},updater:{operationInProgress:false},ownChildPids:new Map(),processes:[]});
  return s;
 }
 test('service vetoes only critical work, untrusted pipe, startup and definitions updates',()=>{
@@ -18,7 +18,7 @@ test('service vetoes only critical work, untrusted pipe, startup and definitions
  // P0: realtime file work and the global scan are independent of an individual
  // handle-based termination. They must not hold the user in "aguarda alguns
  // segundos" indefinitely; protected/identity gates below still apply.
- for(const allowed of [{realtimeQueue:{size:3,active:1}},{fileObservationReads:2},{updater:{operationInProgress:true}},{clamDatabaseGate:{state:{activeScans:1,updatePending:true,updateActive:true}}}, {clamavPrefetches:new Map([['scan',{}]])},{scanAbortControllers:new Map([['scan',{}]]),scanManager:{getActiveScan:()=>({id:'scan'})}}]){const s=service();Object.assign(s,allowed);assert.equal(s.terminationBlocked(),null,JSON.stringify(allowed));}}
+ for(const allowed of [{realtimeQueue:{size:3,active:1}},{fileObservationReads:2},{updater:{operationInProgress:true}},{clamDatabaseGate:{state:{activeScans:1,updatePending:true,updateActive:true}}}, {clamavPrefetches:new Map([['scan',{}]])},{scanAbortControllers:new Map([['scan',{}]]),scanManager:{getActiveScan:()=>({id:'scan'}),updateLeaseActive:()=>false}}]){const s=service();Object.assign(s,allowed);assert.equal(s.terminationBlocked(),null,JSON.stringify(allowed));}}
  finally{if(oldReadonly===undefined)delete process.env.CYBERSAFE_DEV_WINDOWS_READONLY;else process.env.CYBERSAFE_DEV_WINDOWS_READONLY=oldReadonly;if(oldFixture===undefined)delete process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN;else process.env.CYBERSAFE_REALDEV_FIXTURE_SCAN=oldFixture;}
 });
 test('legacy tree request stays refused without taskkill',async()=>{const s=service();s.runTaskkill=()=>{throw Error('must never run')};assert.equal((await s.killProcess(12345)).success,false)});
@@ -37,7 +37,7 @@ test('real service dispatch with fake native handle: proof-only event, sanitized
  openIndividualProcess:()=>({read:()=>identity,exited:()=>exited,terminate:()=>{kills++;exited=true},close(){}})});
  // A benign fixture must remain terminable while realtime work and a global
  // scan are active; the handle and creation identity are the proof, not queue idleness.
- Object.assign(s,{realtimeQueue:{size:2,active:1},fileObservationReads:1,clamavPrefetches:new Map([['scan',{}]]),scanAbortControllers:new Map([['scan',{}]]),scanManager:{getActiveScan:()=>({id:'scan'})}});
+ Object.assign(s,{realtimeQueue:{size:2,active:1},fileObservationReads:1,clamavPrefetches:new Map([['scan',{}]]),scanAbortControllers:new Map([['scan',{}]]),scanManager:{getActiveScan:()=>({id:'scan'}),updateLeaseActive:()=>false}});
  const prepared=await s.dispatch('process.termination.prepare',{pid:12345,startedAt});assert.equal(prepared.ok,true,JSON.stringify(prepared));assert.equal(kills,0);
  const result=await s.dispatch('process.termination.confirm',{ticket:prepared.ticket});assert.equal(result.confirmation,'handle-signaled');assert.equal(kills,1);assert.equal(s.processesEnumeratedAt,0);assert.equal(s.processes.length,1,'rows are not hidden by bare PID');
  assert.equal(events.length,1);assert.equal(events[0][0],'process.killed');assert.equal(events[0][3].scope,'single-process');assert.equal(events.some(e=>e[0]==='process.exited'),false);
@@ -70,7 +70,7 @@ test('prepare -> confirm revalidates service gates and native identity without r
  const startedAt='2026-10-30T08:00:00.0000000Z';
  const cases=[
   ['idle','killed',()=>{}],
-  ['scan and realtime queue become busy','killed',s=>Object.assign(s,{realtimeQueue:{size:4,active:1},fileObservationReads:2,scanAbortControllers:new Map([['global',{}]]),scanManager:{getActiveScan:()=>({id:'global'})}})],
+  ['scan and realtime queue become busy','killed',s=>Object.assign(s,{realtimeQueue:{size:4,active:1},fileObservationReads:2,scanAbortControllers:new Map([['global',{}]]),scanManager:{getActiveScan:()=>({id:'global'}),updateLeaseActive:()=>false}})],
   ['natural exit','already-exited',(_s,f)=>f.exited=true],
   ['PID reuse','reused',(_s,f)=>f.identity={...f.identity,creation:(BigInt(f.identity.creation)+10n).toString()}],
   ['native eligibility revoked','protected',(_s,f)=>f.identity={...f.identity,eligible:false}],

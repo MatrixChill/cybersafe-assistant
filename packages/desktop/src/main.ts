@@ -1926,6 +1926,15 @@ if (!gotTheLock) {
         stagingRoot: path.join(app.getPath("userData"), "update-staging"),
         journalFile: path.join(app.getPath("userData"), "updater-operation.json"),
         launcherPath: path.join(process.resourcesPath, "cybersafe-update-launcher.exe"),
+        acquireScanLease: async () => {
+          if(isQuitting || !client.isConnected) return null;
+          const {token}=await client.request("update.acquireScanLease",undefined);
+          if(!token) return null;
+          return {
+            renew:async()=>!isQuitting && client.isConnected && (await client.request("update.renewScanLease",{token})).ok,
+            release:async()=>{if(client.isConnected) await client.request("update.releaseScanLease",{token});},
+          };
+        },
         // Reuse service/watcher/API shutdown and the existing before-quit cleanup.
         requestShutdown: async () => { if (isQuitting) throw new Error("Shutdown already started"); await quitCyberSafe(); },
         confirmConsent: async (context) => !isQuitting && context.confirmed === true

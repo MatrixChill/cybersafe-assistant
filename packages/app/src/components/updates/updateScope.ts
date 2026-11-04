@@ -21,6 +21,7 @@ export interface TipoAtualizacao {
 }
 
 export interface SnapshotPrograma {
+  channel?: "stable" | "preview";
   status?: string | null;
   installed?: { version?: string | null; build?: string | null } | null;
   canInstall?: boolean | null;
@@ -70,7 +71,9 @@ export function buildAmbitoAtualizacoes({ bridgeAvailable, snapshot }: { bridgeA
 
   const verificacao = snapshot && snapshot.canInstall === true
     ? bridgeAvailable
-      ? "Conforme o snapshot atual, o atualizador indica que as verificações de integridade/autoria/publicador/política foram concluídas; esta vista não repete essa verificação."
+      ? snapshot.channel === "preview"
+        ? "Preview: manifesto Ed25519 e SHA-256 verificados; Setup sem Authenticode e editor não verificado pelo Windows. O launcher revalida os ficheiros antes de abrir a instalação interativa."
+        : "Conforme o snapshot atual, o atualizador indica que as verificações de integridade/autoria/publicador/política foram concluídas; esta vista não repete essa verificação."
       : "O snapshot apresentado indica verificações concluídas ANTERIORMENTE; sem ponte nesta janela, o estado atual NÃO é confirmado."
     : "Assinatura/verificação não confirmada nesta vista (o estado pode ser apenas SHA ou configuração).";
 
