@@ -794,6 +794,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
     case WM_ERASEBKGND:
       return 1;
     case WM_DESTROY:
+      // Wake Start before the UI thread exits so normal close stays cancel.
+      if(g_decisionEvent) SetEvent(g_decisionEvent);
       g_window=nullptr;
       SetEvent(g_decisionEvent);
       PostQuitMessage(0);
