@@ -1,7 +1,9 @@
+import {release} from 'node:os';
 import {createWindowsInstaller} from './windows-installer.js';
 import {createWindowsPublisherVerifier} from './windows-publisher.js';
 import type {InstallGateContext, ScanState} from './types.js';
-import trust from './release-trust.json';
+import stableTrust from './release-trust.json';
+import previewTrust from './preview-trust.json';
 import { createUnconfiguredUpdater, BLOCKED_PUBLISHER } from './bridge.ts';
 import { createUpdater, BLOCKED_INSTALLER } from './updater.ts';
 import { resolveUpdaterConfig } from './config.ts';
@@ -18,22 +20,24 @@ interface InstallationRuntime {
   scanProbe:()=>Promise<ScanState>;
 }
 /** Build-pinned trust; assisted installation remains a separately disabled gate. */
-export function createProductionUpdater(opts: {runtimeSupported: boolean; installation?: InstallationRuntime; automaticCheckEnabled?: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string}) {
+export function createProductionUpdater(opts: {previewOptIn?: boolean; runtimeSupported: boolean; installation?: InstallationRuntime; automaticCheckEnabled?: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string}) {
   const unavailable = () => createUnconfiguredUpdater(opts);
-  if (!trust.enabled || !isGitHubReleaseUrl(trust.feedManifestUrl)) return unavailable();
+  const preview = opts.previewOptIn === true && /^\d+\.\d+\.\d+-rc\.[1-9]\d*$/.test(opts.installedVersion);
+  const trust = preview ? previewTrust : stableTrust;
+  if ((!preview && !stableTrust.enabled) || !isGitHubReleaseUrl(trust.feedManifestUrl)) return unavailable();
   try {
     if (fingerprintFromPublicKey(trust.publicKeyPem) !== trust.pinnedKeyFingerprint) return unavailable();
   } catch { return unavailable(); }
   const config = resolveUpdaterConfig({
-    channel: 'stable', feedManifestUrl: trust.feedManifestUrl,
+    channel: preview ? 'preview' : 'stable', feedManifestUrl: trust.feedManifestUrl,
     originAllowlist: ['github.com'], pinnedKeyFingerprint: trust.pinnedKeyFingerprint,
     expectedPublisherName: trust.publisherLabel, cacheDir: opts.cacheDir,
     timeoutMs: 120000, maxDownloadBytes: 1024 * 1024 * 1024,
-    automaticCheckEnabled: opts.automaticCheckEnabled === true, minCheckIntervalMs: 30_000,
+    automaticCheckEnabled: !preview && opts.automaticCheckEnabled === true, minCheckIntervalMs: 30_000,
   });
   if (!config.ok) return unavailable();
   const transport = createGitHubReleaseOpener(createNodeHttpsOpener());
-  const assisted=trust.assistedInstallationEnabled===true&&opts.runtimeSupported&&opts.installation!==undefined;
+  const assisted=!preview&&stableTrust.assistedInstallationEnabled===true&&opts.runtimeSupported&&opts.installation!==undefined;
   const signatureVerifier=createEd25519ManifestVerifier({publicKey:trust.publicKeyPem,pinnedFingerprint:trust.pinnedKeyFingerprint});
   const publisherVerifier=assisted?createWindowsPublisherVerifier():BLOCKED_PUBLISHER;
   const installer=assisted&&opts.installation?createWindowsInstaller({
@@ -42,6 +46,7 @@ export function createProductionUpdater(opts: {runtimeSupported: boolean; instal
   return createUpdater({
     config, runtimeSupported: opts.runtimeSupported, installed: {version: opts.installedVersion, build: opts.installedBuild, commit: opts.installedCommit},
     manualDownloadOnly: !assisted,
+    previewWindowsBuild: preview ? Number(release().split(".")[2]) : undefined,
     source: new HttpsFeedSource(config.config, createHttpsFeedFetcher(config.config, transport)),
     downloader: createHttpsArtifactDownloader(config.config, transport),
     signatureVerifier,

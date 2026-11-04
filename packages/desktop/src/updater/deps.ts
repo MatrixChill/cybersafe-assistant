@@ -24,6 +24,7 @@ export interface UpdaterDeps {
   source: UpdateSource;
   downloader: ArtifactDownloader;
   signatureVerifier: ManifestSignatureVerifier;
+  previewWindowsBuild?: number;
   publisherVerifier: PublisherVerifier;
   installer: Installer;
   cacheFs: CacheFileSystem;

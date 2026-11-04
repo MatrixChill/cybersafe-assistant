@@ -62,7 +62,7 @@ export class Updater {
     this.cache = new CacheStore(deps.cacheFs, deps.config.ok ? deps.config.config.cacheDir : path.resolve("."));
     const automatic = deps.config.ok ? deps.config.config.automaticCheckEnabled : false;
     if (deps.config.ok) this.resolvedConfig = deps.config.config;
-    this.snapshot = { ...baseSnapshot(deps.installed, automatic), manualDownloadOnly: deps.manualDownloadOnly === true };
+    this.snapshot = { ...baseSnapshot(deps.installed, automatic), channel: this.resolvedConfig?.channel ?? "stable", manualDownloadOnly: deps.manualDownloadOnly === true };
     if (!deps.runtimeSupported) {
       this.snapshot = { ...this.snapshot, phase: "unsupported", error: { code: "unsupported", message: "runtime portable/dev: atualização não suportada" } };
     } else if (!deps.config.ok) {
@@ -193,7 +193,7 @@ export class Updater {
         return this.ok();
       }
 
-      const validation = validateManifest(outcome.manifest);
+      const validation = validateManifest(outcome.manifest, this.resolvedConfig!.channel);
       if (!validation.ok) return this.fail("invalid-manifest", validation.message);
       const manifest = validation.manifest;
 
@@ -217,9 +217,20 @@ export class Updater {
       // Pré-releases/versões internas NUNCA são oferecidas pelo canal estável,
       // mesmo assinadas — identidade canónica é `X.Y.Z` sem pré-release.
       const parsedVersion = parseSemVer(manifest.version);
-      if (parsedVersion && parsedVersion.prerelease.length > 0) {
+      if (manifest.channel === "stable" && parsedVersion && parsedVersion.prerelease.length > 0) {
         this.validated = undefined;
         return this.fail("invalid-manifest", `versão ${manifest.version} é pré-release/interna; o canal estável não a oferece`);
+      }
+
+      if (manifest.channel === "preview") {
+        const build = this.deps.previewWindowsBuild;
+        const installedCore = this.deps.installed.version.split("-")[0];
+        const minimum = manifest.compatibility?.fromVersion;
+        if (build === undefined || !Number.isSafeInteger(build) ||
+            build < manifest.compatibility!.minWindowsBuild! ||
+            (minimum && isDowngrade(installedCore, minimum))) {
+          return this.fail("invalid-manifest", "esta versão Preview não é compatível com o Windows ou a versão instalada");
+        }
       }
 
       if (isDowngrade(manifest.version, this.deps.installed.version)) {
@@ -330,7 +341,7 @@ export class Updater {
       const finalPath = artifactFinalPath(config.cacheDir, manifest.version, manifest.file.sha256);
       this.artifactPath = finalPath;
 
-      if (this.deps.manualDownloadOnly === true) {
+      if (manifest.channel === "preview" || this.deps.manualDownloadOnly === true) {
         this.set({ phase: "downloaded", canInstall: false, progress: { downloadedBytes: data.length, totalBytes: data.length }, error: undefined });
         return this.ok();
       }
@@ -374,7 +385,7 @@ export class Updater {
   }
 
   async install(request: { confirmed: boolean; expectedVersion: string }): Promise<UpdaterResult> {
-    if (this.deps.manualDownloadOnly) return this.fail("publisher", "instalação automática indisponível: instalador sem assinatura Authenticode validada");
+    if (this.resolvedConfig?.channel === "preview" || this.deps.manualDownloadOnly) return this.fail("publisher", "instalação automática indisponível: instalador sem assinatura Authenticode validada");
     const blocked = this.gate();
     if (blocked) return blocked;
     if (this.busy) return this.busyResult();

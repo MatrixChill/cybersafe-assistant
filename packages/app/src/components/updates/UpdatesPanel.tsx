@@ -284,6 +284,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
             )}
           </div>
 
+          {snapshot.channel === "preview" && <p>Canal Preview · Setup sem assinatura Authenticode. Instalação manual.</p>}
           {snapshot.manualDownloadOnly && (
             <div role="note" className="rounded border border-border p-3 text-sm">
               {snapshot.status === "downloaded"

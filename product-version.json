@@ -1,6 +1,6 @@
 {
-  "version": "0.2.0-rc.4",
+  "version": "0.2.0-rc.5",
   "channel": "internal",
-  "codename": "windows-orbital-rc4",
+  "codename": "windows-preview-rc5",
   "note": "Fonte canónica da versão do produto. Lida por scripts/app-version.mjs, injectada no manifesto da aplicação empacotada e no renderer (__BUILD__). Substitui o uso de package.json de workspace como identidade do produto. appId não é definido aqui."
 }

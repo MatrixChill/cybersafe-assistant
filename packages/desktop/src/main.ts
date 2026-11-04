@@ -1917,6 +1917,7 @@ if (!gotTheLock) {
     // se inventa um valor a partir da versão ou do nome do ficheiro.
     const installedIdentity = readBuildIdentity(app.getAppPath(), app.getVersion());
     appUpdater = createProductionUpdater({
+      previewOptIn: process.argv.includes("--cybersafe-preview-updates"),
       cacheDir: updaterCacheDir(app.getPath("userData")),
       runtimeSupported: app.isPackaged && process.platform === "win32",
       installedVersion: app.getVersion(),

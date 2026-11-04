@@ -65,7 +65,7 @@ function asRecord(value) {
 export function normalizeForSigning(raw) {
   const m = asRecord(raw);
   if (!m) fail("manifesto não é um objeto JSON");
-  if (m.channel !== "stable") fail(`canal não suportado: ${String(m.channel)}`);
+  if (m.channel !== "stable" && m.channel !== "preview") fail(`canal não suportado: ${String(m.channel)}`);
   if (typeof m.version !== "string" || !SEMVER.test(m.version)) fail("version não é semver válido");
   if (typeof m.publishedAt !== "string" || Number.isNaN(Date.parse(m.publishedAt))) fail("publishedAt inválido");
   if (typeof m.notes !== "string") fail("notes tem de ser texto");
@@ -110,9 +110,19 @@ export function normalizeForSigning(raw) {
     }
     compatibility = { minWindowsBuild, fromVersion };
   }
+  if (m.channel === "preview" && (
+    m.schema !== "cybersafe-release/1" ||
+    !/^\d+\.\d+\.\d+-rc\.[1-9]\d*$/.test(m.version) ||
+    sourceCommit?.length !== 40 || !compatibility?.minWindowsBuild ||
+    m.requiresElevation !== false ||
+    publisher.name !== "CyberSafe Preview (sem Authenticode)" ||
+    url.origin !== "https://github.com" || url.username || url.password || url.search || url.hash ||
+    !url.pathname.startsWith('/MatrixChill/cybersafe-assistant/releases/download/v' + m.version + '/') ||
+    !/^[A-Za-z0-9._-]+\.exe$/.test(url.pathname.split('/').at(-1))
+  )) fail("identidade, URL, compatibilidade ou política Preview inválida");
   return {
     schema: typeof m.schema === "string" ? m.schema : "cybersafe-release/1",
-    channel: "stable",
+    channel: m.channel,
     version: m.version,
     publishedAt: m.publishedAt,
     notes: m.notes,

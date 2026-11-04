@@ -67,7 +67,7 @@ function fail(
 
 export function resolveUpdaterConfig(input: RawConfigInput): ConfigResolution {
   // Canal fixo: qualquer outra coisa é "unconfigured" (não adivinhamos).
-  if (input.channel !== undefined && input.channel !== "stable") {
+  if (input.channel !== undefined && input.channel !== "stable" && input.channel !== "preview") {
     return fail("bad-limits", `canal não suportado: ${String(input.channel)}`);
   }
 
@@ -125,7 +125,7 @@ export function resolveUpdaterConfig(input: RawConfigInput): ConfigResolution {
   return {
     ok: true,
     config: {
-      channel: "stable",
+      channel: input.channel === "preview" ? "preview" : "stable",
       feedManifestUrl,
       originAllowlist: allowlist,
       pinnedKeyFingerprint,

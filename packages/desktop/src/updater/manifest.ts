@@ -50,11 +50,11 @@ function isIsoDate(value: unknown): value is string {
   return Number.isFinite(t);
 }
 
-export function validateManifest(raw: unknown): ManifestValidation {
+export function validateManifest(raw: unknown, expectedChannel: ValidatedManifest["channel"] = "stable"): ManifestValidation {
   const obj = asRecord(raw);
   if (!obj) return invalid("manifesto não é um objeto JSON");
 
-  if (obj.channel !== "stable") {
+  if (obj.channel !== expectedChannel) {
     return invalid(`canal não suportado: ${String(obj.channel)}`);
   }
   if (typeof obj.version !== "string" || !isValidSemVer(obj.version)) {
@@ -143,11 +143,22 @@ export function validateManifest(raw: unknown): ManifestValidation {
     compatibility = { minWindowsBuild, fromVersion };
   }
 
+  if (expectedChannel === "preview" && (
+    obj.schema !== "cybersafe-release/1" ||
+    !/^\d+\.\d+\.\d+-rc\.[1-9]\d*$/.test(obj.version) ||
+    !file.url.startsWith("https://github.com/MatrixChill/cybersafe-assistant/releases/download/v" + obj.version + "/") ||
+    !/^[A-Za-z0-9._-]+\.exe$/.test(file.url.slice(file.url.lastIndexOf("/") + 1)) ||
+    new URL(file.url).pathname.split("/").length !== 7 ||
+    sourceCommit?.length !== 40 || !compatibility?.minWindowsBuild ||
+    obj.requiresElevation !== false ||
+    publisher.name !== "CyberSafe Preview (sem Authenticode)"
+  )) return invalid("identidade, compatibilidade ou política Preview inválida");
+
   return {
     ok: true,
     manifest: {
       schema: typeof obj.schema === "string" ? obj.schema : "cybersafe-release/1",
-      channel: "stable",
+      channel: expectedChannel,
       version: obj.version,
       publishedAt: obj.publishedAt as string,
       notes: obj.notes,

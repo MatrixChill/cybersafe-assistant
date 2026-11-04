@@ -13,7 +13,7 @@
  */
 
 /** Único canal suportado hoje (o contrato fixa "stable"). */
-export type UpdateChannel = "stable";
+export type UpdateChannel = "stable" | "preview";
 
 /** Fases da máquina. `phase` interno ≠ `status` do contrato (mapeado no patch). */
 export type UpdatePhase =

@@ -25,7 +25,7 @@ export interface AppUpdateRelease {
 }
 export interface AppUpdateSnapshot {
   status: AppUpdateStatus;
-  channel: "stable";
+  channel: "stable" | "preview";
   installed: AppVersionInfo;
   latest?: AppUpdateRelease;
   /** Real bytes only. Missing total means indeterminate progress. */
