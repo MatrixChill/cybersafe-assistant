@@ -1,4 +1,4 @@
-# Run in the signed-in desktop session. Only the JSON report is written.
+﻿# Run in the signed-in desktop session. Only the JSON report is written.
 param([string]$OutputPath = (Join-Path (Get-Location) 'cybersafe-laptop-diagnostic.json'))
 Add-Type -AssemblyName System.Windows.Forms
 $os = Get-CimInstance Win32_OperatingSystem
@@ -13,6 +13,25 @@ $api = try {
  @{status=$r.status;service=$r.service;databaseReady=$r.databaseReady}
 } catch { @{status='unreachable'} }
 $desktop = Get-ItemProperty 'HKCU:\Control Panel\Desktop' -ErrorAction SilentlyContinue
+# Export only bounded, typed startup fields. Ignore text, paths and unknown keys.
+$startupPath = Join-Path $env:APPDATA 'CyberSafe Assistant\logs\startup.log'
+$startup = @(
+ if(Test-Path -LiteralPath $startupPath -PathType Leaf){
+  Get-Content -LiteralPath $startupPath -Tail 80 | ForEach-Object {
+   try { $entry = $_ | ConvertFrom-Json -ErrorAction Stop } catch { return }
+   if($entry.event -cmatch '^(electron-(start|ready)|service-(attempt|result)|api-(attempt|child-spawn|child-error|child-exit|ready|result|failed|unavailable|skipped)|boot-failure)$'){
+    [ordered]@{
+     event=$entry.event
+     status=if($entry.status -cmatch '^(pending|connected|started|failed|skipped|ready|unavailable|error)$'){$entry.status}
+     classification=if($entry.classification -cmatch '^(UNKNOWN|NATIVE_ABI_MISMATCH|MODULE_NOT_FOUND|PERMISSION_DENIED|EADDRINUSE|SERVICE_IDENTITY_OR_HANDSHAKE|API_SECRET_UNAVAILABLE|ISOLATION_REFUSED|TIMEOUT|SQLITE(_[A-Z_]{1,24})?|EPERM_EACCES|SPAWN_ERROR)$'){$entry.classification}
+     elapsedMs=if($entry.elapsedMs -is [ValueType]){$entry.elapsedMs}
+     exitCode=if($entry.exitCode -is [ValueType]){$entry.exitCode}
+    }
+   }
+  }
+ }
+)
+$seed = if($loc){ Join-Path $loc 'resources\clamav-seed' }
 [ordered]@{
  windows = @{version=$os.Version;build=$os.BuildNumber;ramKiB=$os.TotalVisibleMemorySize;freeRamKiB=$os.FreePhysicalMemory}
  cpu=$cpu; graphics=$gpu; configuredLogPixels=$desktop.LogPixels
@@ -20,6 +39,7 @@ $desktop = Get-ItemProperty 'HKCU:\Control Panel\Desktop' -ErrorAction SilentlyC
  cyberSafeVersion=$install.DisplayVersion
  services=@(Get-Service '*cybersafe*' | Select-Object Name,Status,StartType)
  processes=@(Get-Process | Where-Object ProcessName -match '^(CyberSafe Assistant|clamscan|clamd|yara64|scan-engine|cybersafe-update-launcher)$' | Select-Object ProcessName,Id,CPU,WorkingSet64)
+ startup=$startup
  api=$api
- clamav=@{binaryPresent=[bool]$clam;fileVersion=$clam.VersionInfo.FileVersion}
+ clamav=@{binaryPresent=[bool]$clam;fileVersion=$clam.VersionInfo.FileVersion;seedManifestPresent=[bool]($seed -and (Test-Path -LiteralPath (Join-Path $seed 'SEED-MANIFEST.json') -PathType Leaf))}
 } | ConvertTo-Json -Depth 7 | Set-Content -LiteralPath $OutputPath -Encoding utf8
