@@ -4,15 +4,13 @@
 #include <string>
 #include <vector>
 #include <array>
+#include "update_launcher_program.h"
 
 int wmain(int argc, wchar_t** argv) {
   if (argc != 2) return 2;
   const std::wstring encoded(argv[1]);
-  if (encoded.empty() || encoded.size() > 24000) return 2;
-  for (const wchar_t c : encoded) {
-    if (!((c >= L'A' && c <= L'Z') || (c >= L'a' && c <= L'z') ||
-          (c >= L'0' && c <= L'9') || c == L'+' || c == L'/' || c == L'=')) return 2;
-  }
+  // Base64 is an encoding, not an authorization to run caller-supplied code.
+  if (encoded != kHandoffProgram) return 2;
   wchar_t windows[MAX_PATH + 1]{};
   const UINT size = GetWindowsDirectoryW(windows, MAX_PATH);
   if (!size || size >= MAX_PATH) return 3;
