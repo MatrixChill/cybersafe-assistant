@@ -56,6 +56,9 @@ jobs:
       - name: Suíte da aplicação e integração visual do atualizador
         run: npm test -w @cybersafe/app
 
+      - name: Rebuild limpo do launcher e gates de payload
+        run: node --test scripts/test/windows-launcher-proof.test.mjs
+
       - name: Launcher Windows e ensaio isolado de handoff (sem instalar)
         run: node scripts/test-updater-handoff-lab.mjs
 

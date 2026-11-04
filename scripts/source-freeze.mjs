@@ -60,9 +60,11 @@
  * Códigos: 0 = ok, 1 = divergente/ilegível/manifesto inválido, 2 = uso.
  */
 import { createHash } from "node:crypto";
+import { execFileSync } from "node:child_process";
 import fs from "node:fs";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
+import { verifyCleanLauncher } from "./windows-launcher-proof.mjs";
 
 export const SCHEMA = 1;
 export const ALGORITHM = "sha256";
@@ -470,6 +472,14 @@ export function buildManifest({ root = DEFAULT_ROOT, approval, approvalPath = nu
   return { schema: SCHEMA, algorithm: ALGORITHM, generatedAt: new Date().toISOString(), approval, roots, entries, digest: digestEntries(entries) };
 }
 
+export function validateExactApproval(approval, actual) {
+  const problems = [];
+  for (const key of ["head", "gitTree", "digest", "entries"]) {
+    if (approval?.[key] !== actual?.[key]) problems.push({ kind: "approval-mismatch", path: key, detail: `${key} does not match current identity` });
+  }
+  return problems;
+}
+
 export function validateApproval(approval, { root = DEFAULT_ROOT, approvalPath = "", registry = null } = {}) {
   const problems = [];
   const add = (detail) => problems.push({ kind: "approval-invalid", path: approvalPath, detail });
@@ -575,8 +585,18 @@ export function verifySourceFreeze({ root = DEFAULT_ROOT, manifestPath = DEFAULT
   }
   for (const key of Object.keys(report.samples)) report.samples[key] = report.samples[key].slice(0, SAMPLE_LIMIT);
 
+  if (path.resolve(root) === path.resolve(DEFAULT_ROOT)) {
+    try {
+      const git = (...args) => execFileSync("git", args, { cwd: root, encoding: "utf8" }).trim();
+      const actual = { head: git("rev-parse", "HEAD"), gitTree: git("rev-parse", "HEAD^{tree}"), digest: report.treeDigest, entries: report.counts.tree };
+      report.problems.push(...validateExactApproval(manifest.approval, actual));
+      if (git("status", "--porcelain", "--untracked-files=no")) report.problems.push({ kind: "worktree-modified", path: ".", detail: "tracked worktree must be clean" });
+    } catch (error) {
+      report.problems.push({ kind: "git-unavailable", path: ".", detail: String(error.message) });
+    }
+  }
   const divergences = report.counts.added + report.counts.removed + report.counts.modified + report.counts.unreadable + report.counts.links + report.counts.mutated + report.counts.required;
-  report.ok = divergences === 0;
+  report.ok = divergences === 0 && report.problems.length === 0;
   return report;
 }
 
@@ -662,7 +682,17 @@ function main(argv) {
       return 1;
     }
     try {
+      // Production freeze cannot approve a stale native binary, even if its
+      // version string and the previous freeze happen to match.
+      if (path.resolve(options.root) === path.resolve(DEFAULT_ROOT)) verifyCleanLauncher();
       const manifest = buildManifest({ root: options.root, approval, approvalPath: options.approval, manifestPath: options.manifestPath });
+      if (path.resolve(options.root) === path.resolve(DEFAULT_ROOT)) {
+        const git = (...args) => execFileSync("git", args, { cwd: options.root, encoding: "utf8" }).trim();
+        if (git("status", "--porcelain", "--untracked-files=no")) throw new Error("source-freeze: tracked worktree must be clean");
+        const actual = { head: git("rev-parse", "HEAD"), gitTree: git("rev-parse", "HEAD^{tree}"), digest: manifest.digest, entries: manifest.entries.length };
+        const mismatch = validateExactApproval(approval, actual);
+        if (mismatch.length) throw new FreezeError("source-freeze: approval does not match current identity", { problems: mismatch });
+      }
       const tmp = `${options.manifestPath}.tmp-${process.pid}`;
       fs.writeFileSync(tmp, `${JSON.stringify(manifest, null, 2)}\n`, "utf8");
       fs.renameSync(tmp, options.manifestPath);

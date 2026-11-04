@@ -51,6 +51,7 @@ import path from "node:path";
 import { fileURLToPath } from "node:url";
 import { createRequire } from "node:module";
 import { verifySourceFreeze } from "./source-freeze.mjs";
+import { launcherPath, inspectLauncher, verifyCleanLauncher, verifySetupLauncher, assertExtractedLauncher } from "./windows-launcher-proof.mjs";
 import { PRODUCT_VERSION_FILE, readProductVersion, verifyBuiltRenderer } from "./app-version.mjs";
 import {
   assertPinnedManifestSpecs,
@@ -1548,8 +1549,15 @@ function checkReport() {
   const freeze = verifySourceFreeze();
   const licensing = estadoManifestoObrigacao(path.join(licensesDir, "PROVENANCE.json"));
   const yara = verifyYaraVendor();
+  let launcher;
+  try {
+    launcher = { ...inspectLauncher(fs.readFileSync(launcherPath), readProductVersion({ root }).version), rebuildVerified: false };
+  } catch (error) {
+    launcher = { ok: false, missing: [String(error.message)], rebuildVerified: false };
+  }
   return {
-    ok: checks.every((check) => check.exists) && bundle.ok && yara.ok && freeze.ok && (!candidateId || Boolean(seed?.ok)) && (!seed || seed.ok) && licensing.estado === "prova-fecha",
+    ok: checks.every((check) => check.exists) && bundle.ok && yara.ok && freeze.ok && launcher.ok && (!candidateId || Boolean(seed?.ok)) && (!seed || seed.ok) && licensing.estado === "prova-fecha",
+    launcher,
     licensing,
     yara: {
       ok: yara.ok,
@@ -1683,15 +1691,33 @@ function runPipeline() {
   // O driver corre os três gates à volta dos passos do pipeline. Um gate que
   // falhe lança SourceFreezeError e o passo seguinte NÃO corre. Não há bypass
   // nem re-pin automático: o único caminho é um manifesto novo aprovado.
+  let approvedLauncher = null;
   let appDir = null;
   runFreezeGatedPipeline({
     stages: {
       workspaces: () => {
+        // PRE has verified the frozen bytes. Independently rebuild from the
+        // current sources before anything is staged; PRE-builder checks again.
+        approvedLauncher = Buffer.from(verifyCleanLauncher().bytes);
         const result = stageWorkspaces();
         stagingRoot = result.stagingRoot;
         appDir = result.appDir;
       },
-      builder: () => stageBuilder(appDir),
+      builder: () => {
+        stageBuilder(appDir);
+        try {
+          assertExtractedLauncher(approvedLauncher, fs.readFileSync(path.join(outDir, "win-unpacked", "resources", "cybersafe-update-launcher.exe")));
+          if (!dirOnly) {
+            const setups = fs.readdirSync(outDir).filter((entry) => entry.endsWith(".exe") && /setup/i.test(entry));
+            if (setups.length !== 1) throw new Error("Expected exactly one Setup for launcher payload verification");
+            verifySetupLauncher(path.join(outDir, setups[0]), approvedLauncher);
+          }
+          assertExtractedLauncher(approvedLauncher, fs.readFileSync(launcherPath));
+        } catch (error) {
+          fs.writeFileSync(path.join(outDir, "LAUNCHER-VERIFICATION-FAILED.json"), JSON.stringify({ reason: String(error.message), deliverable: false }, null, 2));
+          throw error;
+        }
+      },
       promote: () => stagePromote({ stagingRoot }),
     },
     onGateFail: (phase, freeze) => {
@@ -1945,6 +1971,7 @@ export function contarProblemasPreCheck(report) {
     porGate(report.bundle?.ok, report.bundle?.problems) +
     porGate(report.yara?.ok, report.yara?.problems) +
     porGate(report.freeze?.ok, report.freeze?.problems) +
+    (report.launcher ? porGate(report.launcher.ok, report.launcher.missing) : 0) +
     porGate(report.seed ? report.seed.ok : true, report.seed?.problems) +
     (report.licensing?.estado === "prova-fecha" ? 0 : 1)
   );
@@ -1971,6 +1998,7 @@ if (isMain) {
           : `FALTA bundle-clamav  ${report.bundle.manifestPath}  → ${VENDOR_FIX}`,
       );
       for (const problem of report.bundle.problems) log(`      bundle: ${problem}`);
+      log(report.launcher.ok ? "OK    launcher: identidade inspecionada; rebuild limpo ainda não verificado" : `FALTA launcher: ${report.launcher.missing.join(", ")}`);
       for (const problem of report.freeze.problems) {
         log(`      fontes: ${problem.kind}  ${problem.path}${problem.detail ? `  ${problem.detail}` : ""}`);
       }
@@ -1990,7 +2018,7 @@ if (isMain) {
       const problems = contarProblemasPreCheck(report);
       log(
         problems === 0
-          ? "pré-verificação: inputs presentes, bundle íntegro, fontes congeladas e obrigação documental encerrada; não comprova instalação"
+          ? "pré-verificação: inputs presentes e freeze conforme; launcher apenas inspecionado, rebuild limpo obrigatório no packaging; não comprova instalação"
           : `pré-verificação: ${problems} problema(s) (o bundle é verificado byte a byte; as fontes contra o manifesto aprovado; nada é descarregado aqui)`,
       );
     }

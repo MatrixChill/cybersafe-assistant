@@ -106,8 +106,9 @@ describe("pipeline de empacotamento (--check)", () => {
   it("o código de saída bate certo com o relatório: nunca OK com ficheiros em falta", () => {
     const { code, json } = checkJson();
     const licensingOk = Boolean(json.licensing) && json.licensing.estado === "prova-fecha";
-    const derived = json.checks.every((check) => check.exists) && json.bundle.ok && json.freeze.ok && licensingOk;
-    assert.equal(json.ok, derived, "`ok` tem de ser exatamente o resultado das verificações (inputs + bundle + fontes + licenciamento)");
+    const derived = json.checks.every((check) => check.exists) && json.bundle.ok && json.yara.ok && json.freeze.ok && json.launcher.ok && json.seed.ok && licensingOk;
+    assert.equal(json.launcher.rebuildVerified, false, "--check não compila nem prova derivação do launcher");
+    assert.equal(json.ok, derived, "`ok` inclui launcher, seed, YARA, inputs, bundle, fontes e licenciamento");
     assert.equal(code, derived ? 0 : 1, "código de saída 0 só quando inputs, bundle, fontes e licenciamento estão conformes");
     for (const check of json.checks) {
       assert.equal(check.exists, fs.existsSync(check.path), `"${check.id}": o relatório tem de refletir o disco`);
