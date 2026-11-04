@@ -109,3 +109,8 @@ Obrigação por resolver: fechar o subconjunto efectivamente incorporado e o tex
 de licença desse conjunto. É pendência verificada, não uma lista de licenças
 em falta contada a partir do lock. A licença do motor foi lida no upstream
 oficial, não inferida do manifesto do wrapper.
+
+Monocypher 4.0.3
+Used by the Windows update launcher to verify Ed25519 signatures.
+Upstream: https://monocypher.org/download/
+Dual licensed BSD-2-Clause or CC0. See monocypher-4.0.3-LICENCE.md.
