@@ -15,6 +15,7 @@ import { HttpsFeedSource } from './sources.ts';
 
 interface InstallationRuntime {
   stagingRoot:string; journalFile:string; launcherPath:string;
+  onDiagnostic?:(event:'updater-handoff-started'|'updater-handoff-armed'|'updater-handoff-failed',details:Record<string,string|number|boolean|null>)=>void;
   requestShutdown:()=>Promise<void>;
   confirmConsent:(context:InstallGateContext)=>Promise<boolean>;
   scanProbe:()=>Promise<ScanState>;

@@ -67,7 +67,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
   const podeCancelar =
     bridgeAvailable &&
     snapshot !== null &&
-    (snapshot.status === "downloading" || snapshot.status === "verifying") &&
+    snapshot.status === "downloading" &&
     (busy === null || busy === "download" || busy === "check");
   const installed = snapshot !== null ? formatInstalled(snapshot.installed) : null;
   const latest = snapshot?.latest ?? null;

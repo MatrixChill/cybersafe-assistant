@@ -14,7 +14,7 @@ export function UpdaterScene({ phase, forceStatic = false }: {
   const { gpu, animate, systemReduced } = useAppearance();
   const [failed, setFailed] = useState(false);
   const fail = useCallback(() => setFailed(true), []);
-  const policy = updaterScenePolicy({ gpu, animate, systemReduced, forceStatic: forceStatic || failed });
+  const policy = updaterScenePolicy({ gpu, animate, systemReduced, forceStatic: forceStatic || failed, phase });
   const fallbackReason = failed ? "3D indisponível nesta sessão"
     : forceStatic ? "Modo estático de ensaio"
     : systemReduced ? "Movimento reduzido" : "Apresentação estática";
@@ -30,7 +30,7 @@ export function UpdaterScene({ phase, forceStatic = false }: {
       aria-label="Núcleo CyberSafe — apresentação visual, sem indicação de proteção">
       {policy.render3d ? (
         <Suspense fallback={fallback}>
-          <CoreScene variant="depth" animate={policy.animate && phase !== "error"}
+          <CoreScene variant="depth" animate={policy.animate}
             showEngineNodes={false} fpsLimit={policy.maxFps} dprLimit={policy.dpr} onUnavailable={fail} />
         </Suspense>
       ) : fallback}

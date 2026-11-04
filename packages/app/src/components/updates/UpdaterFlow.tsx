@@ -1,6 +1,6 @@
 import {useEffect,useRef,useState} from "react";
 import type {UpdatesActions,UpdatesViewState} from "./appUpdateController";
-import {deriveUpdaterFlow,canConfirmUpdaterInstall} from "./updaterFlowModel";
+import {deriveUpdaterFlow,canConfirmUpdaterInstall,dispatchUpdaterAction} from "./updaterFlowModel";
 import {UpdaterExperience} from "./UpdaterExperience";
 import {InstallConfirmDialog} from "./InstallConfirmDialog";
 import type {UpdaterAction} from "./updaterWindowModel";
@@ -18,11 +18,7 @@ export function UpdaterFlow({state,actions,onClose}:{state:UpdatesViewState;acti
  },[]);
  function action(request:UpdaterAction){
   // Recompute from current props; a disabled/stale presentation cannot issue another operation.
-  if(deriveUpdaterFlow(state).primaryAction!==request)return;
-  if(request==="retry")actions.refresh();
-  else if(request==="check")actions.check();
-  else if(request==="download")actions.download();
-  else if(request==="install"&&state.snapshot?.latest)setConfirmation(state.snapshot.latest.version);
+  dispatchUpdaterAction(request,state,actions,version=>setConfirmation(version));
  }
  return <dialog ref={dialog} className="updater-flow-dialog" aria-label="Atualização do CyberSafe Assistant" onCancel={event=>{event.preventDefault();if(confirmation)setConfirmation(null);else onClose();}}>
   <UpdaterExperience view={view} onAction={action} onCancel={view.cancelable?actions.cancel:undefined} onClose={onClose}/>

@@ -271,6 +271,10 @@ export function createNodeCacheFileSystem(root: string, options: NodeCacheFsOpti
         }
         throw new CacheFsError("io", `publicação recusada (não sobrescrevemos às cegas): ${finalPath}`);
       }
+      // The streamed download remains at destPath after the atomic publication.
+      // Remove only that validated in-cache staging file; if cleanup fails, fail
+      // closed so the updater can discard both names instead of reporting success.
+      await this.removePath(destPath);
     },
 
     async removePath(target: string): Promise<void> {

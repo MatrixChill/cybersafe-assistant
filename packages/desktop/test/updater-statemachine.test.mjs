@@ -360,6 +360,78 @@ describe("updater — portões de segurança e ataques", () => {
     assert.equal(r.error, "cancelled");
   });
 
+  it("cancelar aos 79% liberta a operação e permite um novo download validado", async () => {
+    const release = signedRelease();
+    const fs = memoryFs();
+    let attempts = 0;
+    const updater = createUpdater({
+      ...dummyDeps(resolveUpdaterConfig(baseConfig({ pinnedKeyFingerprint: release.pins.fingerprint }))),
+      source: new LocalFixtureSource(() => ({ kind: "latest", manifest: release.raw })),
+      downloader: { async download(_url, destination, signal, onProgress) {
+        attempts += 1;
+        if (attempts === 1) {
+          onProgress(79, 100);
+          await new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("abort")), { once: true }));
+        }
+        fs.files.set(destination, release.bytes);
+        onProgress(release.bytes.length, release.bytes.length);
+        return { path: destination, bytes: release.bytes.length };
+      } },
+      signatureVerifier: createEd25519ManifestVerifier({ publicKey: release.pins.pubPem, pinnedFingerprint: release.pins.fingerprint }),
+      cacheFs: fs,
+    });
+    await updater.check();
+    const first = updater.download();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    assert.equal(updater.snapshotCopy().progress?.downloadedBytes, 79);
+    await updater.cancel();
+    const cancelled = await first;
+    assert.equal(cancelled.error, "cancelled");
+    assert.equal(updater.snapshotCopy().canInstall, false);
+
+    const retried = await updater.download();
+    assert.equal(retried.ok, true);
+    assert.equal(attempts, 2);
+    assert.equal(retried.snapshot.phase, "downloaded");
+    assert.equal(retried.snapshot.progress?.downloadedBytes, release.bytes.length);
+  });
+
+  it("ignora callbacks de progresso tardios da transferência cancelada após iniciar retry", async () => {
+    const release = signedRelease();
+    const fs = memoryFs();
+    let attempts = 0;
+    let firstProgress;
+    const updater = createUpdater({
+      ...dummyDeps(resolveUpdaterConfig(baseConfig({ pinnedKeyFingerprint: release.pins.fingerprint }))),
+      source: new LocalFixtureSource(() => ({ kind: "latest", manifest: release.raw })),
+      downloader: { async download(_url, destination, signal, onProgress) {
+        attempts += 1;
+        if (attempts === 1) {
+          firstProgress = onProgress;
+          onProgress(79, 100);
+          await new Promise((_resolve, reject) => signal.addEventListener("abort", () => reject(new Error("abort")), { once: true }));
+        }
+        fs.files.set(destination, release.bytes);
+        onProgress(100, 100);
+        return { path: destination, bytes: release.bytes.length };
+      } },
+      signatureVerifier: createEd25519ManifestVerifier({ publicKey: release.pins.pubPem, pinnedFingerprint: release.pins.fingerprint }),
+      cacheFs: fs,
+    });
+    await updater.check();
+    const first = updater.download();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    await updater.cancel();
+    assert.equal((await first).error, "cancelled");
+
+    const retry = updater.download();
+    await new Promise((resolve) => setTimeout(resolve, 0));
+    const beforeStaleCallback = updater.snapshotCopy().progress?.downloadedBytes;
+    firstProgress(1, 100);
+    assert.equal(updater.snapshotCopy().progress?.downloadedBytes, beforeStaleCallback);
+    assert.equal((await retry).snapshot.phase, "downloaded");
+  });
+
   it("defer aceita e deixa instalável a zero", async () => {
     const release = signedRelease();
     const h = buildHarness({ release });

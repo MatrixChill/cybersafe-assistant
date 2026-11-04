@@ -299,6 +299,9 @@ export class Updater {
       const op = this.startOp();
       try {
         await this.deps.downloader.download(manifest.file.url, staging, op, (bytes, total) => {
+          // A transport may deliver a queued progress callback after abort or
+          // after a later retry has started. Only the active download owns UI state.
+          if (this.controller?.signal !== op || op.aborted || this.snapshot.phase !== "downloading") return;
           this.set({ progress: { downloadedBytes: bytes, totalBytes: total ?? manifest.file.sizeBytes } });
         });
       } catch (error) {

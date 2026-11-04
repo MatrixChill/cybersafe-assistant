@@ -47,6 +47,18 @@ describe("createNodeCacheFileSystem — ciclo happy na cache dedicada", () => {
     });
   });
 
+  it("remove o staging descarregado depois da publicação verificada", async () => {
+    await withCache(async (root, cache) => {
+      await cache.ensureDir(root);
+      const staging = path.join(root, "update-2.1.0-" + "c".repeat(64) + ".tmp");
+      const final = staging.replace(/\.tmp$/, ".exe");
+      fs.writeFileSync(staging, "streamed-bytes");
+      await cache.writeAtomic(staging, ".exe", Buffer.from("verified-bytes"));
+      assert.equal(fs.existsSync(staging), false, "o stream antigo não deve ficar como um segundo executável completo");
+      assert.equal(fs.readFileSync(final, "utf8"), "verified-bytes");
+    });
+  });
+
   it("statFile readFile devolvem null p/ inexistente (nunca inventa)", async () => {
     await withCache(async (root, cache) => {
       const missing = path.join(root, "nao-existe.exe");

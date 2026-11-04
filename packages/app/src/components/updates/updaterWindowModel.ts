@@ -1,7 +1,7 @@
 import type { AppUpdateSnapshot } from "@cybersafe/shared-types";
 import { errorCodeMessage, progressInfo } from "./appUpdateModel";
 export type UpdaterPhase = "authenticating" | "confirming" | "restarting" | "idle" | "checking" | "available" | "downloading" | "verifying" | "preparing" | "installing" | "completed" | "error" | "current" | "unavailable" | "ready";
-export type UpdaterAction = "check" | "download" | "install" | "retry" | "open";
+export type UpdaterAction = "check" | "download" | "install" | "retry" | "retry-check" | "retry-download" | "open";
 export interface UpdaterWindowView {
   phase: UpdaterPhase; currentVersion: string; nextVersion?: string; percent: number | null;
   cancelable: boolean; primaryAction?: UpdaterAction; detail?: string; notes?: string;
@@ -27,11 +27,11 @@ export const updaterCopy: Record<UpdaterPhase, { title: string; description: str
 export function mapUpdaterSnapshot(snapshot: AppUpdateSnapshot): UpdaterWindowView {
   const phases: Record<AppUpdateSnapshot["status"], UpdaterPhase> = { unconfigured: "unavailable", unsupported: "unavailable", idle: "idle", checking: "checking", "up-to-date": "current", available: "available", downloading: "downloading", verifying: "verifying", downloaded: snapshot.canInstall?"confirming":"ready", deferred: "idle", installing: "installing", error: "error" };
   const status = snapshot.status;
-  const primaryAction: UpdaterAction | undefined = status === "available" ? "download" : status === "downloaded" && snapshot.canInstall ? "install" : ["idle", "deferred", "up-to-date"].includes(status) ? "check" : status === "error" ? "retry" : undefined;
+  const primaryAction: UpdaterAction | undefined = status === "available" ? "download" : status === "downloaded" && snapshot.canInstall ? "install" : ["idle", "deferred", "up-to-date"].includes(status) ? "check" : status === "error" ? "retry-check" : undefined;
   return {
 phase: phases[status], currentVersion: snapshot.installed.version, nextVersion: snapshot.latest?.version,
     percent: status === "downloading" && snapshot.progress ? progressInfo(snapshot.progress).percent : null,
-    cancelable: status === "downloading" || status === "verifying", primaryAction, notes: snapshot.latest?.notes,
+    cancelable: status === "downloading", primaryAction, notes: snapshot.latest?.notes,
     detail: snapshot.error ? errorCodeMessage(snapshot.error.code) : snapshot.channel === "preview" ? "Canal Preview: Setup sem Authenticode; editor não verificado pelo Windows. A instalação é interativa e requer a sua confirmação." : status === "downloaded" && !snapshot.canInstall ? "A instalação está bloqueada pelas condições de segurança." : status === "idle" || status === "deferred" ? "Nenhuma atualização em curso." : undefined
 };
 }

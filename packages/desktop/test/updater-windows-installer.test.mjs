@@ -18,8 +18,12 @@ test('Preview requires an idle service lease before staging and releases it on f
   }
 });
 test('default installer refuses execution before staging or shutdown',async()=>{
- const adapter=createWindowsInstaller({stagingRoot:'C:/fixture',journalFile:'C:/fixture/op.json',expectedPublisher:'CyberSafe',signatureVerifier:{verify:async()=>({ok:true})},publisherVerifier:{verify:async()=>({ok:true})},requestShutdown:async()=>{throw Error('must not shut down')}});
+ const events=[];
+ const adapter=createWindowsInstaller({stagingRoot:'C:/fixture',journalFile:'C:/fixture/op.json',expectedPublisher:'CyberSafe',signatureVerifier:{verify:async()=>({ok:true})},publisherVerifier:{verify:async()=>({ok:true})},requestShutdown:async()=>{throw Error('must not shut down')},onDiagnostic:(event,details)=>events.push({event,details})});
  const r=await adapter.install({confirmed:true,expectedVersion:'0.2.0',scanState:'idle',artifactPath:'C:/missing/setup.exe',manifest:{version:'0.2.0'}});assert.equal(r.ok,false);
+ assert.equal(events.length,1);assert.equal(events[0].event,'updater-handoff-failed');
+ assert.ok(['windows-required','execution-not-authorized'].includes(events[0].details.reasonCode));
+ assert.equal(JSON.stringify(events).includes('C:/fixture'),false,'diagnósticos não incluem caminhos locais');
 });
 
 test('denied consent and invalid manifest cannot request shutdown',async()=>{

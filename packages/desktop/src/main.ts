@@ -611,7 +611,11 @@ async function reconcilePendingInstalledUpdate(runtime: ApiRuntime): Promise<voi
       },
     });
     if (operation) {
-      logStartup("update-startup", { status: operation.stage });
+      const reasonCode = typeof operation.reason === "string" && operation.reason.length <= 100 && /^[A-Za-z0-9_.-]+$/.test(operation.reason)
+        ? operation.reason : null;
+      const installerExit = Number.isSafeInteger(operation.installerExit) && (operation.installerExit ?? -1) >= 0 && (operation.installerExit ?? 0) <= 0xffffffff
+        ? operation.installerExit : null;
+      logStartup("update-startup", { status: operation.stage, reasonCode, installerExit });
       if (operation.stage === "recovery-required") dialog.showErrorBox(
         "CyberSafe — Recuperação da atualização",
         "Não foi possível confirmar a versão e os dados após a atualização. Não será iniciada outra instalação automaticamente. Preserve os dados e utilize o procedimento de recuperação com um instalador verificado."
@@ -1926,6 +1930,7 @@ if (!gotTheLock) {
         stagingRoot: path.join(app.getPath("userData"), "update-staging"),
         journalFile: path.join(app.getPath("userData"), "updater-operation.json"),
         launcherPath: path.join(process.resourcesPath, "cybersafe-update-launcher.exe"),
+        onDiagnostic: (event, details) => logExitEvent(event, details),
         acquireScanLease: async () => {
           if(isQuitting || !client.isConnected) return null;
           const {token}=await client.request("update.acquireScanLease",undefined);

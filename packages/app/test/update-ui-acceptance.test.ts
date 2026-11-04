@@ -54,7 +54,7 @@ const NOOP_ACTIONS: UpdatesActions = {
 };
 
 function mount(snapshot: AppUpdateSnapshot | null, extra: Partial<UpdatesViewState> = {}): string {
-  const state: UpdatesViewState = { bridgeAvailable: true, loading: false, snapshot, busy: null, actionError: null, ...extra };
+  const state: UpdatesViewState = { bridgeAvailable: true, loading: false, snapshot, busy: null, actionError: null, failedOperation: null, ...extra };
   return renderToStaticMarkup(createElement(UpdatesPanel, { state, actions: NOOP_ACTIONS }));
 }
 

@@ -5,7 +5,7 @@ import { updaterCopy, type UpdaterAction, type UpdaterWindowView } from "./updat
 export interface UpdaterWindowProps {
   illustration?: ReactNode; view: UpdaterWindowView; demo?: boolean; onAction?: (action: UpdaterAction) => void; onCancel?: () => void; onClose?: () => void;
 }
-const actionLabels: Record<UpdaterAction, string> = { check: "Procurar atualizações", download: "Descarregar atualização", install: "Rever instalação", retry: "Tentar novamente", open: "Abrir aplicação" };
+const actionLabels: Record<UpdaterAction, string> = { check: "Procurar atualizações", download: "Descarregar atualização", install: "Rever instalação", retry: "Reler estado", "retry-check": "Verificar novamente", "retry-download": "Tentar descarregar novamente", open: "Abrir aplicação" };
 export function UpdaterWindow({ view, demo = false, onAction, onCancel, onClose, illustration }: UpdaterWindowProps) {
   const copy = updaterCopy[view.phase];
   const busy = ["checking", "downloading", "verifying", "authenticating", "preparing", "installing", "restarting"].includes(view.phase);
@@ -22,6 +22,6 @@ export function UpdaterWindow({ view, demo = false, onAction, onCancel, onClose,
         {view.notes && <details className="updater-notes"><summary>Novidades desta versão</summary><p>{view.notes}</p></details>}
         <p className="updater-helper">{copy.helper}</p>
       </div></div>
-    <footer className="updater-footer"><div className="updater-security">{failed ? <ShieldAlert size={18} /> : complete ? <ShieldCheck size={18} /> : <Shield size={18} />}<span>{copy.security}</span></div><div className="updater-actions">{view.cancelable && <button className="updater-button" onClick={onCancel} disabled={!onCancel}>Cancelar</button>}{view.primaryAction && <button className="updater-button updater-primary" disabled={!onAction} onClick={() => onAction?.(view.primaryAction!)}>{complete ? <Check size={16} /> : view.primaryAction === "retry" ? <RefreshCw size={16} /> : <ArrowDownToLine size={16} />} {actionLabels[view.primaryAction]}</button>}</div></footer>
+    <footer className="updater-footer"><div className="updater-security">{failed ? <ShieldAlert size={18} /> : complete ? <ShieldCheck size={18} /> : <Shield size={18} />}<span>{copy.security}</span></div><div className="updater-actions">{view.cancelable && <button className="updater-button" onClick={onCancel} disabled={!onCancel}>Cancelar</button>}{view.primaryAction && <button className="updater-button updater-primary" disabled={!onAction} onClick={() => onAction?.(view.primaryAction!)}>{complete ? <Check size={16} /> : view.primaryAction.startsWith("retry") ? <RefreshCw size={16} /> : <ArrowDownToLine size={16} />} {actionLabels[view.primaryAction]}</button>}</div></footer>
   </section>;
 }

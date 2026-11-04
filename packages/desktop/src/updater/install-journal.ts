@@ -6,6 +6,7 @@ import type {InstallGateContext} from './types.js';
 type Stage = 'prepared'|'shutdown'|'installing'|'awaiting-start'|'completed'|'recovery-required';
 interface Operation { schema:1;id:string;startupToken:string;expectedVersion:string;sha256:string;stage:Stage;updatedAt:string;reason?:string;installerExit?:number; handoffResult?:string; artifactIdentity?:string; }
 const stages: Stage[]=['prepared','shutdown','installing','awaiting-start','completed','recovery-required'];
+const recoveryReasons=new Set(['installer-timeout-do-not-retry','installer-failed','waiting-parent','installing']);
 /** Durable protocol state only. Does not execute installers, migrate data or claim rollback. */
 export class UpdateJournal {
   constructor(private readonly file:string) {}
@@ -43,7 +44,11 @@ export class UpdateJournal {
       if(v.stage!=='shutdown'&&v.stage!=='installing'&&v.stage!=='awaiting-start')throw Error('invalid handoff result transition');
       return this.write({...v,stage:'awaiting-start',installerExit:0,updatedAt:new Date().toISOString()});
     }
-    if(result.stage==='recovery-required')return this.write({...v,stage:'recovery-required',reason:'external-installer-failed',updatedAt:new Date().toISOString()});
+    if(result.stage==='recovery-required'){
+      const reason=typeof result.reason==='string'&&recoveryReasons.has(result.reason)?`external-${result.reason}`:'external-result-unclassified';
+      const installerExit=Number.isSafeInteger(result.installerExit)&&result.installerExit>=0&&result.installerExit<=0xffffffff?result.installerExit:undefined;
+      return this.write({...v,stage:'recovery-required',reason,installerExit,updatedAt:new Date().toISOString()});
+    }
     if(result.stage==='installing'&&v.stage==='shutdown')return this.write({...v,stage:'installing',updatedAt:new Date().toISOString()});
     return v;
   }

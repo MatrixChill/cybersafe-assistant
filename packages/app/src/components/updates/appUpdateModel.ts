@@ -171,7 +171,7 @@ export function deriveControls(
   return {
     check: idle && status !== null && !blockedWhenIdle.includes(status),
     download: idle && status === "available",
-    cancel: idle && (status === "downloading" || status === "verifying"),
+    cancel: idle && status === "downloading",
     defer: idle && (status === "available" || status === "downloaded"),
     install: idle && status === "downloaded" && snapshot?.canInstall === true,
     automatic: idle && status !== "unconfigured" && status !== "unsupported",

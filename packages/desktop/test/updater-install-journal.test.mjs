@@ -22,3 +22,15 @@ test('installer errors, wrong versions and unready data require recovery',t=>{
  assert.throws(()=>j.prepare(context));
  }
 });
+
+test('reconciled external failure preserves only allow-listed reason codes and numeric exit',t=>{
+ const file=fixture(t),j=new UpdateJournal(file),p=j.prepare(context),resultFile=path.join(path.dirname(file),'result.json');
+ j.attachHandoff(p.id,resultFile);j.advance(p.id,'shutdown');
+ fs.writeFileSync(resultFile,JSON.stringify({schema:1,operation:p.id,sha256:'a'.repeat(64),stage:'recovery-required',reason:'installer-failed',installerExit:1603}));
+ const recovered=j.reconcileHandoff();assert.equal(recovered.stage,'recovery-required');assert.equal(recovered.reason,'external-installer-failed');assert.equal(recovered.installerExit,1603);
+
+ const nextFile=fixture(t),next=new UpdateJournal(nextFile),q=next.prepare(context),nextResult=path.join(path.dirname(nextFile),'result.json');
+ next.attachHandoff(q.id,nextResult);next.advance(q.id,'shutdown');
+ fs.writeFileSync(nextResult,JSON.stringify({schema:1,operation:q.id,sha256:'a'.repeat(64),stage:'recovery-required',reason:'C:/private/user/path'}));
+ const safe=next.reconcileHandoff();assert.equal(safe.reason,'external-result-unclassified');assert.equal(safe.installerExit,undefined);
+});

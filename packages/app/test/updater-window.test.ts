@@ -21,6 +21,10 @@ test("downloading without total never fabricates percentage", () => {
   const v = mapUpdaterSnapshot({ ...base, status: "downloading", progress: { downloadedBytes: 1024 } });
   assert.equal(v.percent, null); assert.equal(v.cancelable, true);
 });
+test("integrity verification cannot be cancelled after the download signal is closed", () => {
+  const v = mapUpdaterSnapshot({ ...base, status: "verifying" });
+  assert.equal(v.cancelable, false);
+});
 test("downloaded without permission cannot offer installation", () => {
   assert.equal(mapUpdaterSnapshot({ ...base, status: "downloaded" }).primaryAction, undefined);
   assert.equal(mapUpdaterSnapshot({ ...base, status: "downloaded", canInstall: true }).primaryAction, "install");

@@ -9,6 +9,7 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import { createUpdatesController } from "../src/components/updates/appUpdateController";
+import { deriveUpdaterFlow } from "../src/components/updates/updaterFlowModel";
 import type { AppUpdateBridge, AppUpdateResult, AppUpdateSnapshot } from "@cybersafe/shared-types";
 
 function snapshot(overrides: Partial<AppUpdateSnapshot> = {}): AppUpdateSnapshot {
@@ -200,6 +201,26 @@ describe("Controller de atualizações — subscrição e ciclo de vida", () => 
 });
 
 describe("Controller de atualizações — ações", () => {
+  it("cancellation error retains the failed download operation so a closed/reopened flow can retry it", async () => {
+    const latest={version:"0.2.0-rc.6",publishedAt:"2026-11-04T00:00:00Z",notes:"Preview"};
+    const fake=createFakeBridge({initial:snapshot({status:"available",latest})});
+    const controller=createUpdatesController(fake.bridge);
+    controller.start();await flush();
+    const first=controller.download();await flush();
+    fake.resolve(0,{ok:false,error:"cancelled",snapshot:snapshot({status:"error",latest,error:{code:"cancelled",message:"download abortado"}})});
+    await first;
+    assert.equal(controller.getState().failedOperation,"download");
+    assert.equal(deriveUpdaterFlow(controller.getState()).primaryAction,"retry-download");
+
+    const retry=controller.download();await flush();
+    assert.equal(fake.calls.filter((call)=>call==="download").length,2);
+    fake.resolve(1,{ok:true,snapshot:snapshot({status:"downloaded",latest,canInstall:true})});
+    await retry;
+    assert.equal(controller.getState().failedOperation,null);
+    assert.equal(controller.getState().snapshot?.status,"downloaded");
+    controller.dispose();
+  });
+
   it("busy é exclusivo: um pedido concorrente é ignorado", async () => {
     const fake = createFakeBridge();
     const controller = createUpdatesController(fake.bridge);

@@ -101,8 +101,8 @@ test("campos opcionais só entram quando declarados (bytes canónicos da assinat
 test("Preview produz manifesto sem elevação e só aceita Setup versionado oficial", async (t) => {
   const ficheiro = await instalador(await pasta(t));
   const options = {
-    ...BASE, ficheiro, channel: "preview", version: "0.2.0-rc.6",
-    url: "https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.0-rc.6/setup.exe",
+    ...BASE, ficheiro, channel: "preview", version: "0.2.0-rc.7",
+    url: "https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.0-rc.7/setup.exe",
     sourceCommit: "a".repeat(40), minWindowsBuild: 19045,
   };
   const manifest = await construirManifesto(options);

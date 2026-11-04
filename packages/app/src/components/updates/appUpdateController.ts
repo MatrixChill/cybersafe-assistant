@@ -34,6 +34,8 @@ export interface UpdatesViewState {
   snapshot: AppUpdateSnapshot | null;
   busy: AppUpdateActionName | null;
   actionError: { code: AppUpdateErrorCode; message: string } | null;
+  /** In-memory origin of an operation failure; install failures never get blind retry. */
+  failedOperation: "check" | "download" | "install" | null;
 }
 
 export interface UpdatesActions {
@@ -165,6 +167,18 @@ function normalizeTimeout(value: number | undefined): number {
   return value;
 }
 
+function failedOperationFor(action: AppUpdateActionName, code: AppUpdateErrorCode): UpdatesViewState["failedOperation"] {
+  if (code === "busy") return null;
+  switch (action) {
+    case "check":
+    case "download":
+    case "install":
+      return action;
+    default:
+      return null;
+  }
+}
+
 export function createUpdatesController(
   bridge: AppUpdateBridge | null,
   options: UpdatesControllerOptions = {},
@@ -177,6 +191,7 @@ export function createUpdatesController(
     snapshot: null,
     busy: null,
     actionError: null,
+    failedOperation: null,
   };
   let unsubBridge: (() => void) | null = null;
   let pendingRead: PendingSnapshotRead | null = null;
@@ -249,15 +264,16 @@ export function createUpdatesController(
   ): Promise<void> => {
     if (disposed || bridge === null || state.busy !== null) return;
     const current = ++seq;
-    patch({ busy: action, actionError: null });
+    patch({ busy: action, actionError: null, failedOperation: null });
     try {
       const result = await invoke(bridge);
       if (disposed || current !== seq) return;
       patch(
         result.ok
-          ? { snapshot: result.snapshot }
+          ? { snapshot: result.snapshot, failedOperation: null }
           : {
               snapshot: result.snapshot,
+              failedOperation: failedOperationFor(action, result.error),
               actionError: {
                 code: result.error,
                 message: result.snapshot.error?.message ?? errorCodeMessage(result.error),
@@ -266,7 +282,7 @@ export function createUpdatesController(
       );
     } catch (error) {
       if (disposed || current !== seq) return;
-      patch({ actionError: { code: "internal", message: describeError(error) } });
+      patch({ actionError: { code: "internal", message: describeError(error) }, failedOperation: failedOperationFor(action, "internal") });
     } finally {
       if (!disposed && current === seq) patch({ busy: null, loading: false });
     }
