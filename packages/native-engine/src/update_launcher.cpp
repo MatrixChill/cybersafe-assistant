@@ -43,13 +43,56 @@ static bool ParseRc(const std::string& value, Version& parsed) {
   return true;
 }
 
-static bool MatchLockedArtifact(const wchar_t* path, unsigned long long expectedSize, const std::string& expectedHash) {
-  HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
-                            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
-  if (file == INVALID_HANDLE_VALUE) return false;
+class LockedArtifact {
+ public:
+  LockedArtifact() = default;
+  LockedArtifact(const LockedArtifact&) = delete;
+  LockedArtifact& operator=(const LockedArtifact&) = delete;
+  ~LockedArtifact() {
+    for (auto it = handles.rbegin(); it != handles.rend(); ++it) CloseHandle(*it);
+  }
+
+  bool Open(const wchar_t* input) {
+    if (!input) return false;
+    path = input;
+    if (path.size() < 4 || path.size() >= MAX_PATH ||
+        path[1] != L':' || path[2] != L'\\' ||
+        path.find_first_of(L"/:*?\"<>|", 2) != std::wstring::npos) return false;
+    wchar_t resolved[MAX_PATH]{};
+    if (GetFullPathNameW(path.c_str(), MAX_PATH, resolved, nullptr) != path.size() || path != resolved ||
+        GetDriveTypeW(path.substr(0, 3).c_str()) != DRIVE_FIXED) return false;
+    size_t start = 3;
+    while (start < path.size()) {
+      const auto end = path.find(L'\\', start);
+      const auto part = path.substr(start, end == std::wstring::npos ? end : end - start);
+      if (part.empty() || part.back() == L'.' || part.back() == L' ') return false;
+      const bool directory = end != std::wstring::npos;
+      const auto prefix = directory ? path.substr(0, end) : path;
+      HANDLE handle = CreateFileW(prefix.c_str(), directory ? 0 : GENERIC_READ,
+        FILE_SHARE_READ,
+        nullptr, OPEN_EXISTING, FILE_FLAG_OPEN_REPARSE_POINT |
+        (directory ? FILE_FLAG_BACKUP_SEMANTICS : FILE_FLAG_SEQUENTIAL_SCAN), nullptr);
+      if (handle == INVALID_HANDLE_VALUE) return false;
+      handles.push_back(handle);
+      BY_HANDLE_FILE_INFORMATION info{};
+      if (GetFileType(handle) != FILE_TYPE_DISK || !GetFileInformationByHandle(handle, &info) ||
+          (info.dwFileAttributes & FILE_ATTRIBUTE_REPARSE_POINT) ||
+          ((info.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY) != 0) != directory) return false;
+      if (!directory) { file = handle; return true; }
+      start = end + 1;
+    }
+    return false;
+  }
+
+  HANDLE file = INVALID_HANDLE_VALUE;
+ private:
+  std::wstring path;
+  std::vector<HANDLE> handles;
+};
+
+static bool MatchLockedArtifact(HANDLE file, unsigned long long expectedSize, const std::string& expectedHash) {
   BY_HANDLE_FILE_INFORMATION info{};
-  bool ok = GetFileType(file) == FILE_TYPE_DISK && GetFileInformationByHandle(file, &info) &&
-    !(info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) &&
+  bool ok = GetFileInformationByHandle(file, &info) &&
     ((static_cast<unsigned long long>(info.nFileSizeHigh) << 32) | info.nFileSizeLow) == expectedSize;
   BCRYPT_ALG_HANDLE algorithm = nullptr;
   BCRYPT_HASH_HANDLE hash = nullptr;
@@ -74,7 +117,6 @@ static bool MatchLockedArtifact(const wchar_t* path, unsigned long long expected
   }
   if (hash) BCryptDestroyHash(hash);
   if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
-  CloseHandle(file);
   return ok;
 }
 
@@ -106,7 +148,9 @@ static int InspectPreviewManifest(const wchar_t* bytes, const wchar_t* signature
     Version min;
     if (!ParseRc(minimum.substr(1, minimum.size()-2) + "-rc.1", min) || source < min) return 8;
   }
-  return !artifact || MatchLockedArtifact(artifact, std::stoull(match[6]), match[5]) ? 0 : 9;
+  if (!artifact) return 0;
+  LockedArtifact locked;
+  return locked.Open(artifact) && MatchLockedArtifact(locked.file, std::stoull(match[6]), match[5]) ? 0 : 9;
 }
 
 int wmain(int argc, wchar_t** argv) {
