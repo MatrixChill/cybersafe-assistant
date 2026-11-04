@@ -163,6 +163,9 @@ Var CSOrbitalRegisteredDir
   ${EndIf}
 !macroend
 
+; electron-builder can register stock plugins after including this file.
+; Its installer template expands customHeader after the generated header.
+!macro customHeader
 Function .onInstSuccess
   ${If} $CSOrbitalActive == 1
     ${If} $CSOrbitalVerified == 1
@@ -207,6 +210,7 @@ Function .onInstSuccess
     ${EndIf}
   ${EndIf}
 FunctionEnd
+!macroend
 
 Function .onInstFailed
   ${If} $CSOrbitalActive == 1

@@ -17,7 +17,6 @@ for(const mode of ['per-user','all-users','uninstaller']) {
   const dir=fs.mkdtempSync(path.join(out,`${mode}-`));
   const gen=new NsisScriptGenerator();
   gen.addIncludeDir(win(templates));gen.addIncludeDir(win(path.join(templates,'include')));
-  gen.addPluginDir('x86-unicode',win(path.join(resources,'plugins/x86-unicode')));
   gen.include(win(path.join(templates,'include/StdUtils.nsh')));gen.flags(['updated','force-run','keep-shortcuts','no-desktop-shortcut','delete-app-data','allusers','currentuser']);
   const config=new LangConfigurator({});createAddLangsMacro(gen,config);
   let index=0;const packager={getTempFile:async()=>path.join(dir,`messages-${index++}.nsh`)};
@@ -53,6 +52,8 @@ ${mode==='all-users'?'!define INSTALL_MODE_PER_ALL_USERS':''}
 ${mode==='uninstaller'?'!define BUILD_UNINSTALLER':''}
 ${gen.build()}
 !include "${win(path.join(root,'packages/desktop/build/installer/orbital-installer.nsh'))}"
+; The custom include can resolve before the async stock plugin directory.
+!addplugindir /x86-unicode "${win(path.join(resources,'plugins/x86-unicode'))}"
 !include "${win(path.join(templates,'installer.nsi'))}"
 `);
   const result=spawnSync(compiler,['/NOCONFIG','/INPUTCHARSET','UTF8','/V3','-'],{input:fs.readFileSync(nsi,'utf8'),cwd:templates,encoding:'utf8',windowsHide:true,timeout:25000});

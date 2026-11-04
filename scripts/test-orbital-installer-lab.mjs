@@ -50,6 +50,7 @@ ${gen.build()}
 !include MUI2.nsh
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro addLangs
+!insertmacro customHeader
 Function .onInit
  StrCpy $INSTDIR "${win(mode==='silent'?target:initial)}"
  !insertmacro customInit
