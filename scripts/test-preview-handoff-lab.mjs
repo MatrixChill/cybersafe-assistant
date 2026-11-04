@@ -32,13 +32,19 @@ function ps(code){return run('powershell.exe',['-NoLogo','-NoProfile','-NonInter
 const quote=value=>"'"+value.replaceAll("'","''")+"'";
 const registry='HKCU:\\Software\\CyberSafeLauncherLabOnly';
 ps(`if(Test-Path -LiteralPath ${quote(registry)}){throw 'existing laboratory registry must be reviewed first'}`);
+const installRegistry=registry+'-Install';
+ps(`if(Test-Path -LiteralPath ${quote(installRegistry)}){throw 'existing laboratory install registry must be reviewed first'}`);
 let created=false;
 try{
-  ps(`$ErrorActionPreference='Stop'; New-Item -Path ${quote(registry)} | Out-Null; New-ItemProperty -LiteralPath ${quote(registry)} -Name InstallLocation -Value ${quote(installed)} -PropertyType String | Out-Null; New-ItemProperty -LiteralPath ${quote(registry)} -Name DisplayVersion -Value ${quote(version)} -PropertyType String | Out-Null`);created=true;
+  ps(`$ErrorActionPreference='Stop'; New-Item -Path ${quote(registry)} | Out-Null; New-Item -Path ${quote(installRegistry)} | Out-Null; New-ItemProperty -LiteralPath ${quote(installRegistry)} -Name InstallLocation -Value ${quote(installed)} -PropertyType String | Out-Null; New-ItemProperty -LiteralPath ${quote(registry)} -Name DisplayVersion -Value ${quote(version)} -PropertyType String | Out-Null`);created=true;
   for(const scenario of [{exitCode:0},{exitCode:7},{exitCode:0,abort:true},
     {nativeRejection:'hash',expectedNativeExit:9},{nativeRejection:'signature',expectedNativeExit:7},
     {nativeRejection:'downgrade',expectedNativeExit:8},{nativeRejection:'windows',expectedNativeExit:8},
+    {nativeRejection:'missing-location',expectedNativeExit:10},{nativeRejection:'wrong-location',expectedNativeExit:10},
     {nativeRejection:'helper',expectedNativeExit:10},{nativeRejection:'registration',expectedNativeExit:10}]){
+    ps(`Set-ItemProperty -LiteralPath ${quote(installRegistry)} -Name InstallLocation -Value ${quote(installed)}`);
+    if(scenario.nativeRejection==='missing-location') ps(`Remove-ItemProperty -LiteralPath ${quote(installRegistry)} -Name InstallLocation`);
+    if(scenario.nativeRejection==='wrong-location') ps(`Set-ItemProperty -LiteralPath ${quote(installRegistry)} -Name InstallLocation -Value ${quote(path.join(root,'unrelated'))}`);
     const bytes=fs.readFileSync(simulator);
     const releaseVersion=scenario.nativeRejection==='downgrade'?version:target;
     const manifest=buildSignedManifest({schema:'cybersafe-release/1',channel:'preview',version:releaseVersion,publishedAt:'2026-11-04T00:00:00Z',notes:'Inert LAB; never publish',
@@ -67,6 +73,6 @@ try{
     console.log('PASS native Preview LAB '+JSON.stringify(scenario));
   }
 }finally{
-  if(created)ps(`Remove-Item -LiteralPath ${quote(registry)} -ErrorAction Stop`);
+  if(created)ps(`Remove-Item -LiteralPath ${quote(registry)} -ErrorAction Stop; Remove-Item -LiteralPath ${quote(installRegistry)} -ErrorAction Stop`);
 }
 console.log('LAB evidence: '+root);

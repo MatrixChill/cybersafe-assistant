@@ -53,11 +53,13 @@ class PreviewParent {
       wchar_t destination[MAX_PATH]{}, version[64]{};
       DWORD destinationBytes = sizeof(destination), versionBytes = sizeof(version);
 #ifdef CYBERSAFE_LAUNCHER_LAB
+      constexpr auto installKey = L"Software\\CyberSafeLauncherLabOnly-Install";
       constexpr auto key = L"Software\\CyberSafeLauncherLabOnly";
 #else
+      constexpr auto installKey = L"Software\\7f4c0981-4cbf-53f9-af6e-a266427c7961";
       constexpr auto key = L"Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\7f4c0981-4cbf-53f9-af6e-a266427c7961";
 #endif
-      if (RegGetValueW(HKEY_CURRENT_USER, key, L"InstallLocation", RRF_RT_REG_SZ | view,
+      if (RegGetValueW(HKEY_CURRENT_USER, installKey, L"InstallLocation", RRF_RT_REG_SZ | view,
                       nullptr, destination, &destinationBytes) != ERROR_SUCCESS ||
           RegGetValueW(HKEY_CURRENT_USER, key, L"DisplayVersion", RRF_RT_REG_SZ | view,
                       nullptr, version, &versionBytes) != ERROR_SUCCESS) continue;
