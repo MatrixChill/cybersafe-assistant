@@ -22,6 +22,7 @@ set(CMAKE_MSVC_RUNTIME_LIBRARY "MultiThreaded$<$<CONFIG:Debug>:Debug>")
 project(cybersafe_scan_engine LANGUAGES CXX)
 
 if(WIN32)
+  enable_language(C)
   find_program(CYBERSAFE_NODE node REQUIRED)
   set(handoff_source "${CMAKE_CURRENT_SOURCE_DIR}/../desktop/src/updater/windows-handoff-script.ts")
   set(handoff_generator "${CMAKE_CURRENT_SOURCE_DIR}/../../scripts/generate-update-launcher-program.mjs")
@@ -32,6 +33,11 @@ if(WIN32)
     VERBATIM)
   add_executable(cybersafe-update-launcher src/update_launcher.cpp "${handoff_header}")
   target_include_directories(cybersafe-update-launcher PRIVATE "${CMAKE_CURRENT_BINARY_DIR}")
+  target_sources(cybersafe-update-launcher PRIVATE
+    third-party/monocypher/monocypher.c
+    third-party/monocypher/monocypher-ed25519.c)
+  target_include_directories(cybersafe-update-launcher PRIVATE third-party/monocypher)
+  target_link_libraries(cybersafe-update-launcher PRIVATE crypt32)
   set_target_properties(cybersafe-update-launcher PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release")
 endif()
