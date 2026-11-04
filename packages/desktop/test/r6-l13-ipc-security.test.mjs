@@ -102,7 +102,9 @@ for (const packaged of [false, true]) {
     // + service:get-definitions-status (estado das definicoes de seguranca por fonte,
     //   leitura sem efeito; revisado a 2026-11-01 junto com o contrato `definitions.status`).
     // Six additional guarded channels: three AI credentials and three protected termination.
-    assert.equal(f.handlers.size, 68, "audit covers every currently registered channel; review any surface change");
+    // app:update-set-preview changes the persisted channel preference and must use the same sender guard.
+    assert.equal(f.handlers.size, 69, "audit covers every currently registered channel; review any surface change");
+    assert.ok(f.handlers.has("app:update-set-preview"));
     assert.ok(f.handlers.has("app:update-reveal")); // folder reveal: same trusted document guard
     assert.ok(f.handlers.has("service:usb-scan"));
     assert.ok(f.handlers.has("service:usb-cancel"));
@@ -172,6 +174,7 @@ test("remote main-frame document cannot use sensitive methods exposed by the act
     () => api.killProcessTree(424242), () => api.restoreQuarantine("fixture-id", true),
     () => api.allowHash("a".repeat(64)), () => api.setAutoStart({enabled:true,startMinimized:true}),
     () => api.openReportWindow("<p>fixture</p>"), () => api.openFileDialog(),
+    () => api.appUpdate.setPreview(true),
   ]) await assert.rejects(call(), /Emissor IPC não autorizado/);
   assert.equal(f.effects.length, 0);
 });
@@ -223,7 +226,7 @@ test("preload surface is explicitly limited to the 61 reviewed capabilities", ()
   // 52 revistas originalmente + getProtectionIntent/setProtectionIntent (intenção de
   // proteção, 19/10) + appUpdate (objecto de actualização da app, 19/10). O sub-objecto
   // é auditado à parte abaixo: contar `appUpdate` como capacidade e não verificar as
-  // suas 8 chaves seria um ledger mais fraco do que antes.
+  // suas chaves seria um ledger mais fraco do que antes.
   const expected = "aiCredentials,prepareProcessTermination,confirmProcessTermination,cancelProcessTermination,beginShutdown,getProtectionState,setProtection,pauseProtection,getServiceConnectionState,onServiceConnectionState,getSecurityEvents,getThreatEvents,getProcesses,getConnections,getQuarantineFiles,clearThreatEvents,scanFile,scanFullSystem,killProcessTree,analyzeProcess,getHardwareSnapshot,getWindowsHealth,getPCState,restoreQuarantine,deleteQuarantine,allowHash,allowPublisher,runRestrictedAnalysis,updateDefinitions,getDefinitionsStatus,startScan,getActiveScan,getLastScan,getScanHistory,cancelScan,threatAction,openFileDialog,getPathForFile,openFolderDialog,onSecurityEvent,onScanProgress,onScanSession,onExitConfirmRequest,respondExitConfirm,ackExitConfirm,onNavigateRequest,getAutoStart,setAutoStart,getNotificationsEnabled,setNotificationsEnabled,setTitleBarOverlay,openReportWindow,exportReportPdf,getUsbProtection,configureUsbProtection,usbScan,usbCancel,getProtectionIntent,setProtectionIntent,appUpdate,authSession,getExclusions,updateExclusions,getQuarantinePolicy,setQuarantinePolicy".split(",");
   assert.deepEqual(Object.keys(api).sort(), expected.sort());
   for (const [nome, method] of Object.entries(api)) {
@@ -231,7 +234,7 @@ test("preload surface is explicitly limited to the 61 reviewed capabilities", ()
     assert.equal(typeof method, "function", `${nome} tem de continuar a ser uma função`);
   }
   assert.deepEqual(Object.keys(api.appUpdate).sort(),
-    "cancel,check,defer,download,getSnapshot,install,onState,revealDownload,setAutomaticCheck".split(",").sort());
+    "cancel,check,defer,download,getSnapshot,install,onState,revealDownload,setAutomaticCheck,setPreview".split(",").sort());
   for (const method of Object.values(api.appUpdate)) assert.equal(typeof method, "function");
   assert.deepEqual(Object.keys(api.authSession).sort(), ["clear", "read", "write"]);
   for (const method of Object.values(api.authSession)) assert.equal(typeof method, "function");
