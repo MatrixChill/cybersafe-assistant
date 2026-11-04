@@ -51,5 +51,6 @@ export interface AppUpdateBridge {
   /** UI confirms first; main revalidates artifact/version and rejects active/unknown scans. */
   install(request: { confirmed: true; expectedVersion: string }): Promise<AppUpdateResult>;
   setAutomaticCheck(enabled: boolean): Promise<AppUpdateResult>;
+  setPreview?(enabled: boolean): Promise<AppUpdateResult>;
   onState(listener: (snapshot: AppUpdateSnapshot) => void): () => void;
 }

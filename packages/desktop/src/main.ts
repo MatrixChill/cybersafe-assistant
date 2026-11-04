@@ -40,9 +40,7 @@ import {
   resolveWindowMaterial,
   type BackgroundMaterial,
 } from "./window-material.js";
-// Updater da aplicação — integração MÍNIMA (TP-UPDATE-INTEGRATE). Só faz o wiring
-// do IPC; a máquina e os adaptadores vivem em src/updater/*. Hoje UNCONFIGURED
-// (sem feed/chave/editor), adaptadores bloqueados, nada de rede/fs/instalador.
+// Updater: IPC restrito; configuração e verificações residem em src/updater/*.
 import {
   updaterCacheDir,
   failureResult,
@@ -51,6 +49,8 @@ import {
   toWireResult,
   validateAutomaticInput,
   validateInstallRequest,
+  validatePreviewInput,
+  canSwitchUpdateChannel,
 } from "./updater/bridge.js";
 import { startAutomaticChecks } from "./updater/automatic-checks.js";
 import { createProductionUpdater } from "./updater/production.js";
@@ -102,6 +102,8 @@ let mainWindow: BrowserWindow | null = null;
 // Updater da aplicação (ver updater/bridge.ts). `null` até whenReady inicializar;
 // os handlers tratam `null` sem crash e sem `appUpdater!`.
 let appUpdater: Updater | null = null;
+let buildUpdater: ((preview: boolean) => Updater) | null = null;
+let updaterRequestsInFlight = 0;
 let stopAutomaticChecks: (() => void) | null = null;
 let updateStateUnsub: (() => void) | null = null;
 let tray: Tray | null = null;
@@ -143,7 +145,7 @@ const DEBOUNCE_TIME = 15000; // 15 segundos de silêncio para o mesmo arquivo
 // fundo sólido de sempre. Só um pedido explícito (ex.: um toggle futuro nas
 // Definições) liga o backdrop nativo — e mesmo assim apenas quando o
 // `window-material` confirmar que o sistema o suporta.
-let preferences: { notificationsEnabled: boolean; automaticUpdateCheckEnabled?: boolean; windowMaterial?: BackgroundMaterial } = {
+let preferences: { notificationsEnabled: boolean; automaticUpdateCheckEnabled?: boolean; previewUpdateOptIn?: boolean; windowMaterial?: BackgroundMaterial } = {
   notificationsEnabled: true,
   automaticUpdateCheckEnabled: false,
 };
@@ -161,6 +163,7 @@ function loadPreferences() {
         preferences.notificationsEnabled = parsed.notificationsEnabled;
       }
       preferences.automaticUpdateCheckEnabled = parsed.automaticUpdateCheckEnabled === true;
+      preferences.previewUpdateOptIn = typeof parsed.previewUpdateOptIn === "boolean" ? parsed.previewUpdateOptIn : undefined;
       // Só se aceita um material da lista do Electron; qualquer outro valor fica
       // como ausente (fallback sólido), nunca vai para o `new BrowserWindow`.
       if (VALID_BACKGROUND_MATERIALS.includes(parsed.windowMaterial)) {
@@ -1483,13 +1486,17 @@ function registerIpc(
     return result;
   });
 
-  // ── Updater da aplicação (mínimo; UNCONFIGURED hoje) ──────────────────────
+  // ── Updater da aplicação ─────────────────────────────────────────────────
   // `handle` já envolve trustedIpcHandler (documento principal, rejeita subframe/
   // remote). Validação EM RUNTIME dos payloads (o tipo TS não valida nada) e guard
   // de `appUpdater === null` sem `!` (nunca crashar o IPC por init em falta).
   const updateVersion = () => app.getVersion();
-  const withUpdater = async (run: (u: Updater) => Promise<UpdaterResult>) =>
-    appUpdater ? toWireResult(await run(appUpdater)) : failureResult("unconfigured", updateVersion(), "updater não inicializado");
+  const withUpdater = async (run: (u: Updater) => Promise<UpdaterResult>) => {
+    if (!appUpdater) return failureResult("unconfigured", updateVersion(), "updater não inicializado");
+    updaterRequestsInFlight++;
+    try { return toWireResult(await run(appUpdater)); }
+    finally { updaterRequestsInFlight--; }
+  };
   handle("app:update-get-snapshot", async () =>
     appUpdater ? toAppUpdateSnapshot(appUpdater.snapshotCopy()) : failureSnapshot("unconfigured", updateVersion(), "updater não inicializado"));
   handle("app:update-check", () => withUpdater((u) => u.check()));
@@ -1501,6 +1508,32 @@ function registerIpc(
     const v = validateInstallRequest(req);
     if (!v.ok) return failureResult("installation", updateVersion(), "pedido de instalação inválido");
     return withUpdater((u) => u.install(v.value));
+  });
+  handle("app:update-set-preview", async (_event, enabled: unknown) => {
+    const input = validatePreviewInput(enabled);
+    if (!input.ok || !appUpdater || !buildUpdater) return failureResult("internal", updateVersion(), "Pedido de canal inválido ou atualizador indisponível.");
+    const current = appUpdater.snapshotCopy();
+    if (isQuitting || updaterRequestsInFlight > 0 || appUpdater.isBusy() || !canSwitchUpdateChannel(current.phase)) {
+      return toWireResult({ ok: false, error: "busy", snapshot: current });
+    }
+    const next = buildUpdater(input.value);
+    if (input.value && next.snapshotCopy().channel !== "preview") {
+      return toWireResult({ ok: false, error: "unconfigured", snapshot: current });
+    }
+    const previous = preferences.previewUpdateOptIn;
+    preferences.previewUpdateOptIn = input.value;
+    if (!savePreferences()) {
+      preferences.previewUpdateOptIn = previous;
+      return toWireResult({ ok: false, error: "internal", snapshot: current });
+    }
+    stopAutomaticChecks?.();
+    updateStateUnsub?.();
+    appUpdater = next;
+    stopAutomaticChecks = startAutomaticChecks(next);
+    updateStateUnsub = next.onState((state) => {
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:update-state", toAppUpdateSnapshot(state));
+    });
+    return toWireResult({ ok: true, snapshot: next.snapshotCopy() });
   });
   handle("app:update-set-automatic", async (_event, enabled: unknown) => {
     const v = validateAutomaticInput(enabled);
@@ -1913,15 +1946,14 @@ if (!gotTheLock) {
   app.whenReady().then(async () => {
     logStartup("electron-ready", { pid: process.pid, port: perfil.apiPort });
     loadPreferences();
-    // Updater: hoje UNCONFIGURED (sem feed/chave/editor). `runtimeSupported` só
-    // em Windows empacotado; dev/portable ⇒ `unsupported` honesto. Nenhum adapter
-    // real é exercitado neste estado.
+    // Apenas Windows empacotado suporta atualização; Stable permanece fechado
+    // sem confiança de publicação e Preview exige adesão explícita.
     // Identidade REAL do artefacto: o carimbo escrito pelo staging do renderer.
     // Sem carimbo, build/commit ficam ausentes e a UI diz «desconhecida» — nunca
     // se inventa um valor a partir da versão ou do nome do ficheiro.
     const installedIdentity = readBuildIdentity(app.getAppPath(), app.getVersion());
-    appUpdater = createProductionUpdater({
-      previewOptIn: process.argv.includes("--cybersafe-preview-updates"),
+    buildUpdater = (previewOptIn) => createProductionUpdater({
+      previewOptIn,
       cacheDir: updaterCacheDir(app.getPath("userData")),
       runtimeSupported: app.isPackaged && process.platform === "win32",
       installedVersion: app.getVersion(),
@@ -1957,6 +1989,7 @@ if (!gotTheLock) {
       installedBuild: installedIdentity.build,
       installedCommit: installedIdentity.commit,
     });
+    appUpdater = buildUpdater(preferences.previewUpdateOptIn ?? process.argv.includes("--cybersafe-preview-updates"));
     stopAutomaticChecks = startAutomaticChecks(appUpdater);
     updateStateUnsub = appUpdater.onState((s) => {
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:update-state", toAppUpdateSnapshot(s));

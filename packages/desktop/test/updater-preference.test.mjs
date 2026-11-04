@@ -8,3 +8,10 @@ test('automatic update preference survives disk serialization and a fresh load; 
  disk='{"automaticUpdateCheckEnabled":"true"}';ctx.preferences.automaticUpdateCheckEnabled=false;ctx.loadPreferences();assert.equal(ctx.preferences.automaticUpdateCheckEnabled,false);
  ctx.fs.writeFileSync=()=>{throw Error('disk full')};assert.equal(ctx.savePreferences(),false);
 });
+
+test('Preview preference survives a fresh load and accepts only a boolean',()=>{
+ let disk='{}';const ctx={preferences:{notificationsEnabled:true,automaticUpdateCheckEnabled:false},VALID_BACKGROUND_MATERIALS:[],settingsFilePath:()=>'/fixture/settings.json',fs:{existsSync:()=>true,readFileSync:()=>disk}};
+ ctx.atomicWriteJsonSync=(_file,value)=>{disk=JSON.stringify(value)};
+ vm.createContext(ctx);vm.runInContext(code,ctx);ctx.preferences.previewUpdateOptIn=true;assert.equal(ctx.savePreferences(),true);ctx.preferences={notificationsEnabled:true};ctx.loadPreferences();assert.equal(ctx.preferences.previewUpdateOptIn,true);
+ disk='{"previewUpdateOptIn":"true"}';ctx.preferences={notificationsEnabled:true};ctx.loadPreferences();assert.notEqual(ctx.preferences.previewUpdateOptIn,true);
+});

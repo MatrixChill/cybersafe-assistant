@@ -455,3 +455,20 @@ describe("Controller de atualizações — cancelamento com operação pendente"
     assert.equal(controller.getState().snapshot?.status, "idle", "respostas após dispose não escrevem estado");
   });
 });
+
+it("selecionar Preview envia apenas a preferência e aplica o canal devolvido", async () => {
+  const fake = createFakeBridge();
+  const calls: boolean[] = [];
+  fake.bridge.setPreview = async (enabled) => {
+    calls.push(enabled);
+    return {ok:true, snapshot:snapshot({channel:enabled ? "preview" : "stable", automaticCheckEnabled:false})};
+  };
+  const controller = createUpdatesController(fake.bridge);
+  controller.start();
+  await new Promise(resolve => setTimeout(resolve, 0));
+  await controller.setPreview(true);
+  assert.deepEqual(calls, [true]);
+  assert.equal(controller.getState().snapshot?.channel, "preview");
+  assert.deepEqual(fake.calls, ["getSnapshot"]);
+  controller.dispose();
+});

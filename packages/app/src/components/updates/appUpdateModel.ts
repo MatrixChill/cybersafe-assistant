@@ -92,7 +92,7 @@ export function progressInfo(progress: { downloadedBytes: number; totalBytes?: n
 export function statusSummary(snapshot: AppUpdateSnapshot): string {
   switch (snapshot.status) {
     case "unconfigured":
-      return "As atualizações ainda não estão configuradas neste build — nada é transferido nem instalado.";
+      return snapshot.channel === "stable" ? "Canal Stable não configurado: falta confiança de publicação aprovada. Nada é transferido nem instalado." : "O atualizador não está configurado neste ambiente — nada é transferido nem instalado.";
     case "unsupported":
       return "Esta instalação não suporta atualização automática.";
     case "idle":
@@ -100,7 +100,7 @@ export function statusSummary(snapshot: AppUpdateSnapshot): string {
     case "checking":
       return "A verificar se existe uma versão mais recente…";
     case "up-to-date":
-      return "Está na versão mais recente.";
+      return "A última verificação não encontrou uma versão mais recente neste canal.";
     case "available":
       return snapshot.latest
         ? `Está disponível a versão v${snapshot.latest.version}.`

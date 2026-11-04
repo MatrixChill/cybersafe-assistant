@@ -108,3 +108,11 @@ describe("bridge — tradução domínio → contrato", () => {
     assert.equal(wire.snapshot.status, "error");
   });
 });
+
+it('Preview opt-in validates booleans and forbids switching during operations', async()=>{
+ const {validatePreviewInput,canSwitchUpdateChannel}=await import('../src/updater/bridge.ts');
+ assert.equal(validatePreviewInput(true).ok,true);
+ for(const bad of ['true',1,null,{}])assert.equal(validatePreviewInput(bad).ok,false);
+ for(const phase of ['checking','downloading','verifying','installing'])assert.equal(canSwitchUpdateChannel(phase),false);
+ for(const phase of ['unconfigured','idle','downloaded','error'])assert.equal(canSwitchUpdateChannel(phase),true);
+});

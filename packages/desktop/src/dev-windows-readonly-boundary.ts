@@ -366,6 +366,7 @@ export const CANAIS_NEGADOS: ReadonlySet<string> = new Set([
   "app:update-cancel",
   "app:update-defer",
   "app:update-set-automatic",
+  "app:update-set-preview",
 ]);
 
 export interface DecisaoCanal {

@@ -149,6 +149,12 @@ export function validateAutomaticInput(raw: unknown): Validated<boolean> {
   return { ok: false, error: "internal" };
 }
 
+/** Channel selection is explicit and cannot interrupt an updater operation. */
+export const validatePreviewInput = validateAutomaticInput;
+export function canSwitchUpdateChannel(phase: UpdateSnapshot["phase"]): boolean {
+  return !["checking", "downloading", "verifying", "installing"].includes(phase);
+}
+
 /**
  * Result/ snapshot de falha construído no lado do main, para os casos em que o
  * updater ainda não foi inicializado ou o payload é inválido em RUNTIME — sem

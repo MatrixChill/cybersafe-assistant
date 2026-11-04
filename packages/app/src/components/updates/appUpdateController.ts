@@ -26,7 +26,7 @@
 import type { AppUpdateBridge, AppUpdateErrorCode, AppUpdateResult, AppUpdateSnapshot } from "@cybersafe/shared-types";
 import { errorCodeMessage } from "./appUpdateModel";
 
-export type AppUpdateActionName = "reveal" | "refresh" | "check" | "download" | "cancel" | "defer" | "install" | "automatic";
+export type AppUpdateActionName = "reveal" | "refresh" | "check" | "download" | "cancel" | "defer" | "install" | "automatic" | "preview";
 
 export interface UpdatesViewState {
   bridgeAvailable: boolean;
@@ -47,6 +47,7 @@ export interface UpdatesActions {
   defer(): void;
   install(expectedVersion: string): void;
   setAutomaticCheck(enabled: boolean): void;
+  setPreview?(enabled: boolean): void;
 }
 
 export interface UpdatesController {
@@ -62,6 +63,7 @@ export interface UpdatesController {
   defer(): Promise<void>;
   install(expectedVersion: string): Promise<void>;
   setAutomaticCheck(enabled: boolean): Promise<void>;
+  setPreview(enabled: boolean): Promise<void>;
 }
 
 export interface UpdatesControllerOptions {
@@ -392,5 +394,6 @@ export function createUpdatesController(
         ? Promise.resolve()
         : run("install", (b) => b.install({ confirmed: true, expectedVersion })),
     setAutomaticCheck: (enabled: boolean) => run("automatic", (b) => b.setAutomaticCheck(enabled)),
+    setPreview: (enabled: boolean) => run("preview", (b) => { if (!b.setPreview) throw new Error("Seleção de canal indisponível nesta instalação."); return b.setPreview(enabled); }),
   };
 }

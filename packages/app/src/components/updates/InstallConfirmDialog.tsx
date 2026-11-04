@@ -19,11 +19,12 @@ export interface InstallConfirmDialogProps {
   /** false quando a versão ou a capacidade de instalar mudou depois de abrir. */
   podeConfirmar: boolean;
   requiresElevation?: boolean;
+  channel?: "stable" | "preview";
   onCancel: () => void;
   onConfirm: () => void;
 }
 
-export function InstallConfirmDialog({ version, podeConfirmar, requiresElevation, onCancel, onConfirm }: InstallConfirmDialogProps) {
+export function InstallConfirmDialog({ version, podeConfirmar, requiresElevation, channel, onCancel, onConfirm }: InstallConfirmDialogProps) {
   const dialogRef = useRef<HTMLDivElement | null>(null);
   const cancelRef = useRef<HTMLButtonElement | null>(null);
 
@@ -75,6 +76,7 @@ export function InstallConfirmDialog({ version, podeConfirmar, requiresElevation
           Vais instalar a versão <span className="font-mono text-foreground">v{version}</span>. A instalação só
           avança com a tua confirmação.
         </p>
+        {channel === "preview" && <p className="mt-3 rounded-lg border border-cyber-yellow/40 bg-cyber-yellow/10 px-3 py-2 text-xs text-foreground">Preview experimental: Setup sem assinatura Authenticode; o editor não é verificado pelo Windows.</p>}
         {requiresElevation && (
           <p
             className="mt-3 rounded-lg border border-cyber-yellow/40 bg-cyber-yellow/10 px-3 py-2 text-xs leading-relaxed text-foreground"

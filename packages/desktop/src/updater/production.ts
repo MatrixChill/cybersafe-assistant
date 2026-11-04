@@ -35,7 +35,7 @@ export function createProductionUpdater(opts: {previewOptIn?: boolean; runtimeSu
     originAllowlist: ['github.com'], pinnedKeyFingerprint: trust.pinnedKeyFingerprint,
     expectedPublisherName: trust.publisherLabel, cacheDir: opts.cacheDir,
     timeoutMs: 120000, maxDownloadBytes: 1024 * 1024 * 1024,
-    automaticCheckEnabled: !preview && opts.automaticCheckEnabled === true, minCheckIntervalMs: 30_000,
+    automaticCheckEnabled: opts.automaticCheckEnabled === true, minCheckIntervalMs: 30_000,
   });
   if (!config.ok) return unavailable();
   const transport = createGitHubReleaseOpener(createNodeHttpsOpener());

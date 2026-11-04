@@ -601,6 +601,7 @@ describe("registo real com efeitos duplados", () => {
       "app:update-cancel": "updaterAction",
       "app:update-defer": "updaterAction",
       "app:update-set-automatic": "preferenciaEscrita",
+      "app:update-set-preview": "preferenciaEscrita",
       "service:set-protection": "rpcMutacao",
       "service:pause-protection": "rpcMutacao",
       "service:set-protection-intent": "rpcMutacao",
@@ -994,7 +995,8 @@ describe("efeitos fora do IPC", () => {
   });
 
   it("actualizador: nenhum agendamento automático; configuração pública fixada no build", () => {
-    assert.match(fonteMain, /appUpdater = createProductionUpdater\(\{/, "o arranque usa a configuração pública de produção");
+    assert.match(fonteMain, /buildUpdater = \(previewOptIn\) => createProductionUpdater\(\{/, "a fábrica usa a configuração pública de produção");
+    assert.match(fonteMain, /appUpdater = buildUpdater\(preferences\.previewUpdateOptIn/, "o arranque aplica a preferência persistida");
     assert.match(
       fonteMain,
       /runtimeSupported: app\.isPackaged && process\.platform === "win32"/,

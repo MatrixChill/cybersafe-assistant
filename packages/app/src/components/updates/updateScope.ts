@@ -60,7 +60,7 @@ export function buildAmbitoAtualizacoes({ bridgeAvailable, snapshot }: { bridgeA
       ? "desconhecido"
       : snapshot.status === "unconfigured"
         ? "nao-configurado"
-        : "medido";
+        : snapshot.status === "unsupported" ? "indisponivel" : "medido";
   const textoPrograma = !bridgeAvailable
     ? "Sem ponte de atualizações nesta janela: não é possível verificar, transferir nem instalar."
     : !snapshot
@@ -111,7 +111,7 @@ export function buildAmbitoAtualizacoes({ bridgeAvailable, snapshot }: { bridgeA
     verificacao,
     avisos: [
       "Atualizar definições ou regras não é feito por este cartão e não é verificado automaticamente.",
-      "Nenhuma chamada de rede é feita por esta secção; o estado vem do snapshot existente.",
+      "A consulta do canal é iniciada apenas pela verificação manual ou pela preferência automática.",
     ],
   };
 }

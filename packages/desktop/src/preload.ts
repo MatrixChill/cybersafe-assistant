@@ -175,7 +175,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     invoke("app:set-titlebar-overlay", payload),
   // Updater da aplicação — superfície restrita (AppUpdateBridge). Sem URLs/caminhos
   // vindos do renderer; `install` exige confirmation+expectedVersion; `onState`
-  // devolve unsubscribe. Hoje o main responde UNCONFIGURED.
+  // devolve unsubscribe.
   appUpdate: {
     getSnapshot: () => invoke("app:update-get-snapshot"),
     check: () => invoke("app:update-check"),
@@ -185,6 +185,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     defer: () => invoke("app:update-defer"),
     install: (request: { confirmed: true; expectedVersion: string }) => invoke("app:update-install", request),
     setAutomaticCheck: (enabled: boolean) => invoke("app:update-set-automatic", enabled),
+    setPreview: (enabled: boolean) => invoke("app:update-set-preview", enabled),
     onState: (callback: (snapshot: unknown) => void) => {
       const listener = (_event: unknown, snapshot: unknown) => callback(snapshot);
       ipcRenderer.on("app:update-state", listener);

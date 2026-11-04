@@ -70,6 +70,8 @@ export class Updater {
     }
   }
 
+  isBusy(): boolean { return this.busy; }
+
   snapshotCopy(): UpdateSnapshot {
     return JSON.parse(JSON.stringify(this.snapshot)) as UpdateSnapshot;
   }

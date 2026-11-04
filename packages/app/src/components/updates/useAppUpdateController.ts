@@ -50,6 +50,7 @@ export function useAppUpdates(): { state: UpdatesViewState; actions: UpdatesActi
       install: (expectedVersion) => {
         void controller.install(expectedVersion);
       },
+      setPreview: (enabled) => { void controller.setPreview(enabled); },
       setAutomaticCheck: (enabled) => {
         void controller.setAutomaticCheck(enabled);
       },

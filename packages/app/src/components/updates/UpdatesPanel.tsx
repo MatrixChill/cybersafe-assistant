@@ -35,6 +35,7 @@ const BUSY_LABELS: Record<string, string> = {
   defer: "A adiar…",
   install: "A confirmar a instalação…",
   automatic: "A guardar a preferência…",
+  preview: "A guardar o canal…",
 };
 
 const BUTTON_SECONDARY = cn(
@@ -57,7 +58,7 @@ export interface UpdatesPanelProps {
 export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
   // O que estava aberto na confirmação (versão vista na altura) + o instalar
   // que era possível na altura. Se mudar com o aviso aberto, confirmar bloqueia.
-  const [confirmacao, setConfirmacao] = useState<{ version: string } | null>(null);
+  const [confirmacao, setConfirmacao] = useState<{ version: string; channel: "stable" | "preview" } | null>(null);
   const { bridgeAvailable, loading, snapshot, busy, actionError } = state;
   const controls = deriveControls(snapshot, busy, bridgeAvailable);
   // O `controls.cancel` do modelo parte de "busy livre"; mas o Cancelar tem de
@@ -82,7 +83,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
   // estava quando o aviso abriu E o instalador continuar disponível (busy
   // livre, downloaded, canInstall). Caso contrário o modal desativa o botão.
   const podeConfirmarInstalacao =
-    confirmacao !== null && installVersion === confirmacao.version && controls.install;
+    confirmacao !== null && installVersion === confirmacao.version && snapshot?.channel === confirmacao.channel && controls.install;
   const errorToShow =
     actionError ??
     (snapshot?.status === "error" && snapshot.error ? { code: snapshot.error.code, message: snapshot.error.message } : null);
@@ -178,6 +179,18 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
             </div>
           )}
 
+          <div className="rounded-lg border border-border bg-secondary/50 p-3" data-testid="app-update-channel">
+            <p className="text-sm font-semibold">Canal selecionado: {snapshot.channel === "preview" ? "Preview experimental" : "Stable"}</p>
+            {snapshot.channel === "stable" && snapshot.status === "unconfigured" && <p className="text-xs text-muted-foreground">Stable não configurado: falta confiança de publicação aprovada.</p>}
+            <p className="mt-1 text-xs text-muted-foreground">Preview experimental: versões de teste; o Setup não tem assinatura Authenticode. Alterar o canal não inicia verificações ou instalações.</p>
+            <button type="button" role="switch" aria-checked={snapshot.channel === "preview"} aria-label="Aderir ao Preview experimental" data-testid="app-update-preview"
+              disabled={busy !== null || snapshot.status === "unsupported" || ["checking", "downloading", "verifying", "installing"].includes(snapshot.status) || !actions.setPreview}
+              onClick={() => actions.setPreview?.(snapshot.channel !== "preview")} className={cn(BUTTON_SECONDARY, "mt-2")}>
+              {snapshot.channel === "preview" ? "Voltar ao Stable" : "Aderir ao Preview experimental"}
+            </button>
+            <p className="mt-2 text-xs text-muted-foreground">Última verificação: {snapshot.checkedAt ? new Date(snapshot.checkedAt).toLocaleString("pt-PT") : "ainda não confirmada neste canal"}.</p>
+          </div>
+
           {/* Versão instalada — dados REAIS do main; sem dados diz-se desconhecida. */}
           <dl
             className="grid grid-cols-1 gap-1.5 rounded-lg border border-border bg-secondary/50 p-3 font-mono text-sm sm:grid-cols-3"
@@ -269,7 +282,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
               <button
                 type="button"
                 data-testid="app-update-install"
-                onClick={() => setConfirmacao({ version: installVersion })}
+                onClick={() => setConfirmacao({ version: installVersion, channel: snapshot.channel })}
                 disabled={!controls.install}
                 className={BUTTON_PRIMARY}
               >
@@ -354,6 +367,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
       {confirmacao !== null && installVersion.length > 0 && (
         <InstallConfirmDialog
           version={installVersion}
+          channel={confirmacao.channel}
           podeConfirmar={podeConfirmarInstalacao}
           requiresElevation={snapshot?.requiresElevation}
           onCancel={() => setConfirmacao(null)}

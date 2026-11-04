@@ -51,6 +51,7 @@ const NOOP_ACTIONS: UpdatesActions = {
   defer() {},
   install() {},
   setAutomaticCheck() {},
+  setPreview() {},
 };
 
 function mount(snapshot: AppUpdateSnapshot | null, extra: Partial<UpdatesViewState> = {}): string {
@@ -173,7 +174,7 @@ describe("Atualizações — UI real (render SSR)", () => {
   it("unconfigured é declarado com honestidade e o verificar fica inativo", () => {
     const html = mount(baseSnapshot({ status: "unconfigured" }));
     assert.match(html, /data-status="unconfigured"/);
-    assert.match(html, /ainda não estão configuradas/);
+    assert.match(html, /Stable não configurado/);
     assert.ok(buttonTag(html, "app-update-check").includes('disabled=""'), "verificar devia estar inativo");
     assert.ok(!html.includes('data-testid="app-update-download"'), "sem download em unconfigured");
     assert.ok(!html.includes('data-testid="app-update-install"'), "sem instalar em unconfigured");
@@ -326,4 +327,18 @@ describe("Atualizações — política manual não promete desbloqueio automáti
     const html = mount(baseSnapshot({ status: "idle", manualDownloadOnly: true }));
     assert.doesNotMatch(html, /manifesto autenticado e SHA-256 verificado/);
   });
+});
+
+it("permite selecionar Preview experimental quando Stable não está configurado", () => {
+  const html = mount(baseSnapshot({ status:"unconfigured", channel:"stable", automaticCheckEnabled:false }));
+  assert.match(html, /Preview experimental/i);
+  assert.match(html, /data-testid="app-update-preview"/);
+  assert.doesNotMatch(buttonTag(html, "app-update-preview"), /\sdisabled(?:=|\s|>)/);
+  assert.match(html, /Stable.*não configurado/i);
+});
+
+it("a confirmação de instalação Preview identifica explicitamente a ausência de Authenticode", () => {
+  const html = renderToStaticMarkup(createElement(InstallConfirmDialog, {version:"0.2.0-rc.9",channel:"preview",podeConfirmar:true,onCancel(){},onConfirm(){}}));
+  assert.match(html, /Preview experimental/);
+  assert.match(html, /sem assinatura Authenticode/i);
 });
