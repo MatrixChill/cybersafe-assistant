@@ -73,6 +73,7 @@ export function createWindowsInstaller(options:Options):Installer {
   let busy=false;
   return {async install(context){
     if(process.platform!=='win32'||busy||options.authorizeExecution?.()!==true)return {ok:false,message:'installation execution is blocked'};
+    if(context.manifest.channel!=='stable')return {ok:false,message:'Stable installer refuses non-Stable manifests'};
     if(context.confirmed!==true||context.scanState!=='idle'||context.expectedVersion!==context.manifest.version)return {ok:false,message:'installation gate refused'};
     busy=true;
     let helper:Handoff|undefined;

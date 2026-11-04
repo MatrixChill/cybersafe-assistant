@@ -97,6 +97,7 @@ public static class CyberSafeDirectoryLock {
     if([IO.File]::Exists([IO.Path]::Combine($stage,'abort.json'))){throw 'aborted-before-shutdown'}
     if([DateTime]::UtcNow -gt $deadline){throw 'shutdown-timeout'}
   }
+  if([IO.File]::Exists([IO.Path]::Combine($stage,'abort.json'))){throw 'aborted-before-installation'}
   $phase='installing';Result 'installing' '' $null
   $start=New-Object Diagnostics.ProcessStartInfo
   $start.FileName=$artifact;$start.WorkingDirectory=$stage;$start.UseShellExecute=$false;$start.CreateNoWindow=$true

@@ -55,7 +55,9 @@ int wmain(int argc, wchar_t** argv) {
   CloseHandle(process.hThread);
   // Keep the inherited control pipes alive while the controller is validating.
   // The actual helper is breakaway; it can survive this launcher/job as well.
-  WaitForSingleObject(process.hProcess, INFINITE);
+  DWORD childExit = 1;
+  const bool exited = WaitForSingleObject(process.hProcess, INFINITE) == WAIT_OBJECT_0
+    && GetExitCodeProcess(process.hProcess, &childExit);
   CloseHandle(process.hProcess);
-  return 0;
+  return exited ? static_cast<int>(childExit) : 6;
 }
