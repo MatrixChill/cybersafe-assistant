@@ -345,6 +345,12 @@ static void Layout(HWND hwnd){
     g_buttons.push_back(c);
   } else {
     Btn c; c.id = 0; c.label = L"Concluir"; c.icon = -1; c.primary = true; c.enabled = true;
+    if(g_page == 4 && g_openAvailable) {
+      Btn open=c;
+      open.id=1; open.label=L"Abrir CyberSafe";
+      open.r={(LONG)(W-S(468)),(LONG)by,(LONG)(W-S(268)),(LONG)(by+bh)};
+      g_buttons.push_back(open);
+    }
     if(g_page == 6) c.label = L"Voltar";
     c.r = { (LONG)(W - S(56) - S(200)), (LONG)by, (LONG)(W - S(56)), (LONG)(by+bh) };
     g_buttons.push_back(c);
@@ -585,6 +591,7 @@ static void Click(HWND hwnd, int id){
   } else if(g_page == 3){
     if(local == 0 && !g_mutating) { g_action=0; DestroyWindow(hwnd); }
   } else {
+    if(local == 1 && g_page == 4 && g_openAvailable) { g_openRequested=true; DestroyWindow(hwnd); }
     if(local == 0) { if(g_page==6) Go(hwnd,0); else DestroyWindow(hwnd); }
   }
 }
@@ -761,7 +768,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       }
       g_status=(const wchar_t*)lp; Layout(hwnd); InvalidateRect(hwnd,nullptr,FALSE); return TRUE;
     case WM_ORBITAL_RESULT:
-      g_mutating=false; g_resultShown=true; g_success=wp!=0; g_status=(const wchar_t*)lp;
+      g_mutating=false; g_resultShown=true; g_success=wp!=0; g_openAvailable=wp==2; g_status=(const wchar_t*)lp;
       Go(hwnd,4); return 0;
     case WM_ORBITAL_FALLBACK:
       if(g_mutating && !g_resultShown) {

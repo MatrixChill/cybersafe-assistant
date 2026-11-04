@@ -7,6 +7,7 @@
 !addplugindir /x86-unicode "${BUILD_RESOURCES_DIR}\x86-unicode"
 Var CSOrbitalActive
 Var CSOrbitalVerified
+Var CSOrbitalExecutable
 Var CSOrbitalDesktop
 Var CSOrbitalMenu
 Var CSOrbitalAction
@@ -155,6 +156,9 @@ Var CSOrbitalRegisteredDir
         Abort "Nao foi possivel aplicar as opcoes de atalhos."
       ${EndIf}
     !endif
+    !ifndef CS_ORBITAL_LAB
+      StrCpy $CSOrbitalExecutable "$appExe"
+    !endif
     StrCpy $CSOrbitalVerified 1
   ${EndIf}
 !macroend
@@ -162,7 +166,17 @@ Var CSOrbitalRegisteredDir
 Function .onInstSuccess
   ${If} $CSOrbitalActive == 1
     ${If} $CSOrbitalVerified == 1
+      !ifdef CS_ORBITAL_LAB
       OrbitalSetup::Finish "success" "O NSIS terminou e o resultado foi verificado no destino escolhido."
+      !else
+        OrbitalSetup::Finish "success-open" "O NSIS terminou e o resultado foi verificado no destino escolhido."
+        Pop $0
+        ${If} $0 == "open"
+          ${If} ${FileExists} "$CSOrbitalExecutable"
+            ${StdUtils.ExecShellAsUser} $0 "$CSOrbitalExecutable" "open" ""
+          ${EndIf}
+        ${EndIf}
+      !endif
     ${Else}
       SetErrorLevel 2
       OrbitalSetup::Finish "error" "O motor terminou sem prova de instalacao completa. O resultado nao foi aprovado."

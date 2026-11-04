@@ -22,6 +22,7 @@ static HFONT g_editFont = nullptr;
 static HANDLE g_decisionEvent = nullptr, g_uiThread = nullptr;
 static std::wstring g_assets, g_version, g_destination, g_installed, g_required;
 static bool g_backend = false, g_shortcuts[2] = {true,true};
+static bool g_openAvailable = false, g_openRequested = false;
 static bool g_mutating = false, g_success = false, g_resultShown = false;
 // 0 cancelled/not selected, 1 install, 2 frontend error. Atomic: close may
 // race the NSIS stack snapshot, but Begin is serialized on the UI thread.
@@ -171,7 +172,8 @@ ORBITAL_EXPORT(Phase) {
 }
 ORBITAL_EXPORT(Finish) {
   const auto status=PopNsis(stack), text=PopNsis(stack);
-  if(g_window) SendMessageW(g_window,WM_ORBITAL_RESULT,status==L"success",reinterpret_cast<LPARAM>(text.c_str()));
+  const bool offerOpen=status==L"success-open";
+  if(g_window) SendMessageW(g_window,WM_ORBITAL_RESULT,offerOpen?2:status==L"success"?1:0,reinterpret_cast<LPARAM>(text.c_str()));
   if(g_uiThread) WaitForSingleObject(g_uiThread,INFINITE);
-  // Opening the application remains with NSIS/StdUtils (correct user context).
+  if(offerOpen) PushNsis(stack,size,g_openRequested?L"open":L"close");
 }
