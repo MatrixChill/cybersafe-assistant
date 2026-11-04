@@ -153,6 +153,18 @@ static int InspectPreviewManifest(const wchar_t* bytes, const wchar_t* signature
   return locked.Open(artifact) && MatchLockedArtifact(locked.file, std::stoull(match[6]), match[5]) ? 0 : 9;
 }
 
+// RtlGetVersion reads the OS build without compatibility-manifest virtualization.
+static std::wstring InstalledWindowsBuild() {
+  const HMODULE ntdll = GetModuleHandleW(L"ntdll.dll");
+  if (!ntdll) return {};
+  using VersionQuery = LONG (WINAPI*)(OSVERSIONINFOW*);
+  const auto query = reinterpret_cast<VersionQuery>(GetProcAddress(ntdll, "RtlGetVersion"));
+  OSVERSIONINFOW version{};
+  version.dwOSVersionInfoSize = sizeof(version);
+  if (!query || query(&version) != 0 || version.dwMajorVersion != 10) return {};
+  return std::to_wstring(version.dwBuildNumber);
+}
+
 int wmain(int argc, wchar_t** argv) {
   if (argc == 4 && std::wstring(argv[1]) == L"--verify-preview-signature") {
     std::vector<uint8_t> message;
@@ -161,6 +173,10 @@ int wmain(int argc, wchar_t** argv) {
   // Diagnostic mode only. These inputs do not authorize execution.
   if ((argc == 6 || argc == 7) && std::wstring(argv[1]) == L"--inspect-preview-manifest")
     return InspectPreviewManifest(argv[2], argv[3], argv[4], argv[5], argc == 7 ? argv[6] : nullptr);
+  if (argc == 5 && std::wstring(argv[1]) == L"--inspect-preview-for-this-build") {
+    const auto windowsBuild = InstalledWindowsBuild();
+    return InspectPreviewManifest(argv[2], argv[3], CYBERSAFE_LAUNCHER_VERSION, windowsBuild.c_str(), argv[4]);
+  }
   if (argc != 2) return 2;
   const std::wstring encoded(argv[1]);
   // Base64 is an encoding, not an authorization to run caller-supplied code.
