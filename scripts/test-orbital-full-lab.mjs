@@ -30,6 +30,9 @@ class Marker { static void Main() {
 const csc=path.join(process.env.WINDIR,'Microsoft.NET/Framework64/v4.0.30319/csc.exe');
 const markerBuild=spawnSync(csc,['/nologo','/target:winexe',`/out:${path.join(payloadDir,`${name}.exe`)}`,markerSource],{encoding:'utf8',windowsHide:true});
 if(markerBuild.status!==0) throw Error(`Marker compilation failed: ${markerBuild.stdout??''}${markerBuild.stderr??''}`);
+if(process.argv.includes('--invalid-image')){
+ fs.writeFileSync(path.join(payloadDir,`${name}.exe`),'LAB: not a Windows executable');
+}
 fs.writeFileSync(path.join(payloadDir,'resources/app.asar'),'BENIGN LAB ASAR MARKER');
 for(let i=0;i<20;i++) fs.writeFileSync(path.join(payloadDir,`benign-${i}.txt`),`Benign full-template file ${i}\r\n`.repeat(4096));
 const zip=spawnSync(path7za,['a','-t7z',archive,'.'],{cwd:payloadDir,encoding:'utf8',windowsHide:true,timeout:30000});

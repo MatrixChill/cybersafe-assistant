@@ -181,7 +181,19 @@ Function .onInstSuccess
             OrbitalSetup::Verify "$CSOrbitalSavedDir" "$PLUGINSDIR\7z-out"
             Pop $0
             ${If} $0 == "ok"
-              ${StdUtils.ExecShellAsUser} $0 "$CSOrbitalExecutable" "open" ""
+              System::Call 'kernel32::GetBinaryTypeW(w "$CSOrbitalExecutable", *i .r2)i.r0'
+              ${If} $0 == 0
+                SetErrorLevel 2
+              ${ElseIf} $2 == 0
+              ${OrIf} $2 == 6
+                ${StdUtils.ExecShellAsUser} $0 "$CSOrbitalExecutable" "open" ""
+                ${If} $0 != "ok"
+                ${AndIf} $0 != "fallback"
+                  SetErrorLevel 2
+                ${EndIf}
+              ${Else}
+                SetErrorLevel 2
+              ${EndIf}
             ${Else}
               SetErrorLevel 2
             ${EndIf}

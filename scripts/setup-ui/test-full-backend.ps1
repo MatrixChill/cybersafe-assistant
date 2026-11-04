@@ -1,4 +1,4 @@
-param([switch]$CleanupOnly,[ValidateSet('Open','Tampered','Missing','Close')][string]$LaunchCase='Open')
+param([switch]$CleanupOnly,[ValidateSet('Open','Tampered','Missing','Close','WriteLocked','InvalidImage')][string]$LaunchCase='Open')
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot\test-backend.ps1" -FunctionsOnly
 $full=Get-Content -Raw 'output/orbital-full-lab/latest.json' | ConvertFrom-Json
@@ -65,7 +65,16 @@ try {
   if($LaunchCase -eq 'Tampered'){Set-Content -LiteralPath $image -Value 'tampered LAB image'}
  }
  if($LaunchCase -eq 'Close'){Key $h 39}
- Key $h 13 # Opening is the first action on the verified completion screen.
+ $writer=$null
+ try {
+  if($LaunchCase -eq 'WriteLocked'){
+   $writer=[IO.File]::Open($image,[IO.FileMode]::Open,[IO.FileAccess]::Write,[IO.FileShare]::ReadWrite)
+  }
+  Key $h 13 # Opening is the first action on the verified completion screen.
+  if($writer -and !$p.WaitForExit(10000)){throw 'Setup did not refuse the concurrent writer'}
+ } finally {
+  if($writer){$writer.Dispose()}
+ }
  if($LaunchCase -ne 'Open'){
   if(!$p.WaitForExit(10000)){throw 'Setup did not exit'}
   $expected=if($LaunchCase -eq 'Close'){0}else{2}
