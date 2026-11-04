@@ -18,58 +18,13 @@
   <img alt="Estado" src="https://img.shields.io/badge/estado-desenvolvimento%20académico-orange">
 </p>
 
-> **Projeto académico (PAP) em desenvolvimento.** Os instaladores internos usados nos testes
-> **não estão aprovados para distribuição**. O CyberSafe Assistant **não substitui** o Microsoft
-> Defender nem qualquer antivírus certificado, e **não garante deteção** de todo o malware.
+> **Entrega académica Windows x64 · 0.2.0-rc.4.** Pré-release pública para instalação manual. O Setup não tem Authenticode e o updater de produção está desativado. O CyberSafe complementa a aprendizagem e a observação do sistema. Mantém as proteções do Windows ativas.
 
-> **Estado de versão e de artefactos (verificado em 2026-11-01).** As quatro afirmações seguintes
-> não são a mesma coisa e por isso dizem-se separadamente.
->
-> **1. Identidade canónica do produto no código: `0.1.11-internal.pap-r7.20261031`**
-> (`channel: internal`, `codename: pap-r7`), em `product-version.json` na raiz. Esse ficheiro é a
-> única fonte da versão: `scripts/app-version.mjs` injecta-a no manifesto da aplicação empacotada e
-> no renderer (`__BUILD__`). As versões dos `package.json` de workspace — `0.1.1` na raiz, em `core`
-> e em `service`; `0.1.2` em `app` e em `desktop` — **não são identidade do produto** e não devem
-> ser lidas como tal. O `appId` não é definido ali.
->
-> **2. O artefacto mais recente efetivamente construído e medido em disco é a candidata interna
-> PAP R6** — `0.1.10-internal.pap-r6.20261031`. O ficheiro é
-> `packages/desktop/release/candidate-20261031-215559-64b7245b/CyberSafe Assistant-0.1.10-internal.pap-r6.20261031-candidate-20261031-215559-64b7245b-setup.exe`
-> (278 595 602 B), no worktree irmão `pap-freebuff-final-release-20261031`. O SHA-256 foi
-> **recomputado nesta sessão** com `Get-FileHash` e devolveu
-> `79340b7b95a444e955acad5858ef55caf9ba51cc7b41b954f9872fcb068b83a7` — igual ao registo em
-> `PAYLOAD-MEASUREMENT.json`. Os metadados Windows medidos confirmam a versão correta no
-> instalador (`FileVersion` e `ProductVersion` = `0.1.10-internal.pap-r6.20261031`) e o `__BUILD__`
-> embutido no renderer é coerente com essa versão, pelo que a **incoerência de versões da R5 está
-> fechada ao nível dos metadados**. O instalador **não está assinado**: `WinVerifyTrust` devolve
-> `0x800b0100` (`TRUST_E_NOSIGNATURE`) e a tabela de certificados tem tamanho 0.
->
-> **A gate manual continua em aberto.** Os próprios ficheiros da candidata registam o estado como
-> `MEASURED_NOT_INSTALLED` e a handoff como `READY_FOR_VM_VALIDATION`, com a nota explícita de que
-> «não houve instalação nem validação humana». A R6 foi construída, medida e verificada por hash —
-> não foi instalada nem validada por uma pessoa neste registo. O primeiro ecrã do instalador deixa
-> de depender do `installer.nsh` antigo (a R6 usa NSIS stock: `nsis: "STOCK_ASSISTED_INPUT_SAVED"`),
-> mas a leitura textual desse ecrã só se confirma com execução manual, que não foi feita. Nada aqui
-> se apresenta como ensaiado quando ainda precisa de um humano na máquina virtual.
->
-> **3. Não existe qualquer instalador `0.1.11` / R7.** Não há ficheiro `*pap-r7*` em parte alguma:
-> `packages/*/release/` não é versionado (`.gitignore`) e nem sequer existe neste checkout, e não
-> há qualquer artefacto R7 nos diretórios de release locais. A identidade R7 vive no código; **a
-> construção do instalador R7 está pendente**, tal como a sua instalação e ensaio manual.
->
-> **4. O ficheiro da R6 é histórico e não é a versão final da PAP.** Não foi movido, renomeado nem
-> eliminado, e não deve ser: é a prova reprodutível do estado medido em 2026-10-31. A R5
-> (`0.1.10-internal.pap-r5.20261031`, 491 414 411 B, SHA-256 `46718bcd9c5ee712…b6e5bd75`, também
-> recomputado nesta sessão) continua preservada como etapa anterior, com os defeitos de
-> empacotamento e proveniência documentados em `docs/PAP-TRANSFERENCIA-20261031.md`.
->
-> A correção do ciclo de vida da janela (`Object has been destroyed`) está no código (`isDestroyed()`
-> nos caminhos de encerramento de `packages/desktop/src/main.ts`) e mantém-se. O instalador
-> **0.1.9 (PAP R4)** não a continha e não representa o estado atual. Este repositório **não publica
-> instaladores, bases de assinaturas nem releases**: não tem *tag* e não tem *release* no GitHub.
-> O delta técnico posterior ao fecho documental do relatório está em [CHANGELOG.md](CHANGELOG.md).
+1. Descarrega o Setup e o SHA256SUMS na [release RC4](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.0-rc.4).
+2. Em PowerShell, usa `Get-FileHash -Algorithm SHA256 -LiteralPath <caminho-do-setup>` e compara com `5ee8375e7ba8d1427933a6f6fb52d6222425dee74a01f46119639774eb1176bc`.
+3. Executa o Setup Orbital B interativamente. Se o Windows bloquear a execução, regista a mensagem. Após instalação, seleciona «Abrir CyberSafe».
 
----
+A [entrega técnica da PAP](docs/PAP-ENTREGA-WINDOWS-RC4.md) reúne arquitetura, aceitação física, limitações e roteiro de defesa. As referências a candidatas R5/R6 e ensaios anteriores abaixo são históricas.
 
 ## Índice
 
@@ -246,8 +201,7 @@ npm run build:native       # motor C++ (CMake, Release)
 npm run dist -w @cybersafe/desktop   # empacotamento Windows (local)
 ```
 
-> O empacotamento gera instaladores **internos** (`NOT_FOR_DISTRIBUTION`). Não estão aprovados
-> para distribuição e não devem ser publicados.
+> Os builds locais com a marca NOT_FOR_DISTRIBUTION destinam-se a testes internos. Para instalação manual da edição académica, usa o Setup da release pública RC4 indicado acima.
 
 ### ClamAV (vendorização)
 
