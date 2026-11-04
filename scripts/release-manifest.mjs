@@ -26,21 +26,18 @@ import { fileURLToPath } from "node:url";
 
 import { sha256Ficheiro } from "./release-checksums.mjs";
 
+import { normalizeForSigning } from "./release-signing.mjs";
+
 const SCHEMA = "cybersafe.release-manifest/1";
 const VERSÃO = /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/;
-/* O único canal que o cliente sabe ler. `packages/desktop/src/updater/types.ts:16`
-   é `UpdateChannel = "stable"` e `release-signing.mjs:68` recusa outro — emitir
-   `beta`/`internal` seria produzir um manifesto que o assinador ou o cliente
-   chumbam. Uma candidata interna não tem manifesto: o atualizador está
-   desligado (decisão D2) e não há nada a prometer a quem ainda não tem release. */
-const CANAIS = ["stable"];
+const CANAIS = ["stable", "preview"];
 
 /** O contrato do cliente (`packages/desktop/src/updater/types.ts:120`). */
 export async function construirManifesto(opções) {
   const {
     ficheiro, url, version, channel, notes,
     buildId = null, sourceCommit = null, publisher = "CyberSafe",
-    requiresElevation = true, minWindowsBuild = null, fromVersion = null,
+    requiresElevation = channel !== "preview", minWindowsBuild = null, fromVersion = null,
     agora = new Date().toISOString(),
   } = opções;
 
@@ -74,7 +71,7 @@ export async function construirManifesto(opções) {
   if (!notas) throw new Error("faltam notas (--notes texto ou ficheiro): um utilizador tem de ler o que muda");
 
   const manifesto = {
-    schema: SCHEMA,
+    schema: channel === "preview" ? "cybersafe-release/1" : SCHEMA,
     channel,
     version,
     publishedAt: agora,
@@ -84,7 +81,7 @@ export async function construirManifesto(opções) {
       sha256: await sha256Ficheiro(ficheiro),
       sizeBytes: estatuto.size,
     },
-    publisher: { name: publisher },
+    publisher: { name: channel === "preview" ? "CyberSafe Preview (sem Authenticode)" : publisher },
     requiresElevation,
   };
   if (buildId) manifesto.buildId = String(buildId);
@@ -95,7 +92,7 @@ export async function construirManifesto(opções) {
       fromVersion: fromVersion === null ? null : String(fromVersion),
     };
   }
-  return manifesto;
+  return channel === "preview" ? normalizeForSigning(manifesto) : manifesto;
 }
 
 function parseArgs(argv) {

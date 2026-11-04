@@ -97,3 +97,19 @@ test("campos opcionais só entram quando declarados (bytes canónicos da assinat
   assert.equal(completo.buildId, "r7-20261101");
   assert.deepEqual(completo.compatibility, { minWindowsBuild: 19041, fromVersion: "0.1.11" });
 });
+
+test("Preview produz manifesto sem elevação e só aceita Setup versionado oficial", async (t) => {
+  const ficheiro = await instalador(await pasta(t));
+  const options = {
+    ...BASE, ficheiro, channel: "preview", version: "0.2.0-rc.6",
+    url: "https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.0-rc.6/setup.exe",
+    sourceCommit: "a".repeat(40), minWindowsBuild: 19045,
+  };
+  const manifest = await construirManifesto(options);
+  assert.equal(manifest.schema, "cybersafe-release/1");
+  assert.equal(manifest.requiresElevation, false);
+  assert.equal(manifest.file.sizeBytes, 4096);
+  assert.equal(manifest.signature, undefined);
+  await assert.rejects(construirManifesto({ ...options, url: BASE.url }), /Preview inválida/);
+  await assert.rejects(construirManifesto({ ...options, requiresElevation: true }), /Preview inválida/);
+});
