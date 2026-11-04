@@ -37,7 +37,7 @@ if(WIN32)
     third-party/monocypher/monocypher.c
     third-party/monocypher/monocypher-ed25519.c)
   target_include_directories(cybersafe-update-launcher PRIVATE third-party/monocypher)
-  target_link_libraries(cybersafe-update-launcher PRIVATE crypt32)
+  target_link_libraries(cybersafe-update-launcher PRIVATE crypt32 bcrypt)
   set_target_properties(cybersafe-update-launcher PROPERTIES
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release")
 endif()

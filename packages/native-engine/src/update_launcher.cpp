@@ -4,8 +4,11 @@
 #include <string>
 #include <vector>
 #include <array>
+#include <regex>
+#include <tuple>
 #include "update_launcher_program.h"
 #include <wincrypt.h>
+#include <bcrypt.h>
 #include "monocypher-ed25519.h"
 
 // Ed25519 SPKI SHA-256: 3982C36398918D077A417DDA02E6E7FF6C1F70622684DA4FB43673652E4C8FB6.
@@ -25,14 +28,95 @@ static bool DecodeBase64(const std::wstring& input, size_t maxLength, std::vecto
     && size == out.size();
 }
 
-static int VerifyPreviewSignature(const wchar_t* bytes, const wchar_t* signature) {
-  std::vector<uint8_t> message, sig;
+static int ReadSignedPreviewBytes(const wchar_t* bytes, const wchar_t* signature, std::vector<uint8_t>& message) {
+  std::vector<uint8_t> sig;
   if (!DecodeBase64(bytes, 24000, message) || !DecodeBase64(signature, 88, sig) || sig.size() != 64) return 2;
   return crypto_ed25519_check(sig.data(), kPreviewKey.data(), message.data(), message.size()) == 0 ? 0 : 7;
 }
 
+using Version = std::tuple<unsigned long, unsigned long, unsigned long, unsigned long>;
+static bool ParseRc(const std::string& value, Version& parsed) {
+  static const std::regex rc(R"((0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})\.(0|[1-9][0-9]{0,8})-rc\.([1-9][0-9]{0,8}))");
+  std::smatch match;
+  if (!std::regex_match(value, match, rc)) return false;
+  parsed = {std::stoul(match[1]), std::stoul(match[2]), std::stoul(match[3]), std::stoul(match[4])};
+  return true;
+}
+
+static bool MatchLockedArtifact(const wchar_t* path, unsigned long long expectedSize, const std::string& expectedHash) {
+  HANDLE file = CreateFileW(path, GENERIC_READ, FILE_SHARE_READ, nullptr, OPEN_EXISTING,
+                            FILE_FLAG_OPEN_REPARSE_POINT | FILE_FLAG_SEQUENTIAL_SCAN, nullptr);
+  if (file == INVALID_HANDLE_VALUE) return false;
+  BY_HANDLE_FILE_INFORMATION info{};
+  bool ok = GetFileType(file) == FILE_TYPE_DISK && GetFileInformationByHandle(file, &info) &&
+    !(info.dwFileAttributes & (FILE_ATTRIBUTE_DIRECTORY | FILE_ATTRIBUTE_REPARSE_POINT)) &&
+    ((static_cast<unsigned long long>(info.nFileSizeHigh) << 32) | info.nFileSizeLow) == expectedSize;
+  BCRYPT_ALG_HANDLE algorithm = nullptr;
+  BCRYPT_HASH_HANDLE hash = nullptr;
+  if (ok) ok = BCryptOpenAlgorithmProvider(&algorithm, BCRYPT_SHA256_ALGORITHM, nullptr, 0) >= 0;
+  if (ok) ok = BCryptCreateHash(algorithm, &hash, nullptr, 0, nullptr, 0, 0) >= 0;
+  std::array<uint8_t, 65536> buffer{};
+  unsigned long long readTotal = 0;
+  while (ok) {
+    DWORD count = 0;
+    ok = ReadFile(file, buffer.data(), static_cast<DWORD>(buffer.size()), &count, nullptr) != FALSE;
+    if (!ok || count == 0) break;
+    readTotal += count;
+    ok = readTotal <= expectedSize && BCryptHashData(hash, buffer.data(), count, 0) >= 0;
+  }
+  std::array<uint8_t, 32> digest{};
+  if (ok) ok = readTotal == expectedSize && BCryptFinishHash(hash, digest.data(), static_cast<ULONG>(digest.size()), 0) >= 0;
+  if (ok) {
+    constexpr char hex[] = "0123456789abcdef";
+    for (size_t index = 0; index < digest.size(); ++index)
+      if (hex[digest[index] >> 4] != expectedHash[2 * index] ||
+          hex[digest[index] & 15] != expectedHash[2 * index + 1]) { ok = false; break; }
+  }
+  if (hash) BCryptDestroyHash(hash);
+  if (algorithm) BCryptCloseAlgorithmProvider(algorithm, 0);
+  CloseHandle(file);
+  return ok;
+}
+
+// Read only the exact signed canonical representation. Reject duplicate keys,
+// unknown fields, alternate URL spellings and unexpected JSON representations.
+static int InspectPreviewManifest(const wchar_t* bytes, const wchar_t* signature,
+                                  const wchar_t* installed, const wchar_t* windowsBuild, const wchar_t* artifact) {
+  std::vector<uint8_t> message;
+  const int result = ReadSignedPreviewBytes(bytes, signature, message);
+  if (result != 0) return result;
+  if (message.size() > 4096) return 8;
+  static const std::regex manifest(
+    R"json(\{"schema":"cybersafe-release/1","channel":"preview","version":"([0-9.rc-]{1,40})","publishedAt":"([0-9TZ:.+-]{1,35})","notes":"(?:[^"\\\x00-\x1f]|\\(?:["\\/bfnrt]|u[0-9a-fA-F]{4}))*","file":\{"url":"https://github\.com/MatrixChill/cybersafe-assistant/releases/download/v([0-9.rc-]{1,40})/([A-Za-z0-9._-]{1,180}\.exe)","sha256":"([a-f0-9]{64})","sizeBytes":([1-9][0-9]{0,9})\},"publisher":\{"name":"CyberSafe Preview \(sem Authenticode\)"\},"requiresElevation":false(?:,"buildId":"[A-Za-z0-9._-]{1,64}")?,"sourceCommit":"[a-f0-9]{40}","compatibility":\{"minWindowsBuild":([1-9][0-9]{0,8}),"fromVersion":(null|"[0-9.]{5,29}")\}\})json");
+  const std::string canonical(message.begin(), message.end());
+  std::smatch match;
+  if (!std::regex_match(canonical, match, manifest) || match[1] != match[3] ||
+      std::stoull(match[6]) > 1024ull * 1024 * 1024) return 8;
+  const std::wstring current(installed), build(windowsBuild);
+  if (current.size() > 40 || current.find_first_not_of(L"0123456789.rc-") != std::wstring::npos ||
+      build.empty() || build.size() > 9 || build.find_first_not_of(L"0123456789") != std::wstring::npos) return 8;
+  std::string asciiVersion;
+  for (const wchar_t c : current) asciiVersion.push_back(static_cast<char>(c));
+  Version source, target;
+  if (!ParseRc(asciiVersion, source) ||
+      !ParseRc(match[1], target) || target <= source ||
+      std::stoul(build) < std::stoul(match[7])) return 8;
+  if (match[8] != "null") {
+    const auto minimum = match[8].str();
+    Version min;
+    if (!ParseRc(minimum.substr(1, minimum.size()-2) + "-rc.1", min) || source < min) return 8;
+  }
+  return !artifact || MatchLockedArtifact(artifact, std::stoull(match[6]), match[5]) ? 0 : 9;
+}
+
 int wmain(int argc, wchar_t** argv) {
-  if (argc == 4 && std::wstring(argv[1]) == L"--verify-preview-signature") return VerifyPreviewSignature(argv[2], argv[3]);
+  if (argc == 4 && std::wstring(argv[1]) == L"--verify-preview-signature") {
+    std::vector<uint8_t> message;
+    return ReadSignedPreviewBytes(argv[2], argv[3], message);
+  }
+  // Diagnostic mode only. These inputs do not authorize execution.
+  if ((argc == 6 || argc == 7) && std::wstring(argv[1]) == L"--inspect-preview-manifest")
+    return InspectPreviewManifest(argv[2], argv[3], argv[4], argv[5], argc == 7 ? argv[6] : nullptr);
   if (argc != 2) return 2;
   const std::wstring encoded(argv[1]);
   // Base64 is an encoding, not an authorization to run caller-supplied code.
