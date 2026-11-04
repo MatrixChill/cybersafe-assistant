@@ -1,4 +1,4 @@
-param([switch]$CleanupOnly)
+param([switch]$CleanupOnly,[ValidateSet('Open','Tampered','Missing','Close')][string]$LaunchCase='Open')
 $ErrorActionPreference='Stop'
 . "$PSScriptRoot\test-backend.ps1" -FunctionsOnly
 $full=Get-Content -Raw 'output/orbital-full-lab/latest.json' | ConvertFrom-Json
@@ -57,8 +57,33 @@ try {
  # Stock .onInit executes SetOutPath before customInit, creating an empty
  # offered directory. Assert no payload there, not absence of the empty folder.
  if((Test-Path $full.initial) -and @(Get-ChildItem $full.initial -Force).Count -ne 0){throw 'Stock section wrote payload outside chosen destination'}
- Key $h 13
+ $marker=Join-Path $full.target 'lab-opened.txt'
+ $image=Join-Path $full.target "$($full.name).exe"
+ if(Test-Path -LiteralPath $marker){throw 'LAB app started before consent'}
+ if($LaunchCase -in 'Tampered','Missing'){
+  Move-Item -LiteralPath $image -Destination "$image.lab-original"
+  if($LaunchCase -eq 'Tampered'){Set-Content -LiteralPath $image -Value 'tampered LAB image'}
+ }
+ if($LaunchCase -eq 'Close'){Key $h 39}
+ Key $h 13 # Opening is the first action on the verified completion screen.
+ if($LaunchCase -ne 'Open'){
+  if(!$p.WaitForExit(10000)){throw 'Setup did not exit'}
+  $expected=if($LaunchCase -eq 'Close'){0}else{2}
+  if($p.ExitCode -ne $expected){throw "Unexpected exit for ${LaunchCase}: $($p.ExitCode)"}
+  if(Test-Path -LiteralPath $marker){throw 'LAB app ran despite refusal or dismissal'}
+  if(Test-Path -LiteralPath "$image.lab-original"){
+   Move-Item -LiteralPath "$image.lab-original" -Destination $image -Force
+  }
+  Write-Host "PASS: $LaunchCase did not execute the LAB image"
+  & $PSCommandPath -CleanupOnly
+  return
+ }
  if(!$p.WaitForExit(10000) -or $p.ExitCode -ne 0){throw 'Full stock install failed'}
+ $end=(Get-Date).AddSeconds(10)
+ do {Start-Sleep -Milliseconds 100}while(!(Test-Path -LiteralPath $marker) -and (Get-Date)-lt $end)
+ if(!(Test-Path -LiteralPath $marker)){throw 'The installed LAB executable did not run'}
+ if((Get-Content -Raw -LiteralPath $marker) -ne (Join-Path $full.target "$($full.name).exe")){throw 'Unexpected running image path'}
+ Write-Host 'PASS: Abrir executed the installed benign image after verified completion'
  # Real stock A -> B upgrade with /S --updated. No trust keys or launcher
  # publisher bypass: this is an isolated NSIS engine compatibility check.
  $b=Start-Process -FilePath $full.exeB -ArgumentList @('/S','--updated','/currentuser') -PassThru

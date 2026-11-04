@@ -172,8 +172,20 @@ Function .onInstSuccess
         OrbitalSetup::Finish "success-open" "O NSIS terminou e o resultado foi verificado no destino escolhido."
         Pop $0
         ${If} $0 == "open"
-          ${If} ${FileExists} "$CSOrbitalExecutable"
-            ${StdUtils.ExecShellAsUser} $0 "$CSOrbitalExecutable" "open" ""
+          ; Deny writes and deletion of the open image through shell dispatch.
+          ; This does not lock the entire directory or prove process startup.
+          System::Call 'kernel32::CreateFileW(w "$CSOrbitalExecutable", i 0x80000000, i 1, p 0, i 3, i 0x00200000, p 0) p.r1'
+          ${If} $1 == -1
+            SetErrorLevel 2
+          ${Else}
+            OrbitalSetup::Verify "$CSOrbitalSavedDir" "$PLUGINSDIR\7z-out"
+            Pop $0
+            ${If} $0 == "ok"
+              ${StdUtils.ExecShellAsUser} $0 "$CSOrbitalExecutable" "open" ""
+            ${Else}
+              SetErrorLevel 2
+            ${EndIf}
+            System::Call 'kernel32::CloseHandle(p r1)'
           ${EndIf}
         ${EndIf}
       !endif
