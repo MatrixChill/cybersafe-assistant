@@ -76,7 +76,7 @@ describe("Scanner V2 — estado atual dos motores pela derivação canónica", (
     assert.match(html, /data-conexao="confirmada"/);
   });
 
-  test("degradação reportada não vira estado bom; cobertura limitada degrada", () => {
+  test("cobertura limitada é explícita e erro reportado não vira estado bom", () => {
     const html = render({
       engineHealth: saude({
         yara: { status: "active", coverage: "limited" },
@@ -84,9 +84,9 @@ describe("Scanner V2 — estado atual dos motores pela derivação canónica", (
       }),
       serviceConnected: true,
     });
-    assert.match(html, /data-engine="yara"[^>]*data-state="degraded"/, "cobertura limitada não se apresenta como ACTIVE");
-    assert.match(html, /data-engine="nativeengine"|data-engine="nativeEngine"/);
-    assert.equal(html.includes(">Ativo<"), false, "nenhum motor ficou simplesmente «Ativo»");
+    assert.match(html, /data-engine="yara"[^>]*data-state="active"[^>]*><strong>YARA<\/strong><em>Ativo<\/em><small>Cobertura limitada<\/small>/);
+    assert.match(html, /data-engine="nativeEngine"[^>]*data-state="error"[^>]*><strong>Native C\+\+<\/strong><em>Erro<\/em>/);
+    assert.doesNotMatch(html, /Cobertura reportada: normal/);
   });
 });
 

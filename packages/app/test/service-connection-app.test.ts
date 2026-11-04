@@ -12,6 +12,7 @@ import { readFileSync } from "node:fs";
 import vm from "node:vm";
 import ts from "typescript";
 import { deriveProtectionLevel } from "../src/lib/protectionHealth";
+import * as dashboardModelReal from "../src/v2/dashboard/model";
 import * as processIntelligence from "../src/lib/processIntelligence";
 import * as processMatrix from "../src/lib/processMatrix";
 import { deriveLoadingState, BOOT_BODY_COPY, DEFAULT_STARTUP_TIMEOUT_MS } from "../src/lib/loadingStates";
@@ -144,6 +145,7 @@ function appHarness(transformSource: (source: string) => string = (source) => so
     "./contexts/AppearanceContext": { useAppearance: () => ({ identity: "cybersafe-core", effects: {...DEFAULT_VISUAL_EFFECTS} }) },
     "./v2/theme-menu": { ThemeMenu: () => null },
     "./lib/protectionHealth": { deriveProtectionLevel },
+    "./v2/dashboard/model": dashboardModelReal,
     // Modulos REAIS (funcoes puras) pelos NOMES EXACTOS que o App importa.
     "./lib/progressiveRead": progressiveReadReal,
     "./lib/batteryDisplay": batteryDisplayReal,

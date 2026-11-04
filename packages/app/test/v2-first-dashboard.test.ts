@@ -10,7 +10,7 @@ test("no connection never invents four healthy engines", () => {
   assert.equal(cards.length, 4);
   assert.ok(cards.every((c) => c.state === "UNAVAILABLE"));
 });
-test("active with limited corpus remains degraded, never full coverage", () => {
+test("active engine with limited corpus reports availability and coverage separately", () => {
   const cards = engineCards(
     {
       yara: { status: "active", coverage: "limited" },
@@ -20,7 +20,9 @@ test("active with limited corpus remains degraded, never full coverage", () => {
     } as never,
     true,
   );
-  assert.equal(cards[0].state, "DEGRADED");
+  assert.equal(cards[0].state, "ACTIVE");
+  assert.equal(cards[0].coverage, "Cobertura limitada");
+  assert.notEqual(cards[0].coverage, "Cobertura reportada: normal");
   assert.equal(cards[1].state, "DEGRADED");
   assert.equal(cards[2].state, "ERROR");
   assert.equal(cards[3].state, "UNAVAILABLE");
