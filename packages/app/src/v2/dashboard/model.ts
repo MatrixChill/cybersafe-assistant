@@ -59,7 +59,7 @@ export function engineCards(
   return ENGINES.map((e) => {
     const report = connected === true ? health?.[e.key] : undefined;
     const raw = report?.status;
-    let state: VisualState =
+    const state: VisualState =
       raw === "active"
         ? "ACTIVE"
         : raw === "degraded"
@@ -67,8 +67,6 @@ export function engineCards(
           : raw === "error"
             ? "ERROR"
             : "UNAVAILABLE";
-    if (state === "ACTIVE" && report?.coverage === "limited")
-      state = "DEGRADED";
     return {
       ...e,
       state,
@@ -122,6 +120,8 @@ export function dashboardVerdict(
         (limitations ? limitationText : " Consulta o estado de cada motor."),
       tone: "crit",
     };
+  if (realtime?.disponivel === false)
+    return { title: "Monitorização indisponível", description: "A leitura da monitorização está indisponível; consulta os detalhes da proteção.", tone: "warn" };
   if (realtime?.pausedUntil)
     return {
       title: "Monitorização em pausa",
@@ -141,6 +141,23 @@ export function dashboardVerdict(
       title: "Monitorização não verificada",
       description:
         "O serviço ainda não confirmou se a análise contínua está ligada.",
+      tone: "warn",
+    };
+  // Backend status folds the optional, unstarted network filter into degradation.
+  // Only separate it when the reported causes and risk exclude any other issue.
+  const e = d.engineHealth;
+  const reasons = e?.degradedReasons ?? [];
+  const loss = e?.realtimeLoss;
+  const onlyUnstartedNetwork = e?.serviceRunning === true && e.osLayerHealthy === true &&
+    [e.yara, e.hashDb, e.clamav, e.nativeEngine].every((motor) => motor?.status === "active") &&
+    e.wfp?.status === "unavailable" && /sem tentativa de ativação neste perfil/i.test(e.wfp.detail ?? "") &&
+    reasons.length > 0 && reasons.every((reason) => /filtro wfp/i.test(reason) && /sem tentativa de ativação neste perfil/i.test(reason)) &&
+    (loss?.queueRejections ?? e.realtimeDroppedEvents ?? 0) === 0 &&
+    (loss?.watcherSignals ?? 0) === 0 && loss?.watcherCallbacksIndeterminate !== true;
+  if (d.systemStatus === "degraded" && d.riskScore === 100 && d.highSeverityEvents === 0 && onlyUnstartedNetwork)
+    return {
+      title: "Motores de análise operacionais",
+      description: "Os quatro motores de análise estão ativos. Consulta a cobertura e a proteção de rede abaixo.",
       tone: "warn",
     };
   if (level !== "protected")

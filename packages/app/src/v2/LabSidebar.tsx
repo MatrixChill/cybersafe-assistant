@@ -17,6 +17,7 @@ interface Props {
   user?: AuthUser | null;
   onLogout?: () => void;
   level?: ProtectionLevel;
+  analysisOperational?: boolean;
   defaultCollapsed?: boolean;
 }
 export default function LabSidebar({
@@ -25,6 +26,7 @@ export default function LabSidebar({
   user,
   onLogout,
   level,
+  analysisOperational = false,
   defaultCollapsed = false,
 }: Props) {
   const [collapsed, setCollapsed] = useState(
@@ -106,7 +108,7 @@ export default function LabSidebar({
         <div className="isolation">
           <span className="isolation-dot" />
           <span>
-            {meta?.shortLabel || "A verificar"}
+            {analysisOperational ? "4 de 4 motores ativos" : meta?.shortLabel || "A verificar"}
             <small>Estado reportado pelo serviço</small>
           </span>
         </div>

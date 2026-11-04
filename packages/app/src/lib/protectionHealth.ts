@@ -175,9 +175,9 @@ export function windowsFirewallDisplay(state?: WindowsFirewallState | null): Win
  */
 export function wfpModuleDisplay(sub?: EngineSubsystemHealth): { text: string; detail: string } {
   if (!sub) return { text: engineStatusText("unavailable"), detail: "Sem telemetria do módulo WFP." };
-  const notStarted = /not started|not active/i.test(sub.detail ?? "");
+  const notStarted = /not started|not active|sem tentativa de ativação neste perfil/i.test(sub.detail ?? "");
   return {
-    text: engineStatusText(sub.status),
+    text: sub.status === "unavailable" && /sem tentativa de ativação neste perfil/i.test(sub.detail ?? "") ? "Não ativado" : engineStatusText(sub.status),
     detail: notStarted ? WFP_MODULE_NOT_STARTED_DETAIL : (sub.detail ?? ""),
   };
 }
@@ -239,10 +239,10 @@ export const PROTECTION_LEVEL_META: Record<ProtectionLevel, ProtectionLevelMeta>
     answerDetail: "A disponibilidade da proteção está limitada ou por confirmar.",
     summary: "Verificar se a monitorização está ligada e quais os motores disponíveis. Componentes limitados reduzem a capacidade de análise.",
     techSummary: "Motores IMPORTANTES indisponíveis — a confiança nas deteções está reduzida.",
-    dotClass: "bg-cyber-red",
-    chipClass: "border bg-cyber-red/10 border-cyber-red/30",
-    textClass: "text-cyber-red",
-    bannerBadgeClass: "bg-cyber-red/10 border-cyber-red/30 text-cyber-red",
+    dotClass: "bg-cyber-yellow",
+    chipClass: "border bg-cyber-yellow/10 border-cyber-yellow/30",
+    textClass: "text-cyber-yellow",
+    bannerBadgeClass: "bg-cyber-yellow/10 border-cyber-yellow/30 text-cyber-yellow",
   },
   critical: {
     label: "Estado Crítico",

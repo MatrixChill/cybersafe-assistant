@@ -14,6 +14,7 @@ import { wfpHealth } from "@cybersafe/shared-types";
 interface ProtectionDetailsProps {
   engine?: EngineHealth;
   level: ProtectionLevel;
+  analysisOperational?: boolean;
   open: boolean;
   onClose: () => void;
   /** Pontuação de proteção (0–100) mostrada no Dashboard — mesma fonte. */
@@ -176,7 +177,7 @@ function wfpUserCopy(status: EngineSubsystemStatus): { texto: string; contexto: 
  *  um crash. */
 
 /** Um clique no estado geral abre os PROTECTION DETAILS. */
-export default function ProtectionDetails({ engine, level, open, onClose, score }: ProtectionDetailsProps) {
+export default function ProtectionDetails({ engine, level, analysisOperational = false, open, onClose, score }: ProtectionDetailsProps) {
   const [technical, setTechnical] = useState(false);
   const [leitura, setLeitura] = useState<CopiaChipFirewall | null>(null);
   const leitorRef = useRef<LeitorFirewall | null>(null);
@@ -222,7 +223,7 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
 
   if (!open) return null;
 
-  const meta = levelMeta(level);
+  const meta = analysisOperational ? { ...levelMeta("attention"), label: "Motores de análise operacionais", summary: "Os quatro motores de análise estão ativos. Consulta a cobertura e a proteção de rede abaixo." } : levelMeta(level);
   const reasons = engine?.degradedReasons ?? [];
   const scoreInfo = typeof score === "number" ? explainScore(engine, score) : null;
 
@@ -275,14 +276,13 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
         {scoreInfo && (
           <div className="mt-4 p-4 rounded-xl border border-border bg-secondary/30">
             <p className="text-xs font-mono uppercase tracking-wider text-muted-foreground">
-              Porque é que a nota de proteção é {score}/100
+              Nota de proteção: {score}/100
             </p>
             <p className="mt-1 text-xs text-muted-foreground leading-relaxed">
-              Esta é a nota de proteção do CyberSafe. Não é a saúde do computador: são medidas
-              diferentes, calculadas por motores diferentes, e não se somam.
+              Esta nota combina risco reportado e disponibilidade dos motores; não garante cobertura nem proteção total.
             </p>
             <ul className="mt-2 space-y-1.5 text-sm text-foreground">
-              <li>• Dos {scoreInfo.total} motores de análise, <b>{scoreInfo.active} estão ativos</b>.</li>
+              <li>• <b>{scoreInfo.active} de {scoreInfo.total} motores de análise ativos</b>.</li>
               {(coberturaRegras || coberturaAssinaturas) && (
                 <li className="text-xs text-muted-foreground">
                   • Cobertura atual:{" "}
@@ -296,7 +296,7 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
               {scoreInfo.threatPenalty > 0 ? (
                 <li>• As ameaças recentes tiraram mais <b>{scoreInfo.threatPenalty}</b>.</li>
               ) : (
-                <li>• Nenhuma ameaça recente tirou pontos — o teto vem dos motores em falta.</li>
+                <li>• Nenhuma ameaça recente reduziu a nota.</li>
               )}
             </ul>
             <p className="mt-2 text-xs text-muted-foreground leading-relaxed">
@@ -364,6 +364,7 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
               de ciclo de vida (acima). Sem leitura confirmada o unico estado
               honesto continua a ser "Nao verificado" — nunca "desligado";
               com um pedido em voo diz-se "A consultar", não o vazio. */}
+          <h4 className="pt-2 text-sm font-semibold">Proteção de rede</h4>
           {(() => {
             const wfpSub = wfpHealth(engine);
             const wfp = wfpModuleDisplay(wfpSub);
@@ -398,7 +399,7 @@ export default function ProtectionDetails({ engine, level, open, onClose, score 
                       {wfp.text}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-foreground leading-relaxed">{wfpCopy.texto}</p>
+                  <p className="mt-1 text-xs text-foreground leading-relaxed">{wfpSub?.status === "unavailable" && /sem tentativa de ativação neste perfil/i.test(wfpSub.detail ?? "") ? "WFP não ativado neste perfil." : wfpCopy.texto}</p>
                   {wfpCopy.contexto && (
                     <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">{wfpCopy.contexto}</p>
                   )}

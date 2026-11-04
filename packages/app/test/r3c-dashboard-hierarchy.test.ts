@@ -312,7 +312,7 @@ describe("R3-C 6 e 8 — métricas reais, legíveis, sem texto minúsculo nos fo
 
   test("a proveniência da grelha de motores é o relatório do serviço, e diz quando não há relatório", () => {
     const comLeitura = renderDashboard({});
-    const capa = /Relatório do serviço · (\d+) de 4 sem degradação reportada/.exec(comLeitura);
+    const capa = /Relatório do serviço · (\d+) de 4 motores ativos/.exec(comLeitura);
     assert.ok(capa, "a legenda do hero declara de onde vem a contagem");
     // A moeda é a mesma da grelha: o número da caption são os cartões cuyo
     // rótulo medido é «Ativo» — não uma segunda contagem feita à parte.
@@ -353,7 +353,7 @@ describe("R3-C 3, 4 e 9 — honestidade e contraste", () => {
 
   test("as duas notas têm nomes diferentes nos dois sítios", () => {
     assert.match(healthSource, />\s*Saúde do PC\s*</);
-    assert.match(detailsSource, /nota de proteção é \{score\}\/100/);
+    assert.match(detailsSource, /Nota de proteção: \{score\}\/100/);
     assert.equal(healthSource.includes(">Score<"), false, "a etiqueta crua 'Score' confundia as duas medidas");
   });
 

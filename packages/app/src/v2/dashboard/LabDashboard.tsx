@@ -237,7 +237,7 @@ export default function LabDashboard(
               )}
               <span className="caption">
                 {p.serviceConnected === true && p.dashboard.engineHealth
-                  ? `Relatório do serviço · ${active} de 4 sem degradação reportada`
+                  ? `Relatório do serviço · ${active} de 4 motores ativos`
                   : "Motores sem leitura"}
               </span>
             </div>
@@ -519,6 +519,7 @@ export default function LabDashboard(
       )}
       <ProtectionDetails
         engine={p.dashboard.engineHealth}
+        analysisOperational={verdict.title === "Motores de análise operacionais"}
         level={deriveProtectionLevel(
           p.dashboard.systemStatus,
           p.dashboard.engineHealth,

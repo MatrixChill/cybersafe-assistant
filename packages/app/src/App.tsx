@@ -18,6 +18,7 @@ import { normalizeProcessListResult } from "@cybersafe/shared-types";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AppearanceProvider, useAppearance } from "./contexts/AppearanceContext";
 import { deriveProtectionLevel } from "./lib/protectionHealth";
+import { dashboardVerdict } from "./v2/dashboard/model";
 import { deriveLoadingState, DEFAULT_STARTUP_TIMEOUT_MS } from "./lib/loadingStates";
 import { deriveBootReadiness, limitedSessionNowReady, BOOT_COPY, mostraAvisoDeModoLimitado, pendingReadings, type BootPhase } from "./lib/bootReadiness";
 import { classificarLeitura, resumoSync } from "./lib/serviceSyncStatus";
@@ -1000,6 +1001,7 @@ function AuthenticatedApp() {
   // DEGRADED vem de um componente limitado (e não de uma leitura em falta),
   // diz-se isso — nunca se inventa uma leitura ausente.
   const leiturasEmFalta = pendingReadings(bootReadiness.confirmed);
+  const motoresOperacionais = dashboardVerdict(dashboard, realtimeInfo, serviceConnected).title === "Motores de análise operacionais";
   const faixaSessao =
     serviceConnected === null
       ? "Estado do serviço ainda não lido"
@@ -1009,7 +1011,7 @@ function AuthenticatedApp() {
           ? "Serviço ligado — leituras confirmadas"
           : loadingState.state === "DEGRADED"
             ? leiturasEmFalta === "nenhuma leitura em falta"
-              ? "Serviço ligado com componentes limitados"
+              ? motoresOperacionais ? "4 de 4 motores ativos · WFP não ativado" : "Serviço ligado com componentes limitados"
               : `Serviço ligado com leituras incompletas: ${leiturasEmFalta}`
             : loadingState.state === "REFUSED"
               ? `Leituras recusadas pelo gate: ${syncRecusas}`
@@ -1038,6 +1040,7 @@ function AuthenticatedApp() {
             user={user}
             onLogout={logout}
             level={protectionLevel}
+            analysisOperational={motoresOperacionais}
           />
 
 

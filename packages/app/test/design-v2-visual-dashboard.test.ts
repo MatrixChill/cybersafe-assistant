@@ -180,7 +180,7 @@ describe("Dashboard V2 — proveniência dos factos lidos", () => {
     // diz de onde vem o número. As duas formas são as únicas permitidas.
     assert.match(
       html,
-      /<span class="caption">\s*(Relatório do serviço · \d+ de 4 sem degradação reportada|Motores sem leitura)\s*<\/span>/,
+      /<span class="caption">\s*(Relatório do serviço · \d+ de 4 motores ativos|Motores sem leitura)\s*<\/span>/,
     );
     assert.match(html, /Proteção em tempo real: /);
     assert.doesNotMatch(html, /data-testid="evidence-strip"|class="surface-lift/, "a faixa de cinco caixas não volta");

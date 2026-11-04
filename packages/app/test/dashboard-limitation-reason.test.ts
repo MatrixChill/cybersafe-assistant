@@ -72,3 +72,29 @@ test("snapshot produzido pelo serviço e serializado conserva as causas no Dashb
     await fs.rm(dir, { recursive: true, force: true });
   }
 });
+
+test("quatro motores ativos e WFP não iniciado são apresentados separadamente", () => {
+  const healthy = { ...engine, clamav: {status:"active"}, wfp: {status:"unavailable", detail:"filtro WFP inativo — sem tentativa de ativação neste perfil"}, degradedReasons: ["Filtro WFP do CyberSafe: unavailable — filtro WFP inativo — sem tentativa de ativação neste perfil"] } as unknown as EngineHealth;
+  const verdict = dashboardVerdict({ ...dashboard, systemStatus:"degraded", riskScore:100, highSeverityEvents:0, engineHealth:healthy }, {enabled:true,disponivel:true}, true);
+  assert.equal(verdict.title, "Motores de análise operacionais");
+  assert.match(verdict.description, /quatro motores/i);
+  assert.notEqual(verdict.tone, "crit");
+  const failed = dashboardVerdict({ ...dashboard, systemStatus:"critical", engineHealth:healthy }, {enabled:true,disponivel:true}, true);
+  assert.notEqual(failed.title, "Motores de análise operacionais");
+  const loss = { ...healthy, realtimeLoss: {queueRejections:1, watcherSignals:0, watcherCallbacksIndeterminate:false} } as unknown as EngineHealth;
+  assert.notEqual(dashboardVerdict({ ...dashboard, systemStatus:"degraded", engineHealth:loss }, {enabled:true,disponivel:true}, true).title, "Motores de análise operacionais");
+});
+
+test("cobertura limitada de motor ativo não muda o seu estado de disponibilidade", async () => {
+  const { engineCards } = await import("../src/v2/dashboard/model");
+  const e = { ...engine, yara: {status:"active", coverage:"limited"} } as unknown as EngineHealth;
+  const card = engineCards(e, true).find(x => x.key === "yara");
+  assert.equal(card?.state, "ACTIVE");
+  assert.equal(card?.coverage, "Cobertura limitada");
+});
+
+test("não anuncia estado favorável quando a monitorização é reportada indisponível", () => {
+  const healthy = { ...engine, clamav:{status:"active"}, wfp:{status:"unavailable",detail:"filtro WFP inativo — sem tentativa de ativação neste perfil"}, degradedReasons:["Filtro WFP do CyberSafe: unavailable — filtro WFP inativo — sem tentativa de ativação neste perfil"] } as unknown as EngineHealth;
+  const verdict = dashboardVerdict({ ...dashboard, systemStatus:"degraded", riskScore:100, highSeverityEvents:0, engineHealth:healthy }, {enabled:true,disponivel:false}, true);
+  assert.notEqual(verdict.title, "Motores de análise operacionais");
+});

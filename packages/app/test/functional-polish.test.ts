@@ -112,7 +112,7 @@ describe("Polimento visual — Painel", () => {
     const caption = /class="caption">([^<]*)</.exec(html)?.[1] ?? "";
     assert.match(
       caption,
-      /^(Relatório do serviço · \d+ de 4 sem degradação reportada|Motores sem leitura)$/,
+      /^(Relatório do serviço · \d+ de 4 motores ativos|Motores sem leitura)$/,
       `a legenda do hero não é uma proveniência única: "${caption}"`,
     );
     assert.doesNotMatch(html, /class="surface-lift|lg:grid-cols-5/, "a faixa de cinco caixas de V1 não volta");
