@@ -23,7 +23,7 @@ static const Color kText(255, 237, 248, 248), kMuted(255, 126, 164, 168);
 
 struct Btn { RECT r; int id; const wchar_t* label; int icon; bool primary; bool enabled; };
 static std::vector<Btn> g_buttons;
-static int g_page = 0, g_hover = -1, g_focus = 0, g_dpi = 96;
+static int g_page = 0, g_hover = -1, g_focus = 0;
 static Bitmap *g_scene = nullptr, *g_sceneSoft = nullptr, *g_lockup = nullptr, *g_symbol = nullptr;
 static void BuildSceneSoft(int w);
 static void BuildCore();
@@ -41,7 +41,7 @@ static RECT g_winBtn[3];
 static HICON g_appIcon = nullptr;
 
 static float g_ui = 1.0f;
-static float S(float v){ return v * g_dpi / 96.0f * g_ui; }
+static float S(float v){ return v * g_ui; }
 
 static bool FileExistsW(const std::wstring& p){
   DWORD a = GetFileAttributesW(p.c_str());
@@ -305,7 +305,7 @@ static void Layout(HWND hwnd){
   g_buttons.clear();
   float W = (float)rc.right, H = (float)rc.bottom;
   g_ui = fminf(W / 1120.0f, H / 720.0f);
-  if(g_ui < 1.0f) g_ui = 1.0f;
+  if(g_ui <= 0.0f) return;
   if(g_ui > 1.9f) g_ui = 1.9f;
   float bx = W * 0.536f, bw = S(232), bh = S(58), gap = S(18), by = H - S(268);
   float wbw = S(46), wbh = S(34), wgap = S(8);
@@ -610,6 +610,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       if(g_anim){ g_last = GetTickCount64(); SetTimer(hwnd, 3, 33, nullptr); }
       return 0;
     case WM_SIZE:
+      if(wp == SIZE_MINIMIZED) { KillTimer(hwnd, 3); return 0; }
       Layout(hwnd);
       if(IsZoomed(hwnd) || IsIconic(hwnd)) SetWindowRgn(hwnd, nullptr, TRUE);
       else {
@@ -624,8 +625,11 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       return 0;
     case WM_PAINT: {
       PAINTSTRUCT ps; HDC dc = BeginPaint(hwnd, &ps);
+      const auto paintStart = GetTickCount64();
       Paint(hwnd, dc);
       EndPaint(hwnd, &ps);
+      // Give input and NSIS status messages room on slower graphics hardware.
+      if(g_anim && GetTickCount64() - paintStart >= 28) SetTimer(hwnd, 3, 66, nullptr);
       return 0;
     }
     case WM_MOUSEMOVE: {
@@ -703,6 +707,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
         double dt = (double)(now - g_last) / 1000.0;
         g_last = now;
         if(dt > 0.25) dt = 0.25;
+        if(!IsWindowVisible(hwnd) || IsIconic(hwnd) || GetForegroundWindow() != hwnd) return 0;
         g_phase += dt;
         InvalidateRect(hwnd, nullptr, FALSE);
       }
@@ -745,8 +750,8 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
         mm->ptMaxPosition.y = mi.rcWork.top - mi.rcMonitor.top;
         mm->ptMaxSize.x = mi.rcWork.right - mi.rcWork.left;
         mm->ptMaxSize.y = mi.rcWork.bottom - mi.rcWork.top;
-        mm->ptMinTrackSize.x = (LONG)S(960);
-        mm->ptMinTrackSize.y = (LONG)S(660);
+        mm->ptMinTrackSize.x = (mi.rcWork.right - mi.rcWork.left < 960) ? mi.rcWork.right - mi.rcWork.left : 960;
+        mm->ptMinTrackSize.y = (mi.rcWork.bottom - mi.rcWork.top < 660) ? mi.rcWork.bottom - mi.rcWork.top : 660;
       }
       return 0;
     }
@@ -830,15 +835,19 @@ static DWORD WINAPI RunOrbital(void*) {
   wc.hIcon = LoadIcon(nullptr, IDI_APPLICATION);
   RegisterClassExW(&wc);
 
-  int w = 1120, h = 720;
-  HDC screen = GetDC(nullptr);
-  int dpi = GetDeviceCaps(screen, LOGPIXELSX);
-  ReleaseDC(nullptr, screen);
-  g_dpi = dpi;
-  w = MulDiv(w, dpi, 96);
-  h = MulDiv(h, dpi, 96);
-  int x = (GetSystemMetrics(SM_CXSCREEN) - w) / 2;
-  int y = (GetSystemMetrics(SM_CYSCREEN) - h) / 2;
+  POINT launchPoint{};
+  GetCursorPos(&launchPoint);
+  MONITORINFO monitor{sizeof(monitor)};
+  if(!GetMonitorInfoW(MonitorFromPoint(launchPoint, MONITOR_DEFAULTTOPRIMARY), &monitor)) {
+    g_action=2; SetEvent(g_decisionEvent); GdiplusShutdown(token); return 1;
+  }
+  const RECT work = monitor.rcWork;
+  const float preferred = GetDpiForSystem() / 96.0f;
+  const float fit = fminf(preferred, fminf((work.right-work.left-24)/1120.0f,
+                                          (work.bottom-work.top-24)/720.0f));
+  const int w = (int)(1120*fit), h = (int)(720*fit);
+  const int x = work.left + (work.right-work.left-w)/2;
+  const int y = work.top + (work.bottom-work.top-h)/2;
   std::wstring icoPath = FindAsset(L"assets/branding/icon/cybersafe.ico");
   if(!icoPath.empty()) g_appIcon = (HICON)LoadImageW(nullptr, icoPath.c_str(), IMAGE_ICON, 0, 0, LR_LOADFROMFILE | LR_DEFAULTSIZE);
   HWND hwnd = CreateWindowExW(WS_EX_APPWINDOW, kClass, kTitle, WS_POPUP, x, y, w, h, nullptr, nullptr, hInst, nullptr);
@@ -850,7 +859,12 @@ static DWORD WINAPI RunOrbital(void*) {
   }
   HRGN rgn = CreateRoundRectRgn(0, 0, w+1, h+1, (int)S(18), (int)S(18));
   SetWindowRgn(hwnd, rgn, TRUE);
-  ShowWindow(hwnd, SW_SHOW);
+  ShowWindow(hwnd, SW_SHOWNORMAL);
+  BringWindowToTop(hwnd);
+  if(!SetForegroundWindow(hwnd)) {
+    FLASHWINFO flash{sizeof(flash), hwnd, FLASHW_TRAY, 3, 0};
+    FlashWindowEx(&flash);
+  }
   UpdateWindow(hwnd);
 
   MSG msg;

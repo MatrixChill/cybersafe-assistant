@@ -103,7 +103,7 @@ const STATUS: Record<UpdateSnapshot["phase"], AppUpdateSnapshot["status"]> = {
 export function toAppUpdateSnapshot(s: UpdateSnapshot): AppUpdateSnapshot {
   return {
     status: STATUS[s.phase],
-    channel: "stable",
+    channel: s.channel,
     installed: s.installed,
     latest: s.latest,
     progress: s.progress,

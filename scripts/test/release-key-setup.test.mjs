@@ -94,9 +94,15 @@ describe("geração e configuração da chave de publicação", () => {
       path.join(RAIZ_REPO, "packages", "desktop", "src", "updater", "production.ts"), "utf8");
     // `trust.json` aparece no import `from './release-trust.json'` e não é um
     // campo lido; o resto são todos acessos reais do objeto.
-    const lidos = [...new Set([...origem.matchAll(/\btrust\.([A-Za-z_][A-Za-z0-9_]*)/g)]
+    const lidos = [...new Set([...origem.matchAll(/\b(?:trust|stableTrust)\.([A-Za-z_][A-Za-z0-9_]*)/g)]
       .map((m) => m[1]).filter((campo) => campo !== "json"))];
     assert.ok(lidos.length >= 4, `produção.ts deveria ler vários campos do ficheiro, li ${lidos.length}`);
+    const preview = JSON.parse(await fs.readFile(
+      path.join(RAIZ_REPO, "packages", "desktop", "src", "updater", "preview-trust.json"), "utf8"));
+    const shared = [...new Set([...origem.matchAll(/\btrust\.([A-Za-z_][A-Za-z0-9_]*)/g)]
+      .map((match) => match[1]).filter((field) => field !== "json"))];
+    assert.deepEqual(Object.keys(preview).sort(), shared.sort());
+    assert.equal(preview.feedManifestUrl, "https://github.com/MatrixChill/cybersafe-assistant/releases/download/channel-preview/update-manifest.json");
     for (const campo of lidos) {
       assert.ok(campo in config, `o cliente lê trust.${campo} e o bloco emitido não o tem`);
     }
