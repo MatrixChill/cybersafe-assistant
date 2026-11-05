@@ -65,7 +65,7 @@ async function linhasHistorico(e) {
 
 /** Isolar de verdade, pelo motor, e devolver a entrada confirmada pela linha de sucesso. */
 async function isolar(e, analysis) {
-  assert.equal(await e.requestQuarantine(analysis, "manual"), true, "o isolamento tem de acontecer primeiro");
+  assert.equal((await e.requestQuarantine(analysis, "manual")).success, true, "o isolamento tem de acontecer primeiro");
   const linhas = await esperaLinha(e, (ls) => ls.some((l) => l.type === "quarantine.added"),
     "o isolamento tinha de ficar no registo antes de se falar do restauro");
   const entrada = linhas.find((l) => l.type === "quarantine.added").entry;
@@ -95,7 +95,7 @@ test("isolamento confirmado fica numa linha que nomeia o mesmo objeto do manifes
   const { e, dir } = await motor(t);
   const { ficheiro, analysis, sha256 } = await alvoForaDoServico(t);
 
-  assert.equal(await e.requestQuarantine(analysis, "manual"), true, "o isolamento tem de acontecer");
+  assert.equal((await e.requestQuarantine(analysis, "manual")).success, true, "o isolamento tem de acontecer");
 
   const linhas = await esperaLinha(e, (ls) => ls.some((l) => l.type === "quarantine.added"),
     "um isolamento confirmado tinha de ficar numa linha de história");
@@ -119,7 +119,7 @@ test("isolamento confirmado fica numa linha que nomeia o mesmo objeto do manifes
 test("a linha de sucesso diz se foi o utilizador que autorizou", async (t) => {
   const { e } = await motor(t);
   const { ficheiro, analysis } = await alvoForaDoServico(t);
-  assert.equal(await e.requestQuarantine(analysis, "manual"), true);
+  assert.equal((await e.requestQuarantine(analysis, "manual")).success, true);
 
   const linha = (await esperaLinha(e, (ls) => ls.some((l) => l.type === "quarantine.added"),
     "o isolamento confirmado tinha de ficar numa linha de história"))
@@ -132,7 +132,7 @@ test("recusa por caminho protegido é auditada com o motivo", async (t) => {
   const { e, eventos } = await motor(t);
   const antes = await fs.lstat(process.execPath);
 
-  assert.equal(await e.requestQuarantine(analysisPara(process.execPath, path.basename(process.execPath), "a".repeat(64)), "manual"), false);
+  assert.equal((await e.requestQuarantine(analysisPara(process.execPath, path.basename(process.execPath), "a".repeat(64)), "manual")).success, false);
 
   const linhas = await esperaLinha(e, (ls) => ls.some((l) => l.type === "quarantine.failed"),
     "a recusa tinha de ficar no ficheiro, não só nos eventos");
@@ -154,7 +154,7 @@ test("isolamento não confirmado regista a falha e não o sucesso", async (t) =>
   // possível do manager (devolve `null` quando a operação não se confirma).
   e.quarantine.quarantine = async () => null;
 
-  assert.equal(await e.requestQuarantine(analysis, "automatic"), false);
+  assert.equal((await e.requestQuarantine(analysis, "automatic")).success, false);
 
   const linhas = await esperaLinha(e, (ls) => ls.some((l) => l.type === "quarantine.failed"),
     "a falta de confirmação tinha de ser auditável");
@@ -169,8 +169,8 @@ test("repetir o pedido sobre o mesmo alvo não duplica nem inventa", async (t) =
   const { e } = await motor(t);
   const { ficheiro, analysis } = await alvoForaDoServico(t);
 
-  assert.equal(await e.requestQuarantine(analysis, "manual"), true);
-  assert.equal(await e.requestQuarantine(analysis, "manual"), false, "o segundo pedido não tem ficheiro para mover");
+  assert.equal((await e.requestQuarantine(analysis, "manual")).success, true);
+  assert.equal((await e.requestQuarantine(analysis, "manual")).success, false, "o segundo pedido não tem ficheiro para mover");
 
   const linhas = await esperaLinha(e, (ls) => ls.some((l) => l.type === "quarantine.failed"),
     "a segunda tentativa tinha de ficar registada como falha");

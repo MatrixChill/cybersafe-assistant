@@ -99,7 +99,7 @@ test("Linux: o motor recusa uma montagem real antes de a mover", { skip: process
   // `dispatch` do IPC, porque é aqui que a decisão de mover é tomada.
   const isolado = await e.requestQuarantine(analysisPara(montagem, path.basename(montagem), "a".repeat(64)), "manual");
 
-  assert.equal(isolado, false, "um ponto de montagem nunca pode ser isolado");
+  assert.equal(isolado.success, false, "um ponto de montagem nunca pode ser isolado");
   const falha = eventos.find((event) => event.type === "quarantine.failed");
   assert.ok(falha, "a recusa tem de ser publicada");
   assert.equal(falha.data.reason, "mount-point", `motivo esperado «mount-point», veio «${falha.data.reason}»`);
@@ -120,7 +120,8 @@ test("Linux: o motor recusa o próprio interpretador pelo motivo de sempre", asy
 
   const isolado = await e.requestQuarantine(analysisPara(process.execPath, path.basename(process.execPath), "a".repeat(64)), "manual");
 
-  assert.equal(isolado, false);
+  assert.equal(isolado.success, false);
+  assert.match(String(isolado.error), /caminho protegido/);
   const falha = eventos.find((event) => event.type === "quarantine.failed");
   assert.equal(falha.data.reason, "protected-path", "o motivo histórico de Windows não pode ter mudado de nome");
   assert.equal(falha.summary, `Isolamento recusado por caminho protegido: ${path.basename(process.execPath)}`);
@@ -142,7 +143,8 @@ test("Linux: o motor isola mesmo um ficheiro descartável fora da raiz do servi�
 
   const isolado = await e.requestQuarantine(analysisPara(alvo, "fixture.txt", sha256), "manual");
 
-  assert.equal(isolado, true, `o portão novo não pode ter desligado o isolamento; eventos: ${resumeEventos(eventos)}`);
+  assert.equal(isolado.success, true, `o portão novo não pode ter desligado o isolamento; eventos: ${resumeEventos(eventos)}`);
+  assert.equal(isolado.error, undefined, "um isolamento confirmado não transporta erro");
   assert.equal(eventos.some((event) => event.type === "quarantine.failed"), false, `eventos: ${resumeEventos(eventos)}`);
   const entrada = eventos.find((event) => event.type === "quarantine.added")?.data;
   assert.ok(entrada?.id, "o evento de sucesso transporta a entrada da quarentena");

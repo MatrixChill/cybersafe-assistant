@@ -4,6 +4,7 @@ import type { QuarantineEntry, ThreatEvent } from "@cybersafe/shared-types"
 import { cn } from "@/lib/utils"
 import { classifyThreatOrigin } from "@/lib/threatOrigins"
 import { withDeadline } from "@/lib/deadline"
+import { threatRuleDetail, threatRuleLabel } from "@/lib/threatRuleLabels"
 import QuarantinePage from "./QuarantinePage"
 
 interface ThreatsPageProps {
@@ -343,8 +344,12 @@ export default function ThreatsPage({ events, onClear, isClearing, quarantine, o
                         {threat.severity === "critical" ? "Crítica" : threat.severity === "high" ? "Alta" : threat.severity === "medium" ? "Média" : "Baixa"}
                       </span>
                       {threat.rulesTriggered.map(rule => (
-                        <span key={rule} className="px-2 py-1 rounded text-xs font-mono bg-secondary text-muted-foreground">
-                           {rule}
+                        <span
+                          key={rule}
+                          title={threatRuleDetail(rule)}
+                          className="px-2 py-1 rounded text-xs font-mono bg-secondary text-muted-foreground"
+                        >
+                           {threatRuleLabel(rule)}
                         </span>
                       ))}
                       {threat.rulesTriggered.length === 0 && (

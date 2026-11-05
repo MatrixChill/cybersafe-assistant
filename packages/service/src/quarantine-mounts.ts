@@ -1,3 +1,4 @@
+import { lstat } from "node:fs/promises";
 import { lerPontosDeMontagemReais, type ResultadoPontosDeMontagem } from "@cybersafe/core";
 import {
   hasReparseFreePath,
@@ -9,8 +10,19 @@ import {
 /** Porquê de a quarentena ter recusado um caminho ao consultar as montagens. */
 export type QuarantineMountRefusal = "mount-point" | "mount-table-unreadable" | "mount-table-incomplete";
 
-/** Que portão recusou: o mesmo `protected-path` de sempre, ou um dos três novos. */
-export type QuarantinePathRefusal = "protected-path" | QuarantineMountRefusal;
+/**
+ * Que portão recusou. `not-found`, `inaccessible` e `not-a-file` existem para
+ * que a ausência de um ficheiro nunca seja contada como «caminho protegido»:
+ * a primeira diz que o alvo desapareceu, a segunda que não foi possível lê-lo,
+ * e a terceira que o caminho não aponta para um ficheiro regular. Nenhuma
+ * delas autoriza mover seja o que for.
+ */
+export type QuarantinePathRefusal =
+  | "protected-path"
+  | "not-found"
+  | "inaccessible"
+  | "not-a-file"
+  | QuarantineMountRefusal;
 
 /**
  * O caminho é proibido ao isolamento por ser (ou poder ser) um ponto de
@@ -53,13 +65,20 @@ export interface QuarantineGateSources {
   platform?: NodeJS.Platform;
   /** injectável porque é um `realpath` no sistema de ficheiros de quem corre */
   reparseFree?: (filePath: string) => Promise<boolean>;
+  /** injectável para distinguir ausência/inacessibilidade de link redirecionado */
+  statFile?: (filePath: string) => Promise<{ isFile(): boolean }>;
   tabelaDeMontagens?: () => ResultadoPontosDeMontagem;
 }
 
 /**
- * O portão completo do `requestQuarantine`, na mesma ordem de sempre — raízes
- * protegidas, depois links, depois (só POSIX) montagens — e com a mesma
- * preguiça: um caminho protegido não chega a ser `realpath`-ado.
+ * O portão completo do `requestQuarantine`: raízes protegidas, existência,
+ * links e (só POSIX) montagens. A ordem não é cosmética. A raiz protegida vem
+ * primeiro porque é uma recusa de política que não precisa do disco; a
+ * existência vem antes do `realpath` porque `hasReparseFreePath` devolve
+ * `false` tanto para um link como para um `ENOENT`, e essa indistinção era o
+ * defeito: um ficheiro que já não existia era anunciado como «caminho
+ * protegido», escondendo a causa real. `statFile` é injectável para os testes
+ * do portão não dependerem de caminhos reais.
  *
  * Vive aqui e não dentro do motor por uma razão de teste: o motor é a única
  * consumidora, mas instanciá-lo para provar um `if` seria pagar a máquina
@@ -72,6 +91,15 @@ export async function quarantinePathRefusal(
   sources: QuarantineGateSources = {},
 ): Promise<QuarantinePathRefusal | null> {
   if (isProtectedQuarantinePath(filePath, context)) return "protected-path";
+  let info: { isFile(): boolean };
+  try {
+    info = await (sources.statFile ?? lstat)(filePath);
+  } catch (error) {
+    const code = (error as NodeJS.ErrnoException).code;
+    if (code === "ENOENT" || code === "ENOTDIR") return "not-found";
+    return "inaccessible";
+  }
+  if (!info.isFile()) return "not-a-file";
   if (!(await (sources.reparseFree ?? hasReparseFreePath)(filePath))) return "protected-path";
   return quarantineMountRefusal(
     filePath,

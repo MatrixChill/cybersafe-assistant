@@ -2384,7 +2384,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     return {results:[result],totalFiles:1,highRiskCount:0,overallSeverity:"low",rulesTriggered:[],riskScore:0};
   }
 
-  private async requestQuarantine(analysis: AnalysisResult, authorization: "manual" | "automatic"): Promise<boolean> {
+  private async requestQuarantine(analysis: AnalysisResult, authorization: "manual" | "automatic"): Promise<{ success: boolean; error?: string }> {
     const evidence = {artifactPath:analysis.artifactPath,fileName:analysis.fileName,sha256:analysis.sha256,authorization};
     // Linux Lite §9: «a quarentena deve respeitar … Caminhos protegidos. Links
     // simbólicos. Mount points.» Os três portões vivem numa só função
@@ -2396,14 +2396,20 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     if (recusa) {
       const descricao = recusa === "protected-path"
         ? `Isolamento recusado por caminho protegido: ${analysis.fileName}`
-        : recusa === "mount-point"
+        : recusa === "not-found"
+          ? `O ficheiro selecionado não foi encontrado: ${analysis.fileName}`
+          : recusa === "inaccessible"
+            ? `Sem permissão para aceder ao ficheiro selecionado: ${analysis.fileName}. Nada foi movido.`
+            : recusa === "not-a-file"
+              ? `O caminho selecionado não é um ficheiro regular: ${analysis.fileName}. Nada foi movido.`
+              : recusa === "mount-point"
           ? `Isolamento recusado por ser um ponto de montagem: ${analysis.fileName}`
           : recusa === "mount-table-incomplete"
             ? `Isolamento recusado: a tabela de montagens tem linhas não interpretadas e não se pode confirmar que ${analysis.fileName} não é uma montagem`
             : `Isolamento recusado: a tabela de montagens não pôde ser lida e não se pode confirmar que ${analysis.fileName} não é uma montagem`;
       this.eventBus.publish("quarantine.failed", "high", descricao, {...evidence, reason:recusa});
       void this.logHistory({type:"quarantine.failed",...evidence,reason:recusa,timestamp:new Date().toISOString()});
-      return false;
+      return { success: false, error: descricao };
     }
     this.eventBus.publish("quarantine.requested", "high", `Quarentena solicitada: ${analysis.fileName}`, evidence);
     try {
@@ -2415,11 +2421,12 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // quem autorizou não permite responder, dias depois, se um isolamento foi
       // pedido pelo utilizador ou feito pelo motor.
       void this.logHistory({ type: "quarantine.added", ...evidence, entry, timestamp: new Date().toISOString() });
-      return true;
+      return { success: true };
     } catch {
-      this.eventBus.publish("quarantine.failed", "high", `Não foi possível confirmar o isolamento de ${analysis.fileName}. Verifique a quarentena e o ficheiro.`, evidence);
+      const error = `Não foi possível confirmar o isolamento de ${analysis.fileName}. Verifique a quarentena e o ficheiro.`;
+      this.eventBus.publish("quarantine.failed", "high", error, evidence);
       void this.logHistory({type:"quarantine.failed",...evidence,timestamp:new Date().toISOString()});
-      return false;
+      return { success: false, error };
     }
   }
 
@@ -3400,7 +3407,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           if (firstPath !== undefined) this.blockedPaths.delete(firstPath);
         }
         if (!readOnlyUsb && canAutoQuarantine(this.quarantinePolicy, analysis)) {
-          if (await this.requestQuarantine(analysis, "automatic")) {
+          if ((await this.requestQuarantine(analysis, "automatic")).success) {
             analysis.recommendedAction = "quarantined";
             threat.action = "quarantined";
           }
@@ -5531,6 +5538,7 @@ if (processInfo.path) {
            if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/i.test(sha256)) return {success:false,error:"Confirme novamente a deteção: falta o digest do ficheiro autorizado."};
            const threat = this.threats.find(t => (t.url === `file://${id}` || t.filePath === id) && t.sha256?.toLowerCase() === sha256.toLowerCase());
            if (!threat) return {success:false,error:"Esta identidade de ficheiro não corresponde a uma deteção registada. Volte a analisar."};
+           if (threat && !threat.filePath) return {success:false,error:"A deteção não tem um caminho de ficheiro verificável; volte a analisar."};
            if (threat && threat.filePath) {
               const analysis = {
                 artifactPath: threat.filePath,
@@ -5544,11 +5552,11 @@ if (processInfo.path) {
                 this.eventBus.publish("quarantine.failed", "high", "Deteção sem digest verificável; volte a analisar o ficheiro antes de o isolar.", {artifactPath:threat.filePath,fileName:analysis.fileName});
                 return {success:false,error:"Volte a analisar o ficheiro: esta deteção não contém uma identidade verificável."};
               }
-              success = await this.requestQuarantine(analysis, "manual");
-              if (success) {
-                threat.action = "quarantined";
-                void this.logHistory({ type: "threat.quarantined_manual", id, timestamp: new Date().toISOString() });
-              }
+              const outcome = await this.requestQuarantine(analysis, "manual");
+              if (!outcome.success) return { success: false, error: outcome.error ?? "O isolamento não foi confirmado; o ficheiro pode ter mudado ou estar inacessível." };
+              success = true;
+              threat.action = "quarantined";
+              void this.logHistory({ type: "threat.quarantined_manual", id, timestamp: new Date().toISOString() });
            }
         }
 

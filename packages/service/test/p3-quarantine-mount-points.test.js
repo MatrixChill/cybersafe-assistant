@@ -97,6 +97,7 @@ test("a recusa aplica-se também ao caminho que seria montagem, com tabela incom
  */
 const CONTEXTO = { baseDir: "/opt/cybersafe" };
 const SEMPRE_LIVRE = async () => true;
+const SEMPRE_ARQUIVO = async () => ({ isFile: () => true });
 const TABELA_DE = (...montagens) => () => ({ ok: true, montagens, ilegiveis: 0, reason: null });
 
 test("caminho protegido é recusado antes de qualquer leitura de montagem", async () => {
@@ -115,6 +116,7 @@ test("caminho protegido é recusado antes de qualquer leitura de montagem", asyn
 test("caminho redirecionado por link continua a ser protected-path", async () => {
   const recusa = await quarantinePathRefusal("/home/caioc/veneno.bin", CONTEXTO, {
     platform: "linux",
+    statFile: SEMPRE_ARQUIVO,
     reparseFree: async () => false,
     tabelaDeMontagens: TABELA_DE(),
   });
@@ -124,6 +126,7 @@ test("caminho redirecionado por link continua a ser protected-path", async () =>
 test("ponto de montagem é recusado pelo motivo dele, não como caminho protegido", async () => {
   const recusa = await quarantinePathRefusal("/media/caioc/pen", CONTEXTO, {
     platform: "linux",
+    statFile: SEMPRE_ARQUIVO,
     reparseFree: SEMPRE_LIVRE,
     tabelaDeMontagens: TABELA_DE("/", "/media/caioc/pen"),
   });
@@ -134,6 +137,7 @@ test("em Windows o portão completo não abre a tabela de montagens", async () =
   let abertas = 0;
   const recusa = await quarantinePathRefusal("/mnt/c/veneno.exe", CONTEXTO, {
     platform: "win32",
+    statFile: SEMPRE_ARQUIVO,
     reparseFree: SEMPRE_LIVRE,
     tabelaDeMontagens: () => { abertas += 1; return TABELA_DE("/mnt/c")(); },
   });
@@ -145,6 +149,7 @@ test("caminho limpo em Linux passa, com a tabela consultada uma vez", async () =
   let abertas = 0;
   const recusa = await quarantinePathRefusal("/home/caioc/veneno.bin", CONTEXTO, {
     platform: "linux",
+    statFile: SEMPRE_ARQUIVO,
     reparseFree: SEMPRE_LIVRE,
     tabelaDeMontagens: () => { abertas += 1; return TABELA_DE(...TABELA_MAQUINA)(); },
   });
@@ -155,8 +160,59 @@ test("caminho limpo em Linux passa, com a tabela consultada uma vez", async () =
 test("tabela ilegível fecha o portão", async () => {
   const recusa = await quarantinePathRefusal("/home/caioc/veneno.bin", CONTEXTO, {
     platform: "linux",
+    statFile: SEMPRE_ARQUIVO,
     reparseFree: SEMPRE_LIVRE,
     tabelaDeMontagens: () => ({ ok: false, montagens: [], ilegiveis: 0, reason: "x" }),
   });
   assert.equal(recusa, "mount-table-unreadable");
+});
+
+/**
+ * O defeito P1: `hasReparseFreePath` devolvia `false` tanto para um link como
+ * para um `ENOENT`, e o motor anunciava «caminho protegido» a um ficheiro que
+ * já não existia. A existência passa a ser um portão próprio, antes do
+ * `realpath`, para que a mensagem diga a causa verdadeira.
+ */
+test("ficheiro inexistente é not-found, nunca protected-path", async () => {
+  let reparsePedida = 0;
+  const recusa = await quarantinePathRefusal("/home/caioc/desaparecido.bin", CONTEXTO, {
+    platform: "linux",
+    statFile: async () => { throw Object.assign(new Error("ENOENT"), { code: "ENOENT" }); },
+    reparseFree: async () => { reparsePedida += 1; return true; },
+    tabelaDeMontagens: TABELA_DE(),
+  });
+  assert.equal(recusa, "not-found");
+  assert.equal(reparsePedida, 0, "um alvo ausente não chega a ser realpath-ado");
+});
+
+test("sem permissão de leitura é inaccessible", async () => {
+  const recusa = await quarantinePathRefusal("/home/caioc/bloqueado.bin", CONTEXTO, {
+    platform: "linux",
+    statFile: async () => { throw Object.assign(new Error("EACCES"), { code: "EACCES" }); },
+    reparseFree: SEMPRE_LIVRE,
+    tabelaDeMontagens: TABELA_DE(),
+  });
+  assert.equal(recusa, "inaccessible");
+});
+
+test("um diretório não é um ficheiro isolável", async () => {
+  const recusa = await quarantinePathRefusal("/home/caioc/pasta", CONTEXTO, {
+    platform: "linux",
+    statFile: async () => ({ isFile: () => false }),
+    reparseFree: SEMPRE_LIVRE,
+    tabelaDeMontagens: TABELA_DE(),
+  });
+  assert.equal(recusa, "not-a-file");
+});
+
+test("caminho protegido continua a vencer a ausência", async () => {
+  let statPedido = 0;
+  const recusa = await quarantinePathRefusal("/opt/cybersafe/data/desaparecido.dll", CONTEXTO, {
+    platform: "linux",
+    statFile: async () => { statPedido += 1; return { isFile: () => true }; },
+    reparseFree: SEMPRE_LIVRE,
+    tabelaDeMontagens: TABELA_DE(),
+  });
+  assert.equal(recusa, "protected-path");
+  assert.equal(statPedido, 0, "a política de raiz protegida não depende do disco");
 });
