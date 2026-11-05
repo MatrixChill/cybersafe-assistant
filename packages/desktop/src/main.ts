@@ -52,7 +52,7 @@ import {
   validatePreviewInput,
   canSwitchUpdateChannel,
 } from "./updater/bridge.js";
-import { startAutomaticChecks } from "./updater/automatic-checks.js";
+import { runAutomaticCheck, startAutomaticChecks } from "./updater/automatic-checks.js";
 import { createProductionUpdater } from "./updater/production.js";
 import type { Updater } from "./updater/updater.js";
 import type { UpdaterResult } from "./updater/index.js";
@@ -102,7 +102,8 @@ let mainWindow: BrowserWindow | null = null;
 // Updater da aplicação (ver updater/bridge.ts). `null` até whenReady inicializar;
 // os handlers tratam `null` sem crash e sem `appUpdater!`.
 let appUpdater: Updater | null = null;
-let buildUpdater: ((preview: boolean) => Updater) | null = null;
+let buildUpdater: ((preview?: boolean) => Updater) | null = null;
+let startupUpdateCheckStarted = false;
 let updaterRequestsInFlight = 0;
 let stopAutomaticChecks: (() => void) | null = null;
 let updateStateUnsub: (() => void) | null = null;
@@ -145,7 +146,7 @@ const DEBOUNCE_TIME = 15000; // 15 segundos de silêncio para o mesmo arquivo
 // fundo sólido de sempre. Só um pedido explícito (ex.: um toggle futuro nas
 // Definições) liga o backdrop nativo — e mesmo assim apenas quando o
 // `window-material` confirmar que o sistema o suporta.
-let preferences: { notificationsEnabled: boolean; automaticUpdateCheckEnabled?: boolean; previewUpdateOptIn?: boolean; windowMaterial?: BackgroundMaterial } = {
+let preferences: { notificationsEnabled: boolean; automaticUpdateCheckEnabled?: boolean; previewUpdateOptIn?: boolean; lastSuccessfulUpdateCheckAt?: string; windowMaterial?: BackgroundMaterial } = {
   notificationsEnabled: true,
   automaticUpdateCheckEnabled: false,
 };
@@ -156,19 +157,30 @@ function settingsFilePath(): string {
 
 function loadPreferences() {
   try {
-    if (fs.existsSync(settingsFilePath())) {
-      const raw = fs.readFileSync(settingsFilePath(), "utf8");
-      const parsed = JSON.parse(raw);
-      if (typeof parsed.notificationsEnabled === "boolean") {
-        preferences.notificationsEnabled = parsed.notificationsEnabled;
-      }
-      preferences.automaticUpdateCheckEnabled = parsed.automaticUpdateCheckEnabled === true;
-      preferences.previewUpdateOptIn = typeof parsed.previewUpdateOptIn === "boolean" ? parsed.previewUpdateOptIn : undefined;
-      // Só se aceita um material da lista do Electron; qualquer outro valor fica
-      // como ausente (fallback sólido), nunca vai para o `new BrowserWindow`.
-      if (VALID_BACKGROUND_MATERIALS.includes(parsed.windowMaterial)) {
-        preferences.windowMaterial = parsed.windowMaterial;
-      }
+    const path = settingsFilePath();
+    if (!fs.existsSync(path)) {
+      // Instalação nova: verificar automaticamente é a opção de omissão.
+      // Instalações antigas sem o campo ficam como estavam (desligadas): uma
+      // migração não pode ligar uma preferência que o utilizador nunca escolheu.
+      preferences.automaticUpdateCheckEnabled = true;
+      return;
+    }
+    const raw = fs.readFileSync(path, "utf8");
+    const parsed = JSON.parse(raw);
+    if (typeof parsed.notificationsEnabled === "boolean") {
+      preferences.notificationsEnabled = parsed.notificationsEnabled;
+    }
+    preferences.automaticUpdateCheckEnabled = typeof parsed.automaticUpdateCheckEnabled === "boolean"
+      ? parsed.automaticUpdateCheckEnabled
+      : false;
+    preferences.previewUpdateOptIn = typeof parsed.previewUpdateOptIn === "boolean" ? parsed.previewUpdateOptIn : undefined;
+    preferences.lastSuccessfulUpdateCheckAt = typeof parsed.lastSuccessfulUpdateCheckAt === "string" && Number.isFinite(Date.parse(parsed.lastSuccessfulUpdateCheckAt))
+      ? parsed.lastSuccessfulUpdateCheckAt
+      : undefined;
+    // Só se aceita um material da lista do Electron; qualquer outro valor fica
+    // como ausente (fallback sólido), nunca vai para o `new BrowserWindow`.
+    if (VALID_BACKGROUND_MATERIALS.includes(parsed.windowMaterial)) {
+      preferences.windowMaterial = parsed.windowMaterial;
     }
   } catch {
     // Ficheiro inválido não deve impedir o arranque.
@@ -185,7 +197,27 @@ function savePreferences() {
   }
 }
 
+/** Verificação inicial depois de a janela estar pronta; nunca bloqueia o arranque. */
+function startStartupUpdateCheck() {
+  if (startupUpdateCheckStarted || !appUpdater) return;
+  startupUpdateCheckStarted = true;
+  void runAutomaticCheck(appUpdater);
+}
+
 // RECOVERY-SECURITY-20261014: a decisao de notificar vive em
+/** Guarda a data real de uma verificação bem-sucedida, sem inventar relógios. */
+let persistedUpdateCheckAt = "";
+function persistSuccessfulUpdateCheck(snapshot: { phase?: string; checkedAt?: string }) {
+  // Só uma verificação que terminou em `available`/`upToDate` é sucesso.
+  // `checkedAt` pode sobreviver a um erro posterior; não o promover a sucesso.
+  if (snapshot.phase !== "available" && snapshot.phase !== "upToDate") return;
+  const at = snapshot.checkedAt;
+  if (!at || at === persistedUpdateCheckAt) return;
+  persistedUpdateCheckAt = at;
+  preferences.lastSuccessfulUpdateCheckAt = at;
+  void savePreferences();
+}
+
 // security-notifications.ts (testavel sem Electron); este ligacao e o unico
 // caminho do EventBus real ate `Notification`.
 const notificationDelivery = createNativeNotificationDelivery({
@@ -363,6 +395,11 @@ function createWindow() {
     isQuitting: () => isQuitting,
   });
   pendingForegroundRequest = false;
+  mainWindow.webContents.once("did-finish-load", () => {
+    // O sandbox de testes de janela não carrega o updater; no processo real a
+    // função existe sempre. A verificação nunca pode impedir o arranque.
+    if (typeof startStartupUpdateCheck === "function") startStartupUpdateCheck();
+  });
   mainWindow.once("ready-to-show", () => {
     if (!app.isPackaged) mainWindow?.webContents.openDevTools();
   });
@@ -1946,8 +1983,8 @@ if (!gotTheLock) {
   app.whenReady().then(async () => {
     logStartup("electron-ready", { pid: process.pid, port: perfil.apiPort });
     loadPreferences();
-    // Apenas Windows empacotado suporta atualização; Stable permanece fechado
-    // sem confiança de publicação e Preview exige adesão explícita.
+    // Apenas Windows empacotado suporta atualização. O feed assinado é usado
+    // internamente; a interface não expõe canais nem exige adesão.
     // Identidade REAL do artefacto: o carimbo escrito pelo staging do renderer.
     // Sem carimbo, build/commit ficam ausentes e a UI diz «desconhecida» — nunca
     // se inventa um valor a partir da versão ou do nome do ficheiro.
@@ -1958,6 +1995,7 @@ if (!gotTheLock) {
       runtimeSupported: app.isPackaged && process.platform === "win32",
       installedVersion: app.getVersion(),
       automaticCheckEnabled: preferences.automaticUpdateCheckEnabled === true,
+      lastSuccessfulCheckAt: preferences.lastSuccessfulUpdateCheckAt,
       installation: {
         stagingRoot: path.join(app.getPath("userData"), "update-staging"),
         journalFile: path.join(app.getPath("userData"), "updater-operation.json"),
@@ -2005,9 +2043,10 @@ if (!gotTheLock) {
       installedBuild: installedIdentity.build,
       installedCommit: installedIdentity.commit,
     });
-    appUpdater = buildUpdater(preferences.previewUpdateOptIn ?? process.argv.includes("--cybersafe-preview-updates"));
+    appUpdater = buildUpdater(preferences.previewUpdateOptIn);
     stopAutomaticChecks = startAutomaticChecks(appUpdater);
     updateStateUnsub = appUpdater.onState((s) => {
+      persistSuccessfulUpdateCheck(s);
       if (mainWindow && !mainWindow.isDestroyed()) mainWindow.webContents.send("app:update-state", toAppUpdateSnapshot(s));
     });
     // Identidade da aplicação no Windows (taskbar/notificações/ateliers).

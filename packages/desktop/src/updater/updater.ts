@@ -39,8 +39,8 @@ import {
 import { NOOP_LOGGER, SYSTEM_CLOCK } from "./types.ts";
 import type { UpdaterDeps } from "./deps.ts";
 
-function baseSnapshot(installed: VersionInfo, automatic: boolean): UpdateSnapshot {
-  return { phase: "idle", channel: "stable", installed, canInstall: false, automaticCheckEnabled: automatic };
+function baseSnapshot(installed: VersionInfo, automatic: boolean, lastSuccessfulCheckAt?: string): UpdateSnapshot {
+  return { phase: "idle", channel: "stable", installed, canInstall: false, automaticCheckEnabled: automatic, lastSuccessfulCheckAt };
 }
 
 export class Updater {
@@ -62,7 +62,7 @@ export class Updater {
     this.cache = new CacheStore(deps.cacheFs, deps.config.ok ? deps.config.config.cacheDir : path.resolve("."));
     const automatic = deps.config.ok ? deps.config.config.automaticCheckEnabled : false;
     if (deps.config.ok) this.resolvedConfig = deps.config.config;
-    this.snapshot = { ...baseSnapshot(deps.installed, automatic), channel: this.resolvedConfig?.channel ?? "stable", manualDownloadOnly: deps.manualDownloadOnly === true };
+    this.snapshot = { ...baseSnapshot(deps.installed, automatic, deps.lastSuccessfulCheckAt), channel: this.resolvedConfig?.channel ?? "stable", manualDownloadOnly: deps.manualDownloadOnly === true };
     if (!deps.runtimeSupported) {
       this.snapshot = { ...this.snapshot, phase: "unsupported", error: { code: "unsupported", message: "runtime portable/dev: atualização não suportada" } };
     } else if (!deps.config.ok) {

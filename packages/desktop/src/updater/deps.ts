@@ -34,4 +34,6 @@ export interface UpdaterDeps {
   scanProbe: () => Promise<ScanState>;
   clock?: Clock;
   logger?: Logger;
+  /** Última verificação bem-sucedida já persistida pelo main (ISO-8601). */
+  lastSuccessfulCheckAt?: string;
 }

@@ -71,10 +71,8 @@ export function buildAmbitoAtualizacoes({ bridgeAvailable, snapshot }: { bridgeA
 
   const verificacao = snapshot && snapshot.canInstall === true
     ? bridgeAvailable
-      ? snapshot.channel === "preview"
-        ? "Preview: manifesto Ed25519 e SHA-256 verificados; Setup sem Authenticode e editor não verificado pelo Windows. O launcher revalida os ficheiros antes de abrir a instalação interativa."
-        : "Conforme o snapshot atual, o atualizador indica que as verificações de integridade/autoria/publicador/política foram concluídas; esta vista não repete essa verificação."
-      : "O snapshot apresentado indica verificações concluídas ANTERIORMENTE; sem ponte nesta janela, o estado atual NÃO é confirmado."
+      ? "Manifesto Ed25519 e SHA-256 verificados; o Setup não tem assinatura Authenticode e o editor não é verificado pelo Windows. O launcher revalida os ficheiros antes de abrir a instalação interativa."
+      : "O snapshot indica verificações concluídas anteriormente; sem ponte nesta janela, o estado atual não é confirmado."
     : "Assinatura/verificação não confirmada nesta vista (o estado pode ser apenas SHA ou configuração).";
 
   return {
@@ -111,7 +109,7 @@ export function buildAmbitoAtualizacoes({ bridgeAvailable, snapshot }: { bridgeA
     verificacao,
     avisos: [
       "Atualizar definições ou regras não é feito por este cartão e não é verificado automaticamente.",
-      "A consulta do canal é iniciada apenas pela verificação manual ou pela preferência automática.",
+      "A consulta de atualizações é iniciada pela verificação automática ou pelo botão manual.",
     ],
   };
 }

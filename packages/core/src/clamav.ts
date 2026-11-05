@@ -2899,7 +2899,7 @@ export function applyClamavLoadProof(
       health: {
         status: "unavailable",
         busy: true,
-        detail: `Motor ocupado: prova de carga adiada (${why}); ainda sem carga comprovada.`,
+        detail: `A verificar o motor ClamAV — prova de carga adiada (${why}); ainda sem carga comprovada.`,
       },
     };
   }
@@ -3242,7 +3242,7 @@ export function diagnoseClamavBinary(
 }
 
 export class ClamavBridge {
-  private _health: EngineSubsystemHealth = { status: "unavailable", detail: "Not checked" };
+  private _health: EngineSubsystemHealth = { status: "unavailable", busy: true, detail: "A iniciar ClamAV…" };
   /**
    * A saúde do ULTIMO probe: binario + base presentes + frescura das
    * definicoes. E a autoridade sobre a BASE; `_health` e o que a UI ve agora.
@@ -3486,6 +3486,11 @@ export class ClamavBridge {
   }
 
   private async probe(): Promise<boolean> {
+    // Enquanto a prova corre não há confirmação: a UI deve ler «a verificar»,
+    // não «indisponível». O estado final substitui este marcador.
+    this._health = this._health.status === "active"
+      ? { ...this._health, busy: true, detail: "A verificar o motor ClamAV; mantém-se a última carga comprovada." }
+      : { status: "unavailable", busy: true, detail: "A verificar o motor ClamAV…" };
     // A resolução vem PRIMEIRO: a sonda de versão tem de correr sobre o
     // binário que vamos usar a sério. Correr `clamscan --version` pelo nome
     // dava `unavailable` a uma instalação que existe fora do PATH — e era

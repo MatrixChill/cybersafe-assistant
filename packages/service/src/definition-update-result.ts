@@ -5,12 +5,17 @@ export function createDefinitionsUpdateResult(result: UpdateResult, previousUpda
   const yaraUpdated = result.yaraUpdated === true;
   const clamUpdated = result.clamUpdated === true;
   const hashesUpdated = result.hashesUpdated === true;
+  // Compatibilidade com fixtures antigos: se a verificação não for reportada,
+  // uma atualização confirmada é a única prova de que o componente foi lido.
+  const yaraChecked = result.yaraChecked ?? yaraUpdated;
+  const clamChecked = result.clamChecked ?? clamUpdated;
+  const hashesChecked = result.hashesChecked ?? hashesUpdated;
   const errors = result.errors.slice();
   const warnings = result.warnings.slice();
   const anyUpdated = yaraUpdated || clamUpdated || hashesUpdated;
   return {
-    success: yaraUpdated && clamUpdated && hashesUpdated && errors.length === 0 && warnings.length === 0,
+    success: yaraChecked && clamChecked && hashesChecked && errors.length === 0 && warnings.length === 0,
     updatedAt: anyUpdated ? checkedAt : previousUpdatedAt,
-    checkedAt, yaraUpdated, clamUpdated, hashesUpdated, errors, warnings,
+    checkedAt, yaraUpdated, clamUpdated, hashesUpdated, yaraChecked, clamChecked, hashesChecked, errors, warnings,
   };
 }

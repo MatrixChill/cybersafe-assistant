@@ -22,9 +22,12 @@ interface InstallationRuntime {
   acquireScanLease?:()=>Promise<ScanLease|null>;
 }
 /** Build-pinned trust; assisted installation remains a separately disabled gate. */
-export function createProductionUpdater(opts: {previewOptIn?: boolean; runtimeSupported: boolean; installation?: InstallationRuntime; automaticCheckEnabled?: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string}) {
+export function createProductionUpdater(opts: {previewOptIn?: boolean; runtimeSupported: boolean; installation?: InstallationRuntime; automaticCheckEnabled?: boolean; installedVersion: string; cacheDir: string; installedBuild?: string; installedCommit?: string; lastSuccessfulCheckAt?: string}) {
   const unavailable = () => createUnconfiguredUpdater(opts);
-  const preview = opts.previewOptIn === true && /^\d+\.\d+\.\d+-rc\.[1-9]\d*$/.test(opts.installedVersion);
+  // O updater normal usa a infraestrutura assinada já publicada para builds RC.
+  // `previewOptIn` deixa de ser uma condição de experiência: não há canal
+  // visível nem adesão. Stable continua indisponível sem Authenticode.
+  const preview = /^\d+\.\d+\.\d+-rc\.[1-9]\d*$/.test(opts.installedVersion);
   const trust = preview ? previewTrust : stableTrust;
   if ((!preview && !stableTrust.enabled) || !isGitHubReleaseUrl(trust.feedManifestUrl)) return unavailable();
   try {
@@ -56,7 +59,7 @@ export function createProductionUpdater(opts: {previewOptIn?: boolean; runtimeSu
     source: new HttpsFeedSource(config.config, createHttpsFeedFetcher(config.config, transport)),
     downloader: createHttpsArtifactDownloader(config.config, transport),
     signatureVerifier,
-    publisherVerifier, installer,
+    publisherVerifier, installer, lastSuccessfulCheckAt: opts.lastSuccessfulCheckAt,
     cacheFs: createNodeCacheFileSystem(opts.cacheDir), scanProbe: opts.installation?.scanProbe ?? (async () => 'unknown'),
   });
 }

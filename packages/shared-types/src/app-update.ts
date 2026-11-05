@@ -31,6 +31,8 @@ export interface AppUpdateSnapshot {
   /** Real bytes only. Missing total means indeterminate progress. */
   progress?: { downloadedBytes: number; totalBytes?: number };
   checkedAt?: string;
+  /** Data da última verificação bem-sucedida, persistida entre arranques. */
+  lastSuccessfulCheckAt?: string;
   error?: { code: AppUpdateErrorCode; message: string };
   /** Main sets true only after integrity/authenticity/publisher/policy checks. */
   canInstall: boolean;

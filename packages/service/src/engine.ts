@@ -984,6 +984,9 @@ export class ProtectionEngineService {
         throw new ServiceStartupError(SERVICE_DISPOSED_MESSAGE, "SERVICE_DISPOSED");
       }
       this.settleStartup("ready");
+      // A prova adiada durante o arranque é revalidada pelo próprio serviço,
+      // sem esperar que o utilizador abra outra página.
+      this.observeAndRecoverClamav();
     } catch (error) {
       if (this.startupStateValue !== "disposed") this.settleStartup("failed");
       throw error;
@@ -2744,6 +2747,11 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
             "[CLAMAV] recovery attempt=" + this.clamavRecoveryAttempts + " result=" +
               (ok ? "active" : "still-degraded") + " status=" + this.clamav.health.status,
           );
+          if (ok) {
+            this.eventBus.publish("engine.health", "low", "ClamAV recuperado e disponível.", {
+              engine: "ClamAV", status: this.clamav.health.status,
+            });
+          }
         })
         .catch((err: unknown) => {
           void this.actionsLog?.write(
@@ -3682,6 +3690,7 @@ if (processInfo.path) {
       const checkedAt = new Date().toISOString();
       return createDefinitionsUpdateResult({
         yaraUpdated: false, clamUpdated: false, hashesUpdated: false,
+        yaraChecked: false, clamChecked: false, hashesChecked: false,
         errors: ["O serviço não confirmou a atualização de definições."], warnings: [], timestamp: checkedAt,
       }, anterior, checkedAt);
     }

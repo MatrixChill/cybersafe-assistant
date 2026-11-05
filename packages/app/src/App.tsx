@@ -49,6 +49,7 @@ import RegisterPage from "./pages/RegisterPage";
 import AIAssistant from "./components/AIAssistant";
 import { OnboardingOverlay } from "./components/OnboardingOverlay";
 import { ExitConfirmHost } from "./components/ExitConfirmDialog";
+import { AutomaticUpdatePrompt } from "./components/updates/AutomaticUpdatePrompt";
 import { BrandLogo } from "./components/BrandLogo";
 import { BootScreen, type BootStep } from "./components/BootScreen";
 import { AppTitleBar } from "./components/AppTitleBar";
@@ -1196,6 +1197,7 @@ function AuthenticatedApp() {
       </div>}
 
       <AIAssistant currentPage={page} context={matrixContext} processDiagnostic={processDiagnostic} processContext={processContext} explainRequest={processExplanation} explainIdentity={explicacaoIdentidade} />
+      <AutomaticUpdatePrompt />
 
       {showOnboarding && (
         <OnboardingOverlay plataforma={hardware?.system.platform ?? null} onDone={() => setShowOnboarding(false)} onSkip={() => setShowOnboarding(false)} />

@@ -4,6 +4,14 @@ interface Checkable {
   check(): Promise<unknown>;
 }
 type Schedule = (tick: () => Promise<void>, intervalMs: number) => () => void;
+
+/** Uma verificação inicial, sem download/instalação e sem repetir em paralelo. */
+export async function runAutomaticCheck(updater: Checkable): Promise<void> {
+  const state = updater.snapshotCopy();
+  if (!state.automaticCheckEnabled || !['idle', 'upToDate', 'error'].includes(state.phase)) return;
+  try { await updater.check(); } catch { /* A aplicação continua utilizável; o próximo tick pode recuperar. */ }
+}
+
 /** Availability only: no download/install, explicit preference checked each tick. */
 export function startAutomaticChecks(updater: Checkable, options: {schedule?: Schedule} = {}): () => void {
   let disposed = false;

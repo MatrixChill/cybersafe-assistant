@@ -12,7 +12,7 @@ export const updaterCopy: Record<UpdaterPhase, { title: string; description: str
   restarting: {title:"A aguardar reinício",description:"A instalação ainda precisa de confirmação após o arranque.",helper:"Siga a indicação do atualizador para reabrir a aplicação.",security:"Versão instalada ainda não confirmada"},
   idle: { title: "Atualizador CyberSafe", description: "Procure uma versão mais recente quando quiser.", helper: "Nenhuma atualização está em curso.", security: "Nenhuma transferência ou instalação em curso" },
   checking: { title: "A procurar atualizações", description: "A consultar a disponibilidade de uma nova versão do CyberSafe.", helper: "Pode continuar a utilizar a aplicação.", security: "Verificações de segurança ainda não concluídas" },
-  available: { title: "Uma nova versão está disponível", description: "Reveja a versão e as novidades antes de descarregar.", helper: "A instalação requer a sua confirmação.", security: "O instalador será verificado após a transferência" },
+  available: { title: "Nova atualização disponível", description: "Reveja a versão e as novidades antes de atualizar.", helper: "A instalação requer a sua confirmação.", security: "Manifesto autenticado; o Setup será verificado por SHA-256" },
   downloading: { title: "A descarregar a atualização", description: "A transferir os ficheiros necessários para este computador.", helper: "Pode cancelar a transferência.", security: "Integridade e autenticidade por verificar" },
   verifying: { title: "A verificar a atualização", description: "A verificar integridade e autenticidade do instalador.", helper: "A instalação permanece bloqueada até às verificações necessárias.", security: "Verificações de segurança em curso" },
   preparing: { title: "A preparar a instalação", description: "A preparar os ficheiros e a verificar as condições de instalação.", helper: "Aguarde pela confirmação do atualizador.", security: "A aguardar confirmação das condições de instalação" },
@@ -32,6 +32,6 @@ export function mapUpdaterSnapshot(snapshot: AppUpdateSnapshot): UpdaterWindowVi
 phase: phases[status], currentVersion: snapshot.installed.version, nextVersion: snapshot.latest?.version,
     percent: status === "downloading" && snapshot.progress ? progressInfo(snapshot.progress).percent : null,
     cancelable: status === "downloading", primaryAction, notes: snapshot.latest?.notes,
-    detail: snapshot.error ? errorCodeMessage(snapshot.error.code) : snapshot.channel === "preview" ? "Canal Preview: Setup sem Authenticode; editor não verificado pelo Windows. A instalação é interativa e requer a sua confirmação." : status === "downloaded" && !snapshot.canInstall ? "A instalação está bloqueada pelas condições de segurança." : status === "idle" || status === "deferred" ? "Nenhuma atualização em curso." : undefined
+    detail: snapshot.error ? errorCodeMessage(snapshot.error.code) : status === "available" ? "Publicação verificada por Ed25519. O Setup não tem assinatura Authenticode e a instalação exige a sua confirmação." : status === "downloaded" && !snapshot.canInstall ? "A instalação está bloqueada pelas condições de segurança." : status === "idle" || status === "deferred" ? "Nenhuma atualização em curso." : undefined
 };
 }

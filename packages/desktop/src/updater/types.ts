@@ -78,6 +78,8 @@ export interface UpdateSnapshot {
   latest?: ReleaseInfo;
   progress?: ProgressInfo;
   checkedAt?: string;
+  /** Data da última verificação bem-sucedida, vinda das preferências do main. */
+  lastSuccessfulCheckAt?: string;
   error?: { code: UpdateErrorCode; message: string };
   /** true só depois de integridade + autenticidade + editor + política. */
   canInstall: boolean;

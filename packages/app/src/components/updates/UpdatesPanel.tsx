@@ -18,6 +18,7 @@ import {
   deriveControls,
   errorCodeMessage,
   formatBytes,
+  formatCheckDate,
   formatInstalled,
   formatPublishedDate,
   progressInfo,
@@ -35,7 +36,6 @@ const BUSY_LABELS: Record<string, string> = {
   defer: "A adiar…",
   install: "A confirmar a instalação…",
   automatic: "A guardar a preferência…",
-  preview: "A guardar o canal…",
 };
 
 const BUTTON_SECONDARY = cn(
@@ -183,6 +183,12 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
             <p className="mt-0.5 font-mono text-sm text-foreground select-text">{installed?.version}</p>
           </div>
 
+          {(snapshot.lastSuccessfulCheckAt ?? (snapshot.status === "up-to-date" ? snapshot.checkedAt : undefined)) && (
+            <p className="font-mono text-xs text-muted-foreground" data-testid="app-update-last-check">
+              Última verificação bem-sucedida: {formatCheckDate(snapshot.lastSuccessfulCheckAt ?? snapshot.checkedAt)}
+            </p>
+          )}
+
           {/* Versão disponível + notas: TEXTO SIMPLES (o React escapa o que vier). */}
           {latest !== null && (
             <div className="rounded-lg border border-border bg-secondary/50 p-3" data-testid="app-update-latest">
@@ -247,7 +253,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
 
             {(snapshot.status === "available" || snapshot.status === "downloaded") && (
               <button type="button" data-testid="app-update-defer" onClick={actions.defer} disabled={!controls.defer} className={BUTTON_SECONDARY}>
-                <Clock className="w-3.5 h-3.5" aria-hidden /> Adiar
+                <Clock className="w-3.5 h-3.5" aria-hidden /> Mais tarde
               </button>
             )}
 
@@ -304,23 +310,9 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
               Definições avançadas
             </summary>
             <div className="mt-3 space-y-3">
-              <div className="rounded-lg border border-border bg-secondary/50 p-3" data-testid="app-update-channel">
-                <p className="text-sm font-semibold text-foreground">
-                  Canal de atualizações: {snapshot.channel === "preview" ? "Avaliação assinada (Preview)" : "Stable"}
-                </p>
-                {snapshot.channel === "stable" && snapshot.status === "unconfigured" && (
-                  <p className="text-xs text-muted-foreground">Stable indisponível: a publicação ainda não tem confiança de assinatura aprovada.</p>
-                )}
-                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
-                  Preview: distribuições de avaliação assinadas pelo projeto (Ed25519 + SHA-256 sobre HTTPS). O Setup não tem assinatura Authenticode; o editor não é verificado pelo Windows. Alterar o canal não inicia verificações nem instalações.
-                </p>
-                <button type="button" role="switch" aria-checked={snapshot.channel === "preview"} aria-label="Ativar canal Preview" data-testid="app-update-preview"
-                  disabled={busy !== null || snapshot.status === "unsupported" || ["checking", "downloading", "verifying", "installing"].includes(snapshot.status) || !actions.setPreview}
-                  onClick={() => actions.setPreview?.(snapshot.channel !== "preview")} className={cn(BUTTON_SECONDARY, "mt-2")}>
-                  {snapshot.channel === "preview" ? "Desativar canal Preview" : "Ativar canal Preview"}
-                </button>
-                <p className="mt-2 text-xs text-muted-foreground">Última verificação: {snapshot.checkedAt ? new Date(snapshot.checkedAt).toLocaleString("pt-PT") : "ainda não confirmada neste canal"}.</p>
-              </div>
+              <p className="rounded-lg border border-border bg-secondary/50 p-3 text-xs leading-relaxed text-muted-foreground">
+                Publicação verificada por Ed25519 e SHA-256 sobre HTTPS. O Setup não tem assinatura Authenticode; o editor não é verificado pelo Windows. Nada é transferido sem a tua ação.
+              </p>
               <dl className="grid grid-cols-1 gap-1.5 rounded-lg border border-border bg-secondary/50 p-3 font-mono text-xs sm:grid-cols-2" data-testid="app-update-installed-technical">
                 <div>
                   <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">Compilação</dt>
@@ -338,20 +330,20 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
           {/* Verificação automática — preferência REAL do updater. */}
           <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/50 p-3">
             <div>
-              <p className="text-sm font-mono text-foreground">Verificação automática</p>
+              <p className="text-sm font-mono text-foreground">Verificar atualizações automaticamente</p>
               <p className="text-xs text-muted-foreground mt-0.5">
                 {snapshot.status === "unconfigured" || snapshot.status === "unsupported"
                   ? "Indisponível enquanto as atualizações não estiverem configuradas."
                   : snapshot.automaticCheckEnabled
-                    ? "Ligada — a aplicação verifica automaticamente."
-                    : "Desligada."}
+                    ? "Ligada — a aplicação verifica ao abrir e periodicamente."
+                    : "Desligada — só verificas quando pedires."}
               </p>
             </div>
             <button
               type="button"
               role="switch"
               aria-checked={snapshot.automaticCheckEnabled}
-              aria-label="Verificação automática"
+              aria-label="Verificar atualizações automaticamente"
               data-testid="app-update-automatic"
               disabled={!controls.automatic}
               onClick={() => actions.setAutomaticCheck(!snapshot.automaticCheckEnabled)}

@@ -140,11 +140,11 @@ const WFP_LABEL = "Filtro WFP (CyberSafe)";
 
 function subsystemEntries(
   engine: EngineHealth | undefined,
-): { label: string; status: EngineSubsystemStatus }[] {
-  const entries: { label: string; status: EngineSubsystemStatus }[] = [];
+): { label: string; status: EngineSubsystemStatus; busy?: boolean }[] {
+  const entries: { label: string; status: EngineSubsystemStatus; busy?: boolean }[] = [];
   for (const { key, label } of CORE_SUBSYSTEMS) {
     const sub = engine?.[key] as EngineSubsystemHealth | undefined;
-    if (sub) entries.push({ label, status: sub.status });
+    if (sub) entries.push({ label, status: sub.status, busy: sub.busy === true });
   }
   const wfp = wfpHealth(engine);
   if (wfp) entries.push({ label: WFP_LABEL, status: wfp.status });
@@ -156,7 +156,7 @@ function describeSubsystems(
   statuses: EngineSubsystemStatus[],
 ): string[] {
   return subsystemEntries(engine)
-    .filter((entry) => statuses.includes(entry.status))
+    .filter((entry) => entry.busy !== true && statuses.includes(entry.status))
     .map((entry) => {
       const palavra =
         entry.status === "degraded" ? "degradado"

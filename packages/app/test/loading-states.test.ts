@@ -115,6 +115,14 @@ describe("loadingStates — não mascarar degradação/indisponibilidade como ca
     assert.match(s.detail, /Filtro WFP \(CyberSafe\) \(indisponível\)/);
   });
 
+  test("ClamAV busy (prova adiada, sem falha) não é degradação", () => {
+    const s = derive({
+      protection: protection("safe", { ...ALL_ACTIVE, clamav: { status: "unavailable", busy: true } }),
+    });
+    assert.equal(s.state, "READY");
+    assert.doesNotMatch(s.detail, /ClamAV/);
+  });
+
   test("ClamAV degradado (instalado mas inerte) → DEGRADED com motivo", () => {
     const s = derive({ protection: protection("attention", { ...ALL_ACTIVE, clamav: sub("degraded") }) });
     assert.equal(s.state, "DEGRADED");

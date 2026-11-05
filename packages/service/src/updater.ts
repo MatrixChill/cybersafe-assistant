@@ -315,6 +315,10 @@ export interface UpdateResult {
   yaraUpdated: boolean;
   clamUpdated: boolean;
   hashesUpdated: boolean;
+  /** A verificação foi executada e o fornecedor respondeu validamente. */
+  yaraChecked: boolean;
+  clamChecked: boolean;
+  hashesChecked: boolean;
   errors: string[];
   warnings: string[];
   timestamp: string;
@@ -555,6 +559,9 @@ export class DefinitionUpdater {
         yaraUpdated: false,
         clamUpdated: false,
         hashesUpdated: false,
+        yaraChecked: false,
+        clamChecked: false,
+        hashesChecked: false,
         errors: [],
         warnings: ["Já existe um ciclo de atualização de definições em curso; este pedido foi recusado para não escrever duas vezes sobre as mesmas bases."],
         timestamp: new Date().toISOString(),
@@ -569,6 +576,9 @@ export class DefinitionUpdater {
       yaraUpdated: false,
       clamUpdated: false,
       hashesUpdated: false,
+      yaraChecked: false,
+      clamChecked: false,
+      hashesChecked: false,
       errors: [],
       warnings: [],
       timestamp: new Date().toISOString(),
@@ -600,6 +610,7 @@ export class DefinitionUpdater {
     if (stale.yara) {
       try {
         const yaraResult = await this.updateYaraRules();
+        result.yaraChecked = true;
         result.yaraUpdated = true;
         this.limparFalha("yara");
         updated.yara = true;
@@ -626,6 +637,7 @@ export class DefinitionUpdater {
     if (stale.clamav) {
       try {
         await this.updateClamAV();
+        result.clamChecked = true;
         result.clamUpdated = true;
         this.limparFalha("clamav");
         updated.clamav = true;
@@ -642,6 +654,7 @@ export class DefinitionUpdater {
     if (stale.hashes) {
       try {
         const feed = await this.updateHashFeed();
+        result.hashesChecked = true;
         // Dois factos separados, porque são dois factos diferentes:
         // `hashesUpdated` = a base em disco mudou (é isto que manda recarregar
         // o SignatureDatabase); `updated.hashes` = houve uma verificação bem

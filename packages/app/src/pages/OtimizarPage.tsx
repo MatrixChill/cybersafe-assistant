@@ -226,9 +226,9 @@ export default function OtimizarPage({
   const [detalhesAbertos, setDetalhesAbertos] = useState(false);
 
   /* Estado por fonte das definições, lido AO SERVIÇO. `null` é «sem leitura
-     disponível» — não é «nenhuma base» nem «tudo atualizado». Uma leitura por
-     montagem; `definitions.status` está na fila de leituras independentes do
-     serviço, por isso não compete com os snapshots nem se repete em cada render. */
+     disponível» — não é «nenhuma base» nem «tudo atualizado». É relido quando o
+     motor ou a base mudam, para uma recuperação/atualização aparecer sem
+     obrigar o utilizador a sair e voltar a esta página. */
   const [fontesDefinicoes, setFontesDefinicoes] = useState<LinhaDefinicoes[] | null>(null);
 
   const lerDefinicoes = useCallback(async (): Promise<LinhaDefinicoes[]> => {
@@ -260,6 +260,20 @@ export default function OtimizarPage({
   const motoresRespostas = protecao.motores
     ? MOTORES.filter((chave) => protecao.motores?.[chave]?.status === "active").length
     : null;
+  const motoresAVerificar = protecao.motores
+    ? MOTORES.filter((chave) => protecao.motores?.[chave]?.busy === true).length
+    : 0;
+  const definicoesKey = [
+    protecao.motores?.clamav?.status,
+    protecao.motores?.clamav?.busy === true,
+    protecao.motores?.hashDb?.status,
+    protecao.motores?.definitionsUpdatedAt,
+  ].join(":");
+  useEffect(() => {
+    // O estado do motor e das definições pode mudar sem navegação (recuperação
+    // do ClamAV, fim de uma atualização). Reler a fonte mantém a página coerente.
+    void lerDefinicoes();
+  }, [definicoesKey, lerDefinicoes]);
 
   /* O catálogo é uma projeção pela plataforma PUBLICADA pelo serviço, não pelo
      aspeto dos caminhos: sem leitura não se adivinha e a página fica como é.
@@ -518,7 +532,7 @@ export default function OtimizarPage({
             </div>
             <div className="row-meta mt-2 flex flex-wrap gap-x-3 gap-y-1">
               <span>Tempo real: {tempoReal ? tempoReal.text : "sem leitura"}</span>
-              <span>Motores: {motoresRespostas === null ? "sem leitura" : `${motoresRespostas} de ${MOTORES.length} a responder`}</span>
+              <span>Motores: {motoresRespostas === null ? "sem leitura" : `${motoresRespostas} de ${MOTORES.length} a responder`}{motoresAVerificar > 0 ? ` · ${motoresAVerificar} a verificar` : ""}</span>
               {protecao.pontuacao != null && <span>Nota do motor: {protecao.pontuacao}/100</span>}
             </div>
             <p className="row-meta mt-2">

@@ -111,6 +111,8 @@ const OVERVIEW_DOT: Record<ProtectionOverview["tone"], string> = {
   na: "bg-muted-foreground",
 };
 
+const VERIFY_META = { text: "A verificar", cls: "text-muted-foreground border-border bg-secondary/40" };
+
 const STATUS_META: Record<EngineSubsystemStatus, { text: string; cls: string }> = {
   active: { text: engineStatusText("active"), cls: "text-cyber-green border-cyber-green/40 bg-cyber-green/10" },
   degraded: { text: engineStatusText("degraded"), cls: "text-cyber-yellow border-cyber-yellow/40 bg-cyber-yellow/10" },
@@ -149,7 +151,9 @@ function explainScore(engine: EngineHealth | undefined, score: number) {
 function motorUserCopy(
   key: "yara" | "hashDb" | "clamav" | "nativeEngine",
   status: EngineSubsystemStatus,
+  busy = false,
 ): { texto: string; contexto?: string } {
+  if (busy) return { texto: key === "clamav" ? "A verificar o motor ClamAV. Ainda não há prova de carga." : "A verificar o estado deste motor." };
   switch (key) {
     case "yara":
       if (status === "active") return { texto: "Motor de análise por regras ativo." };
@@ -357,15 +361,16 @@ export default function ProtectionDetails({ engine, level, overview, open, onClo
           {ENGINE_ROWS.map(({ key, label }) => {
             const sub = engine?.[key];
             const status: EngineSubsystemStatus = sub?.status ?? "unavailable";
-            const copy = motorUserCopy(key, status);
+            const copy = motorUserCopy(key, status, sub?.busy === true);
+            const badge = sub?.busy === true ? VERIFY_META : STATUS_META[status];
             const coberturaLinha =
               key === "yara" ? coberturaRegras : key === "hashDb" ? coberturaAssinaturas : null;
             return (
               <div key={key} className="p-3 rounded-lg bg-secondary/40 border border-border">
                 <div className="flex items-center justify-between gap-2">
                   <span className="font-mono text-sm text-foreground">{label}</span>
-                  <span className={cn("text-xs font-mono uppercase px-2 py-1 rounded border shrink-0", STATUS_META[status].cls)}>
-                    {STATUS_META[status].text}
+                  <span className={cn("text-xs font-mono uppercase px-2 py-1 rounded border shrink-0", badge.cls)}>
+                    {badge.text}
                   </span>
                 </div>
                 <p className="mt-1 text-xs text-foreground leading-relaxed">{copy.texto}</p>

@@ -7,11 +7,12 @@ import { UpdaterWindow } from "../src/components/updates/UpdaterWindow";
 import type { AppUpdateSnapshot } from "@cybersafe/shared-types";
 import {buildAmbitoAtualizacoes} from '../src/components/updates/updateScope';
 
-test('assisted Preview never claims a Windows authenticated publisher',()=>{
+test('assisted update never claims a Windows authenticated publisher',()=>{
   const snapshot={...base,channel:'preview' as const,status:'downloaded' as const,canInstall:true};
   const scope=buildAmbitoAtualizacoes({bridgeAvailable:true,snapshot});
-  assert.match(scope.verificacao,/sem Authenticode/);
-  assert.match(mapUpdaterSnapshot(snapshot).detail??'',/sem Authenticode/);
+  assert.doesNotMatch(scope.verificacao,/Preview|Stable/);
+  assert.match(scope.verificacao,/não tem assinatura Authenticode/);
+  assert.doesNotMatch(mapUpdaterSnapshot(snapshot).detail ?? '', /Authenticode|assinado/i);
 });
 const base: AppUpdateSnapshot = { status: "unconfigured", channel: "stable", installed: { version: "0.2.0-rc.1" }, canInstall: false, automaticCheckEnabled: false };
 test("unconfigured snapshot never offers downloading or installation", () => {

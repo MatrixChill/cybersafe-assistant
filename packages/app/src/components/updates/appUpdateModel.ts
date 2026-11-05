@@ -19,7 +19,7 @@ const STATUS_LABELS: Record<AppUpdateStatus, string> = {
   idle: "Pronto",
   checking: "A verificar…",
   "up-to-date": "Atualizado",
-  available: "Atualização disponível",
+  available: "Nova atualização disponível",
   downloading: "A transferir…",
   verifying: "A verificar integridade…",
   downloaded: "Transferida",
@@ -92,7 +92,7 @@ export function progressInfo(progress: { downloadedBytes: number; totalBytes?: n
 export function statusSummary(snapshot: AppUpdateSnapshot): string {
   switch (snapshot.status) {
     case "unconfigured":
-      return snapshot.channel === "stable" ? "Stable indisponível: falta confiança de publicação aprovada. Nada é transferido nem instalado." : "O atualizador não está configurado neste ambiente — nada é transferido nem instalado.";
+      return "O atualizador não está configurado neste ambiente — nada é transferido nem instalado.";
     case "unsupported":
       return "Esta instalação não suporta atualização automática.";
     case "idle":
@@ -100,7 +100,7 @@ export function statusSummary(snapshot: AppUpdateSnapshot): string {
     case "checking":
       return "A verificar se existe uma versão mais recente…";
     case "up-to-date":
-      return "A última verificação não encontrou uma versão mais recente neste canal.";
+      return "A instalação está atualizada.";
     case "available":
       return snapshot.latest
         ? `Está disponível a versão v${snapshot.latest.version}.`
@@ -140,6 +140,17 @@ export function formatInstalled(installed: { version: string; build?: string; co
 }
 
 /** Data real da publicação; uma data inválida mostra-se tal como veio. */
+export function formatCheckDate(iso?: string): string {
+  if (!iso) return "ainda não registada";
+  const timestamp = Date.parse(iso);
+  if (!Number.isFinite(timestamp)) return iso;
+  try {
+    return new Intl.DateTimeFormat("pt-PT", { dateStyle: "medium", timeStyle: "short" }).format(new Date(timestamp));
+  } catch {
+    return iso;
+  }
+}
+
 export function formatPublishedDate(iso: string): string {
   const date = new Date(iso);
   if (Number.isNaN(date.getTime())) return iso;

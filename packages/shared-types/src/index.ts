@@ -2588,7 +2588,8 @@ export const ENGINE_DISPLAY_NAME: Record<string, string> = {
 /** Verifica se algum motor de proteção está degradado ou indisponível. */
 export function hasDegradedProtections(engine: EngineHealth): boolean {
   const engines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)];
-  return engines.some(e => e && (e.status === "degraded" || e.status === "unavailable" || e.status === "error"));
+  // Prova adiada por ocupação não é degradação: não houve falha observada.
+  return engines.some(e => e && e.busy !== true && (e.status === "degraded" || e.status === "unavailable" || e.status === "error"));
 }
 
 /** Conta motores ativos vs total reportados. */

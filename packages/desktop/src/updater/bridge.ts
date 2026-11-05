@@ -108,6 +108,7 @@ export function toAppUpdateSnapshot(s: UpdateSnapshot): AppUpdateSnapshot {
     latest: s.latest,
     progress: s.progress,
     checkedAt: s.checkedAt,
+    lastSuccessfulCheckAt: s.lastSuccessfulCheckAt,
     error: s.error,
     canInstall: s.canInstall,
     manualDownloadOnly: s.manualDownloadOnly,

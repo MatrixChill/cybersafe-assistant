@@ -109,7 +109,8 @@ export function engineIsDegraded(engine?: EngineHealth): boolean {
     || loss?.watcherCallbacksIndeterminate === true
     || (loss?.watcherSignals ?? 0) > 0) return true;
   const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)];
-  return subEngines.some((e) => e && e.status !== "active");
+  // `busy` = prova adiada por ocupação, sem falha observada. Não é degradação.
+  return subEngines.some((e) => e && e.busy !== true && e.status !== "active");
 }
 
 export function activeEngineCount(engine?: EngineHealth): number {

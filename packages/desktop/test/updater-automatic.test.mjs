@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {startAutomaticChecks} from '../src/updater/automatic-checks.ts';
+import {runAutomaticCheck,startAutomaticChecks} from '../src/updater/automatic-checks.ts';
 test('automatic checks require explicit preference, avoid overlap and stop at disposal',async()=>{
  let tick,cleared=false,calls=0,resolve;
  const state={automaticCheckEnabled:false,phase:'idle'};
@@ -14,4 +14,13 @@ test('automatic checks require explicit preference, avoid overlap and stop at di
 test('timer errors are contained and allow a later attempt',async()=>{
  let tick,calls=0;const stop=startAutomaticChecks({snapshotCopy:()=>({automaticCheckEnabled:true,phase:'idle'}),check:async()=>{calls++;throw Error('offline')}},{schedule:fn=>{tick=fn;return()=>{}}});
  await tick();await tick();assert.equal(calls,2);stop();
+});
+
+test('startup check only runs for an enabled, idle updater and never throws',async()=>{
+ let calls=0;const state={automaticCheckEnabled:false,phase:'idle'};
+ const updater={snapshotCopy:()=>state,check:async()=>{calls++;if(calls===2)throw Error('offline')}};
+ await runAutomaticCheck(updater);assert.equal(calls,0);
+ state.automaticCheckEnabled=true;await runAutomaticCheck(updater);assert.equal(calls,1);
+ state.phase='checking';await runAutomaticCheck(updater);assert.equal(calls,1);
+ state.phase='error';await runAutomaticCheck(updater);assert.equal(calls,2);
 });

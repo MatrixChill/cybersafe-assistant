@@ -174,7 +174,7 @@ describe("Atualizações — UI real (render SSR)", () => {
   it("unconfigured é declarado com honestidade e o verificar fica inativo", () => {
     const html = mount(baseSnapshot({ status: "unconfigured" }));
     assert.match(html, /data-status="unconfigured"/);
-    assert.match(html, /Stable indisponível/);
+    assert.match(html, /não está configurado/);
     assert.ok(buttonTag(html, "app-update-check").includes('disabled=""'), "verificar devia estar inativo");
     assert.ok(!html.includes('data-testid="app-update-download"'), "sem download em unconfigured");
     assert.ok(!html.includes('data-testid="app-update-install"'), "sem instalar em unconfigured");
@@ -329,16 +329,14 @@ describe("Atualizações — política manual não promete desbloqueio automáti
   });
 });
 
-it("permite selecionar Preview quando Stable não está configurado", () => {
+it("não expõe canais Preview/Stable na experiência normal", () => {
   const html = mount(baseSnapshot({ status:"unconfigured", channel:"stable", automaticCheckEnabled:false }));
-  assert.match(html, /Preview:/i);
-  assert.match(html, /data-testid="app-update-preview"/);
-  assert.doesNotMatch(buttonTag(html, "app-update-preview"), /\sdisabled(?:=|\s|>)/);
-  assert.match(html, /Stable.*indisponível/i);
+  assert.doesNotMatch(html, /app-update-preview|Preview|Stable/);
+  assert.ok(buttonTag(html, "app-update-check").includes('disabled=""'));
 });
 
-it("a confirmação de instalação Preview identifica explicitamente a ausência de Authenticode", () => {
+it("a confirmação de instalação identifica explicitamente a ausência de Authenticode", () => {
   const html = renderToStaticMarkup(createElement(InstallConfirmDialog, {version:"0.2.0-rc.9",channel:"preview",podeConfirmar:true,onCancel(){},onConfirm(){}}));
-  assert.match(html, /Preview/);
-  assert.match(html, /sem assinatura Authenticode/i);
+  assert.doesNotMatch(html, /Preview|Stable/);
+  assert.match(html, /não tem assinatura Authenticode/i);
 });
