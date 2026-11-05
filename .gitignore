@@ -51,3 +51,7 @@ __pycache__/
 
 # Evidência local da missão R7 (bases ClamAV descarregadas, logs de prova)
 .r7-evidence/
+
+# Artefactos locais de release/backup e nota de continuidade (não são fonte)
+/output/
+/docs/CODEX-CONTINUIDADE-V020.md
