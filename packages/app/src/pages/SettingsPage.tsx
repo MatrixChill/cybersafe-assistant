@@ -362,8 +362,8 @@ export default function SettingsPage() {
               )}
             >
               <div className={cn(
-                "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
-                autoStart ? "translate-x-5.5" : "translate-x-0.5",
+                "absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
+                autoStart ? "translate-x-5" : "translate-x-0.5",
               )} />
             </button>
           </div>
@@ -382,8 +382,8 @@ export default function SettingsPage() {
                 )}
               >
                 <div className={cn(
-                  "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
-                  startMinimized ? "translate-x-5.5" : "translate-x-0.5",
+                  "absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
+                  startMinimized ? "translate-x-5" : "translate-x-0.5",
                 )} />
               </button>
             </div>
@@ -418,8 +418,8 @@ export default function SettingsPage() {
             )}
           >
             <div className={cn(
-              "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
-              notificationsEnabled ? "translate-x-5.5" : "translate-x-0.5",
+              "absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
+              notificationsEnabled ? "translate-x-5" : "translate-x-0.5",
             )} />
           </button>
         </div>
@@ -843,8 +843,8 @@ export default function SettingsPage() {
               : setQuarantineConsentOpen(true)}
             className={cn("relative w-11 h-6 shrink-0 rounded-full transition-colors disabled:opacity-50",
               quarantinePolicy === "automatic-high-confidence" ? "bg-primary" : "bg-secondary")}>
-            <div className={cn("absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
-              quarantinePolicy === "automatic-high-confidence" ? "translate-x-5.5" : "translate-x-0.5")} />
+            <div className={cn("absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
+              quarantinePolicy === "automatic-high-confidence" ? "translate-x-5" : "translate-x-0.5")} />
           </button>
         </div>
         <div className="mt-3 grid gap-2 sm:grid-cols-2">
@@ -909,8 +909,8 @@ export default function SettingsPage() {
             )}
           >
             <div className={cn(
-              "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
-              retomaOptin === "enabled" ? "translate-x-5.5" : "translate-x-0.5",
+              "absolute left-0.5 top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
+              retomaOptin === "enabled" ? "translate-x-5" : "translate-x-0.5",
             )} />
           </button>
         </div>

@@ -13,6 +13,26 @@
  */
 import type { AppUpdateErrorCode, AppUpdateSnapshot, AppUpdateStatus } from "@cybersafe/shared-types";
 
+/**
+ * A janela automática é uma consequência da preferência, não da descoberta de
+ * uma versão: uma verificação manual com o switch desligado não pode abrir um
+ * modal por cima da página onde o utilizador pediu a verificação.
+ */
+export function shouldOpenAutomaticPrompt(input: {
+  automaticCheckEnabled: boolean;
+  status: string | undefined;
+  version: string | undefined;
+  dismissed: ReadonlySet<string>;
+}): boolean {
+  return (
+    input.automaticCheckEnabled &&
+    input.status === "available" &&
+    typeof input.version === "string" &&
+    input.version.length > 0 &&
+    !input.dismissed.has(input.version)
+  );
+}
+
 const STATUS_LABELS: Record<AppUpdateStatus, string> = {
   unconfigured: "Não configurado",
   unsupported: "Não suportado",

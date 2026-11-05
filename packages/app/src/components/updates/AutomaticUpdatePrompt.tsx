@@ -1,5 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import { useAppUpdates } from "./useAppUpdateController";
+import { shouldOpenAutomaticPrompt } from "./appUpdateModel";
 import { UpdaterFlow } from "./UpdaterFlow";
 
 /** Janela global: só aparece perante uma versão validada e realmente superior.
@@ -8,14 +9,19 @@ export function AutomaticUpdatePrompt() {
   const { state, actions } = useAppUpdates();
   const [open, setOpen] = useState(false);
   const dismissed = useRef(new Set<string>());
-  const pendingVersion = state.snapshot?.status === "available" ? state.snapshot.latest?.version : undefined;
+  const automatic = state.snapshot?.automaticCheckEnabled === true;
+  const status = state.snapshot?.status;
+  const pendingVersion = status === "available" ? state.snapshot?.latest?.version : undefined;
 
   useEffect(() => {
-    if (!pendingVersion || dismissed.current.has(pendingVersion)) return;
+    // A janela global é o braço da verificação AUTOMÁTICA. Uma verificação
+    // manual continua a mostrar a atualização no painel de Definições, mas não
+    // abre um modal por cima da página onde o utilizador a pediu.
+    if (!shouldOpenAutomaticPrompt({ automaticCheckEnabled: automatic, status, version: pendingVersion, dismissed: dismissed.current })) return;
     setOpen(true);
-  }, [pendingVersion]);
+  }, [automatic, status, pendingVersion]);
 
-  if (!open || !pendingVersion) return null;
+  if (!automatic || !open || !pendingVersion) return null;
 
   return (
     <UpdaterFlow

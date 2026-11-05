@@ -347,16 +347,24 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
               data-testid="app-update-automatic"
               disabled={!controls.automatic}
               onClick={() => actions.setAutomaticCheck(!snapshot.automaticCheckEnabled)}
+              data-state={snapshot.automaticCheckEnabled ? "on" : "off"}
               className={cn(
-                "relative w-11 h-6 shrink-0 rounded-full transition-colors",
-                snapshot.automaticCheckEnabled ? "bg-primary" : "bg-secondary",
+                "relative h-6 w-11 shrink-0 rounded-full border p-0.5 transition-colors",
+                "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/70 focus-visible:ring-offset-2 focus-visible:ring-offset-background",
+                snapshot.automaticCheckEnabled
+                  ? "border-primary/60 bg-primary"
+                  : "border-border bg-secondary",
                 "disabled:opacity-50 disabled:pointer-events-none",
               )}
             >
               <span
+                aria-hidden
                 className={cn(
-                  "absolute top-0.5 w-5 h-5 rounded-full bg-card border border-border transition-transform",
-                  snapshot.automaticCheckEnabled ? "translate-x-5.5" : "translate-x-0.5",
+                  "block h-5 w-5 rounded-full border border-border bg-card shadow-sm transition-transform duration-200",
+                  // Track 44px - 2px border - 4px padding = 38px úteis;
+                  // thumb 20px => deslocamento máximo 18px. `translate-x-5`
+                  // empurrava o círculo 2px para fora do track.
+                  snapshot.automaticCheckEnabled ? "translate-x-[18px]" : "translate-x-0",
                 )}
               />
             </button>

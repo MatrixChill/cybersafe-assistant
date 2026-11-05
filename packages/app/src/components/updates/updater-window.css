@@ -33,4 +33,6 @@
 @media(max-width:700px){.updater-body {grid-template-columns:1fr}.updater-original-scene {min-height:220px}.updater-content {padding:24px}.updater-original-scene .updater-art-label {bottom:4px}}
 
 .updater-flow-dialog {padding:0;border:0;background:transparent;color:var(--foreground);width:calc(100vw - 32px);max-width:860px;max-height:calc(100dvh - 32px);overflow:auto;border-radius:var(--shell-radius-card)}
-.updater-flow-dialog::backdrop {background:color-mix(in srgb,var(--background) 80%,transparent)}
+.updater-flow-dialog::backdrop {background:color-mix(in srgb,var(--background) 82%,transparent);backdrop-filter:blur(6px)}
+@media(prefers-reduced-transparency:reduce){.updater-flow-dialog::backdrop {backdrop-filter:none}}
+.updater-window {background:linear-gradient(155deg,color-mix(in srgb,var(--primary) 5%,var(--card)),var(--card) 58%);border-color:color-mix(in srgb,var(--primary) 18%,var(--border))}

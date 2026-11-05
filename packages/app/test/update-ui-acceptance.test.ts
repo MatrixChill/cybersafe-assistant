@@ -9,7 +9,7 @@ import type { AppUpdateSnapshot } from "@cybersafe/shared-types";
 import type { UpdatesActions, UpdatesViewState } from "../src/components/updates/appUpdateController";
 import { UpdatesPanel } from "../src/components/updates/UpdatesPanel";
 import { InstallConfirmDialog } from "../src/components/updates/InstallConfirmDialog";
-import { deriveControls, errorCodeMessage, progressInfo } from "../src/components/updates/appUpdateModel";
+import { deriveControls, errorCodeMessage, progressInfo, shouldOpenAutomaticPrompt } from "../src/components/updates/appUpdateModel";
 
 /**
  * TP-UPDATE-UI (17/10) — aceitação da secção "Atualizações".
@@ -65,6 +65,29 @@ function buttonTag(html: string, testid: string): string {
   assert.ok(match, `elemento ${testid} ausente no render`);
   return match[0];
 }
+
+describe("Atualizações — switch e janela automática", () => {
+  it("o thumb cabe no track com borda e padding (sem círculo fora da superfície)", () => {
+    const onHtml = mount(baseSnapshot({ status: "idle", automaticCheckEnabled: true }));
+    const offHtml = mount(baseSnapshot({ status: "idle", automaticCheckEnabled: false }));
+    const on = buttonTag(onHtml, "app-update-automatic");
+    const off = buttonTag(offHtml, "app-update-automatic");
+    assert.match(on, /aria-checked="true"/);
+    assert.match(onHtml, /translate-x-\[18px\]/, "thumb ligado tem de parar no limite interior dos 44 px");
+    assert.match(off, /aria-checked="false"/);
+    assert.match(offHtml, /translate-x-0/);
+    assert.doesNotMatch(onHtml, /translate-x-5\.5|translate-x-5(?![\d.])/, "posição antiga não pode voltar");
+  });
+
+  it("o prompt global só abre com a verificação automática ativa, versão disponível e aviso não adiado", () => {
+    const dismissed = new Set<string>();
+    assert.equal(shouldOpenAutomaticPrompt({ automaticCheckEnabled: false, status: "available", version: "0.2.0", dismissed }), false);
+    assert.equal(shouldOpenAutomaticPrompt({ automaticCheckEnabled: true, status: "idle", version: undefined, dismissed }), false);
+    assert.equal(shouldOpenAutomaticPrompt({ automaticCheckEnabled: true, status: "available", version: "0.2.0", dismissed }), true);
+    dismissed.add("0.2.0");
+    assert.equal(shouldOpenAutomaticPrompt({ automaticCheckEnabled: true, status: "available", version: "0.2.0", dismissed }), false, "Mais tarde fecha a janela nesta sessão");
+  });
+});
 
 describe("Atualizações — contrato real que a UI tem de honrar", () => {
   it("cobre os estados que a UI mostra (unconfigured/unsupported/downloading/downloaded)", () => {
