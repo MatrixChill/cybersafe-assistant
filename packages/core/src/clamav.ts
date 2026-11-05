@@ -940,6 +940,8 @@ const globalClamavSlots = {
   waitingHealth: [] as Array<(granted: ClamavSlotResult) => void>,
   /** Fila de BACKGROUND (análise unitária de ficheiro/processo, sem scanId). */
   waitingBackground: [] as Array<(granted: ClamavSlotResult) => void>,
+  /** Ficheiros observados; partilha o tecto automático com os processos. */
+  waitingRealtime: [] as Array<(granted: ClamavSlotResult) => void>,
   /** Jobs de background RECUSADOS por fila cheia (backpressure honesta). */
   droppedBackground: 0,
 };
@@ -952,11 +954,11 @@ const globalClamavSlots = {
  *              fila de análises automáticas (era a origem do `sem vaga dentro
  *              de 30000 ms`), mas também não passa à frente de um scan pedido
  *              pelo utilizador.
- * `background` = análise unitária automática (ficheiro observado, processo
- *              iniciado, correlação ETW). É o default, e é o conservador: só
+ * `realtime` = ficheiro observado, antes de processos rotineiros.
+ * `background` = análise automática de processo iniciado ou correlação ETW. É o default, e é o conservador: só
  *              quem declara (ou traz scanId) sobe de prioridade.
  */
-export type ClamavJobPriority = "user" | "health" | "background";
+export type ClamavJobPriority = "user" | "health" | "realtime" | "background";
 
 /**
  * Tecto de jobs de BACKGROUND à espera da vaga.
@@ -1026,8 +1028,8 @@ async function acquireClamavSlot(
   // BACKPRESSURE: a fila de background tem tecto. Um scan do utilizador nunca é
   // recusado por isto — ele é uma ação explícita e cabe sempre.
   if (
-    priority === "background" &&
-    globalClamavSlots.waitingBackground.length >= MAX_QUEUED_BACKGROUND_JOBS
+    (priority === "background" || priority === "realtime") &&
+    globalClamavSlots.waitingBackground.length + globalClamavSlots.waitingRealtime.length >= MAX_QUEUED_BACKGROUND_JOBS
   ) {
     globalClamavSlots.droppedBackground++;
     return "overloaded";
@@ -1046,7 +1048,9 @@ async function acquireClamavSlot(
         ? globalClamavSlots.waitingUser
         : priority === "health"
           ? globalClamavSlots.waitingHealth
-          : globalClamavSlots.waitingBackground;
+          : priority === "realtime"
+            ? globalClamavSlots.waitingRealtime
+            : globalClamavSlots.waitingBackground;
     let settled = false;
     const settle = (result: ClamavSlotResult) => {
       if (settled) return;
@@ -1063,6 +1067,7 @@ async function acquireClamavSlot(
       if (index >= 0) queue.splice(index, 1);
       settle("aborted");
     };
+    slotArrival.set(entry, ++slotArrivalSequence);
     queue.push(entry);
     if (signal) signal.addEventListener("abort", onAbort, { once: true });
   });
@@ -1074,19 +1079,34 @@ async function acquireClamavSlot(
  * ORDEM DE PRIORIDADE (o P0 SCANNER_RUNTIME_ZERO_PROGRESS):
  *   1. scans do utilizador em espera, por ordem de chegada;
  *   2. provas de saúde/carga, por ordem de chegada;
- *   3. análises de background em espera, por ordem de chegada;
- *   4. ninguém -> a vaga fica livre (`active` decrementa).
+ *   3. ficheiros observados em tempo real;
+ *   4. processos de background;
+ *   5. ninguém -> a vaga fica livre (`active` decrementa).
+ * A cada nove atribuições, o pedido mais antigo tem preferência para impedir
+ * starvation das classes inferiores. Não há garantia temporal se um filho demora.
  *
  * O job ATIVO nunca é interrompido: a vaga só é decidida quando ele termina.
  * Isso é deliberado — matar um clamscan saudável a meio para preempção pagaria
  * ~981 MB outra vez e podia deixar a base da app a ser escrita por cima de um
  * processo vivo.
  */
+const slotArrival = new WeakMap<(result: ClamavSlotResult) => void, number>();
+let slotArrivalSequence = 0;
+let priorityGrants = 0;
+
 function releaseClamavSlot(): void {
-  const next =
-    globalClamavSlots.waitingUser.shift() ??
-    globalClamavSlots.waitingHealth.shift() ??
-    globalClamavSlots.waitingBackground.shift();
+  const queues = [globalClamavSlots.waitingUser, globalClamavSlots.waitingHealth,
+    globalClamavSlots.waitingRealtime, globalClamavSlots.waitingBackground];
+  // Every ninth grant serves the oldest head across classes. FIFO within each
+  // class and a finite admission budget prevent starvation under continuous
+  // higher-priority arrivals. An active scan is never preempted.
+  const nonempty = queues.filter(queue => queue.length > 0);
+  const selected = priorityGrants >= 8
+    ? nonempty.reduce<typeof nonempty[number] | undefined>((oldest, queue) =>
+        !oldest || slotArrival.get(queue[0])! < slotArrival.get(oldest[0])! ? queue : oldest, undefined)
+    : nonempty[0];
+  const next = selected?.shift();
+  priorityGrants = next ? (priorityGrants >= 8 ? 0 : priorityGrants + 1) : 0;
   if (next) {
     // `active` mantem-se: a vaga passa de mãos em mãos, nunca há um instante
     // em que o limite possa ser excedido.
@@ -1104,6 +1124,7 @@ export function clamavSlotStats(): {
   active: number;
   waitingUser: number;
   waitingHealth: number;
+  waitingRealtime: number;
   waitingBackground: number;
   poisoned: number;
   droppedBackground: number;
@@ -1113,6 +1134,7 @@ export function clamavSlotStats(): {
     active: globalClamavSlots.active,
     waitingUser: globalClamavSlots.waitingUser.length,
     waitingHealth: globalClamavSlots.waitingHealth.length,
+    waitingRealtime: globalClamavSlots.waitingRealtime.length,
     waitingBackground: globalClamavSlots.waitingBackground.length,
     poisoned: globalClamavSlots.poisoned,
     droppedBackground: globalClamavSlots.droppedBackground,
@@ -1130,8 +1152,11 @@ export function clamavSlotStats(): {
  */
 function poisonClamavSlot(): void {
   globalClamavSlots.poisoned++;
-  // AS DUAS filas. Com o semáforo partido em duas, esquecer uma deixava metade
-  // dos waiters presos para sempre — ninguém lhes daria vaga nem recusa.
+  priorityGrants = 0;
+  while (globalClamavSlots.waitingRealtime.length > 0) {
+    globalClamavSlots.waitingRealtime.shift()!("poisoned");
+  }
+  // Todas as classes têm de receber a recusa para não deixar waiters presos.
   while (globalClamavSlots.waitingUser.length > 0) {
     globalClamavSlots.waitingUser.shift()!("poisoned");
   }
@@ -4165,7 +4190,7 @@ export class ClamavBridge {
     scanPerfLog(
       "CLAMAV_SLOT_ACQUIRE_BEGIN",
       options.scanId,
-      `priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
+      `priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingRealtime=${globalClamavSlots.waitingRealtime.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
     );
     // HEARTBEAT DA ESPERA PELA VAGA. A vaga é GLOBAL (1) e partilhada com o
     // monitor de ficheiros, o monitor de processos e o dashboard: se outro
@@ -4178,7 +4203,7 @@ export class ClamavBridge {
         scanPerfLog(
           "CLAMAV_SLOT_WAIT",
           options.scanId,
-          `waitedMs=${Date.now() - slotStartedAt} priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
+          `waitedMs=${Date.now() - slotStartedAt} priority=${priority} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingRealtime=${globalClamavSlots.waitingRealtime.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} limit=${this.concurrencyLimit}`,
         );
       }, 5000);
     }
@@ -4187,7 +4212,7 @@ export class ClamavBridge {
     scanPerfLog(
       "CLAMAV_SLOT_ACQUIRE_END",
       options.scanId,
-      `result=${slot} priority=${priority} elapsedMs=${Date.now() - slotStartedAt} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} droppedBackground=${globalClamavSlots.droppedBackground}`,
+      `result=${slot} priority=${priority} elapsedMs=${Date.now() - slotStartedAt} active=${globalClamavSlots.active} waitingUser=${globalClamavSlots.waitingUser.length} waitingHealth=${globalClamavSlots.waitingHealth.length} waitingRealtime=${globalClamavSlots.waitingRealtime.length} waitingBackground=${globalClamavSlots.waitingBackground.length} poisoned=${globalClamavSlots.poisoned} droppedBackground=${globalClamavSlots.droppedBackground}`,
     );
     // Vaga envenenada: há um clamscan vivo cuja morte ninguém confirmou. Não
     // admitimos outro — seria 2 GB em voo. E não fingimos que o ficheiro está
@@ -4201,7 +4226,7 @@ export class ClamavBridge {
       scanPerfLog(
         "CLAMAV_SLOT_OVERLOADED",
         options.scanId,
-        `priority=${priority} dropped=${globalClamavSlots.droppedBackground} waitingBackground=${globalClamavSlots.waitingBackground.length} limit=${MAX_QUEUED_BACKGROUND_JOBS}`,
+        `priority=${priority} dropped=${globalClamavSlots.droppedBackground} waitingRealtime=${globalClamavSlots.waitingRealtime.length} waitingBackground=${globalClamavSlots.waitingBackground.length} limit=${MAX_QUEUED_BACKGROUND_JOBS}`,
       );
       return unavailable(OVERLOADED_SCAN_DETAIL);
     }
@@ -4345,7 +4370,7 @@ export class ClamavBridge {
         scanPerfLog(
           "CLAMAV_CHILD_OUTCOME_RESOLVE",
           options.scanId,
-          `pid=${handle.pid ?? "unknown"} code=${outcome.code} elapsedMs=${Date.now() - batchStart} timedOut=${timedOut} killed=${outcome.killed === true} deathUnconfirmed=${outcome.deathUnconfirmed === true}`,
+          `pid=${handle.pid ?? "unknown"} code=${outcome.code} executionMs=${Date.now() - childStartedAt} elapsedMs=${Date.now() - batchStart} timedOut=${timedOut} killed=${outcome.killed === true} deathUnconfirmed=${outcome.deathUnconfirmed === true}`,
         );
       } catch (error) {
         const code = (error as NodeJS.ErrnoException)?.code ?? "unknown";

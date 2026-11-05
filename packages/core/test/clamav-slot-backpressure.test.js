@@ -155,8 +155,11 @@ describe("P0 STARVATION — a fila de background é LIMITADA", () => {
       "um ficheiro que não foi analisado NUNCA pode ser reportado como 'clean'",
     );
 
+    const realtimeOverflow = await bridge.scanFiles([target(9998)], {priority:"realtime"});
+    assert.equal(realtimeOverflow.status.status,"unavailable");
+    assert.equal(realtimeOverflow.files[0].verdict,"error");
     const stats = clamavSlotStats();
-    assert.equal(stats.droppedBackground, 1, "a recusa é contabilizada, não silenciosa");
+    assert.equal(stats.droppedBackground, 2, "a recusa é contabilizada, não silenciosa");
     assert.equal(stats.active, 1, "MAX_ACTIVE_CLAMSCAN continua a ser 1");
     assert.equal(stats.poisoned, 0, "nenhuma vaga foi envenenada por backpressure");
   });

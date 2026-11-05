@@ -322,13 +322,14 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
     }
   });
 
-  it("uma vaga ENVENENADA acorda as três filas (ninguém fica preso à espera)", async () => {
+  it("uma vaga ENVENENADA acorda as quatro filas (ninguém fica preso à espera)", async () => {
     fired.push(bridge.scanFiles([target(0)], {}));
     await waitFor(() => gate.state.spawned === 1, { label: "job ativo" });
 
     const user = bridge.scanFiles([target(900)], { scanId: "u-que-espera" });
     const background = bridge.scanFiles([target(1)], {});
-    fired.push(user, background);
+    const realtime = bridge.scanFiles([target(2)], { priority: "realtime" });
+    fired.push(user, background, realtime);
     await waitFor(() => clamavSlotStats().waitingUser === 1 && clamavSlotStats().waitingBackground === 1, {
       label: "ambas as classes na fila antes da morte não confirmada",
     });
@@ -348,7 +349,9 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
       deathUnconfirmed: true,
     });
 
-    const [u, b, available] = await Promise.all([user, background, health]);
+    const [u, b, available, r] = await Promise.all([user, background, health, realtime]);
+    assert.equal(r.status.status, "unavailable");
+    assert.equal(clamavSlotStats().waitingRealtime, 0);
     assert.equal(available, false, "a prova de saúde falha fechada quando a morte não é confirmada");
     assert.equal(clamavSlotStats().waitingHealth, 0, "a fila de saúde também é drenada");
     assert.equal(bridge.health.status, "degraded");
@@ -433,4 +436,41 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
       await fs.rm(localTmp, { recursive: true, force: true }).catch(() => {});
     }
   });
+});
+
+it('realtime file overtakes 30 admitted process scans; background still progresses', async () => {
+  fired.push(bridge.scanFiles([target(0)], {}));
+  await waitFor(()=>gate.state.spawned===1);
+  for(let i=1;i<=30;i++) fired.push(bridge.scanFiles([target(i)],{}));
+  await waitFor(()=>clamavSlotStats().waitingBackground===30);
+  const download=target(999);
+  fired.push(bridge.scanFiles([download],{priority:'realtime'}));
+  await sleep(30);
+  const releasedAt=performance.now();gate.release(gate.state.order[0].pid);
+  await waitFor(()=>gate.state.spawned===2);
+  assert.equal(gate.state.order[1].target,download);
+  console.log(`realtime handoff after release: ${(performance.now()-releasedAt).toFixed(1)} ms (gated fixture, not ClamAV runtime)`);
+  for(let i=0;i<120 && gate.state.spawned<32;i++){gate.releaseAll();await sleep(3);}
+  gate.releaseAll();await Promise.allSettled(fired);
+  assert.equal(gate.state.spawned,32);assert.equal(gate.state.peak,1);
+});
+
+it('old routine work receives a slot within nine grants under realtime backlog',async()=>{
+ fired.push(bridge.scanFiles([target(0)],{}));await waitFor(()=>gate.state.spawned===1);
+ fired.push(bridge.scanFiles([target(1)],{}));await waitFor(()=>clamavSlotStats().waitingBackground===1);
+ for(let i=2;i<22;i++)fired.push(bridge.scanFiles([target(i)],{priority:'realtime'}));
+ await waitFor(()=>clamavSlotStats().waitingRealtime===20);
+ for(let i=0;i<10 && !gate.state.order.some(x=>x.target===target(1));i++){gate.releaseAll();await sleep(5);}
+ const position=gate.state.order.findIndex(x=>x.target===target(1));
+ assert.ok(position>0 && position<=9,`routine position ${position}`);
+ assert.equal(gate.state.peak,1);
+});
+
+it('cancelled realtime waiter releases its admission without spawning',async()=>{
+ fired.push(bridge.scanFiles([target(0)],{}));await waitFor(()=>gate.state.spawned===1);
+ const controller=new AbortController();
+ fired.push(bridge.scanFiles([target(1)],{priority:'realtime',signal:controller.signal}));
+ await waitFor(()=>clamavSlotStats().waitingRealtime===1);controller.abort();
+ await waitFor(()=>clamavSlotStats().waitingRealtime===0);
+ gate.releaseAll();await Promise.allSettled(fired);assert.equal(gate.state.spawned,1);
 });

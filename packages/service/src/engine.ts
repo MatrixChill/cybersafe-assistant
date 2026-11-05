@@ -2284,7 +2284,12 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     }
   }
 
+  private realtimeObservationSequence = 0;
+
   private async handleFileObservation(filePath: string, retry = false, recoverySignal?: AbortSignal): Promise<boolean> {
+    const observedAt = performance.now();
+    const traceId = ++this.realtimeObservationSequence;
+    const trace = process.env.CYBERSAFE_DEBUG_SCAN === "1";
     const generation = this.protectionGeneration;
     if (!this.protectionState || this.isShuttingDown || recoverySignal?.aborted) return true;
     if (this.fileObservationReads >= 64) { this.reportRealtimeOverflow(filePath, "metadata", retry); return false; }
@@ -2307,10 +2312,15 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
     if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || recoverySignal?.aborted) return true;
     const signal = this.backgroundAbort.signal;
+    const queuedAt = performance.now();
     const admission = this.realtimeQueue.enqueue(path.resolve(filePath).toLowerCase(), fingerprint, async () => {
       if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || signal.aborted) return;
-      await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true });
+      const startedAt = performance.now();
+      if (trace) console.log(`[RealtimePerf] id=${traceId} stage=start queueWaitMs=${(startedAt-queuedAt).toFixed(1)} observedToStartMs=${(startedAt-observedAt).toFixed(1)}`);
+      const result = await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true, priority: "realtime", realtimeTraceId: trace ? traceId : undefined });
+      if (trace) console.log(`[RealtimePerf] id=${traceId} stage=returned pipelineMs=${(performance.now()-startedAt).toFixed(1)} observedToReturnedMs=${(performance.now()-observedAt).toFixed(1)} verdict=${result?.results[0]?.verdict ?? "cancelled"}`);
     }, this.realtimePriority(filePath));
+    if (trace) console.log(`[RealtimePerf] id=${traceId} stage=admission outcome=${admission} metadataMs=${(queuedAt-observedAt).toFixed(1)} queueDepth=${this.realtimeQueue.size}`);
     if (admission === "full") { this.reportRealtimeOverflow(filePath, "analysis", retry); return false; }
     return true;
   }
@@ -3194,6 +3204,8 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
        * análises automáticas (ficheiro observado, processo iniciado) não.
        */
       priority?: ClamavJobPriority;
+      /** Diagnostic correlation only; never used as a scan/cache identity. */
+      realtimeTraceId?: number;
       /**
        * USB: analise estritamente READ-ONLY. Nunca coloca em quarentena,
        * nunca escreve/move nada no dispositivo e forca skipVirusTotal.
@@ -3416,6 +3428,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       }
 
       this.eventBus.publish("artifact.analyzed", finalSeverity, `Analisado ${analysis.fileName}`, { ...analysis, vtResult, analysisState, inconclusiveReason, inconclusiveEngines, nativeEngine, detail: coverageDetail });
+      if (options?.realtimeTraceId !== undefined && process.env.CYBERSAFE_DEBUG_SCAN === "1") console.log(`[RealtimePerf] id=${options.realtimeTraceId} stage=verdict-published at=${new Date().toISOString()} verdict=${analysis.verdict}`);
 
 
       // Log VT result to Action log (Workstream F: rotation + dedupe)

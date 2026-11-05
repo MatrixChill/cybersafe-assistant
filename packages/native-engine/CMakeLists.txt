@@ -50,10 +50,18 @@ if(WIN32)
     RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/Release")
   # EXCLUDE_FROM_ALL: never a packaging dependency, name or output location.
   # Uses a public RFC test vector and an isolated registry namespace only.
+  # Native Preview validation only accepts an installed rc version. A stable
+  # product therefore gets a synthetic lab rc; the distribution launcher above
+  # keeps the canonical product version.
+  if(launcher_version MATCHES "-rc[.][1-9][0-9]*$")
+    set(lab_launcher_version "${launcher_version}")
+  else()
+    set(lab_launcher_version "${launcher_version}-rc.1")
+  endif()
   add_executable(cybersafe-update-launcher-lab EXCLUDE_FROM_ALL src/update_launcher.cpp "${handoff_header}"
     third-party/monocypher/monocypher.c third-party/monocypher/monocypher-ed25519.c)
   target_include_directories(cybersafe-update-launcher-lab PRIVATE "${CMAKE_CURRENT_BINARY_DIR}" third-party/monocypher)
-  target_compile_definitions(cybersafe-update-launcher-lab PRIVATE CYBERSAFE_LAUNCHER_LAB=1 CYBERSAFE_LAUNCHER_VERSION=L\"${launcher_version}\")
+  target_compile_definitions(cybersafe-update-launcher-lab PRIVATE CYBERSAFE_LAUNCHER_LAB=1 CYBERSAFE_LAUNCHER_VERSION=L\"${lab_launcher_version}\")
   target_link_libraries(cybersafe-update-launcher-lab PRIVATE crypt32 bcrypt advapi32)
   set_target_properties(cybersafe-update-launcher-lab PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_BINARY_DIR}/lab")
 endif()

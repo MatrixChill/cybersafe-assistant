@@ -143,3 +143,38 @@ test("parar a proteção limpa as retomas pendentes", async () => {
   assert.equal(resultado.protectionEnabled, false);
   assert.equal(recovery.snapshot().pending, 0, "retomas pendentes não podem sobreviver a um OFF");
 });
+
+test('observed file propagates realtime class and cancellation to the global engine path',async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'cybersafe-watcher-'));
+ try{
+  const file=path.join(dir,'inert.txt');await fs.writeFile(file,'benign');
+  const {e,chamar}=costura();let run;let options;
+  e.realtimeQueue.enqueue=(_key,_fingerprint,callback)=>{run=callback;return 'queued';};
+  e.scanArtifact=async(_file,_source,value)=>{options=value;return null;};
+  assert.equal(await chamar(file),true);await run();
+  assert.equal(options.priority,'realtime');
+  assert.equal(options.backgroundSignal,e.backgroundAbort.signal);
+  assert.equal(options.skipVirusTotal,true);
+ }finally{await fs.rm(dir,{recursive:true,force:true});}
+});
+
+test('realtime timing separates admission, wait and returned pipeline without logging file paths',async()=>{
+ const dir=await fs.mkdtemp(path.join(os.tmpdir(),'cybersafe-watcher-'));
+ const previous=process.env.CYBERSAFE_DEBUG_SCAN;const originalLog=console.log;const lines=[];
+ try{
+  process.env.CYBERSAFE_DEBUG_SCAN='1';console.log=(line)=>lines.push(String(line));
+  const file=path.join(dir,'private-fixture-name.txt');await fs.writeFile(file,'benign');
+  const {e,chamar}=costura();e.realtimeObservationSequence=0;let run;
+  e.realtimeQueue.enqueue=(_key,_fingerprint,callback)=>{run=callback;return 'queued';};
+  e.scanArtifact=async()=>({results:[{verdict:'safe'}]});
+  await chamar(file);await run();
+  assert.ok(lines.some(x=>/stage=admission outcome=queued metadataMs=\d/.test(x)));
+  assert.ok(lines.some(x=>/stage=start queueWaitMs=\d/.test(x)));
+  assert.ok(lines.some(x=>/stage=returned pipelineMs=\d/.test(x)));
+  assert.ok(lines.every(x=>!x.includes(file) && !x.includes('private-fixture-name')));
+ }finally{
+  console.log=originalLog;
+  if(previous===undefined)delete process.env.CYBERSAFE_DEBUG_SCAN;else process.env.CYBERSAFE_DEBUG_SCAN=previous;
+  await fs.rm(dir,{recursive:true,force:true});
+ }
+});
