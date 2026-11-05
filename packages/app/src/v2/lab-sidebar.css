@@ -115,6 +115,25 @@
   background: var(--v2-hover);
   color: var(--v2-text);
 }
+/* Estado ativo: a rota real ganha uma superfície inteira, não apenas um ponto.
+   O ponto continua como reforço, mas deixa de ser a única pista de localização. */
+.cs-v2.cs-v2-shell .lab-sidebar .nav-group button.active {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--v2-accent) 16%, transparent),
+    color-mix(in srgb, var(--v2-accent) 4%, transparent)
+  );
+  color: var(--v2-text);
+  box-shadow: inset 3px 0 0 var(--v2-accent), inset 0 1px #ffffff10;
+}
+.cs-v2.cs-v2-shell .lab-sidebar .nav-group button.active > svg {
+  color: var(--v2-accent);
+}
+.cs-v2.cs-v2-shell .lab-sidebar .nav-group button:focus-visible {
+  outline: 2px solid var(--v2-accent);
+  outline-offset: 2px;
+}
+
 .cs-v2.cs-v2-shell .lab-sidebar .nav-group button small {
   font-family: var(--v2-font-data);
   font-size: 8px;

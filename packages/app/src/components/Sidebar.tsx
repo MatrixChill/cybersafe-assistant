@@ -79,7 +79,7 @@ const navGroups: { label: string; items: { id: Page; label: string; icon: typeof
     ],
   },
   {
-    label: "Definições",
+    label: "Configurações",
     items: [
       { id: "settings", label: "Configurações", icon: Settings2, feature: FEATURES.DASHBOARD_BASIC, proOnly: false },
     ],

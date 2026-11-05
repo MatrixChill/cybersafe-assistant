@@ -100,7 +100,7 @@ describe("Sidebar v2 — contrato de navegação inalterado", () => {
     assert.equal((html.match(/<aside/g) ?? []).length, 1, "mais do que uma landmark");
     assert.match(html, /aria-label="Navegação principal"/);
     const groups = (html.match(/<section aria-label="([^"]+)"/g) ?? []).map((s) => s.replace(/.*aria-label="|"$/g, ""));
-    assert.deepEqual(groups, ["Painel", "Segurança", "Computador", "Ferramentas", "Definições"], "ordem de grupos mudou");
+    assert.deepEqual(groups, ["Painel", "Segurança", "Computador", "Ferramentas", "Configurações"], "ordem de grupos mudou");
   });
 
   it("rotas com os mesmos ids/rótulos (gating free: 9 itens, sem Business/Relatórios)", () => {

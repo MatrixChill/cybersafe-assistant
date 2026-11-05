@@ -206,3 +206,12 @@ export function useAppearance(): AppearanceContextValue {
   if (!ctx) throw new Error("useAppearance deve ser usado dentro de <AppearanceProvider>");
   return ctx;
 }
+
+/**
+ * Leitura opcional para superfícies decorativas que também são renderizadas
+ * isoladamente em testes/SSR. Sem provider não há animação: a superfície cai
+ * no fallback estático em vez de rebentar a página inteira.
+ */
+export function useOptionalAppearance(): AppearanceContextValue | null {
+  return useContext(AppearanceContext);
+}

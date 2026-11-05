@@ -105,10 +105,13 @@ export default function LabSidebar({
       </nav>
       <div data-cs-matrix-dock="" aria-hidden="true" style={{height:'var(--matrix-dock-slot-h, 0px)',flexShrink:0}} />
       <div className="sidebar-bottom" data-cs-reserve="matrix">
-        <div className="isolation">
+        <div
+          className="isolation"
+          title="Motores de análise operacionais. A cobertura das definições externas é medida separadamente."
+        >
           <span className="isolation-dot" />
           <span>
-            {analysisOperational ? "4 de 4 motores ativos" : meta?.shortLabel || "A verificar"}
+            {analysisOperational ? "4/4 motores de análise" : meta?.shortLabel || "A verificar"}
             <small>Estado reportado pelo serviço</small>
           </span>
         </div>

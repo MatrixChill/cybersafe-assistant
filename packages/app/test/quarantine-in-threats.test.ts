@@ -115,7 +115,7 @@ describe("Fase A — Quarentena dentro de Ameacas", () => {
     assert.ok(threatsButton, "com activePage=quarantine, a seleccao activa e o item Ameacas");
   });
 
-  test("sidebar: grupos da arquitetura (Painel/Seguranca/Computador/Ferramentas/Definicoes/Experimental)", () => {
+  test("sidebar: grupos da arquitetura (Painel/Seguranca/Computador/Ferramentas/Configuracoes/Experimental)", () => {
     // Business e Relatorios sao gateados por feature — Business Center exige
     // conta business (ou admin), independentemente do plano. Sem user o gate
     // esconde-os (isto esta correto). O teste usa uma conta business real.
@@ -129,7 +129,7 @@ describe("Fase A — Quarentena dentro de Ameacas", () => {
       activePage: "dashboard" as never,
       user: businessUser,
     });
-    for (const group of ["Painel", "Segurança", "Computador", "Ferramentas", "Definições", "Experimental"]) {
+    for (const group of ["Painel", "Segurança", "Computador", "Ferramentas", "Configurações", "Experimental"]) {
       assert.match(html, new RegExp(`>${group}<`), `rotulo de grupo "${group}" presente`);
     }
   });
