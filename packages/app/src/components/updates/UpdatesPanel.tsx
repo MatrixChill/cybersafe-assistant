@@ -111,7 +111,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
           <ArrowDownToLine className="w-5 h-5 text-primary" />
         </div>
         <div>
-          <h2 className="font-mono font-semibold text-foreground">Atualizações</h2>
+          <h2 className="font-mono font-semibold text-foreground">Atualizações do CyberSafe</h2>
           <p className="text-xs text-muted-foreground">Estado real do atualizador da aplicação - nunca simulado.</p>
         </div>
       </div>
@@ -180,13 +180,13 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
           )}
 
           <div className="rounded-lg border border-border bg-secondary/50 p-3" data-testid="app-update-channel">
-            <p className="text-sm font-semibold">Canal selecionado: {snapshot.channel === "preview" ? "Preview experimental" : "Stable"}</p>
-            {snapshot.channel === "stable" && snapshot.status === "unconfigured" && <p className="text-xs text-muted-foreground">Stable não configurado: falta confiança de publicação aprovada.</p>}
-            <p className="mt-1 text-xs text-muted-foreground">Preview experimental: versões de teste; o Setup não tem assinatura Authenticode. Alterar o canal não inicia verificações ou instalações.</p>
-            <button type="button" role="switch" aria-checked={snapshot.channel === "preview"} aria-label="Aderir ao Preview experimental" data-testid="app-update-preview"
+            <p className="text-sm font-semibold">Canal selecionado: {snapshot.channel === "preview" ? "Preview" : "Stable"}</p>
+            {snapshot.channel === "stable" && snapshot.status === "unconfigured" && <p className="text-xs text-muted-foreground">Stable indisponível: a publicação ainda não tem confiança de assinatura aprovada.</p>}
+            <p className="mt-1 text-xs text-muted-foreground">Preview: versões de teste assinadas pelo projeto (Ed25519 + SHA-256). O Setup não tem assinatura Authenticode. Alterar o canal não inicia verificações nem instalações.</p>
+            <button type="button" role="switch" aria-checked={snapshot.channel === "preview"} aria-label="Ativar canal Preview" data-testid="app-update-preview"
               disabled={busy !== null || snapshot.status === "unsupported" || ["checking", "downloading", "verifying", "installing"].includes(snapshot.status) || !actions.setPreview}
               onClick={() => actions.setPreview?.(snapshot.channel !== "preview")} className={cn(BUTTON_SECONDARY, "mt-2")}>
-              {snapshot.channel === "preview" ? "Voltar ao Stable" : "Aderir ao Preview experimental"}
+              {snapshot.channel === "preview" ? "Desativar canal Preview" : "Ativar canal Preview"}
             </button>
             <p className="mt-2 text-xs text-muted-foreground">Última verificação: {snapshot.checkedAt ? new Date(snapshot.checkedAt).toLocaleString("pt-PT") : "ainda não confirmada neste canal"}.</p>
           </div>

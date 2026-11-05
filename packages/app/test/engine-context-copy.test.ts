@@ -171,9 +171,12 @@ describe("WS-B 3 — Windows Firewall e WFP na fonte de copy da app", () => {
 
 describe("WS-B 4 — score copy", () => {
   const src = readFileSync(new URL("../src/components/ProtectionDetails.tsx", import.meta.url), "utf8");
+  // A copy operacional vive na decisao unica; o modal apenas a apresenta.
+  const overviewSrc = readFileSync(new URL("../src/lib/protectionOverview.ts", import.meta.url), "utf8");
   test("'estão ativos' substitui 'estão a funcionar'", () => {
     assert.doesNotMatch(src, /estão a funcionar/, "copy antiga");
-    assert.match(src, /estão ativos/, "falta a copy nova");
+    assert.doesNotMatch(src, /Motores de análise operacionais\", summary/, "copy duplicada no modal");
+    assert.match(overviewSrc, /estão ativos/, "falta a copy nova");
   });
   test("a cobertura real (regras/assinaturas) aparece junto ao detalhe", () => {
     assert.match(src, /Cobertura atual/, "linhas de cobertura em falta");

@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { X, ShieldAlert } from "lucide-react";
+import { X, ShieldAlert, ShieldCheck } from "lucide-react";
 import type {
   EngineHealth,
   EngineSubsystemCoverage,
@@ -10,11 +10,13 @@ import { cn } from "@/lib/utils";
 import { levelMeta, engineStatusText, wfpModuleDisplay, type ProtectionLevel } from "../lib/protectionHealth";
 import { criarLeitorFirewall, copyEstadoLeituraFirewall, copiaPrimeiraPintura, type LeitorFirewall, type CopiaChipFirewall } from "../lib/firewallReadState";
 import { wfpHealth } from "@cybersafe/shared-types";
+import type { ProtectionOverview } from "../lib/protectionOverview";
 
 interface ProtectionDetailsProps {
   engine?: EngineHealth;
   level: ProtectionLevel;
-  analysisOperational?: boolean;
+  /** Decisao semantica unica (Dashboard, barra lateral e modal). */
+  overview?: ProtectionOverview;
   open: boolean;
   onClose: () => void;
   /** Pontuação de proteção (0–100) mostrada no Dashboard — mesma fonte. */
@@ -88,6 +90,26 @@ function coberturaUserCopy(
 /** O modulo WFP do CyberSafe, e o Windows Firewall, sao linhas diferentes. */
 const WFP_MODULE_LABEL = "Filtro WFP (CyberSafe)";
 const WINDOWS_FIREWALL_LABEL = "Windows Firewall";
+
+/** Cores da decisao unica: o icone, o chip e o texto dizem o mesmo. */
+const OVERVIEW_CHIP: Record<ProtectionOverview["tone"], string> = {
+  ok: "border-cyber-green/30 bg-cyber-green/10 text-cyber-green",
+  warn: "border-cyber-yellow/30 bg-cyber-yellow/10 text-cyber-yellow",
+  crit: "border-cyber-red/30 bg-cyber-red/10 text-cyber-red",
+  na: "border-border bg-secondary/40 text-muted-foreground",
+};
+const OVERVIEW_TEXT: Record<ProtectionOverview["tone"], string> = {
+  ok: "text-cyber-green",
+  warn: "text-cyber-yellow",
+  crit: "text-cyber-red",
+  na: "text-muted-foreground",
+};
+const OVERVIEW_DOT: Record<ProtectionOverview["tone"], string> = {
+  ok: "bg-cyber-green",
+  warn: "bg-cyber-yellow",
+  crit: "bg-cyber-red",
+  na: "bg-muted-foreground",
+};
 
 const STATUS_META: Record<EngineSubsystemStatus, { text: string; cls: string }> = {
   active: { text: engineStatusText("active"), cls: "text-cyber-green border-cyber-green/40 bg-cyber-green/10" },
@@ -177,7 +199,7 @@ function wfpUserCopy(status: EngineSubsystemStatus): { texto: string; contexto: 
  *  um crash. */
 
 /** Um clique no estado geral abre os PROTECTION DETAILS. */
-export default function ProtectionDetails({ engine, level, analysisOperational = false, open, onClose, score }: ProtectionDetailsProps) {
+export default function ProtectionDetails({ engine, level, overview, open, onClose, score }: ProtectionDetailsProps) {
   const [technical, setTechnical] = useState(false);
   const [leitura, setLeitura] = useState<CopiaChipFirewall | null>(null);
   const leitorRef = useRef<LeitorFirewall | null>(null);
@@ -223,7 +245,17 @@ export default function ProtectionDetails({ engine, level, analysisOperational =
 
   if (!open) return null;
 
-  const meta = analysisOperational ? { ...levelMeta("attention"), label: "Motores de análise operacionais", summary: "Os quatro motores de análise estão ativos. Consulta a cobertura e a proteção de rede abaixo." } : levelMeta(level);
+  const meta = overview
+    ? {
+        ...levelMeta(overview.level),
+        label: overview.title,
+        shortLabel: overview.title,
+        summary: overview.description,
+        chipClass: "border " + OVERVIEW_CHIP[overview.tone],
+        textClass: OVERVIEW_TEXT[overview.tone],
+        dotClass: OVERVIEW_DOT[overview.tone],
+      }
+    : levelMeta(level);
   const reasons = engine?.degradedReasons ?? [];
   const scoreInfo = typeof score === "number" ? explainScore(engine, score) : null;
 
@@ -247,8 +279,19 @@ export default function ProtectionDetails({ engine, level, analysisOperational =
       >
         <div className="flex items-start justify-between gap-4">
           <div className="flex items-center gap-3">
-            <div className="w-11 h-11 rounded-xl bg-primary/10 border border-primary/25 flex items-center justify-center shrink-0">
-              <ShieldAlert className="w-6 h-6 text-primary" />
+            <div
+              className={cn(
+                "w-11 h-11 rounded-xl border flex items-center justify-center shrink-0",
+                overview?.tone === "ok"
+                  ? "bg-cyber-green/10 border-cyber-green/25"
+                  : "bg-primary/10 border-primary/25",
+              )}
+            >
+              {overview?.tone === "ok" ? (
+                <ShieldCheck className="w-6 h-6 text-cyber-green" />
+              ) : (
+                <ShieldAlert className="w-6 h-6 text-primary" />
+              )}
             </div>
             <div>
               <h3 className="font-mono font-bold text-foreground">Estado da Proteção</h3>

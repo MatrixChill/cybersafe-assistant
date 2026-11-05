@@ -519,7 +519,7 @@ export default function LabDashboard(
       )}
       <ProtectionDetails
         engine={p.dashboard.engineHealth}
-        analysisOperational={verdict.title === "Motores de análise operacionais"}
+        overview={verdict.overview}
         level={deriveProtectionLevel(
           p.dashboard.systemStatus,
           p.dashboard.engineHealth,

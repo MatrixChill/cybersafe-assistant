@@ -1,9 +1,7 @@
 import type { DashboardSummary, EngineHealth } from "@cybersafe/shared-types";
-import {
-  deriveProtectionLevel,
-  type RealtimeProtectionInfo,
-} from "@/lib/protectionHealth";
+import type { RealtimeProtectionInfo } from "@/lib/protectionHealth";
 import type { V2Tone } from "../ui";
+import { protectionOverview, type ProtectionOverview } from "@/lib/protectionOverview";
 export type VisualState =
   | "ACTIVE"
   | "DEGRADED"
@@ -101,77 +99,15 @@ export function dashboardVerdict(
   d: DashboardSummary,
   realtime: RealtimeProtectionInfo | undefined,
   connected: boolean | null | undefined,
-): { title: string; description: string; tone: V2Tone } {
-  if (connected !== true)
-    return {
-      title: "Ligação não confirmada",
-      description:
-        "Sem leitura atual do serviço. Não é possível confirmar o estado de proteção.",
-      tone: "na",
-    };
-  const level = deriveProtectionLevel(d.systemStatus, d.engineHealth, realtime);
-  const limitations = dashboardLimitationSummary(d.engineHealth);
-  const limitationText = limitations ? ` Limitações reportadas: ${limitations}.` : "";
-  if (level === "critical")
-    return {
-      title: "Proteção com limitações",
-      description:
-        "O relatório recebido contém erros ou sinais críticos." +
-        (limitations ? limitationText : " Consulta o estado de cada motor."),
-      tone: "crit",
-    };
-  if (realtime?.disponivel === false)
-    return { title: "Monitorização indisponível", description: "A leitura da monitorização está indisponível; consulta os detalhes da proteção.", tone: "warn" };
-  if (realtime?.pausedUntil)
-    return {
-      title: "Monitorização em pausa",
-      description:
-        "O serviço reportou uma pausa. Os motores mantêm estados independentes.",
-      tone: "warn",
-    };
-  if (realtime?.enabled === false)
-    return {
-      title: "Monitorização desligada",
-      description:
-        "A análise contínua está desligada. As análises manuais continuam disponíveis.",
-      tone: "warn",
-    };
-  if (realtime?.enabled !== true)
-    return {
-      title: "Monitorização não verificada",
-      description:
-        "O serviço ainda não confirmou se a análise contínua está ligada.",
-      tone: "warn",
-    };
-  // Backend status folds the optional, unstarted network filter into degradation.
-  // Only separate it when the reported causes and risk exclude any other issue.
-  const e = d.engineHealth;
-  const reasons = e?.degradedReasons ?? [];
-  const loss = e?.realtimeLoss;
-  const onlyUnstartedNetwork = e?.serviceRunning === true && e.osLayerHealthy === true &&
-    [e.yara, e.hashDb, e.clamav, e.nativeEngine].every((motor) => motor?.status === "active") &&
-    e.wfp?.status === "unavailable" && /sem tentativa de ativação neste perfil/i.test(e.wfp.detail ?? "") &&
-    reasons.length > 0 && reasons.every((reason) => /filtro wfp/i.test(reason) && /sem tentativa de ativação neste perfil/i.test(reason)) &&
-    (loss?.queueRejections ?? e.realtimeDroppedEvents ?? 0) === 0 &&
-    (loss?.watcherSignals ?? 0) === 0 && loss?.watcherCallbacksIndeterminate !== true;
-  if (d.systemStatus === "degraded" && d.riskScore === 100 && d.highSeverityEvents === 0 && onlyUnstartedNetwork)
-    return {
-      title: "Motores de análise operacionais",
-      description: "Os quatro motores de análise estão ativos. Consulta a cobertura e a proteção de rede abaixo.",
-      tone: "warn",
-    };
-  if (level !== "protected")
-    return {
-      title: "Proteção com limitações",
-      description:
-        "Consulta a cobertura e os limites reportados antes de interpretar os resultados." +
-        limitationText,
-      tone: "warn",
-    };
+): { title: string; description: string; tone: V2Tone; overview: ProtectionOverview } {
+  // Uma unica decisao. O titulo e APRESENTACAO: nenhum consumidor pode
+  // inferir o estado comparando esta string (era essa a origem da
+  // contradicao entre o Dashboard e a janela de detalhes).
+  const overview = protectionOverview(d, realtime, connected);
   return {
-    title: "Monitorização ligada",
-    description:
-      "Estado reportado pelo serviço. Não confirma cobertura integral do Windows.",
-    tone: "ok",
+    title: overview.title,
+    description: overview.description,
+    tone: overview.tone,
+    overview,
   };
 }

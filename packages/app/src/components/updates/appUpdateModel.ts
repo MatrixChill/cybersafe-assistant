@@ -92,7 +92,7 @@ export function progressInfo(progress: { downloadedBytes: number; totalBytes?: n
 export function statusSummary(snapshot: AppUpdateSnapshot): string {
   switch (snapshot.status) {
     case "unconfigured":
-      return snapshot.channel === "stable" ? "Canal Stable não configurado: falta confiança de publicação aprovada. Nada é transferido nem instalado." : "O atualizador não está configurado neste ambiente — nada é transferido nem instalado.";
+      return snapshot.channel === "stable" ? "Stable indisponível: falta confiança de publicação aprovada. Nada é transferido nem instalado." : "O atualizador não está configurado neste ambiente — nada é transferido nem instalado.";
     case "unsupported":
       return "Esta instalação não suporta atualização automática.";
     case "idle":

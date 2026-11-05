@@ -1974,9 +1974,25 @@ if (!gotTheLock) {
         },
         // Reuse service/watcher/API shutdown and the existing before-quit cleanup.
         requestShutdown: async () => { if (isQuitting) throw new Error("Shutdown already started"); await quitCyberSafe(); },
-        confirmConsent: async (context) => !isQuitting && context.confirmed === true
-          && appUpdater?.snapshotCopy().phase === "installing"
-          && appUpdater.snapshotCopy().latest?.version === context.expectedVersion,
+        // CONSENTIMENTO REAL: o pedido do renderer (confirmed: true) e apenas um
+        // pedido. A instalacao so avanca depois de um clique numa janela nativa do
+        // Windows; a flag --cybersafe-preview-updates nunca chega aqui sozinha.
+        confirmConsent: async (context) => {
+          if (isQuitting || context.confirmed !== true) return false;
+          const snap = appUpdater?.snapshotCopy();
+          if (snap?.phase !== "installing" || snap.latest?.version !== context.expectedVersion) return false;
+          const { response } = await dialog.showMessageBox({
+            type: "question",
+            buttons: ["Instalar agora", "Cancelar"],
+            defaultId: 1,
+            cancelId: 1,
+            noLink: true,
+            title: "Instalar atualizacao do CyberSafe",
+            message: "Instalar a versao " + context.expectedVersion + "?",
+            detail: "O CyberSafe vai fechar, instalar a atualizacao verificada e reiniciar. Nada e instalado sem esta confirmacao.",
+          });
+          return response === 0 && !isQuitting;
+        },
         scanProbe: async () => {
           if (!client.isConnected) return "unknown";
           try {

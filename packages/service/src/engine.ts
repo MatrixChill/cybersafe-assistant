@@ -855,6 +855,12 @@ export class ProtectionEngineService {
   private protectionResumeTimer: NodeJS.Timeout | null = null;
   /** Estado explícito de encerramento: para o trabalho novo e o broadcast. */
   private isShuttingDown = false;
+  /** Recuperacao do ClamAV: um unico timer, backoff limitado, sem ciclos. */
+  private clamavRecoveryTimer: NodeJS.Timeout | null = null;
+  private clamavRecoveryAttempts = 0;
+  private clamavNextProbeAt = 0;
+  private clamavBackoffMs = 0;
+  private lastClamavHealthStatus: string | null = null;
   /** Garante que dispose()/shutdown() não correm a desmontagem duas vezes. */
   private disposed = false;
   /** Estado do arranque progressivo. `legacy` = regime antigo, sem gate. */
@@ -2693,8 +2699,65 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     return { ok: true, policy: saved.policy };
   }
 
+  /**
+   * Recuperacao automatica do ClamAV, sem reiniciar a aplicacao.
+   *
+   * Causa medida na RC9: o fixture do probe de carga era apanhado pelo monitor
+   * em tempo real e apagado pelo proprio probe; o motor caia e so voltava com
+   * outro scan ou actualizacao — a intermitencia observada.
+   *
+   * - falha transitoria -> nova prova em segundos;
+   * - falha persistente -> 30s, 60s, ... ate 5min, maximo 6 tentativas;
+   * - nunca duas provas concorrentes (a bridge e single-flight);
+   * - ACTIVE so depois de prova positiva real;
+   * - binario ausente nao entra em ciclo. Pode ser lido agora.
+   */
+  private observeAndRecoverClamav(): void {
+    const health = this.clamav.health;
+    const status = health.status;
+    const detail = health.detail ?? "";
+    if (status !== this.lastClamavHealthStatus) {
+      void this.actionsLog?.write(
+        "[CLAMAV] " + (this.lastClamavHealthStatus ?? "unknown") + " -> " + status +
+          " at=" + new Date().toISOString() + (detail ? " | " + detail : ""),
+      );
+      this.lastClamavHealthStatus = status;
+      if (status === "active") {
+        this.clamavRecoveryAttempts = 0;
+        this.clamavBackoffMs = 0;
+        this.clamavNextProbeAt = 0;
+      }
+    }
+    if (status === "active" || this.isShuttingDown || this.startupStateValue === "starting") return;
+    if (this.clamavRecoveryTimer !== null || this.clamavRecoveryAttempts >= 6) return;
+    if (/not found|nao encontrado|did not report/i.test(detail)) return;
+    if (Date.now() < this.clamavNextProbeAt) return;
+    this.clamavRecoveryTimer = setTimeout(() => {
+      this.clamavRecoveryTimer = null;
+      if (this.isShuttingDown) return;
+      this.clamavRecoveryAttempts += 1;
+      this.clamavBackoffMs = this.clamavBackoffMs === 0 ? 30_000 : Math.min(this.clamavBackoffMs * 2, 300_000);
+      this.clamavNextProbeAt = Date.now() + this.clamavBackoffMs;
+      void this.clamav.isAvailable(true)
+        .then((ok) => {
+          void this.actionsLog?.write(
+            "[CLAMAV] recovery attempt=" + this.clamavRecoveryAttempts + " result=" +
+              (ok ? "active" : "still-degraded") + " status=" + this.clamav.health.status,
+          );
+        })
+        .catch((err: unknown) => {
+          void this.actionsLog?.write(
+            "[CLAMAV] recovery attempt=" + this.clamavRecoveryAttempts + " failed=" +
+              String((err as Error)?.message ?? err),
+          );
+        });
+    }, 0);
+    this.clamavRecoveryTimer.unref?.();
+  }
+
   getProtectionState(): ProtectionState {
     const status = this.clamav.health.status;
+    this.observeAndRecoverClamav();
     const available = status === "active";
     const now = Date.now();
     const previous = this.lastClamavAvailability === undefined

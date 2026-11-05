@@ -18,7 +18,7 @@ import { normalizeProcessListResult } from "@cybersafe/shared-types";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
 import { AppearanceProvider, useAppearance } from "./contexts/AppearanceContext";
 import { deriveProtectionLevel } from "./lib/protectionHealth";
-import { dashboardVerdict } from "./v2/dashboard/model";
+import { protectionOverview } from "./lib/protectionOverview";
 import { deriveLoadingState, DEFAULT_STARTUP_TIMEOUT_MS } from "./lib/loadingStates";
 import { deriveBootReadiness, limitedSessionNowReady, BOOT_COPY, mostraAvisoDeModoLimitado, pendingReadings, type BootPhase } from "./lib/bootReadiness";
 import { classificarLeitura, resumoSync } from "./lib/serviceSyncStatus";
@@ -1001,7 +1001,10 @@ function AuthenticatedApp() {
   // DEGRADED vem de um componente limitado (e não de uma leitura em falta),
   // diz-se isso — nunca se inventa uma leitura ausente.
   const leiturasEmFalta = pendingReadings(bootReadiness.confirmed);
-  const motoresOperacionais = dashboardVerdict(dashboard, realtimeInfo, serviceConnected).title === "Motores de análise operacionais";
+  // A mesma decisao do Dashboard/modal. Nunca uma comparacao de texto: a
+  // copia muda e o estado nao.
+  const protecaoVisao = protectionOverview(dashboard, realtimeInfo, serviceConnected);
+  const motoresOperacionais = protecaoVisao.kind === "operational-network-off";
   const faixaSessao =
     serviceConnected === null
       ? "Estado do serviço ainda não lido"

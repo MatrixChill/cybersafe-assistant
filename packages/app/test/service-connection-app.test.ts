@@ -15,6 +15,7 @@ import { deriveProtectionLevel } from "../src/lib/protectionHealth";
 import * as dashboardModelReal from "../src/v2/dashboard/model";
 import * as processIntelligence from "../src/lib/processIntelligence";
 import * as processMatrix from "../src/lib/processMatrix";
+import * as protectionOverviewReal from "../src/lib/protectionOverview";
 import { deriveLoadingState, BOOT_BODY_COPY, DEFAULT_STARTUP_TIMEOUT_MS } from "../src/lib/loadingStates";
 import { BootScreen } from "../src/components/BootScreen";
 import * as bootReadinessReal from "../src/lib/bootReadiness";
@@ -156,6 +157,7 @@ function appHarness(transformSource: (source: string) => string = (source) => so
     "./lib/serviceSyncStatus": serviceSyncStatusReal,
     "./lib/processIntelligence": processIntelligence,
     "./lib/processMatrix": processMatrix,
+    "./lib/protectionOverview": protectionOverviewReal,
     "./lib/loadingStates": { deriveLoadingState, BOOT_BODY_COPY, DEFAULT_STARTUP_TIMEOUT_MS },
     // P1-PROCESS-TRUTH: o App passou a importar uma FUNÇÃO de shared-types
     // (`normalizeProcessListResult`). Sem mapeamento, o Proxy do harness devolvia
