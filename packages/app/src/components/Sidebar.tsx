@@ -211,8 +211,11 @@ export default function Sidebar({
               monograma; o nome completo fica só para leitores de ecrã, para não
               se perder o título acessível. */}
           {!collapsed && (
-            <span className="sr-only">CyberSafe — Assistente de segurança</span>
+            <span className="font-mono text-[10px] uppercase tracking-[0.16em] text-muted-foreground">
+              Edição PAP
+            </span>
           )}
+          <span className="sr-only">CyberSafe Assistant — Edição PAP</span>
         </div>
 
         {/* Collapse Toggle — ancorado à linha da marca, centrado verticalmente.

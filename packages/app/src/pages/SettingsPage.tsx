@@ -1014,7 +1014,8 @@ export default function SettingsPage() {
         <h2 id="settings-avancado-title" className="font-mono text-lg font-semibold text-foreground">Avançado</h2>
       <section className="surface-elevated cyber-border rounded-xl p-6">
         <h2 className="text-lg font-semibold text-foreground mb-1">Sobre o CyberSafe</h2>
-        <p className="text-sm text-muted-foreground mb-4">CyberSafe Assistant - assistência de segurança pessoal para Windows.</p>
+        <p className="text-sm font-semibold text-foreground">CyberSafe Assistant — Edição PAP</p>
+        <p className="text-xs text-muted-foreground mb-4">Assistência de segurança pessoal para Windows.</p>
         <dl className="space-y-2 font-mono text-sm">
           {aboutIdentityLines(resolveIdentity()).map((row) => (
             <div key={row.label} className="flex items-baseline justify-between gap-4">

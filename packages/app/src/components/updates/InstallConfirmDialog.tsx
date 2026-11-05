@@ -76,7 +76,7 @@ export function InstallConfirmDialog({ version, podeConfirmar, requiresElevation
           Vais instalar a versão <span className="font-mono text-foreground">v{version}</span>. A instalação só
           avança com a tua confirmação.
         </p>
-        {channel === "preview" && <p className="mt-3 rounded-lg border border-cyber-yellow/40 bg-cyber-yellow/10 px-3 py-2 text-xs text-foreground">Preview: Setup sem assinatura Authenticode; o editor não é verificado pelo Windows.</p>}
+        {channel === "preview" && <p className="mt-3 rounded-lg border border-cyber-yellow/40 bg-cyber-yellow/10 px-3 py-2 text-xs text-foreground">Distribuição de avaliação (Preview): Setup sem assinatura Authenticode; o editor não é verificado pelo Windows.</p>}
         {requiresElevation && (
           <p
             className="mt-3 rounded-lg border border-cyber-yellow/40 bg-cyber-yellow/10 px-3 py-2 text-xs leading-relaxed text-foreground"

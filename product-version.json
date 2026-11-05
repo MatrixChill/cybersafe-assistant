@@ -1,6 +1,6 @@
 {
-  "version": "0.2.0-rc.10",
+  "version": "0.2.0-rc.11",
   "channel": "internal",
-  "codename": "windows-preview-rc10",
+  "codename": "pap-edition-rc11",
   "note": "Fonte can�nica da vers�o do produto. Lida por scripts/app-version.mjs, injectada no manifesto da aplica��o empacotada e no renderer (__BUILD__). Substitui o uso de package.json de workspace como identidade do produto. appId n�o � definido aqui."
 }

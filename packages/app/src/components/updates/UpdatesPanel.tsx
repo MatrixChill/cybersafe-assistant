@@ -112,11 +112,9 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
         </div>
         <div>
           <h2 className="font-mono font-semibold text-foreground">Atualizações do CyberSafe</h2>
-          <p className="text-xs text-muted-foreground">Estado real do atualizador da aplicação - nunca simulado.</p>
+          <p className="text-xs text-muted-foreground">Versão instalada e estado das atualizações.</p>
         </div>
       </div>
-
-      <UpdateScopePanel bridgeAvailable={bridgeAvailable} snapshot={snapshot} />
 
       {!bridgeAvailable && (
         <div className="flex items-start gap-3 rounded-lg border border-border bg-secondary/50 p-4" data-testid="app-update-no-bridge">
@@ -179,36 +177,11 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
             </div>
           )}
 
-          <div className="rounded-lg border border-border bg-secondary/50 p-3" data-testid="app-update-channel">
-            <p className="text-sm font-semibold">Canal selecionado: {snapshot.channel === "preview" ? "Preview" : "Stable"}</p>
-            {snapshot.channel === "stable" && snapshot.status === "unconfigured" && <p className="text-xs text-muted-foreground">Stable indisponível: a publicação ainda não tem confiança de assinatura aprovada.</p>}
-            <p className="mt-1 text-xs text-muted-foreground">Preview: versões de teste assinadas pelo projeto (Ed25519 + SHA-256). O Setup não tem assinatura Authenticode. Alterar o canal não inicia verificações nem instalações.</p>
-            <button type="button" role="switch" aria-checked={snapshot.channel === "preview"} aria-label="Ativar canal Preview" data-testid="app-update-preview"
-              disabled={busy !== null || snapshot.status === "unsupported" || ["checking", "downloading", "verifying", "installing"].includes(snapshot.status) || !actions.setPreview}
-              onClick={() => actions.setPreview?.(snapshot.channel !== "preview")} className={cn(BUTTON_SECONDARY, "mt-2")}>
-              {snapshot.channel === "preview" ? "Desativar canal Preview" : "Ativar canal Preview"}
-            </button>
-            <p className="mt-2 text-xs text-muted-foreground">Última verificação: {snapshot.checkedAt ? new Date(snapshot.checkedAt).toLocaleString("pt-PT") : "ainda não confirmada neste canal"}.</p>
-          </div>
-
           {/* Versão instalada — dados REAIS do main; sem dados diz-se desconhecida. */}
-          <dl
-            className="grid grid-cols-1 gap-1.5 rounded-lg border border-border bg-secondary/50 p-3 font-mono text-sm sm:grid-cols-3"
-            data-testid="app-update-installed"
-          >
-            <div>
-              <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">Instalada</dt>
-              <dd className="text-foreground select-text">{installed?.version}</dd>
-            </div>
-            <div>
-              <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">Compilação</dt>
-              <dd className="text-foreground select-text">{installed?.build}</dd>
-            </div>
-            <div>
-              <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">Código</dt>
-              <dd className="text-foreground select-text">{installed?.commit}</dd>
-            </div>
-          </dl>
+          <div className="rounded-lg border border-border bg-secondary/50 p-3" data-testid="app-update-installed">
+            <p className="font-mono text-[11px] uppercase tracking-wider text-muted-foreground">Versão instalada</p>
+            <p className="mt-0.5 font-mono text-sm text-foreground select-text">{installed?.version}</p>
+          </div>
 
           {/* Versão disponível + notas: TEXTO SIMPLES (o React escapa o que vier). */}
           {latest !== null && (
@@ -297,7 +270,6 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
             )}
           </div>
 
-          {snapshot.channel === "preview" && <p>Canal Preview · Setup sem assinatura Authenticode; editor não verificado pelo Windows. {snapshot.manualDownloadOnly ? "Instalação manual." : "Instalação interativa após confirmação; não ignore avisos do Windows."}</p>}
           {snapshot.manualDownloadOnly && (
             <div role="note" className="rounded border border-border p-3 text-sm">
               {snapshot.status === "downloaded"
@@ -326,6 +298,42 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
                 Esta atualização vai pedir permissões de administrador do Windows quando for instalada.
               </p>
             )}
+
+          <details className="rounded-lg border border-border bg-secondary/30 p-3" data-testid="app-update-advanced">
+            <summary className="cursor-pointer select-none font-mono text-xs text-muted-foreground hover:text-foreground">
+              Definições avançadas
+            </summary>
+            <div className="mt-3 space-y-3">
+              <div className="rounded-lg border border-border bg-secondary/50 p-3" data-testid="app-update-channel">
+                <p className="text-sm font-semibold text-foreground">
+                  Canal de atualizações: {snapshot.channel === "preview" ? "Avaliação assinada (Preview)" : "Stable"}
+                </p>
+                {snapshot.channel === "stable" && snapshot.status === "unconfigured" && (
+                  <p className="text-xs text-muted-foreground">Stable indisponível: a publicação ainda não tem confiança de assinatura aprovada.</p>
+                )}
+                <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+                  Preview: distribuições de avaliação assinadas pelo projeto (Ed25519 + SHA-256 sobre HTTPS). O Setup não tem assinatura Authenticode; o editor não é verificado pelo Windows. Alterar o canal não inicia verificações nem instalações.
+                </p>
+                <button type="button" role="switch" aria-checked={snapshot.channel === "preview"} aria-label="Ativar canal Preview" data-testid="app-update-preview"
+                  disabled={busy !== null || snapshot.status === "unsupported" || ["checking", "downloading", "verifying", "installing"].includes(snapshot.status) || !actions.setPreview}
+                  onClick={() => actions.setPreview?.(snapshot.channel !== "preview")} className={cn(BUTTON_SECONDARY, "mt-2")}>
+                  {snapshot.channel === "preview" ? "Desativar canal Preview" : "Ativar canal Preview"}
+                </button>
+                <p className="mt-2 text-xs text-muted-foreground">Última verificação: {snapshot.checkedAt ? new Date(snapshot.checkedAt).toLocaleString("pt-PT") : "ainda não confirmada neste canal"}.</p>
+              </div>
+              <dl className="grid grid-cols-1 gap-1.5 rounded-lg border border-border bg-secondary/50 p-3 font-mono text-xs sm:grid-cols-2" data-testid="app-update-installed-technical">
+                <div>
+                  <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">Compilação</dt>
+                  <dd className="text-foreground select-text">{installed?.build}</dd>
+                </div>
+                <div>
+                  <dt className="text-[11px] uppercase tracking-wider text-muted-foreground">Código</dt>
+                  <dd className="text-foreground select-text">{installed?.commit}</dd>
+                </div>
+              </dl>
+              <UpdateScopePanel bridgeAvailable={bridgeAvailable} snapshot={snapshot} />
+            </div>
+          </details>
 
           {/* Verificação automática — preferência REAL do updater. */}
           <div className="flex items-center justify-between gap-3 rounded-lg border border-border bg-secondary/50 p-3">
