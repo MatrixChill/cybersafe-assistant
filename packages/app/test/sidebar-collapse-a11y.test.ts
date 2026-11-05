@@ -30,10 +30,11 @@ const props = {
 const render = () => renderToStaticMarkup(createElement(AppearanceProvider, null, createElement(Sidebar, props)));
 
 describe("barra lateral", () => {
-  test("expandida: tagline em PT-PT e página ativa marcada", () => {
+  test("expandida: identidade PT-PT e página ativa marcada", () => {
     delete store[S.SIDEBAR_COLLAPSED_KEY];
     const html = render();
-    assert.match(html, /Assistente de segurança/);
+    assert.match(html, /Edição PAP/);
+    assert.match(html, /sr-only">CyberSafe Assistant — Edição PAP/);
     assert.doesNotMatch(html, /Security Assistant/);
     assert.match(html, /aria-current="page"/);
     assert.match(html, /aria-expanded="true"/);

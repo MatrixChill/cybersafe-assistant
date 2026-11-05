@@ -47,7 +47,8 @@ test("a marca aparece uma vez: titlebar grande, sidebar só com o monograma", ()
     /CYBER<span[^>]*>SAFE/,
     "o wordmark visual repetido na sidebar não pode voltar",
   );
-  assert.match(SIDEBAR, /sr-only">CyberSafe — Assistente de segurança/, "o nome acessível perdeu-se");
+  assert.match(SIDEBAR, /sr-only">CyberSafe Assistant — Edição PAP/, "o nome acessível perdeu-se");
+  assert.match(SIDEBAR, /Edição PAP/, "a edição visível perdeu-se");
   assert.doesNotMatch(SIDEBAR, /Assistente de segurança<\/span>\s*<\/div>/, "o subtítulo truncado voltou");
 
   // Alvo REAL (migração V2-FIRST): a barra que o App monta agora é
