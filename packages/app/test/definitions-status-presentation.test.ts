@@ -59,6 +59,28 @@ describe("estado das definições por fonte", () => {
     assert.match(medido.texto, /0 assinaturas|0 ficheiros/, "um zero medido continua a ser mostrado");
   });
 
+  it("chave externa ausente é uma condição, não uma tentativa falhada", () => {
+    const linha = linhaDasDefinicoes(
+      fonte({
+        fonte: "hashes",
+        estado: "degradado",
+        configuracaoNecessaria: true,
+        ultimaBemSucedidaAtMs: null,
+        ultimaTentativaAtMs: null,
+        ultimoErro: "MalwareBazaar: sem chave de acesso (define MALWAREBAZAAR_AUTH_KEY)",
+        tentativasConsecutivas: 10,
+        proximaVerificacaoAtMs: 0,
+      }),
+      AGORA,
+    );
+    assert.equal(linha.rotulo, "Configuração necessária");
+    assert.equal(linha.configuracaoNecessaria, true);
+    assert.match(linha.texto, /atualização externa suspensa/);
+    assert.match(linha.texto, /3 assinaturas de hash carregadas/);
+    assert.doesNotMatch(linha.texto, /tentativa\(s\) consecutiva\(s\)/, "não houve tentativas úteis a anunciar");
+    assert.doesNotMatch(linha.texto, /próxima verificação|sem atualização bem sucedida/, "não se inventa um próximo ciclo");
+  });
+
   it("a causa é catalogada e o texto do transporte nunca é ecoado", () => {
     const sujo = "MalwareBazaar HTTP 500 https://mb-api.abuse.ch/api/v1/ chave=abc123 C:\\Users\\caioc";
     const linha = linhaDasDefinicoes(

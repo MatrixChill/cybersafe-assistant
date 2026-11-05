@@ -26,17 +26,29 @@ after(() => {
   for (const r of RAIZES) fs.rmSync(r, { recursive: true, force: true });
 });
 
-test("sem histórico nenhum: as três fontes dizem nunca_verificado, não indisponivel", async () => {
-  const { servico } = await novoMotor();
-  const r = await servico.definitionsStatus();
-  assert.equal(r.fontes.length, 3, "clamav, yara e hashes");
-  for (const f of r.fontes) {
-    assert.equal(f.estado, "nunca_verificado", `${f.fonte}: ${JSON.stringify(f)}`);
-    assert.equal(f.ultimaBemSucedidaAtMs, null);
-    assert.equal(f.tentativasConsecutivas, 0);
-    assert.ok(f.cadenciaMs > 0, "a cadência é por fonte e tem de vir no contrato");
+test("sem histórico: ClamAV/YARA nunca verificados; HashDB pede configuração", async () => {
+  const chave = process.env.MALWAREBAZAAR_AUTH_KEY;
+  delete process.env.MALWAREBAZAAR_AUTH_KEY;
+  try {
+    const { servico } = await novoMotor();
+    const r = await servico.definitionsStatus();
+    assert.equal(r.fontes.length, 3, "clamav, yara e hashes");
+    for (const f of r.fontes) {
+      assert.equal(f.ultimaBemSucedidaAtMs, null);
+      assert.equal(f.tentativasConsecutivas, 0);
+      assert.ok(f.cadenciaMs > 0, "a cadência é por fonte e tem de vir no contrato");
+      if (f.fonte === "hashes") {
+        assert.equal(f.configuracaoNecessaria, true, "sem chave legítima, a condição é explícita");
+        assert.equal(f.estado, "degradado", JSON.stringify(f));
+        assert.equal(f.proximaVerificacaoAtMs, 0, "não se anuncia um próximo ciclo que nunca vai correr");
+      } else {
+        assert.equal(f.estado, "nunca_verificado", `${f.fonte}: ${JSON.stringify(f)}`);
+      }
+    }
+    assert.equal(r.cicloEmCurso, false);
+  } finally {
+    if (chave !== undefined) process.env.MALWAREBAZAAR_AUTH_KEY = chave;
   }
-  assert.equal(r.cicloEmCurso, false);
 });
 
 test("a cadência dos hashes é a do feed (45 min), não a herda das outras fontes", async () => {
@@ -72,7 +84,11 @@ test("sucesso registado há mais do que a cadência vira desactualizado", async 
 });
 
 test("backoff em vigor aparece como degradado com o erro e a próxima janela reais", async () => {
+  const chave = process.env.MALWAREBAZAAR_AUTH_KEY;
+  process.env.MALWAREBAZAAR_AUTH_KEY = "fixture-de-testes-sem-rede";
   const { servico, raiz } = await novoMotor();
+  if (chave === undefined) delete process.env.MALWAREBAZAAR_AUTH_KEY;
+  else process.env.MALWAREBAZAAR_AUTH_KEY = chave;
   fs.mkdirSync(path.join(raiz, "definitions"), { recursive: true });
   const agora = Date.now();
   fs.writeFileSync(

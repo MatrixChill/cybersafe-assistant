@@ -3633,7 +3633,11 @@ if (processInfo.path) {
       let estado: DefinitionsSourceState;
       if (motor === "out") {
         estado = bruta.nuncaVerificado ? "nunca_verificado" : "indisponivel";
-      } else if (motor === "degradado" || bruta.emBackoff) {
+      } else if ((bruta.configuracaoNecessaria && bruta.ultimaBemSucedidaAtMs === null) || motor === "degradado" || bruta.emBackoff) {
+        // Sem chave e sem nenhum sucesso local, a base externa está por
+        // configurar. Se já houve um sucesso, a idade real da base continua a
+        // mandar: «desactualizado» é mais informativo do que esconder a base
+        // atrás de «configuração necessária».
         estado = "degradado";
       } else if (bruta.ultimaBemSucedidaAtMs === null) {
         estado = "nunca_verificado";
@@ -3650,6 +3654,7 @@ if (processInfo.path) {
         tentativasConsecutivas: bruta.tentativasConsecutivas,
         proximaVerificacaoAtMs: bruta.proximaVerificacaoAtMs,
         cadenciaMs: bruta.cadenciaMs,
+        configuracaoNecessaria: bruta.configuracaoNecessaria,
         identificadorBase:
           bruta.fonte === "clamav" ? diaria : bruta.fonte === "hashes" ? "hashes/default.json" : "yara/default.yar",
         itensCarregados:

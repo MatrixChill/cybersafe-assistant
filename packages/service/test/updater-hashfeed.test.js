@@ -102,6 +102,22 @@ describe("chave de acesso: recusada antes da rede, nunca embutida", () => {
     }
   });
 
+  test("sem chave, o agendador não considera a HashDB velha nem anuncia um próximo ciclo", async () => {
+    const cabecalho = { chunks: [], corpos: [], pedidos: [] };
+    const guardado = process.env[MALWAREBAZAAR_AUTH_KEY_ENV];
+    delete process.env[MALWAREBAZAAR_AUTH_KEY_ENV];
+    try {
+      const updater = new DefinitionUpdater(path.join(ROOT, "scheduler-sem-chave"), { hashFeedRequest: fakeRequest(cabecalho) });
+      const hashes = updater.estadoDasFontes().find((f) => f.fonte === "hashes");
+      assert.equal(hashes.configuracaoNecessaria, true);
+      assert.equal(hashes.proximaVerificacaoAtMs, 0, "não há data futura para uma tentativa que não vai acontecer");
+      assert.equal(updater["componentStale"]("hashes"), false, "o scheduler não deve chamar o feed");
+      assert.equal(cabecalho.pedidos.length, 0);
+    } finally {
+      if (guardado !== undefined) process.env[MALWAREBAZAAR_AUTH_KEY_ENV] = guardado;
+    }
+  });
+
   test("o ambiente é lido no construtor, e uma chave inválida vale como ausente", async () => {
     process.env[MALWAREBAZAAR_AUTH_KEY_ENV] = "curta";
     try {

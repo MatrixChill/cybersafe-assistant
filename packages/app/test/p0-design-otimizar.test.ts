@@ -166,7 +166,8 @@ describe("P0 — a secção original de definições não está comprimida", () 
     assert.match(bloco, /grid-template-columns:\s*minmax\(0,\s*1fr\)\s+auto/);
     assert.match(css, /@media \(max-width: 720px\)[\s\S]*?\.optimize-source-row/);
     assert.match(html, /Definições de segurança/);
-    assert.match(html, /O serviço não reportou a data da última atualização de definições nesta leitura/);
+    assert.match(html, /O serviço não reportou uma data global de definições/);
+    assert.match(html, /Cada fonte abaixo mostra a data da sua tentativa e a do último sucesso conhecido/);
   });
 });
 

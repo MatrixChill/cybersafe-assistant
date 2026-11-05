@@ -87,31 +87,47 @@ export interface LinhaDefinicoes {
   severidade: "ok" | "atencao" | "critico";
   /** Uma linha por fonte, pronta a renderizar; nunca contém texto do transporte. */
   texto: string;
+  /** A fonte exige uma chave que não está configurada. */
+  configuracaoNecessaria: boolean;
 }
 
 export function linhaDasDefinicoes(f: DefinitionsSourceStatus, agora: number): LinhaDefinicoes {
+  const configuracaoNecessaria = f.configuracaoNecessaria === true;
   const carregados =
     !Number.isSafeInteger(f.itensCarregados) || (f.itensCarregados ?? -1) < 0
       ? "contagem não medida"
       : f.fonte === "hashes"
         ? `${f.itensCarregados} assinaturas de hash carregadas`
         : `${f.itensCarregados} ficheiros de base`;
-  const causa = categoriaDaCausa(f.ultimoErro);
-  const partes = [
-    `última tentativa ${tempo(f.ultimaTentativaAtMs, agora)}`,
-    f.ultimaBemSucedidaAtMs
-      ? `última atualização bem sucedida ${tempo(f.ultimaBemSucedidaAtMs, agora)}`
-      : "sem atualização bem sucedida registada",
-    carregados,
-    quando(f.proximaVerificacaoAtMs, agora),
-  ];
-  if (causa) partes.push(`causa: ${causa} (${f.tentativasConsecutivas} tentativa(s) consecutiva(s))`);
+  const causa = configuracaoNecessaria ? "chave de acesso não configurada" : categoriaDaCausa(f.ultimoErro);
+  const partes = configuracaoNecessaria
+    ? [
+        "atualização externa suspensa até MALWAREBAZAAR_AUTH_KEY ser configurada",
+        ...(f.ultimaBemSucedidaAtMs
+          ? [`última atualização bem sucedida ${tempo(f.ultimaBemSucedidaAtMs, agora)}`]
+          : []),
+        carregados,
+      ]
+    : [
+        `última tentativa ${tempo(f.ultimaTentativaAtMs, agora)}`,
+        f.ultimaBemSucedidaAtMs
+          ? `última atualização bem sucedida ${tempo(f.ultimaBemSucedidaAtMs, agora)}`
+          : "sem atualização bem sucedida registada",
+        carregados,
+        quando(f.proximaVerificacaoAtMs, agora),
+      ];
+  if (causa && !configuracaoNecessaria) partes.push(`causa: ${causa} (${f.tentativasConsecutivas} tentativa(s) consecutiva(s))`);
+  // O rótulo só substitui o estado real quando ainda não existe uma base
+  // local com sucesso conhecido. Caso contrário, a idade da base continua a
+  // ser o estado principal e a suspensão externa aparece no texto.
+  const rotulo = configuracaoNecessaria && !f.ultimaBemSucedidaAtMs ? "Configuração necessária" : ROTULOS[f.estado];
   return {
     fonte: f.fonte,
     nome: NOMES[f.fonte],
-    rotulo: ROTULOS[f.estado],
-    severidade: SEVERIDADES[f.estado],
-    texto: `${NOMES[f.fonte]} — ${ROTULOS[f.estado]} · ${partes.join(" · ")}`,
+    rotulo,
+    severidade: configuracaoNecessaria ? "atencao" : SEVERIDADES[f.estado],
+    texto: `${NOMES[f.fonte]} — ${rotulo} · ${partes.join(" · ")}`,
+    configuracaoNecessaria,
   };
 }
 

@@ -142,7 +142,8 @@ function createInstaller(options:Options|PreviewOptions,channel:'stable'|'previe
       if(previous&&previous.stage!=='completed'){failureCode='recovery-required';throw new HandoffError(failureCode)}
       phase='consent';
       if(context.manifest.requiresElevation){failureCode='elevation-not-authorized';throw new HandoffError(failureCode)}
-      if(await options.confirmConsent?.(context)!==true){failureCode='consent-refused';throw new HandoffError(failureCode)}
+      const consentGranted = await options.confirmConsent?.(context) === true;
+      if(!consentGranted){failureCode='consent-refused';throw new HandoffError(failureCode)}
       if(channel==='preview') {
         phase='scanner-lease';
         lease=await (options as PreviewOptions).acquireScanLease();
@@ -172,7 +173,10 @@ function createInstaller(options:Options|PreviewOptions,channel:'stable'|'previe
         if(!(await stable.publisherVerifier.verify(artifact,stable.expectedPublisher)).ok){failureCode='staged-authenticode-refused';throw new HandoffError(failureCode)}
       }
       phase='consent-revalidation';
-      if(await options.confirmConsent?.(context)!==true||options.authorizeExecution?.()!==true){failureCode='consent-withdrawn';throw new HandoffError(failureCode)}
+      // Uma única confirmação nativa por operação. A revalidação reutiliza a
+      // decisão dada antes de o artefacto ser preparado; voltar a abrir o mesmo
+      // diálogo era a duplicação visível antes do Setup.
+      if(!consentGranted||options.authorizeExecution?.()!==true){failureCode='consent-withdrawn';throw new HandoffError(failureCode)}
       phase='scanner-lease-renewal';
       if(lease && await lease.renew()!==true){failureCode='scanner-lease-expired';throw new HandoffError(failureCode)}
       phase='journal-prepare';

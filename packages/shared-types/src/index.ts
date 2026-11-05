@@ -1055,6 +1055,12 @@ export interface DefinitionsSourceStatus {
   identificadorBase: string | null;
   /** Quantidade efetivamente carregada, quando mensurável; `null` = não medido. */
   itensCarregados: number | null;
+  /**
+   * A fonte externa exige uma credencial que não está configurada. Não é uma
+   * falha de rede nem uma base desatualizada: é uma condição de configuração
+   * que impede a tentativa e deve ser mostrada como tal.
+   */
+  configuracaoNecessaria?: boolean;
 }
 
 export interface DefinitionsStatus {

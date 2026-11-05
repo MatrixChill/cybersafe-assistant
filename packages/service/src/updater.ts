@@ -539,6 +539,11 @@ export class DefinitionUpdater {
     this.afterYaraUpdated = options.afterYaraUpdated;
     this.afterYaraRollbackFailed = options.afterYaraRollbackFailed;
     this.afterDefinitionsUpdated = options.afterDefinitionsUpdated;
+    // Sem chave, a fonte não deve gerar uma tentativa de rede por ciclo. A
+    // condição fica registada uma vez e o agendador deixa de a considerar
+    // «velha»; a base local que já existe continua a ser usada pelo motor.
+    if (!this.hashAuthKey) this.marcarHashConfiguracaoNecessaria();
+    else this.limparConfiguracaoHashAusente();
   }
 
   // ── Public API ─────────────────────────────────────────────────────────────
@@ -1579,12 +1584,14 @@ export class DefinitionUpdater {
     cadenciaMs: number;
     nuncaVerificado: boolean;
     emBackoff: boolean;
+    configuracaoNecessaria: boolean;
   }> {
     const meta = this.readUpdateMeta();
     const hashesTentado = Number(meta.hashesCheckedAt ?? 0);
     return (["clamav", "yara", "hashes"] as UpdateComponent[]).map((fonte) => {
       const sucesso = Number(meta.components?.[fonte] ?? 0) || null;
       const falha = meta.falhas?.[fonte];
+      const configuracaoNecessaria = fonte === "hashes" && !this.hashAuthKey;
       const cadenciaMs = this.intervaloDoComponente(fonte);
       const ultimaTentativa =
         Number.isFinite(falha?.lastAttemptAtMs ?? 0) && (falha?.lastAttemptAtMs ?? 0) > 0
@@ -1598,16 +1605,19 @@ export class DefinitionUpdater {
         ultimaBemSucedidaAtMs: sucesso,
         ultimaTentativaAtMs: ultimaTentativa ?? null,
         ultimoErro: falha?.lastError ?? null,
-        tentativasConsecutivas: falha?.count ?? 0,
-        proximaVerificacaoAtMs: emBackoff
-          ? (falha as FonteFalha).nextAllowedAtMs
-          : (sucesso ?? 0) + cadenciaMs,
+        tentativasConsecutivas: configuracaoNecessaria ? 0 : falha?.count ?? 0,
+        proximaVerificacaoAtMs: configuracaoNecessaria
+          ? 0
+          : emBackoff
+            ? (falha as FonteFalha).nextAllowedAtMs
+            : (sucesso ?? 0) + cadenciaMs,
         cadenciaMs,
         // Uma fonte só é «nunca verificada» se não houver NEM sucesso NEM
         // tentativa registada — e, no caso dos hashes, a verificação conta mesmo
         // sem alteração escrita, porque foi isso que aconteceu.
         nuncaVerificado: sucesso === null && ultimaTentativa == null && !(fonte === "hashes" && hashesTentado > 0),
-        emBackoff,
+        emBackoff: !configuracaoNecessaria && emBackoff,
+        configuracaoNecessaria,
       };
     });
   }
@@ -1643,7 +1653,41 @@ export class DefinitionUpdater {
     return component === "hashes" ? HASH_FEED_INTERVAL_MS : UPDATE_INTERVAL_MS;
   }
 
+  /**
+   * Marca a HashDB como «configuração necessária» uma única vez, sem rede e
+   * sem contar uma tentativa falhada. `nextAllowedAtMs` fica no máximo para que
+   * o agendador não volte a tentar; o estado é reconstruído no próximo arranque
+   * se a chave entretanto existir.
+   */
+  private marcarHashConfiguracaoNecessaria(): void {
+    const meta = this.readUpdateMeta();
+    const falhas = { ...(meta.falhas ?? {}) };
+    falhas.hashes = {
+      count: 0,
+      nextAllowedAtMs: Number.MAX_SAFE_INTEGER,
+      lastAttemptAtMs: 0,
+      lastError: `MalwareBazaar: sem chave de acesso (define ${MALWAREBAZAAR_AUTH_KEY_ENV}).`,
+    };
+    fs.mkdirSync(path.dirname(this.metaPath), { recursive: true });
+    fs.writeFileSync(this.metaPath, JSON.stringify({ ...meta, falhas }, null, 2), "utf-8");
+  }
+
+  /** Remove apenas o marcador de configuração, nunca uma falha de rede real. */
+  private limparConfiguracaoHashAusente(): void {
+    const meta = this.readUpdateMeta();
+    const falha = meta.falhas?.hashes;
+    if (!falha || !/sem chave de acesso/i.test(falha.lastError ?? "")) return;
+    const falhas = { ...meta.falhas };
+    delete falhas.hashes;
+    fs.mkdirSync(path.dirname(this.metaPath), { recursive: true });
+    fs.writeFileSync(this.metaPath, JSON.stringify({ ...meta, falhas }, null, 2), "utf-8");
+  }
+
   private componentStale(component: UpdateComponent): boolean {
+    // A ausência de chave é uma condição permanente de configuração, não uma
+    // falha transitória. Não se repete o pedido até o utilizador configurar a
+    // chave (o updater é reconstruído no arranque seguinte).
+    if (component === "hashes" && !this.hashAuthKey) return false;
     const meta = this.readUpdateMeta();
     const limite = this.intervaloDoComponente(component);
     // Backoff em vigor: uma fonte em falha consecutiva NÃO é «velha» até o seu

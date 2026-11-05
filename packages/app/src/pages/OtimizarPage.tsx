@@ -84,6 +84,7 @@ const CHIP_DEFINICOES: Record<string, string> = {
   Degradado: "state-chip state-chip--warn",
   Indisponível: "state-chip state-chip--warn",
   "Nunca verificado": "state-chip state-chip--na",
+  "Configuração necessária": "state-chip state-chip--warn",
 };
 
 const MOSAICO: Record<OptimizeClassificacao["tom"] | "proc", string> = {
@@ -727,8 +728,8 @@ export default function OtimizarPage({
         </div>
         <p className="row-meta -mt-2 mb-3">
           {protecao.motores?.definitionsUpdatedAt && Number.isFinite(Date.parse(protecao.motores.definitionsUpdatedAt))
-            ? `Última atualização de definições reportada: ${new Date(protecao.motores.definitionsUpdatedAt).toLocaleString("pt-PT")}.`
-            : "O serviço não reportou a data da última atualização de definições nesta leitura."}
+            ? `Última atualização global de definições reportada: ${new Date(protecao.motores.definitionsUpdatedAt).toLocaleString("pt-PT")}.`
+            : "O serviço não reportou uma data global de definições. Cada fonte abaixo mostra a data da sua tentativa e a do último sucesso conhecido."}
         </p>
         {fontesDefinicoes === null ? (
           <div className="stat-card flex items-start gap-3 p-4">
