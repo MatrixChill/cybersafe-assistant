@@ -41,9 +41,9 @@ export class RealtimeRecovery {
   private readonly clearTimer: NonNullable<Options["clearTimer"]>;
   constructor(options: Options = {}) {
     // Orcamento para uma rajada real de downloads/instalacao: 128 caminhos,
-    // 5 tentativas e 2 min. Nao e cobertura certificada; e a diferenca entre
-    // desistir em 30 s e dar tempo a fila de 64 lugares a escoar.
-    this.maxPaths = options.maxPaths ?? 128; this.maxAttempts = options.maxAttempts ?? 5;
+    // Até 32 tentativas durante 2 min. Com backoff 100 ms..5 s, cinco
+    // tentativas esgotavam em 3,1 s, antes de uma análise normal terminar.
+    this.maxPaths = options.maxPaths ?? 128; this.maxAttempts = options.maxAttempts ?? 32;
     this.maxAgeMs = options.maxAgeMs ?? 120_000; this.delayMs = options.delayMs ?? 100;
     this.attemptTimeoutMs = options.attemptTimeoutMs ?? 2_000;
     for (const value of [this.maxPaths,this.maxAttempts,this.maxAgeMs,this.delayMs,this.attemptTimeoutMs]) {

@@ -1,6 +1,6 @@
 {
-  "version": "0.2.0",
+  "version": "0.2.1",
   "channel": "stable",
-  "codename": "v0.2.0-final",
+  "codename": "v0.2.1-realtime-recovery",
   "note": "Fonte canónica da versão do produto. Lida por scripts/app-version.mjs, injectada no manifesto da aplicação empacotada e no renderer (__BUILD__)."
 }

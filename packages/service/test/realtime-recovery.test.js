@@ -60,3 +60,59 @@ test('cooldown após esgotar mantém budget e só liberta com nova janela',async
  assert.equal(h.queue.defer('A','analysis',run),'full');await h.tick();assert.equal(calls,1);assert.equal(h.queue.snapshot().suppressed,1);
  h.advance(31);assert.equal(h.queue.defer('a','analysis',run),'scheduled');await h.tick();assert.equal(calls,2);
 });
+
+// Real elapsed scheduling (the older harness intentionally ignores delays).
+function elapsedHarness() {
+ let time=0, sequence=0; const timers=new Map();
+ const recovery=new RealtimeRecovery({now:()=>time,
+  setTimer:(fn,delay)=>{const id=++sequence;timers.set(id,{fn,at:time+delay});return id;},
+  clearTimer:id=>timers.delete(id)});
+ return {recovery,get time(){return time;},async until(end){
+  for(;;){const next=[...timers].sort((a,b)=>a[1].at-b[1].at)[0];
+   if(!next || next[1].at>end)break;
+   timers.delete(next[0]);time=next[1].at;next[1].fn();
+   for(let i=0;i<16;i++)await Promise.resolve();
+  }time=end;
+ }};
+}
+
+test('default recovery survives a seven-second occupied analysis slot',async()=>{
+ const h=elapsedHarness();let admitted=0;
+ h.recovery.defer('fixture/download.txt','analysis',async()=>{
+  if(h.time<7000)return false;
+  admitted++;return true;
+ });
+ await h.until(12000);
+ assert.equal(admitted,1,'a temporary seven-second saturation must not exhaust recovery at 3.1 seconds');
+ assert.equal(h.recovery.snapshot().recovered,1);
+ assert.equal(h.recovery.snapshot().exhausted,0);
+ assert.equal(h.recovery.snapshot().pending,0);
+});
+
+test('default recovery still expires persistent saturation within its two-minute window',async()=>{
+ const h=elapsedHarness();let attempts=0;
+ h.recovery.defer('fixture/blocked.txt','analysis',async()=>{attempts++;return false;});
+ await h.until(126000);
+ const snapshot=h.recovery.snapshot();
+ assert.equal(snapshot.pending,0);
+ assert.equal(snapshot.expired,1);
+ assert.ok(attempts<=32,'admission work must remain bounded');
+ const before=attempts;await h.until(240000);assert.equal(attempts,before);
+});
+
+test('real bounded queue admits a rejected file after a seven-second scan completes',async()=>{
+ const {RealtimeFileQueue}=await import('../dist/realtime-file-queue.js');
+ const h=elapsedHarness();const q=new RealtimeFileQueue(1,()=>h.time);const scanned=[];let release;
+ q.enqueue('running','v1',()=>new Promise(resolve=>{release=resolve;}));
+ q.enqueue('waiting','v1',async()=>{scanned.push('waiting');});
+ const admit=async()=>q.enqueue('download','v1',async()=>{scanned.push('download');},'high')!=='full';
+ assert.equal(await admit(),false);
+ h.recovery.defer('download','analysis',admit);
+ await h.until(7000);
+ assert.equal(h.recovery.snapshot().pending,1);
+ release();for(let i=0;i<24;i++)await Promise.resolve();
+ await h.until(12000);for(let i=0;i<24;i++)await Promise.resolve();
+ assert.deepEqual(scanned,['waiting','download']);
+ assert.equal(h.recovery.snapshot().recovered,1);
+ assert.equal(q.active,0);assert.equal(q.size,0);
+});
