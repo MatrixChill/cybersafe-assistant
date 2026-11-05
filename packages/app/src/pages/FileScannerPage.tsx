@@ -14,7 +14,6 @@ import { ScanHistoryPanel } from "../components/ScanHistoryPanel"
 // R8-USB: o painel do observador USB entra aqui, por cima do arquivo. É só
 // montagem: nenhuma linha de decisão de estado do scanner muda com isto.
 import { UsbProtectionPanel } from "../components/UsbProtectionPanel"
-import { CoreVisual } from "../components/visual/CoreVisual"
 import {
   NO_DETECTIONS_NOTE,
   SCAN_ACTION_CARDS,
@@ -1167,7 +1166,7 @@ export default function FileScannerPage({ pendingScan, onScanConsumed, onOpenThr
   })
 
   return (
-    <div className="cs-scanner-root v2-scanner p-8 space-y-8 animate-in fade-in duration-500 overflow-y-auto max-h-[calc(100vh-100px)]" data-scanner-v2="ativo">
+    <div className="cs-scanner-root v2-scanner p-6 space-y-5 animate-in fade-in duration-500 overflow-y-auto max-h-[calc(100vh-100px)]" data-scanner-v2="ativo">
       {/* Header */}
       <div className="cs-scanner-header">
         <div className="cs-scanner-heading">
@@ -1178,8 +1177,6 @@ export default function FileScannerPage({ pendingScan, onScanConsumed, onOpenThr
             Verifica as zonas prioritárias do computador, as suas pastas de forma abrangente, um ficheiro ou uma pasta.
           </p>
         </div>
-        {/* Identidade visual: o núcleo é decorativo e não comunica progresso. */}
-        <CoreVisual active={isActive} />
       </div>
 
       {/* ── Watchdog: sem atualizações do motor ──────────────────── */}

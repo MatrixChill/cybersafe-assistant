@@ -136,7 +136,7 @@ const CORE_SUBSYSTEMS: { key: keyof EngineHealth; label: string }[] = [
   { key: "nativeEngine", label: "Motor nativo" },
 ];
 
-const WFP_LABEL = "Filtro WFP (CyberSafe)";
+const WFP_LABEL = "Proteção de rede avançada";
 
 function subsystemEntries(
   engine: EngineHealth | undefined,

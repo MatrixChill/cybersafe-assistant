@@ -75,8 +75,8 @@ describe("estado das definições por fonte", () => {
     );
     assert.equal(linha.rotulo, "Configuração necessária");
     assert.equal(linha.configuracaoNecessaria, true);
-    assert.match(linha.texto, /atualização externa suspensa/);
-    assert.match(linha.texto, /3 assinaturas de hash carregadas/);
+    assert.match(linha.texto, /A base de hashes adicional ainda não está configurada\. As restantes ferramentas de análise continuam disponíveis\./);
+    assert.doesNotMatch(linha.texto, /MALWAREBAZAAR_AUTH_KEY|3 assinaturas de hash carregadas/);
     assert.doesNotMatch(linha.texto, /tentativa\(s\) consecutiva\(s\)/, "não houve tentativas úteis a anunciar");
     assert.doesNotMatch(linha.texto, /próxima verificação|sem atualização bem sucedida/, "não se inventa um próximo ciclo");
   });

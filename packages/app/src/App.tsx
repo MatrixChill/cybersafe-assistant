@@ -978,7 +978,7 @@ function AuthenticatedApp() {
                     : page === "reports"
                       ? "Relatórios"
                       : page === "settings"
-                        ? "Definições"
+                        ? "Configurações"
                         : page === "business"
                           ? "Business Center"
                           : ""
@@ -1015,7 +1015,7 @@ function AuthenticatedApp() {
           ? "Serviço ligado — leituras confirmadas"
           : loadingState.state === "DEGRADED"
             ? leiturasEmFalta === "nenhuma leitura em falta"
-              ? motoresOperacionais ? "4 de 4 motores ativos · WFP não ativado" : "Serviço ligado com componentes limitados"
+              ? motoresOperacionais ? "4 de 4 motores ativos · Proteção de rede avançada não ativada" : "Serviço ligado com componentes limitados"
               : `Serviço ligado com leituras incompletas: ${leiturasEmFalta}`
             : loadingState.state === "REFUSED"
               ? `Leituras recusadas pelo gate: ${syncRecusas}`

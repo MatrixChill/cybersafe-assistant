@@ -100,14 +100,10 @@ export function linhaDasDefinicoes(f: DefinitionsSourceStatus, agora: number): L
         ? `${f.itensCarregados} assinaturas de hash carregadas`
         : `${f.itensCarregados} ficheiros de base`;
   const causa = configuracaoNecessaria ? "chave de acesso não configurada" : categoriaDaCausa(f.ultimoErro);
+  const textoHashDbSemChave =
+    "A base de hashes adicional ainda não está configurada. As restantes ferramentas de análise continuam disponíveis.";
   const partes = configuracaoNecessaria
-    ? [
-        "atualização externa suspensa até MALWAREBAZAAR_AUTH_KEY ser configurada",
-        ...(f.ultimaBemSucedidaAtMs
-          ? [`última atualização bem sucedida ${tempo(f.ultimaBemSucedidaAtMs, agora)}`]
-          : []),
-        carregados,
-      ]
+    ? [textoHashDbSemChave]
     : [
         `última tentativa ${tempo(f.ultimaTentativaAtMs, agora)}`,
         f.ultimaBemSucedidaAtMs
@@ -120,7 +116,7 @@ export function linhaDasDefinicoes(f: DefinitionsSourceStatus, agora: number): L
   // O rótulo só substitui o estado real quando ainda não existe uma base
   // local com sucesso conhecido. Caso contrário, a idade da base continua a
   // ser o estado principal e a suspensão externa aparece no texto.
-  const rotulo = configuracaoNecessaria && !f.ultimaBemSucedidaAtMs ? "Configuração necessária" : ROTULOS[f.estado];
+  const rotulo = configuracaoNecessaria ? "Configuração necessária" : ROTULOS[f.estado];
   return {
     fonte: f.fonte,
     nome: NOMES[f.fonte],

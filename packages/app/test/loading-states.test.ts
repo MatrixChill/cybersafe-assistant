@@ -112,7 +112,7 @@ describe("loadingStates — não mascarar degradação/indisponibilidade como ca
     const s = derive({ protection: protection("safe", { ...ALL_ACTIVE, wfp: sub("unavailable") }) });
     assert.equal(s.state, "DEGRADED");
     assert.notEqual(s.state, "INITIALIZING");
-    assert.match(s.detail, /Filtro WFP \(CyberSafe\) \(indisponível\)/);
+    assert.match(s.detail, /Proteção de rede avançada \(indisponível\)/);
   });
 
   test("ClamAV busy (prova adiada, sem falha) não é degradação", () => {

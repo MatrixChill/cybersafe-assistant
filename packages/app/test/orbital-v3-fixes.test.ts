@@ -27,8 +27,8 @@ test("núcleo da verificação: identidade CyberSafe com fallback estático aces
   assert.equal(html.includes("progresso real"), false, "o núcleo não pode prometer progresso");
 });
 
-test("o scanner integra o núcleo no cabeçalho e o updater reutiliza a mesma cena", () => {
-  assert.match(read("..", "src", "pages", "FileScannerPage.tsx"), /<CoreVisual active=\{isActive\} \/>/);
+test("o scanner não usa o núcleo no cabeçalho e o updater mantém a mesma cena", () => {
+  assert.doesNotMatch(read("..", "src", "pages", "FileScannerPage.tsx"), /<CoreVisual/);
   const core = read("..", "src", "components", "visual", "CoreVisual.tsx");
   assert.match(core, /dashboard\/effects\/CoreScene/);
   assert.match(core, /fpsLimit=\{30\}/);

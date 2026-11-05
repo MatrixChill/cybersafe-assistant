@@ -38,7 +38,6 @@ export function aboutIdentityLines(i: BuildIdentity): { label: string; value: st
     { label: "Versão", value: `v${i.version}` },
     { label: "Compilação", value: i.buildId },
     { label: "Código (commit)", value: i.commit },
-    ...(i.sourceState ? [{ label: "Estado do código", value: sourceStateText(i) }] : []),
   ];
 }
 

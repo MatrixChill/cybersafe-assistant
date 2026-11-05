@@ -87,7 +87,7 @@ describe("WS-B addendum — ProtectionDetails renderizado", () => {
     "As assinaturas precisam de ser instaladas ou atualizadas",
     "Motor nativo de análise disponível",
     "3 de 4 motores de análise ativos",
-    "O filtro de rede próprio do CyberSafe não está ativo",
+    "Proteção de rede avançada não ativada",
     "Isto não significa que o Firewall do Windows esteja desligado",
     "Não verificado",
     "O CyberSafe ainda não consultou o estado do Firewall do Windows nesta vista",

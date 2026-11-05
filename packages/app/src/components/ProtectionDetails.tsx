@@ -88,7 +88,7 @@ function coberturaUserCopy(
 }
 
 /** O modulo WFP do CyberSafe, e o Windows Firewall, sao linhas diferentes. */
-const WFP_MODULE_LABEL = "Filtro WFP (CyberSafe)";
+const WFP_MODULE_LABEL = "Proteção de rede avançada";
 const WINDOWS_FIREWALL_LABEL = "Windows Firewall";
 
 /** Cores da decisao unica: o icone, o chip e o texto dizem o mesmo. */
@@ -185,10 +185,10 @@ function motorUserCopy(
 
 function wfpUserCopy(status: EngineSubsystemStatus): { texto: string; contexto: string } {
   const disclaimer = "Isto não significa que o Firewall do Windows esteja desligado.";
-  if (status === "active") return { texto: "O filtro de rede próprio do CyberSafe está ativo.", contexto: disclaimer };
-  if (status === "unavailable") return { texto: "O filtro de rede próprio do CyberSafe não está ativo.", contexto: disclaimer };
-  if (status === "degraded") return { texto: "O filtro de rede próprio do CyberSafe não está a funcionar como esperado.", contexto: disclaimer };
-  return { texto: "O filtro de rede próprio do CyberSafe reporta um erro.", contexto: disclaimer };
+  if (status === "active") return { texto: "Proteção de rede avançada ativa.", contexto: disclaimer };
+  if (status === "unavailable") return { texto: "Proteção de rede avançada não ativada.", contexto: disclaimer };
+  if (status === "degraded") return { texto: "Proteção de rede avançada com funcionamento limitado.", contexto: disclaimer };
+  return { texto: "Proteção de rede avançada com erro.", contexto: disclaimer };
 }
 
 /** SESSION14: o ciclo real da leitura (pedido/in-flight/erro/não-consultado/
@@ -447,7 +447,7 @@ export default function ProtectionDetails({ engine, level, overview, open, onClo
                       {wfp.text}
                     </span>
                   </div>
-                  <p className="mt-1 text-xs text-foreground leading-relaxed">{wfpSub?.status === "unavailable" && /sem tentativa de ativação neste perfil/i.test(wfpSub.detail ?? "") ? "WFP não ativado neste perfil." : wfpCopy.texto}</p>
+                  <p className="mt-1 text-xs text-foreground leading-relaxed">{wfpSub?.status === "unavailable" && /sem tentativa de ativação neste perfil/i.test(wfpSub.detail ?? "") ? "Proteção de rede avançada não ativada." : wfpCopy.texto}</p>
                   {wfpCopy.contexto && (
                     <p className="mt-0.5 text-xs text-muted-foreground leading-relaxed">{wfpCopy.contexto}</p>
                   )}

@@ -47,7 +47,7 @@ export function ScanEngineState({
       <h3>Estado atual dos motores</h3>
       <p className="caption">
         {confirmada
-          ? "Instantâneo do serviço nesta página. Não prova que estes motores participaram em nenhuma análise."
+          ? "Instantâneo do serviço nesta página. A disponibilidade de um motor não garante a sua participação em todas as análises."
           : "Sem ligação confirmada ao serviço: nenhum motor comunica o seu estado nesta página."}
       </p>
       <div className="result-grid engine-state-grid">
@@ -61,7 +61,7 @@ export function ScanEngineState({
           >
             <strong>{c.name}</strong>
             <em>{c.label}</em>
-            <small>{c.coverage}</small>
+            {c.coverage === "Cobertura limitada" && <small>{c.coverage}</small>}
           </span>
         ))}
       </div>

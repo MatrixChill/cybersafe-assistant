@@ -112,7 +112,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
         </div>
         <div>
           <h2 className="font-mono font-semibold text-foreground">Atualizações do CyberSafe</h2>
-          <p className="text-xs text-muted-foreground">Versão instalada e estado das atualizações.</p>
+          <p className="text-xs text-muted-foreground">Atualizações disponíveis para verificação. A instalação requer a sua confirmação.</p>
         </div>
       </div>
 
@@ -278,11 +278,7 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
 
           {snapshot.manualDownloadOnly && (
             <div role="note" className="rounded border border-border p-3 text-sm">
-              {snapshot.status === "downloaded"
-                ? "Transferência concluída: manifesto autenticado e SHA-256 verificado. "
-                : "Modo manual: cada transferência exige manifesto autenticado e verificação SHA-256. "}
-              Instalação automática bloqueada nesta compilação: não há validação Authenticode do editor.
-              Abrir a pasta não executa o instalador; a decisão de o executar é manual.
+              As atualizações são verificadas antes da transferência. Terá de confirmar a instalação.
               {snapshot.status === "downloaded" && actions.revealDownload && (
                 <button type="button" disabled={state.busy !== null} onClick={() => actions.revealDownload?.()}>
                   Abrir pasta do instalador verificado
@@ -307,11 +303,11 @@ export function UpdatesPanel({ state, actions }: UpdatesPanelProps) {
 
           <details className="rounded-lg border border-border bg-secondary/30 p-3" data-testid="app-update-advanced">
             <summary className="cursor-pointer select-none font-mono text-xs text-muted-foreground hover:text-foreground">
-              Definições avançadas
+              Configurações avançadas
             </summary>
             <div className="mt-3 space-y-3">
               <p className="rounded-lg border border-border bg-secondary/50 p-3 text-xs leading-relaxed text-muted-foreground">
-                Publicação verificada por Ed25519 e SHA-256 sobre HTTPS. O Setup não tem assinatura Authenticode; o editor não é verificado pelo Windows. Nada é transferido sem a tua ação.
+                Publicação verificada por Ed25519 e SHA-256 sobre HTTPS. Instalação automática bloqueada nesta compilação: o Setup não tem assinatura Authenticode e o editor não é verificado pelo Windows. Nada é transferido sem a tua ação.
               </p>
               <dl className="grid grid-cols-1 gap-1.5 rounded-lg border border-border bg-secondary/50 p-3 font-mono text-xs sm:grid-cols-2" data-testid="app-update-installed-technical">
                 <div>

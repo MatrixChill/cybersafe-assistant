@@ -190,7 +190,7 @@ export type TitlebarPageLabel =
   | "Otimizar"
   | "Simulador"
   | "Relatórios"
-  | "Definições"
+  | "Configurações"
   | "Business Center";/**
  * Sincroniza o contexto da página com o que o utilizador vê na faixa.
  * Na versão atual a faixa já contém o título quando o App.tsx o fornece;

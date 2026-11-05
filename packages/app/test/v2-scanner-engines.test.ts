@@ -51,7 +51,7 @@ describe("Scanner V2 — estado atual dos motores pela derivação canónica", (
     assert.equal(render({ serviceConnected: undefined }), "");
   });
 
-  test("os rótulos e a cobertura são os de `engineCards`, não uma cópia local", () => {
+  test("os rótulos são os de `engineCards`; a cobertura só aparece quando é uma limitação real", () => {
     const health = saude({
       yara: { status: "active", coverage: "normal" },
       clamav: { status: "degraded" },
@@ -62,8 +62,13 @@ describe("Scanner V2 — estado atual dos motores pela derivação canónica", (
     for (const c of esperado) {
       assert.ok(html.includes(`>${c.name}<`), `faltou o motor ${c.name}`);
       assert.ok(html.includes(`>${c.label}<`), `faltou o rótulo canónico de ${c.name} (${c.label})`);
-      assert.ok(html.includes(c.coverage), `faltou a cobertura canónica de ${c.name}`);
+      if (c.coverage === "Cobertura limitada") {
+        assert.ok(html.includes(c.coverage), `faltou a limitação real de ${c.name}`);
+      } else {
+        assert.equal(html.includes(c.coverage), false, `a cobertura não confirmada não se repete em ${c.name}`);
+      }
     }
+    assert.match(html, /A disponibilidade de um motor não garante a sua participação em todas as análises\./);
     // `unavailable` tem nome próprio no contrato: não é «Sem leitura».
     assert.match(html, />Indisponível</);
   });
@@ -72,7 +77,8 @@ describe("Scanner V2 — estado atual dos motores pela derivação canónica", (
     const html = render({ engineHealth: saude(), serviceConnected: true });
     assert.equal(html.includes("Ativo"), false, "sem relatório por motor nada é ativo");
     assert.equal((html.match(/data-state="unavailable"/g) ?? []).length, 4);
-    assert.equal((html.match(/Cobertura não confirmada/g) ?? []).length, 4);
+    assert.equal((html.match(/Cobertura não confirmada/g) ?? []).length, 0, "a cobertura desconhecida não se repete por cartão");
+    assert.match(html, /A disponibilidade de um motor não garante a sua participação em todas as análises\./);
     assert.match(html, /data-conexao="confirmada"/);
   });
 
@@ -114,7 +120,7 @@ describe("Scanner V2 — offline e ausência não comunicam estado", () => {
   test("o rótulo é ESTADO ATUAL; a participação na sessão nunca é afirmada", () => {
     const html = render({ engineHealth: saude(), serviceConnected: true });
     assert.match(html, /Estado atual dos motores/);
-    assert.match(html, /Não prova que estes motores participaram em nenhuma análise/);
+    assert.match(html, /A disponibilidade de um motor não garante a sua participação em todas as análises\./);
     assert.equal(/participa[çc][ãa]o nesta/.test(html), false, "não há frase que afirme participação nesta sessão");
     assert.equal(/Cobertura do cen|COBERTURA DO CEN/i.test(html), false, "a contagem de cenário do lab não é dado do produto");
   });

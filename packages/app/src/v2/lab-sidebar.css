@@ -142,13 +142,6 @@
   margin-left: auto;
   border-radius: 3px;
 }
-.cs-v2.cs-v2-shell .lab-sidebar .nav-indicator {
-  height: 5px;
-  width: 5px;
-  border-radius: 50%;
-  background: var(--v2-accent);
-  margin-left: auto;
-}
 .cs-v2.cs-v2-shell .lab-sidebar-bottom {
   padding: 13px 19px 10px;
   border-top: 1px solid var(--v2-border);
