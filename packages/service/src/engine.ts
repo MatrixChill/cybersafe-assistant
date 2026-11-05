@@ -1252,7 +1252,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // must not disappear when protection is subsequently confirmed.
       const pendingFiles = new Map<string, string>();
       const fileCapture = (event: FileObservation) => {
-        if (this.isShuttingDown || this.exclusions.isExcluded(event.path)) return;
+        if (this.isShuttingDown || this.exclusions.isExcluded(event.path) || this.clamav.isProbeArtifact(event.path)) return;
         const key = path.resolve(event.path).toLowerCase();
         if (!pendingFiles.has(key) && pendingFiles.size >= 64) { this.reportRealtimeOverflow(event.path); return; }
         pendingFiles.set(key, event.path);
@@ -2188,13 +2188,13 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     });
     this.watcher.on("file.created", (event: FileObservation) => {
       if (!this.protectionState || this.isShuttingDown) return;
-      if (this.exclusions.isExcluded(event.path)) return;
+      if (this.exclusions.isExcluded(event.path) || this.clamav.isProbeArtifact(event.path)) return;
       this.eventBus.publish("file.created", "low", `Novo ficheiro observado: ${event.path}`, event);
       void this.handleFileObservation(event.path);
     });
     this.watcher.on("file.modified", (event: FileObservation) => {
       if (!this.protectionState || this.isShuttingDown) return;
-      if (this.exclusions.isExcluded(event.path)) return;
+      if (this.exclusions.isExcluded(event.path) || this.clamav.isProbeArtifact(event.path)) return;
       this.eventBus.publish("file.modified", "low", `Ficheiro modificado observado: ${event.path}`, event);
       void this.handleFileObservation(event.path);
     });

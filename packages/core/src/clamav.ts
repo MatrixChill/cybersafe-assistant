@@ -3262,6 +3262,8 @@ export class ClamavBridge {
   private probeExpiresAt = 0;
   /** Prova EM CURSO (single-flight: até `force` se junta à em curso). */
   private probeInFlight: Promise<boolean> | null = null;
+  /** Caminhos canonicos dos fixtures de prova criados por ESTA bridge. */
+  private readonly activeProbePaths = new Set<string>();
   /** Há uma prova adiada por ocupação à espera de revalidação. */
   private probeDeferredPending = false;
   private _dbDir: string | null = null;
@@ -3446,6 +3448,21 @@ export class ClamavBridge {
    * Verifica binário **e** definições (base de assinaturas). Resultado em
    * cache; `force=true` re-executa o probe (ex.: depois de correr freshclam).
    */
+  /**
+   * Fixture EXATO em uso pelo probe de carga, comparado por caminho canonico.
+   * Um ficheiro do utilizador com nome parecido NUNCA e excluido: a decisao
+   * nao depende de prefixo, extensao ou localizacao, apenas do caminho que
+   * esta bridge criou e ainda nao removeu.
+   */
+  isProbeArtifact(filePath: string): boolean {
+    if (!filePath) return false;
+    const target = path.resolve(filePath).toLowerCase();
+    for (const active of this.activeProbePaths) {
+      if (active.toLowerCase() === target) return true;
+    }
+    return false;
+  }
+
   async isAvailable(force = false): Promise<boolean> {
     // SINGLE-FLIGHT: qualquer chamada (mesmo `force`) junta-se à prova em
     // curso. Sem isto, duas `force` concorrentes (health-check + após swap)
@@ -3661,6 +3678,7 @@ export class ClamavBridge {
         `cybersafe-clamav-load-probe-${randomBytes(8).toString("hex")}.txt`,
       );
       await writeFile(fixturePath, CLAMAV_LOAD_PROBE_FIXTURE, "utf8");
+      this.activeProbePaths.add(path.resolve(fixturePath));
 
       // Re-verificação depois do último `await` antes do spawn (janela dispose).
       if (this.disposed) {
@@ -3732,7 +3750,10 @@ export class ClamavBridge {
         else releaseClamavSlot();
         slotHeld = false;
       }
-      if (fixturePath) await rm(fixturePath, { force: true }).catch(() => undefined);
+      if (fixturePath) {
+        this.activeProbePaths.delete(path.resolve(fixturePath));
+        await rm(fixturePath, { force: true }).catch(() => undefined);
+      }
       // Morte não confirmada → a lease NÃO se liberta sem prova do SO
       // (spawner de produção tem sempre o gancho; sem ele, a lease fica presa
       // = estado honesto).

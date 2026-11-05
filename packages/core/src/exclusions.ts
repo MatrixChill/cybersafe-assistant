@@ -235,12 +235,6 @@ export class ExclusionManager {
     const ext = path.extname(lowerPath);
     const fileName = path.basename(lowerPath);
 
-    // A fixture da prova de carga do ClamAV pertence ao proprio motor. Deixa-la
-    // entrar no monitor em tempo real criava um ciclo medido nos logs: o watcher
-    // abria o ficheiro, o probe apagava-o no fim e o evento saia como "removido ou
-    // inacessivel" — ruido de falha sem relacao com ficheiros do utilizador.
-    if (fileName.startsWith("cybersafe-clamav-load-probe-")) return true;
-
     if (this.userCategory(filePath)) return true;
 
     // 1. Path prefix exclusions (directories / exact files)
@@ -272,10 +266,6 @@ export class ExclusionManager {
     const lowerPath = normalizedPath.toLowerCase();
     const ext = path.extname(lowerPath);
     const fileName = path.basename(lowerPath);
-
-    if (fileName.startsWith("cybersafe-clamav-load-probe-")) {
-      return "fixture interna da prova de carga do ClamAV";
-    }
 
     for (const ex of this.config.paths) {
       if (matchesPathBoundary(lowerPath, ex)) {
