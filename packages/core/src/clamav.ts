@@ -2816,6 +2816,8 @@ export type ClamavLoadRun = (
  * (exit 0). 30 s é o tecto com margem >4× para máquinas lentas.
  */
 export const CLAMAV_LOAD_PROBE_TIMEOUT_MS = 30_000;
+/** Teto do prazo adaptativo: um PC que nem em 120 s carrega a base fica degradado com a causa dita. */
+export const CLAMAV_LOAD_PROBE_MAX_TIMEOUT_MS = 120_000;
 
 /**
  * Espera máxima pela VAGA antes de adiar a prova. Distinta do deadline da
@@ -2953,16 +2955,31 @@ export function applyClamavLoadProof(
   }
   if (outcome.health.status !== "active" || !chosen) return outcome;
   if (clamavLoadConfirmed(proof)) return outcome;
-  const why = proof.error
-    ? `a prova de carga falhou (${proof.error})`
-    : "a prova de carga não produziu evidência coerente (exit≠0, resumo incompleto, infrações ou stderr de erro)";
   return {
     available: false,
-    health: {
-      status: "degraded",
-      detail: `Base presente em ${chosen.dir} mas ${why} — não se publica active sem carga comprovada; corra freshclam`,
-    },
+    health: { status: "degraded", detail: clamavLoadProofFailureDetail(chosen.dir, proof) },
   };
+}
+
+/**
+ * Diagnóstico da prova de carga falhada, por CAUSA. Antes dizia sempre «corra
+ * freshclam», mesmo quando a base estava boa e o que falhou foi um clamscan
+ * anterior ainda vivo (vaga envenenada) ou uma carga lenta — e o freshclam não
+ * resolve nenhum desses. Só a falha de carga sem outra causa sugere atualizar.
+ */
+export function clamavLoadProofFailureDetail(dir: string, proof: ClamavLoadProof): string {
+  const erro = proof.error ?? "";
+  if (/vaga envenenada/i.test(erro)) {
+    return `Base presente em ${dir}, mas um clamscan anterior ainda não terminou (o Windows não confirmou o fim). O CyberSafe volta a provar a carga quando ele terminar; não é preciso atualizar as definições.`;
+  }
+  if (/^timeout/i.test(erro)) {
+    return `Base presente em ${dir}, mas a carga demorou mais do que o prazo (${erro}). Acontece com o computador ocupado ou com o antivírus a analisar a base; nova tentativa automática com prazo maior.`;
+  }
+  if (/morte não confirmada/i.test(erro)) {
+    return `Base presente em ${dir}, mas o fim da prova não foi confirmado pelo Windows; o motor fica indisponível até essa confirmação.`;
+  }
+  const why = erro ? `a prova de carga falhou (${erro})` : "a prova de carga não produziu evidência coerente (exit≠0, resumo incompleto ou erro do clamscan)";
+  return `Base presente em ${dir} mas ${why} — não se publica active sem carga comprovada. Se repetir, atualiza as definições (freshclam): a base pode estar incompleta.`;
 }
 
 /**
@@ -3329,6 +3346,13 @@ export class ClamavBridge {
   private probeExpiresAt = 0;
   /** Prova EM CURSO (single-flight: até `force` se junta à em curso). */
   private probeInFlight: Promise<boolean> | null = null;
+  /**
+   * Prazo da prova de carga em uso. Começa no valor medido (30 s); depois de
+   * uma prova que EXPIROU com o processo terminado e confirmado, dobra até
+   * 120 s. Uma prova bem-sucedida repõe o valor de base. Não é um aumento
+   * global: só o PC que mostrou ser lento recebe mais tempo.
+   */
+  private adaptiveProbeTimeoutMs: number | null = null;
   /** Caminhos canonicos dos fixtures de prova criados por ESTA bridge. */
   private readonly activeProbePaths = new Set<string>();
   /** Há uma prova adiada por ocupação à espera de revalidação. */
@@ -3613,6 +3637,13 @@ export class ClamavBridge {
           : await this.runLoadProof(chosen);
       decided = applyClamavLoadProof(decided, chosen, proof, previous);
       if (proof.deferred === true) this.probeDeferredPending = true;
+      if (this.options.probeTimeoutMs === undefined) {
+        if (decided.health.status === "active") this.adaptiveProbeTimeoutMs = null;
+        else if (/^timeout/i.test(proof.error ?? "") && !/morte não confirmada/i.test(proof.error ?? "")) {
+          const atual = this.adaptiveProbeTimeoutMs ?? CLAMAV_LOAD_PROBE_TIMEOUT_MS;
+          this.adaptiveProbeTimeoutMs = Math.min(atual * 2, CLAMAV_LOAD_PROBE_MAX_TIMEOUT_MS);
+        }
+      }
     }
     // POST017: timeout/lease/cancel da prova não tornam as definições velhas.
     // Guardar a frescura separadamente permite recuperar SÓ após batch positivo;
@@ -3652,7 +3683,7 @@ export class ClamavBridge {
     // para a frente TODOS os scans respondiam "indisponível". A prova agora
     // adquire a vaga como qualquer job (background, espera com limite do
     // probe), e a vaga só é libertada/envenenada QUEM A POSSUI.
-    const probeTimeoutMs = this.options.probeTimeoutMs ?? CLAMAV_LOAD_PROBE_TIMEOUT_MS;
+    const probeTimeoutMs = this.options.probeTimeoutMs ?? this.adaptiveProbeTimeoutMs ?? CLAMAV_LOAD_PROBE_TIMEOUT_MS;
     const slotWaitMs = this.options.probeSlotWaitMs ?? CLAMAV_LOAD_PROBE_SLOT_WAIT_MS;
     // Cancelamento da ESPERA pela vaga: um controlador próprio cujo timer se
     // limpa assim que a vaga decide (o `AbortSignal.timeout` deixava um timer
