@@ -1,3 +1,4 @@
+import { WatcherReconciler, reconcileWatcherRoot } from "./watcher-reconciliation.js";
 import { RpcRequestQueue, INDEPENDENT_READ_METHODS } from './rpc-request-queue.js';
 import { createDefinitionsUpdateResult } from "./definition-update-result.js";
 import {
@@ -440,6 +441,7 @@ export class ProtectionEngineService {
   /** Única fonte dos números de perda: separa fila de watcher e nunca soma cumulativos. */
   private loss = new RealtimeLossLedger();
   /** Últimos buracos de cobertura reportados pelo filho do watcher (janela limitada). */
+  private watcherReconciler?: WatcherReconciler;
   private coverageGaps: { path: string; motivo: string; detectedAt: string }[] = [];
   /**
    * Raiz de dados do serviço. Injetável para que um teste nunca escreva em
@@ -1438,6 +1440,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     this.realtimeRecovery.clear();
     // A contagem de perda é por sessão de proteção: sem ela, um número de
     // ontem é apresentado como se fosse do estado atual.
+    this.watcherReconciler?.clear();
     this.loss.reset();
     this.resetOverflowEpisode();
     this.backgroundAbort.abort();
@@ -2427,7 +2430,26 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
    * expõe aqui).
    */
   private reportCoverageGap(caminho: string, motivo: string, novos: number, total: number, mensagem: string): void {
+    const previousSignals = this.loss.summary().watcherSignals;
     this.loss.noteWatcherSignal({ path: caminho, novos, total });
+    if (motivo === "overflow" && this.loss.summary().watcherSignals === previousSignals) return;
+    this.loss.noteCoverageGap(caminho, motivo);
+    if (motivo === "overflow" && path.isAbsolute(caminho) && this.protectionState && !this.isShuttingDown) {
+      this.watcherReconciler ??= new WatcherReconciler(async root => {
+        const signal = this.backgroundAbort.signal;
+        return reconcileWatcherRoot(root, async file => {
+          if (this.exclusions.isExcluded(file) || signal.aborted) return false;
+          const result = await this.scanArtifact(file, "service", {backgroundSignal: signal, skipVirusTotal:true, readOnly:true, priority:"realtime"});
+          const verdict = result?.results[0]?.verdict;
+          return verdict === "safe" || verdict === "malicious" || verdict === "suspicious";
+        }, signal);
+      }, root => {
+        this.loss.confirmRootSnapshot(root);
+        this.eventBus.publish("engine.health", "low", "Reconciliação concluída: os ficheiros presentes na pasta foram analisados e a lista permaneceu estável.", {reason:"watcher-snapshot-reconciled", historicalDeliveryConfirmed:false});
+      });
+      this.watcherReconciler.schedule(caminho);
+    }
+
     this.coverageGaps.push({ path: caminho, motivo, detectedAt: new Date().toISOString() });
     if (this.coverageGaps.length > 50) this.coverageGaps.shift();
     const agora = Date.now();

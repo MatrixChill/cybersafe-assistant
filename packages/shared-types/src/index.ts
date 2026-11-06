@@ -457,6 +457,8 @@ export interface RealtimeLossSummary {
   watcherSignals: number;
   watcherNamelessCallbacks: number;
   watcherCallbacksIndeterminate: boolean;
+  /** Current snapshot gaps; absent on older services. Historical counters remain. */
+  watcherPendingRoots?: string[];
   raizesComPerda: string[];
 }
 
@@ -2636,7 +2638,9 @@ export function realtimeCoverage(engine?: EngineHealth): RealtimeCoverage {
   const rec = engine?.realtimeRecovery;
   const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
   const rejectedAttempts = loss?.queueRejections ?? engine?.realtimeDroppedEvents ?? 0;
-  const watcherIndeterminate = loss?.watcherCallbacksIndeterminate === true || (loss?.watcherSignals ?? 0) > 0;
+  const watcherIndeterminate = Array.isArray(loss?.watcherPendingRoots)
+    ? loss.watcherPendingRoots.length > 0
+    : loss?.watcherCallbacksIndeterminate === true || (loss?.watcherSignals ?? 0) > 0;
   const reported = typeof rec?.unrecovered === "number" && typeof rec?.analysisPending === "number";
   const c = {
     rejectedAttempts,

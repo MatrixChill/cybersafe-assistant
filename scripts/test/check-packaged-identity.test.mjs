@@ -86,10 +86,15 @@ describe("gate de identidade de packaging", () => {
     if (publisher.assinatura === "NotSigned") {
       assert.equal(publisher.status, "FAIL", "com --require-signature, um binário sem assinatura é FAIL");
       assert.equal(code, 1, "e o gate sai com 1");
-    } else {
-      // Assinado neste ambiente: o caminho feliz é ter de passar.
+    } else if (publisher.assinatura === "Valid") {
+      // Só uma assinatura explicitamente válida permite o caminho feliz.
       assert.equal(publisher.status, "PASS");
       assert.equal(code, 0, "um binário assinado passa o gate de assinatura");
+    } else {
+      // Falha do verificador/SO não é prova de assinatura válida.
+      assert.notEqual(publisher.status, "PASS");
+      assert.equal(code, 1, "assinatura não verificável mantém o gate fechado");
+      assert.ok(publisher.detail?.trim());
     }
   });
 

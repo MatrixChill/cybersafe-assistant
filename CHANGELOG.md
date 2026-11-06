@@ -48,6 +48,8 @@ e exigem autorização explícita do dono do projeto.
 
 ## `0.2.2` — candidata de manutenção, **NÃO PUBLICADA**
 
+Complemento de 06/11: cartões distinguem métricas ausentes; reconciliação limitada por pasta exige análises concluídas e snapshot estável, preservando lacunas reais e contadores históricos. Ver `docs/V022-CODEX-FINALIZACAO.md`. Novo freeze obrigatório.
+
 Base: `v0.2.1` (`b3a216a`). Branch `fix/v021-realtime-coverage`.
 
 ### Tempo real e cobertura

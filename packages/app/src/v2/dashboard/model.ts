@@ -74,7 +74,9 @@ export function engineCards(
           ? "Cobertura limitada"
           : report?.coverage === "normal" && raw === "active"
             ? "Cobertura reportada: normal"
-            : "Cobertura não confirmada",
+            : !report ? "Sem leitura de cobertura"
+              : report.coverage === undefined ? "Sem métrica de cobertura"
+              : "Cobertura não confirmada",
       report,
     };
   });

@@ -36,6 +36,14 @@ export class RealtimeLossLedger {
   watcherSignals = 0;
   watcherNamelessCallbacks = 0;
   private indeterminado = false;
+  private pendingRoots: Map<string, boolean> | undefined;
+  noteCoverageGap(root: string, reason: string): void {
+    this.pendingRoots ??= new Map();
+    this.pendingRoots.set(root, (this.pendingRoots.get(root) ?? false) || reason !== "overflow");
+  }
+  confirmRootSnapshot(root: string): void {
+    if (this.pendingRoots?.get(root) === false) this.pendingRoots.delete(root);
+  }
 
   constructor(opcoes: { maxPaths?: number } = {}) {
     this.maxPaths = opcoes.maxPaths ?? 5_000;
@@ -80,6 +88,7 @@ export class RealtimeLossLedger {
 
   summary(): RealtimeLossSummary {
     return {
+      ...(this.pendingRoots ? { watcherPendingRoots: [...this.pendingRoots.keys()] } : {}),
       queueRejections: this.queueRejections,
       queueDistinctPaths: this.paths.size,
       queuePathsCapped: this.queuePathsCapped,
@@ -99,5 +108,6 @@ export class RealtimeLossLedger {
     this.watcherSignals = 0;
     this.watcherNamelessCallbacks = 0;
     this.indeterminado = false;
+    this.pendingRoots = undefined;
   }
 }
