@@ -11,7 +11,7 @@ const ler = (rel) => fs.readFileSync(path.join(RAIZ, rel), "utf8");
 test("product-version.json é a identidade canónica e é semver válido", () => {
   const { version, channel } = readProductVersion({ root: RAIZ });
   assert.ok(isValidVersion(version), `versão inválida: ${version}`);
-  assert.match(version, /^0\.2\.0/, "a Release em preparação é 0.2.0");
+  assert.match(version, /^0\.2\.2$/, "a Release em preparação é 0.2.2");
   assert.ok(typeof channel === "string" && channel.length > 0, "canal em falta");
   assert.ok(fs.existsSync(path.join(RAIZ, PRODUCT_VERSION_FILE)));
 });

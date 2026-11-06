@@ -6,9 +6,10 @@ import path from 'node:path';
 import { readProductVersion, isValidVersion, verifyBuiltRenderer } from './app-version.mjs';
 test('candidate, product and Windows versions are distinct and consistent',()=>{
  const v=readProductVersion();
- assert.equal(v.version,'0.2.0-rc.7');
- assert.equal(v.channel,'internal');
- assert.equal(v.productVersion,'0.2.0'); assert.equal(v.windowsVersion,'0.2.0.0');
+ // Release de manutenção estável em preparação (product-version.json).
+ assert.equal(v.version,'0.2.2');
+ assert.equal(v.channel,'stable');
+ assert.equal(v.productVersion,'0.2.2'); assert.equal(v.windowsVersion,'0.2.2.0');
 });
 test('rejects ambiguous semver identifiers',()=>{
  for(const value of ['01.2.3','1.2.3-01','1.2.3-a..b','1.2.3-','1.2']) assert.equal(isValidVersion(value),false,value);

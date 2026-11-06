@@ -46,6 +46,41 @@ e exigem autorização explícita do dono do projeto.
 
 ---
 
+## `0.2.2` — candidata de manutenção, **NÃO PUBLICADA**
+
+Base: `v0.2.1` (`b3a216a`). Branch `fix/v021-realtime-coverage`.
+
+### Tempo real e cobertura
+- Cada caminho afetado por saturação é seguido até à **análise da versão atual**: à espera,
+  sem nenhuma versão admitida, admitido por analisar, analisado com veredicto, inconclusivo, ou
+  alterado/removido sem confirmação. Admissão recuperada deixa de contar como cobertura.
+- A cobertura é um **eixo próprio**: histórico todo confirmado já não deixa «Proteção com
+  limitações» nem «Degradado» com os quatro motores ativos; lacunas por resolver continuam a avisar.
+- Recuperação acordada pela fila (`onSpace`) e sem recuo depois de uma admissão aceite.
+  Orçamento **medido**: 1024 caminhos (pico do incidente 648; 128 deixava 519 sem versão admitida).
+- 16 lugares da fila reservados a Downloads: p95 sob saturação 63 ms (antes 27–46 s), 0 perdidos.
+- Um aviso por episódio de saturação e um desfecho no fim, em vez de um aviso cumulativo a cada 10 s.
+- O seguimento não enche com histórico confirmado em serviços ligados durante dias.
+
+### Motores e deteção
+- ClamAV: uma prova em curso depois de um timeout já não publica «indisponível» (um alerta por causa).
+- Tempo real: um SHA-256 completo que coincide com uma assinatura verificada decide sem esperar
+  pelo `clamscan` (~15 s); o resultado diz que o ClamAV não foi consultado e a cobertura fica
+  incompleta. Análises manuais correm todos os motores.
+- Uma falha do ClamAV já não rebaixa a confiança de uma deteção por hash exato, o que bloqueava a
+  quarentena automática autorizada. Deteções só pelo ClamAV continuam fora do isolamento automático.
+
+### Quarentena
+- Restauro: o segundo passo diz «Confirmar restauro», recebe o foco e mostra o destino; o primeiro
+  indica que abriu a confirmação. Textos PT-PT corrigidos.
+
+### Limitações mantidas
+- Terminação de processos desligada em Windows (decisão R7).
+- Sem assinatura Authenticode.
+- Latência EICAR instalada e janela minimizada: validação manual em VM.
+
+---
+
 ## `0.1.11-internal.pap-r7.20261031` — **SÓ CÓDIGO**, sem instalador
 
 Canal `internal`, codinome `pap-r7`; identidade definida em `dca1cde` sem alterar o `appId`.
