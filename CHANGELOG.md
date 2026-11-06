@@ -46,7 +46,7 @@ e exigem autorização explícita do dono do projeto.
 
 ---
 
-## `0.2.3` — estabilidade (candidata, **NÃO PUBLICADA**)
+## `0.2.3` — estabilidade, publicada em 06/11/2026
 
 Base: `v0.2.2` (`7b942bd`). Branch `fix/v023-stability`. Corrige o que foi observado com a v0.2.2
 instalada num segundo computador.
