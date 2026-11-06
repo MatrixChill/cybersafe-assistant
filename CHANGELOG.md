@@ -46,7 +46,7 @@ e exigem autorização explícita do dono do projeto.
 
 ---
 
-## `0.2.4` — correção do ClamAV degradado no notebook (candidata, **NÃO PUBLICADA**)
+## `0.2.4` — correção do ClamAV degradado no notebook, publicada em 06/11/2026
 
 Base: `v0.2.3` (`f8062a5`). Evidência: notebook i5-8350U com a v0.2.3, ClamAV degradado com «o fim da
 prova não foi confirmado pelo Windows» e nenhum `clamscan` vivo no diagnóstico.

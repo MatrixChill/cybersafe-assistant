@@ -18,8 +18,8 @@
   <img alt="Estado" src="https://img.shields.io/badge/estado-desenvolvimento%20académico-orange">
 </p>
 
-> **Versão pública estável: [v0.2.3](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.3)** · Windows 10/11 x64.
-> A **v0.2.3** (estabilidade do ClamAV, arranque e cobertura do tempo real) está publicada para instalação manual; manifesto Ed25519 e SHA-256 verificados. Instalador sem assinatura Authenticode (limitação declarada).
+> **Versão pública estável: [v0.2.4](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.4)** · Windows 10/11 x64.
+> A **v0.2.4** (correção do ClamAV degradado em PCs mais lentos, sobre a v0.2.3) está publicada para instalação manual; manifesto Ed25519 e SHA-256 verificados. Instalador sem assinatura Authenticode (limitação declarada).
 > O CyberSafe complementa — não substitui — o Microsoft Defender: mantém as proteções do Windows ativas.
 
 <p align="center">
@@ -77,7 +77,7 @@ indisponíveis).
 3. Encerra normalmente o CyberSafe, preserva um backup dos dados e executa o instalador oficial. Sem Authenticode, o Windows pode mostrar editor desconhecido. Se uma política bloquear a execução, conserva a mensagem e não desatives as proteções.
 4. Abre o CyberSafe e confirma a versão `0.2.2`, a sessão, o histórico e o estado dos quatro motores. A versão anterior continua disponível na [release v0.2.1](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.1).
 
-Setup: [CyberSafe-Assistant-Setup-0.2.3.exe](https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.3/CyberSafe-Assistant-Setup-0.2.3.exe), 279437606 bytes. SHA-256: `eeb6276d3575487527afec502bae80343b6465264cfae86cdff811ca1983358b`.
+Setup: [CyberSafe-Assistant-Setup-0.2.4.exe](https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.4/CyberSafe-Assistant-Setup-0.2.4.exe), 279442395 bytes. SHA-256: `6a3e9d730ef989c84ac7de701d98b46b7f5e65b9110d5e96032efdb0c880ea2c`.
 
 As atualizações seguintes são verificadas pela aplicação: manifesto assinado com **Ed25519** (chave do proprietário, impressão digital fixada em `packages/desktop/src/updater/release-trust.json`), SHA-256 do instalador e recusa de versões mais antigas. A instalação continua manual.
 
