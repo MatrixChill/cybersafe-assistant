@@ -29,6 +29,7 @@ import { ProtectionEngineService } from "../dist/engine.js";
 import { NativeEngineBridge } from "../dist/native-engine-bridge.js";
 import { ScanManager } from "../dist/scan-manager.js";
 import { RealtimeFileQueue } from "../dist/realtime-file-queue.js";
+import { RealtimeRecovery } from "../dist/realtime-recovery.js";
 
 const MARCADOR = "MZ CS-STRONG-USB-PROBE-42";
 
@@ -127,6 +128,7 @@ async function dispositivo(t) {
     isShuttingDown: false,
     protectionGeneration: 1,
     realtimeQueue: new RealtimeFileQueue(),
+    realtimeRecovery: new RealtimeRecovery(),
     fileObservationReads: 0,
     logHistory: async () => {},
     actionsLog: { write: async () => {} },
