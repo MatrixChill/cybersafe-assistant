@@ -181,3 +181,21 @@ test('reserva: trabalho normal deixa 16 lugares livres para Downloads', () => {
   let high=0; while(q.enqueue(`h${high}`,'1',async()=>{},'high')==='queued') high++;
   assert.equal(high,16);
 });
+
+test('serviço de longa duração: histórico confirmado não enche o seguimento', () => {
+  const h=harness({maxPaths:4,maxTracked:4});
+  for(let i=0;i<4;i++){h.r.defer(`old-${i}`,'analysis',async()=>false);h.r.noteAdmitted(`old-${i}`,'v');h.r.noteAnalyzed(`old-${i}`,'v','verdict');}
+  h.r.defer('novo','analysis',async()=>false);
+  const s=h.r.snapshot();
+  assert.equal(s.unrecovered,0,'um caminho novo não pode nascer como lacuna');
+  assert.equal(s.trackedCapped,false);
+  assert.equal(s.waiting,1);
+});
+
+test('seguimento cheio de lacunas reais continua a contar o excedente', () => {
+  const h=harness({maxPaths:2,maxTracked:2});
+  h.r.defer('a','analysis',async()=>false); h.r.defer('b','analysis',async()=>false);
+  h.r.defer('c','analysis',async()=>false);
+  assert.equal(h.r.snapshot().trackedCapped,true);
+  assert.ok(h.r.snapshot().unrecovered>=1);
+});

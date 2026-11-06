@@ -172,6 +172,12 @@ export class RealtimeRecovery {
     if(t){t.state=state;return;}
     // Só chaves e um estado: segue mais caminhos do que o backlog de repetições,
     // para que uma observação nova também feche um caminho já largado.
+    // Cheio: liberta primeiro um caminho JÁ CONFIRMADO (histórico resolvido, não
+    // esconde lacuna). Sem isto, dias de serviço ligado enchiam o seguimento e
+    // toda a rejeição seguinte ficava «não recuperada» até reiniciar.
+    if(this.tracked.size>=this.maxTracked){
+      for(const [old,t] of this.tracked)if(t.state==="confirmed"){this.tracked.delete(old);break;}
+    }
     if(this.tracked.size<this.maxTracked)this.tracked.set(key,{state,fingerprint:null});else this.trackedOverflow++;
   }
   private idleCheck():void{if(this.entries.size===0 && !this.busy)this.onIdle?.();}
