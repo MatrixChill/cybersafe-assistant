@@ -455,9 +455,11 @@ import { alvoDeExplicacao, consentValeParaAlvo, autorizacaoValida, isProcessQues
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 const R = ((globalThis.__mSpies ??= { abertos: [] as boolean[], locais: [] as any[], ofertas: [] as any[] }));
 const cancelLocalSecurityRequest = (_c: any) => {};
 const abortRef: any = { current: null };
@@ -782,6 +784,7 @@ import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, buil
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 import { isLocalSecurityQuestion, shouldDiscardLateAnswer } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 const R = ((globalThis.__eSpies ??= { chamadas: [] as any[], anexadas: [] as any[] }));
 const useCallback = (fn: any) => fn;
@@ -1122,6 +1125,7 @@ import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, buil
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 import { isLocalSecurityQuestion, shouldDiscardLateAnswer } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 import { alvoDePedido, descartarResposta, traceDePedido, bloqueioDeConsentimentoAplica, revalidarAntesDoEnvio } from ${JSON.stringify(urlModulo("src/lib/matrixRequestMachine.ts"))};
 import { decidirConsentimentoDeEnvio, mesmosCamposDeConsentimento, camposDeConsentimentoNoChat, codigoDeConsentimentoRecusado, mensagemDeConsentimento, subscreverRevogacaoDeConsentimento, notificarRevogacaoDeConsentimento, alvoUnicoCanonico, autorizacaoUnicaValida, camposDeAutorizacaoUnicaNoChat, pedirAutorizacaoUnica as pedirAutorizacaoUnicaReal } from ${JSON.stringify(urlModulo("src/lib/matrixExternalConsent.ts"))};

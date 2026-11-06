@@ -351,6 +351,7 @@ const shouldDiscardLateAnswer = (_i: any) => false;
 const answerLocalSecurityQuestion = async () => (${JSON.stringify(c.respostaLocal ?? null)});
 ${declLocal}
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 const authHeaders = () => ({ Authorization: "Bearer fixture-de-teste" });
 const API_BASE = "http://127.0.0.1:59999";
 const PAGE_LABELS: any = { dashboard: "Painel", tasks: "Processos" };

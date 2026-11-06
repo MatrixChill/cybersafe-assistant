@@ -270,7 +270,10 @@ assert.notEqual(REGIAO_ESTADO_VISIVEL.indexOf("estadoVisivel ="), -1, "a deriva�
 
 const PERGUNTA_A = "Porque é que o PID 4712 está a usar tanta RAM? É seguro fechá-lo?";
 const PERGUNTA_B = "Porque é que o PID 9990 está a usar tanta RAM? É seguro fechá-lo?";
-const PERGUNTA_NEUTRA = "Oi";
+// v0.2.2: «Oi» passou a ser respondido pela MATRIX localmente (apresentação do
+// produto). A pergunta neutra continua a ser uma pergunta GERAL, sem dados do
+// processo, que pode ir ao fornecedor no modo Online.
+const PERGUNTA_NEUTRA = "Dá-me um conselho geral de segurança para a família";
 
 test("as perguntas sintéticas são mesmo duas classes diferentes", () => {
   // Sem isto, os casos A e B podiam passar por acaso: o gate só existe para
@@ -302,9 +305,11 @@ import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, proc
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 import { isLocalSecurityQuestion, shouldDiscardLateAnswer } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 import { alvoDePedido, descartarResposta, traceDePedido, estadoDoTransporte, bloqueioDeConsentimentoAplica, revalidarAntesDoEnvio, type MatrixRequestState, type IdentidadePedido } from ${JSON.stringify(urlModulo("src/lib/matrixRequestMachine.ts"))};
 const R = ((globalThis.__sSpies ??= { chamadas: [], traces: [], anexadas: [], stream: [], espera: [], ids: 0, timers: [], armados: [], seq: 0 }));
@@ -507,8 +512,8 @@ const CONTEXTO_B = {
   selectedProcess: { pid: 9990, name: "MsMpEng", cpuPercent: 12.5, workingSetMb: 2100, startedAt: "2026-10-23T08:30:00.000Z" },
 };
 
-// A — conversa nova com «Oi»: sem gate, fornecedor configurado, resposta da IA.
-test("A: «Oi» numa conversa nova vai ao fornecedor configurado e diz que foi a IA", async () => {
+// A — conversa nova com uma pergunta geral: sem gate, fornecedor configurado, resposta da IA.
+test("A: pergunta geral numa conversa nova vai ao fornecedor configurado e diz que foi a IA", async () => {
   const m = await montar({});
   await m.enviar(PERGUNTA_NEUTRA);
   const e = m.estado();
@@ -518,6 +523,15 @@ test("A: «Oi» numa conversa nova vai ao fornecedor configurado e diz que foi a
   assert.equal(resposta.origin, "ai");
   assert.equal(resposta.state, "generativa");
   assert.equal(matrixStateLabel(resposta.state), "Resposta da IA");
+});
+
+// A2 — «Oi» é a MATRIX a apresentar-se: resposta local, zero chamadas.
+test("A2: «Oi» responde localmente, sem fornecedor", async () => {
+  const m = await montar({});
+  await m.enviar("Oi");
+  const e = m.estado();
+  assert.equal(e.chamadas.length, 0, "a saudação não vai ao fornecedor");
+  assert.equal(e.anexadas.at(-1).origin, "local");
 });
 
 // B — processo não autorizado: zero IO, e o estado diz «a precisar de autorização».

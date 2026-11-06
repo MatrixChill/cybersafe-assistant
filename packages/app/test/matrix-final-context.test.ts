@@ -59,12 +59,14 @@ const semAlarme = (texto: string) => assert.doesNotMatch(
   /(está|foi|é) (infetado|malware)|ameaça confirmada|fuga de memória confirmada|\bNormal\b/i,
 );
 
-test("F1 — quatro blocos determinísticos, sem os rótulos antigos, com RAM/CPU globais", () => {
+// v0.2.2: formato pedido pelo utilizador para «Explicar na MATRIX» — as mesmas
+// garantias (só factos medidos, sem tendência inventada), com perguntas claras.
+test("F1 — blocos determinísticos no formato da explicação, com RAM/CPU globais", () => {
   const texto = buildProcessLocalReply(diagnostico(), 900, brave as never);
-  assert.match(texto, /^\*\*MEDIDO:\*\*/m);
-  assert.match(texto, /^\*\*HIPÓTESE:\*\*/m);
-  assert.match(texto, /^\*\*NÃO CONFIRMADO:\*\*/m);
-  assert.match(texto, /^\*\*AÇÃO SEGURA:\*\*/m);
+  for (const bloco of ["Processo analisado:", "O que é:", "Consumo observado:", "O que isto pode significar:", "Existem sinais de perigo?", "O que recomendo:", "Posso encerrá-lo?"]) {
+    assert.ok(texto.split("\n").some((linha) => linha.startsWith(`**${bloco}**`)), bloco);
+  }
+  assert.match(texto, /Processo analisado:\*\* brave\.exe \(PID 900\)/i);
   assert.match(texto, /RAM utilizada: 15000 MB de 16384 MB/);
   assert.match(texto, /RAM disponível: 1384 MB/);
   assert.match(texto, /CPU global: 88\.0%/);

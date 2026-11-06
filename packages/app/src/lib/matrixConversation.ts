@@ -157,6 +157,8 @@ export type MatrixRotaInput = {
   modoLocal: boolean;
   /** Escolha explícita «Local»: nenhum pedido vai ao fornecedor neste turno. */
   modoConversaLocal?: boolean;
+  /** Pergunta sobre o próprio CyberSafe com resposta local exata. */
+  respostaDoProduto?: boolean;
 };
 
 /**
@@ -181,6 +183,9 @@ export function motivoDoEncaminhamentoLocal(i: MatrixRotaInput): string | null {
   // volta a esta matriz e o modo escolhido impede o fornecedor. Pôr o modo à
   // frente disto respondia «local» genérico a uma pergunta que tinha leitura real.
   if (i.perguntaSegurancaLocal) return "seguranca-local";
+  // O produto responde sobre si próprio: o fornecedor genérico não conhece os
+  // motores nem as regras do CyberSafe e podia inventar.
+  if (i.respostaDoProduto === true) return "conhecimento-produto";
   // Escolha explícita do utilizador: precede o gate de consentimento porque não
   // há envio nenhum a autorizar. Pedir uma autorização que não vai ser usada era
   // a contradição entre a caixa e o modo que este lote fecha.
@@ -247,8 +252,11 @@ export function deveAutoEnviarExplicacao(
   return ultimoIdAutoEnviado !== pedido.id;
 }
 
-/** Saudação única da Matrix: a mesma no arranque e em «Nova conversa». */
-export const MATRIX_GREETING = "Oi! Tudo bem? Em que posso ajudar?";
+import { MATRIX_APRESENTACAO } from "./matrixKnowledge";
+
+/** Apresentação da MATRIX: a mesma no arranque e em «Nova conversa». Um
+    cumprimento posterior na mesma conversa recebe resposta breve. */
+export const MATRIX_GREETING = MATRIX_APRESENTACAO;
 
 /** Conversa nova começa com UMA mensagem da assistente, não com zero. */
 export function initialMatrixMessages(): ConversationMessage[] {

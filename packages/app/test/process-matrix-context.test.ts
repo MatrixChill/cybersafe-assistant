@@ -40,11 +40,12 @@ test('contexto contém apenas contrato mínimo e nomes base, sem caminhos ou cam
 test('fallback usa factos medidos e identifica limites, não se apresenta como IA generativa', () => {
   const answer = buildProcessLocalReply(diagnostic, 42);
   assert.match(answer, /DIAGNÓSTICO LOCAL/);
-  assert.match(answer, /MEDIDO/);
+  assert.match(answer, /Consumo observado:/);
   assert.match(answer, /900/);
   assert.match(answer, /200/);
-  assert.match(answer, /NÃO CONFIRMADO/);
-  assert.match(answer, /AÇÃO SEGURA/);
+  assert.match(answer, /O que isto pode significar:/);
+  assert.match(answer, /O que recomendo:/);
+  assert.match(answer, /Existem sinais de perigo\?\*\* Nestas medições não há nenhum indício/);
   assert.doesNotMatch(answer, /memória restante é cache|detetado um vírus|fuga de memória confirmada/);
 });
 test('perguntas de processos usam diagnóstico factual; ausência não inventa números', () => {
@@ -79,15 +80,15 @@ test('specific Windows process names select factual offline diagnosis',()=>{
   assert.match(defender,/não confirma uma análise em curso/);
 });
 
-test('MemoryCompression offline reply has four deterministic blocks',()=>{
+test('MemoryCompression offline reply has deterministic blocks and says not to close it',()=>{
   const diag={...diagnostic,topProcesses:[{...diagnostic.topProcesses[0],name:'Memory Compression',pid:968}],selected:{...diagnostic.topProcesses[0],name:'Memory Compression',pid:968}};
   const reply=buildProcessLocalReply(diag,968,{pid:968,name:'Memory Compression',startedAt:'2026-09-01T10:00:00.000Z',cpuPercent:3,workingSetMb:1950});
   assert.match(reply,/DIAGNÓSTICO LOCAL/);
-  assert.match(reply,/MEDIDO/);
-  assert.match(reply,/HIPÓTESE/);
+  assert.match(reply,/Consumo observado:/);
+  assert.match(reply,/O que é:/);
   assert.match(reply,/não concludente/);
-  assert.match(reply,/NÃO CONFIRMADO/);
-  assert.match(reply,/AÇÃO SEGURA/);
+  assert.match(reply,/O que isto pode significar:/);
+  assert.match(reply,/Posso encerrá-lo\?\*\* Não: é um componente do Windows/);
   assert.doesNotMatch(reply,/DADO OBSERVADO|HIPÓTESE \/ CONTEXTO|FALTA MEDIR|RECOMENDAÇÃO/);
 });
 

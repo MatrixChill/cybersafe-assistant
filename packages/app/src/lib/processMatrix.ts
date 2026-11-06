@@ -341,8 +341,13 @@ export function isProcessDiagnosticRequest(text: string): boolean {
   return !PROCESS_EDUCATIONAL.test(text);
 }
 
+/** Seguimento com pronome ou verbo acentuado: o `\b` sem a flag `u` não
+    reconhece «fechá-lo» (o «á» não é carácter de palavra). */
+const SEGUIMENTO_PROCESSO = /(?<![\p{L}\p{N}])(?:fech[aá](?:-l[oa]|r)|encerr[aá](?:-l[oa]|r)|termin[aá](?:-l[oa]|r)|mat[aá]-l[oa]|(?:usa|consome|gasta)\s+tant[oa])(?![\p{L}\p{N}])/iu;
+
 export function isProcessQuestion(text: string): boolean {
-  return /\b(ram|cpu|mem[oó]ria|processo[s]?|programa|chrome|firefox|msedge|memory compression|msmpeng(?:\.exe)?|lento|lentid[aã]o|encerrar|fechar|consum[oie]|working set)\b/i.test(text);
+  return /\b(ram|cpu|mem[oó]ria|processo[s]?|programa|chrome|firefox|msedge|memory compression|msmpeng(?:\.exe)?|lento|lentid[aã]o|encerrar|fechar|consum[oie]|working set)\b/i.test(text)
+    || SEGUIMENTO_PROCESSO.test(text);
 }
 
 /**
@@ -370,7 +375,11 @@ export function perguntaApontaParaAlvo(
     const escapado = base.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
     if (new RegExp(`(^|[^a-z0-9])${escapado}($|[^a-z0-9])`, "i").test(baixo)) return true;
   }
-  return /\b(?:este|deste|desse|nesse|aquele|mesmo)\s+(?:processo|programa)\b|\besta\s+inst[âa]ncia\b|\bo\s+processo\s+em\s+causa\b/i.test(texto);
+  if (/\b(?:este|deste|desse|nesse|aquele|mesmo)\s+(?:processo|programa)\b|\besta\s+inst[âa]ncia\b|\bo\s+processo\s+em\s+causa\b/i.test(texto)) return true;
+  // Seguimento sobre o alvo em causa: «Posso fechá-lo?», «E porque usa tanta
+  // RAM?». A identidade (PID + instante) continua a ser verificada à parte, e o
+  // envio ao fornecedor continua a exigir autorização.
+  return SEGUIMENTO_PROCESSO.test(texto);
 }
 
 /* ==========================================================================
@@ -574,12 +583,27 @@ export function buildProcessLocalReply(diagnostic: ProcessDiagnostic | null, sel
     diagnostic.recommendations.join('\n') || 'Guardar o trabalho e observar mais amostras. Não encerrar processos críticos do Windows.',
   ].join('\n\n');
 
+  const nomeAnalisado = chosen ? `${processName(chosen.name)} (PID ${chosen.pid})` : 'nenhum processo selecionado — vista geral da máquina';
+  const componenteDoWindows = familia === 'memory-compression' || familia === 'defender' || familia === 'wmi';
+  const perigo = 'Nestas medições não há nenhum indício de ameaça: consumo alto, por si, não é prova de malware, e um nome conhecido também não prova que o executável é legítimo. Para verificar o ficheiro do programa, usa o **Scanner**.';
+  const encerrar = [
+    componenteDoWindows
+      ? 'Não: é um componente do Windows e encerrá-lo pode tornar o sistema instável.'
+      : chosen
+        ? 'Se for uma aplicação tua, fecha-a pela própria janela depois de guardar o trabalho — encerrar à força pode perder dados não guardados.'
+        : 'Escolhe primeiro um processo no Gestor de Tarefas.',
+    'No CyberSafe, terminar processos está desligado em Windows: a identidade do processo não pode ser provada de ponta a ponta, por isso nenhuma ação é executada a partir daqui.',
+  ].join(' ');
+
   return [
     '**DIAGNÓSTICO LOCAL** — explicação determinística, sem fornecedor externo e sem autorização de dados; a IA generativa não foi utilizada.',
-    `**MEDIDO:**\n${observed.join('\n')}`,
-    `**HIPÓTESE:** ${explanation}`,
-    `**NÃO CONFIRMADO:**\n${naoConfirmado}`,
-    `**AÇÃO SEGURA:**\n${acaoSegura}`,
+    `**Processo analisado:** ${nomeAnalisado}`,
+    `**O que é:** ${explanation}`,
+    `**Consumo observado:**\n${observed.join('\n')}`,
+    `**O que isto pode significar:**\n${naoConfirmado}`,
+    `**Existem sinais de perigo?** ${perigo}`,
+    `**O que recomendo:**\n${acaoSegura}`,
+    `**Posso encerrá-lo?** ${encerrar}`,
   ].join('\n\n');
 }
 

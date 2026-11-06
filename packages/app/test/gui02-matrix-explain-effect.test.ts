@@ -39,9 +39,11 @@ import { alvoDeExplicacao, consentValeParaAlvo, autorizacaoValida, isProcessQues
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 const estado = { cancelamentos: 0, fases: 0, aberturas: 0, inputs: 0, envios: 0, forcar: null as boolean | null, pendentes: 0, locais: 0, ofertas: 0 };
 const setStreamed = (_v: string) => {};
 const streamedRef = { current: "" };

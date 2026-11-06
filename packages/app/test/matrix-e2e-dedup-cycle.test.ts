@@ -57,9 +57,11 @@ import { isProcessQuestion, perguntaApontaParaAlvo, buildProcessLocalReply, proc
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 import { isProcessDiagnosticRequest } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { isProcessListQuestion } from ${JSON.stringify(urlModulo("src/lib/processMatrix.ts"))};
 import { classifyMatrixTopic } from ${JSON.stringify(urlModulo("src/lib/matrixLocalTools.ts"))};
+import { classificarIntencao, INTENCOES_DO_PRODUTO } from ${JSON.stringify(urlModulo("src/lib/matrixKnowledge.ts"))};
 import { alvoDePedido, descartarResposta, bloqueioDeConsentimentoAplica, revalidarAntesDoEnvio } from ${JSON.stringify(urlModulo("src/lib/matrixRequestMachine.ts"))};
 import { isLocalSecurityQuestion } from ${JSON.stringify(urlModulo("src/lib/localSecurityReply.ts"))};
 

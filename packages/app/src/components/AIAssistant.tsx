@@ -44,6 +44,7 @@ import {
   type Size,
 } from "@/lib/matrixLauncherPosition"
 import type { ProcessIntelligenceContext } from "@cybersafe/shared-types"
+import { classificarIntencao, foraDoTema, pedidoPerigoso, respostaLocal, INTENCOES_DO_PRODUTO } from "@/lib/matrixKnowledge"
 import type { ProcessDiagnostic, EstadoIdentidade } from "@/lib/processIntelligence"
 import { buildProcessLocalReply, buildIdentityLostReply, isProcessDiagnosticRequest, isProcessListQuestion, perguntaApontaParaAlvo, processPayload, processChatHistory, matrixTelemetryContext, alvoDeExplicacao, alvoParaConsentimento, mesmoAlvo, rotuloDoProcessoEmCausa, consentValeParaAlvo, rotuloDeConsentimento, identidadeDeExplicacaoPerdida, deveReenviarExplicacaoAposAutorizacao, autorizarAlvo, revogarAlvo, autorizacaoValida, limparAutorizacoesExpiradas, AMBITO_CONSENTIMENTO, CAMPOS_AUTORIZADOS, CAMPOS_NUNCAS_AUTORIZADOS, type AlvoProcesso, type PendenteExplicacao, type AutorizacaoAlvo } from "@/lib/processMatrix"
 import {
@@ -130,88 +131,69 @@ const PAGE_LABELS: Record<Page, string> = {
   business: "Business Center",
 }
 
-// Guardas locais para não depender do provider nos fallbacks cruciais.
-const OFF_TOPIC_KEYWORDS = [
-  "lasanha", "receita", "bolo", "cozinhar", "futebol", "campeonato", "jogo do", "golo",
-  "história para", "redação", "poema", "música", "filme", "novela", "série", "receita",
-  "temperatura do clima", "previsão do tempo", "polit", "eleição", "celebridade",
-]
-const DANGEROUS_KEYWORDS = [
-  "criar malware", "fazer malware", "escrever malware", "ransomware que", "roubar credenciais",
-  "phishing funcional", "invadir", "hackear o", "hackear o meu", "persistência maliciosa",
-  "evadir antivírus", "bypass de segurança", "desativar o antivírus", "crackar", "cracking",
-  "destruir dados", "apagar tudo o", "exploit", "exploração ofensiva", "keylogger",
-]
 const SECRET_PATTERN = /(?:senha|password|passwd|palavra[- ]?passe|token|api[ -]?key|chave)\s*[:=]\s*\S+/i
 
-// Sugestões por página (a mais relevante em primeiro).
+// Sugestões por página (a mais relevante em primeiro). v0.2.2: PT-PT, e só
+// perguntas que a MATRIX sabe responder — por conhecimento local ou por uma
+// leitura real do serviço. Nada de valores fixos («disco em 86%») que podiam
+// não corresponder ao PC de quem lê.
 const SUGGESTIONS: Record<Page, { label: string }[]> = {
   dashboard: [
-    { label: "Meu PC está seguro?" },
-    { label: "Explica meu índice de proteção" },
-    { label: "O que é phishing?" },
-    { label: "Como melhorar minha segurança?" },
+    { label: "Como está a proteção?" },
+    { label: "Porque a proteção aparece com limitações?" },
+    { label: "O que posso melhorar na segurança?" },
+    { label: "O que podes fazer?" },
   ],
   quarantine: [
-    { label: "O que acontece aos ficheiros em quarentena?" },
-    { label: "É seguro restaurar um ficheiro isolado?" },
     { label: "Porque foi este ficheiro isolado?" },
+    { label: "Quais os riscos de restaurar um ficheiro?" },
+    { label: "Como funciona a quarentena?" },
   ],
   pccenter: [
-    { label: "Meu disco está em 86% — devo me preocupar?" },
-    { label: "O que significa meu índice de saúde?" },
-    { label: "Como libertar espaço em disco?" },
-    { label: "O firewall está ativo?" },
+    { label: "Quanto espaço livre tenho no disco?" },
+    { label: "Como está a CPU e a RAM?" },
+    { label: "Porque o meu computador está lento?" },
   ],
   threats: [
-    { label: "O que significa esta ameaça?" },
-    { label: "Devo apagar todos os eventos?" },
+    { label: "O que significa análise inconclusiva?" },
     { label: "Como funciona a quarentena?" },
-    { label: "O que é um falso positivo?" },
+    { label: "Quais são os quatro motores?" },
   ],
   scanner: [
-    { label: "O que é a Análise Rápida do Computador?" },
-    { label: "Este ficheiro pode ser perigoso?" },
-    { label: "Como funciona a análise de ficheiros?" },
-    { label: "O que devo fazer após o scan?" },
-  ],  monitor: [
-    { label: "O que significa esta conexão?" },
-    { label: "Como ler estes eventos?" },
-    { label: "O que é a proteção residente?" },
-    { label: "Devo bloquear este processo?" },
+    { label: "Explica os modos do Scanner" },
+    { label: "O que significa análise inconclusiva?" },
+    { label: "O que é o EICAR?" },
+  ],
+  monitor: [
+    { label: "Como funciona a proteção em tempo real?" },
+    { label: "Porque a proteção aparece com limitações?" },
+    { label: "O que é o ClamAV?" },
   ],
   simulator: [
-    { label: "Por que este link é phishing?" },
-    { label: "Como identificar emails falsos?" },
-    { label: "Dá-me uma dica para o Simulador" },
+    { label: "O que é phishing?" },
     { label: "O que é engenharia social?" },
   ],
   reports: [
-    { label: "Como exportar um relatório PDF?" },
-    { label: "O que inclui o relatório?" },
-    { label: "Como ler o score de proteção?" },
-    { label: "O que são eventos de segurança?" },
+    { label: "Como está a proteção?" },
+    { label: "Quais são os quatro motores?" },
   ],
   taskmanager: [
-    { label: "Usei bastante CPU/RAM — é normal?" },
-    { label: "Como identificar processo suspeito?" },
-    { label: "O que fazer se um processo usa 100% CPU?" },
-    { label: "Como monitorizar processos?" },
+    { label: "Quais os processos com maior utilização de CPU?" },
+    { label: "Porque o meu computador está lento?" },
+    { label: "Como está a CPU e a RAM?" },
   ],
   otimizar: [
-    { label: "O que devo otimizar primeiro?" },
-    { label: "Por que meu PC está lento?" },
-    { label: "Discos e temporários — o que posso apagar?" },
-    { label: "Como melhorar o desempenho?" },
+    { label: "O que pode fazer o Otimizar?" },
+    { label: "Porque o meu computador está lento?" },
+    { label: "Quanto espaço livre tenho no disco?" },
   ],
   settings: [
-    { label: "O que é o tema Matrix Terminal?" },
-    { label: "Como mudo o tema?" },
+    { label: "Como funcionam as atualizações?" },
+    { label: "Como funciona a quarentena?" },
   ],
   business: [
-    { label: "Explica as ligações desta página" },
-    { label: "O que é uma ligação de rede?" },
-    { label: "Como ler o Business Security Center?" },
+    { label: "O que podes fazer?" },
+    { label: "O que posso melhorar na segurança?" },
   ],
 }
 
@@ -225,54 +207,6 @@ const DEFAULT_SUGGESTIONS = SUGGESTIONS.dashboard
 function novaIdDeConversa(): string {
   return globalThis.crypto?.randomUUID?.() ?? `c${Date.now()}`
 }
-
-// Base de conhecimento local (FALLBACK educativo — preservada e alinhada à persona feminina).
-const OFFLINE_KB: { keywords: string[]; answer: string }[] = [
-  {
-    keywords: ["phishing", "email falso", "email suspeito", "link falso", "este link"],
-    answer: "**Phishing** é uma técnica onde atacantes enviam emails ou mensagens falsas para roubar dados. Para te proteger:\n\n- **Nunca cliques** em links de emails a pedir dados sensíveis\n- Verifica o remetente real (não apenas o nome exibido)\n- Acede a sites diretamente pelo navegador, não por links de emails\n- Desconfia de urgência excessiva ou ameaças\n\nSe suspeitares de um email, não cliques em nada e apaga-o ou marca-o como phishing."
-  },
-  {
-    keywords: ["senha", "palavra-passe", "palavras-passe", "password", "forte", "fraca", "segura", "123456"],
-    answer: "**Palavras-passe fortes** são a primeira linha de defesa:\n\n- **12+ caracteres** com letras, números e símbolos\n- Evita palavras do dicionário, datas ou nomes conhecidos\n- Usa uma **frase-passe** (ex.: `Cafe#Frio2026!`)\n- Ativa **2FA** sempre que possível\n- Usa um **gestor de palavras-passe** (Bitwarden, 1Password)\n\nPior, usar `123456` é deixar a chave de casa debaixo do tapete. Não vale a pena o risco."
-  },
-  {
-    keywords: ["ransomware", "resgate", "criptografar", "encriptar"],
-    answer: "**Ransomware** é malware que **criptografa os teus ficheiros** e exige resgate.\n\n**Como te proteger:**\n\n- **Backups regulares** (regra 3-2-1: 3 cópias, 2 mídias, 1 offsite)\n- Não abras anexos suspeitos\n- Mantém o sistema e apps atualizados\n- Ativa a **Proteção de Pasta** do Windows\n\nSe for vítima: **não pagues o resgate** — não há garantia de recuperação e financia o crime."
-  },
-  {
-    keywords: ["2fa", "autenticação", "dois fatores", "mfa"],
-    answer: "**2FA (Autenticação em 2 Passos)** adiciona uma segunda camada além da palavra-passe.\n\n- **App authenticator** (Google Authenticator, Authy) — mais seguro\n- **SMS** — melhor que nada, mas suscetível a SIM swap\n- **Hardware key** (YubiKey) — máxima segurança\n\nPrecisas? Tecnicamente ninguém te obriga. Mas se a palavra-passe vazar, o 2FA é o segurança da porta a dizer: 'hoje não, querido'."
-  },
-  {
-    keywords: ["firewall", "rede", "wifi", "conexão", "vpn"],
-    answer: "**Firewall e redes:**\n\n- Use **WPA3** ou no mínimo WPA2 (nunca WEP)\n- Evita redes públicas sem VPN\n- Desativa **sharing** de ficheiros e impressoras\n- Mantém o **firewall** ativo (verifica no PC Center)\n- Monitora as conexões no **Monitor** do CyberSafe\n\nA VPN criptografa a conexão, mas atenção à limitação: ela **não** protege contra phishing, malware ou más práticas — é só mais uma camada."
-  },
-  {
-    keywords: ["cybersafe", "como usar", "funcionalidade", "ajuda", "quick scan", "scan"],
-    answer: "**CyberSafe Assistant** funciona assim:\n\n- **Dashboard**: visão geral do sistema e alertas\n- **PC Center**: análise de hardware e saúde do Windows\n- **Ameaças**: histórico de eventos detectados\n- **Análise de Segurança**: análise rápida/profunda do computador ou de um ficheiro/pasta\n- **Task Manager**: monitorar processos\n- **Monitor**: conexões de rede e proteção\n- **Simulador**: exercícios práticos de phishing\n- **Otimizar**: recomendações de desempenho\n- **Relatórios**: resumo de segurança\n\nA **Análise Rápida do Computador** verifica as áreas de maior risco; a **Análise Profunda do Computador** percorre o sistema todo e demora mais."
-  },
-  {
-    keywords: ["disco", "espaço", "lento", "desempenho", "86%", "temporários"],
-    answer: "**Disco cheio / PC lento:**\n\nUm disco a **86%** não é emergência, mas já está a pedir socorro. Vale:\n\n- Libertar **ficheiros temporários** e de cache\n- Mover ficheiros grandes para um disco externo/cloud\n- Executar **Otimizar** no CyberSafe\n- Ver quais programas ocupam espaço em **Task Manager**\n\nAcima de 90% começa a afetar o desempenho do Windows."
-  },
-  {
-    keywords: ["backup", "cópia", "certificar"],
-    answer: "Backup é a tua rede de segurança:\n\n- Prefere a regra **3-2-1**: 3 cópias, 2 tipos de mídia, 1 fora de casa\n- Testa a **restauração** periodicamente — um backup que não restaura não serve\n- Mantém backups **desligados** depois do processo, para proteger contra ransomware\n\nProtege contra malware, falhas de disco e erros humanos."
-  },
-  {
-    keywords: ["malware", "trojan", "spyware", "worm", "adware", "virus", "vírus"],
-    answer: "Malware é software malicioso: **Trojan** finge ser legítimo, **Ransomware** criptografa ficheiros, **Spyware** espreita a atividade, **Worm** propaga-se sozinho, **Adware** mostra publicidade intrusiva.\n\nMantém o antivírus atualizado, só baixa software de fontes oficiais e usa a **Análise de Segurança** do CyberSafe para verificar ficheiros suspeitos."
-  },
-  {
-    keywords: ["engenharia social", "social engineering", "golpe", "manipulação"],
-    answer: "**Engenharia social** é manipular pessoas para obter acesso ou informações:\n\n- **Pretexto**: história falsa para convencer\n- **Baiting**: prometem algo em troca de dados\n- **Tailgating**: seguem alguém para áreas restritas\n- **Oferta irresistível**: prémios, urgência, medo\n\nDefende-te desconfiando do contacto não solicitado, verificando por outros canais e nunca fornecendo palavras-passe ou códigos por telefone/email."
-  },
-  {
-    keywords: ["oi", "olá", "ola", "hello", "bom dia", "boa tarde", "boa noite", "tudo bem", "quem és", "quem é", "quem es", "quem e"],
-    answer: "Sou a **Matrix**, a assistente de IA do **CyberSafe**.\n\nPosso ajudar-te com **phishing, malware, palavras-passe, privacidade, backups, ransomware** e a entender o teu painel. Pergunta o que quiseres!"
-  },
-]
 
 // Fallback OT para fora-de-tema (variado, para não repetir sempre).
 const OFF_TOPIC_REPLIES = [
@@ -294,26 +228,23 @@ function pickRandom(arr: string[]): string {
 }
 
 function offlineReply(input: string, page: Page, modo: MatrixChatMode = "online"): { content: string; isOffTopic?: boolean; isDanger?: boolean } {
-  const lower = input.toLowerCase()
-
   if (SECRET_PATTERN.test(input)) {
     return {
       content: "**Atenção**: parece que colaste uma credencial (palavra-passe/chave). **Nunca** partilhes palavras-passe, tokens ou chaves API no chat — nem comigo. \n\nSe foi acidente, **revoga essa credencial** (troca a palavra-passe / regenera a chave) e usa um **gestor de palavras-passe**. Nenhum serviço legítimo te pede credenciais por chat.",
     }
   }
 
-  if (DANGEROUS_KEYWORDS.some((kw) => lower.includes(kw))) {
+  // Palavras inteiras (matrixKnowledge): substrings classificavam «foi isolado»
+  // como saudação e «política de quarentena» como fora do tema.
+  if (pedidoPerigoso(input)) {
     return { content: pickRandom(DANGER_REPLIES), isDanger: true }
   }
 
-  if (OFF_TOPIC_KEYWORDS.some((kw) => lower.includes(kw))) {
-    return { content: pickRandom(OFF_TOPIC_REPLIES), isOffTopic: true }
-  }
+  const intencao = classificarIntencao(input)
+  if (intencao) return { content: respostaLocal(intencao) }
 
-  for (const entry of OFFLINE_KB) {
-    if (entry.keywords.some((kw) => lower.includes(kw))) {
-      return { content: entry.answer }
-    }
+  if (foraDoTema(input)) {
+    return { content: pickRandom(OFF_TOPIC_REPLIES), isOffTopic: true }
   }
 
   // Fallback educacional com indicação de página — nunca repete a mesma coisa literal.
@@ -1378,6 +1309,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
       // e "Quanto armazenamento tenho?" sem rota local — a função nova nunca era
       // chamada. `general` continua a não abrir este caminho.
       const topicoLocal = classifyMatrixTopic(trimmed)
+      const intencaoLocal = identityLost || processQuestion ? null : classificarIntencao(trimmed)
       const rota = {
         texto: trimmed,
         // O gate de consentimento só se aplica quando há MESMO contexto do alvo a
@@ -1403,6 +1335,7 @@ export default function AIAssistant({ currentPage = "dashboard", context = "", p
         // Escolha visível: em «Local» este turno não contacta o fornecedor, mesmo
         // com um grant válido. O consentimento não é consumido nem revogado.
         modoConversaLocal: modoDoPedido === "local",
+        respostaDoProduto: intencaoLocal !== null && INTENCOES_DO_PRODUTO.has(intencaoLocal),
       }
       const motivo = motivoDoEncaminhamentoLocal(rota)
       /**

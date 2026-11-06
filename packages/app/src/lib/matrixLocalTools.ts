@@ -23,8 +23,10 @@ import {
  */
 export type MatrixLocalTopic = "protection" | "storage" | "resources" | "general";
 
-const B0 = "(?<![\p{L}\p{N}])";
-const B1 = "(?![\p{L}\p{N}])";
+// String.raw: numa string normal "\p" vira "p" e a fronteira deixava de o ser
+// («gramática» e «telegrama» eram lidas como perguntas sobre RAM).
+const B0 = String.raw`(?<![\p{L}\p{N}])`;
+const B1 = String.raw`(?![\p{L}\p{N}])`;
 const rx = (body: string) => new RegExp(B0 + body + B1, "iu");
 
 const EDUCATIONAL =
