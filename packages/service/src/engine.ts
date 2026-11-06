@@ -3422,7 +3422,10 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       // factors, never cached engine health, to retain upstream coverage gaps.
       const upstreamIncomplete = analysis.verdict === "inconclusive" ||
         analysis.rulesTriggered.includes("scan_inconclusive") ||
-        analysis.factors.some(factor => ["clamav-inconclusive", "yara-inconclusive", "yara-timeout", "scan-cancelled"].includes(factor.id));
+        analysis.factors.some(factor => ["clamav-inconclusive", "clamav-skipped-known-hash", "yara-inconclusive", "yara-timeout", "scan-cancelled"].includes(factor.id));
+      // Atalho do tempo real por hash exato: a deteção é definitiva, mas o ClamAV
+      // não avaliou o ficheiro — a cobertura continua dita como incompleta.
+      const clamavSkippedByHash = analysis.factors.some(factor => factor.id === "clamav-skipped-known-hash");
       const analysisState: import("@cybersafe/shared-types").FileScanResult["analysisState"] =
         !nativeCompleted ? nativeFailure === "unavailable" ? "engine-unavailable"
           : nativeFailure === "cancelled" ? "inconclusive" : "failed"
@@ -3442,12 +3445,15 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
           : undefined;
       const inconclusiveEngines: import("@cybersafe/shared-types").InconclusiveEngine[] = [
         ...(!nativeCompleted ? ["native" as const] : []),
-        ...(analysis.factors.some((factor) => factor.id === "clamav-inconclusive") ? ["clamav" as const] : []),
+        ...(analysis.factors.some((factor) => factor.id === "clamav-inconclusive") || clamavSkippedByHash ? ["clamav" as const] : []),
         ...(analysis.factors.some((factor) => ["yara-inconclusive", "yara-timeout"].includes(factor.id)) ? ["yara" as const] : []),
       ];
-      const coverageDetail = nativeDetail ?? (upstreamIncomplete
-        ? "Pelo menos um motor não conseguiu avaliar o ficheiro; a deteção disponível foi preservada, mas a cobertura é inconclusiva."
-        : undefined);
+      const onlySkippedByHash = clamavSkippedByHash && !analysis.rulesTriggered.includes("scan_inconclusive");
+      const coverageDetail = nativeDetail ?? (onlySkippedByHash
+        ? "Detetado por hash exato verificado; o ClamAV não foi consultado para não atrasar a deteção em tempo real."
+        : upstreamIncomplete
+          ? "Pelo menos um motor não conseguiu avaliar o ficheiro; a deteção disponível foi preservada, mas a cobertura é inconclusiva."
+          : undefined);
 
       // Read-only: a recomendacao tem de dizer o que o motor faz de facto.
       // Recomendar quarentena sem a executar faria a UI e o historico
