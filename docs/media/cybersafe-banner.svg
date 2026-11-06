@@ -1,0 +1,7 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1440" height="360" viewBox="0 0 1440 360" role="img" aria-labelledby="title desc">
+<title id="title">CyberSafe Assistant</title><desc id="desc">Identidade visual: azul-marinho, órbitas ciano e violeta. Aplicação desktop de segurança para Windows.</desc>
+<defs><linearGradient id="bg"><stop stop-color="#07121f"/><stop offset="1" stop-color="#103344"/></linearGradient><radialGradient id="halo"><stop stop-color="#00d9df" stop-opacity=".18"/><stop offset="1" stop-color="#00d9df" stop-opacity="0"/></radialGradient></defs>
+<rect width="1440" height="360" rx="24" fill="url(#bg)"/><circle cx="1170" cy="180" r="240" fill="url(#halo)"/>
+<g fill="none" stroke-width="2"><ellipse cx="1160" cy="180" rx="174" ry="112" stroke="#45dbe3" transform="rotate(-28 1160 180)"/><ellipse cx="1160" cy="180" rx="130" ry="163" stroke="#9684ed" opacity=".8" transform="rotate(-28 1160 180)"/><circle cx="1160" cy="180" r="60" stroke="#45dbe3" opacity=".3"/></g>
+<path d="M66 91h55" stroke="#43e0dc" stroke-width="4"/><text x="66" y="158" fill="#f0f7fc" font-family="Segoe UI,Arial,sans-serif" font-size="57" font-weight="700">CyberSafe Assistant</text>
+<text x="69" y="209" fill="#c2d8e3" font-family="Segoe UI,Arial,sans-serif" font-size="25">Segurança e contexto, no mesmo painel.</text><text x="69" y="281" fill="#62dce2" font-family="Segoe UI,Arial,sans-serif" font-size="17" letter-spacing="3">WINDOWS · MULTIMOTOR · MATRIX · PROJETO PAP</text></svg>

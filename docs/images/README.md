@@ -1,13 +1,7 @@
-# Capturas de ecrã
+# Capturas reais
 
-Esta pasta é o local reservado para capturas **reais e aprovadas** da aplicação.
+As imagens `v020-*.png` são capturas históricas reais da versão pública **v0.2.0**. O README identifica essa versão explicitamente; não as apresenta como validação da v0.2.4.
 
-Regras:
+Novas capturas devem ser da aplicação instalada, com versão conhecida, sem dados pessoais, caminhos privados, credenciais ou conteúdo de ficheiros. Não substituir uma captura por mockup nem por uma imagem de laboratório apresentada como estável.
 
-- Apenas capturas da versão atual, obtidas da aplicação em execução.
-- Sem dados pessoais, nomes de utilizador, caminhos privados, tokens ou chaves visíveis.
-- Sem imagens geradas, montagens ou capturas de versões antigas apresentadas como atuais.
-- Nome sugerido: `NN-ecra.png` (ex.: `01-painel.png`, `02-scanner.png`), PNG, largura ≥ 1280 px.
-
-Enquanto não existirem capturas aprovadas, o README usa apenas o logótipo oficial
-(`assets/branding/generated/`) e não apresenta imagens da aplicação.
+O banner vetorial de identidade está em `../media/` e é uma ilustração, não uma captura da aplicação.

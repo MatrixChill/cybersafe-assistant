@@ -1,6 +1,21 @@
 # Documentação CyberSafe Assistant
 
-Índice do material técnico do projeto.
+Ponto de entrada para utilizar, desenvolver e avaliar o projeto. A **main** contém a edição Windows; a [branch Linux Lite](https://github.com/MatrixChill/cybersafe-assistant/tree/experimental/linux-lite) é experimental e permanece separada.
+
+| Começar por | Conteúdo |
+|---|---|
+| [Instalação](installation.md) | Download oficial, checksums e atualização manual |
+| [Arquitetura](ARCHITECTURE.md) | Camadas, IPC e serviço local |
+| [Motores](engines.md) | ClamAV, YARA, HashDB e Native C++ |
+| [MATRIX](matrix.md) | Diagnóstico local, IA online e consentimento |
+| [Desenvolvimento](development.md) | Ambiente, comandos de testes e build |
+| [Testes e segurança](security-and-testing.md) | Evidência, limitações e comunicação responsável |
+| [Atualizações](updates.md) | Feed, Ed25519, integridade e gates de release |
+| [PAP](../PAP-EVIDENCIAS-TECNICAS/README.md) | Evidências técnicas e contexto académico |
+
+## Referências e arquivo técnico
+
+Os documentos datados abaixo e os checkpoints preservam decisões e evidências históricas. Não representam automaticamente o estado da versão atual. Não foram eliminados para evitar perder a reprodutibilidade dos builds e dos ensaios.
 
 | Documento | Conteúdo |
 |-----------|-----------|

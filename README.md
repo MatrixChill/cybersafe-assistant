@@ -1,425 +1,99 @@
-<p align="center">
-  <img src="assets/branding/generated/icon-128.png" alt="CyberSafe Assistant" width="112" height="112">
-</p>
+<p align="center"><img src="assets/branding/generated/icon-128.png" alt="Logótipo oficial CyberSafe" width="88"></p>
 
-<h1 align="center">CyberSafe Assistant</h1>
+![CyberSafe Assistant — segurança e contexto no mesmo painel](docs/media/cybersafe-banner.svg)
 
 <p align="center">
-  Aplicação desktop de cibersegurança para Windows — análise de ficheiros com múltiplos motores,
-  monitorização do sistema e resposta a ameaças, num único painel.
+<a href="https://github.com/MatrixChill/cybersafe-assistant/releases/latest"><img alt="Última release" src="https://img.shields.io/github/v/release/MatrixChill/cybersafe-assistant?color=0891b2"></a>
+<a href="https://github.com/MatrixChill/cybersafe-assistant/actions/workflows/ci.yml"><img alt="CI Windows" src="https://github.com/MatrixChill/cybersafe-assistant/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+<img alt="Windows 10 e 11 x64" src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0b5067">
+<img alt="Electron 33" src="https://img.shields.io/badge/Electron-33-224653">
+<img alt="React 19 e TypeScript" src="https://img.shields.io/badge/React%2019-TypeScript-3178c6">
 </p>
 
-<p align="center">
-  <img alt="Electron" src="https://img.shields.io/badge/Electron-33-47848F">
-  <img alt="React" src="https://img.shields.io/badge/React-19-61DAFB">
-  <img alt="TypeScript" src="https://img.shields.io/badge/TypeScript-5.9-3178C6">
-  <img alt="Node" src="https://img.shields.io/badge/Node.js-%E2%89%A520-339933">
-  <img alt="Windows" src="https://img.shields.io/badge/Windows-10%2F11-0078D4">
-  <img alt="Estado" src="https://img.shields.io/badge/estado-desenvolvimento%20académico-orange">
-</p>
+<p align="center"><a href="https://github.com/MatrixChill/cybersafe-assistant/releases/latest"><b>Descarregar para Windows</b></a> · <a href="docs/README.md">Documentação</a> · <a href="https://github.com/MatrixChill/cybersafe-assistant/tree/experimental/linux-lite">Linux Lite experimental</a></p>
 
-> **Versão pública estável: [v0.2.4](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.4)** · Windows 10/11 x64.
-> A **v0.2.4** (correção do ClamAV degradado em PCs mais lentos, sobre a v0.2.3) está publicada para instalação manual; manifesto Ed25519 e SHA-256 verificados. Instalador sem assinatura Authenticode (limitação declarada).
-> O CyberSafe complementa — não substitui — o Microsoft Defender: mantém as proteções do Windows ativas.
+O **CyberSafe Assistant** é uma aplicação desktop de segurança para Windows. Reúne análise de ficheiros com quatro motores, monitorização do sistema, quarentena e assistência MATRIX numa interface comum.
 
-<p align="center">
-  <img src="docs/images/v020-dashboard.png" alt="Painel do CyberSafe Assistant (captura real da v0.2.0)" width="760">
-  <br><sub>Captura real do painel (v0.2.0).</sub>
-</p>
+Criado por **Caio Amorim** no âmbito da **Prova de Aptidão Profissional**, explora a integração entre software desktop, componentes nativos e decisões de segurança explicáveis. É um projeto académico: complementa as proteções do Windows e apresenta limitações quando uma análise não pode ser concluída.
 
-## Índice
+## O que pode fazer
 
-- [O que é](#o-que-é)
-- [Instalar e verificar](#instalar-e-verificar)
-- [Funcionalidades](#funcionalidades)
-- [Os quatro motores](#os-quatro-motores)
-- [Proteção em tempo real](#proteção-em-tempo-real)
-- [Quarentena](#quarentena)
-- [MATRIX](#matrix)
-- [Arquitetura](#arquitetura)
-- [Tecnologias](#tecnologias)
-- [Desenvolvimento](#desenvolvimento)
-- [Testes](#testes)
-- [Segurança e limitações](#segurança-e-limitações)
-- [Melhorias futuras](#melhorias-futuras)
-- [Documentação](#documentação)
-- [Licença](#licença)
+| Área | Funcionalidades |
+|---|---|
+| **Scanner** | Análises rápidas e personalizadas, progresso, cancelamento, histórico e relatórios PDF. |
+| **Quatro motores** | ClamAV, regras YARA, HashDB e análise nativa em C++. Estados de saúde e resultados inconclusivos explícitos. |
+| **Monitorização** | Eventos de ficheiros e processos, recuperação de filas e diagnóstico de lacunas de cobertura. |
+| **Quarentena** | Isolamento e restauro controlado, com metadados e verificações de identidade e destino. |
+| **MATRIX** | Diagnóstico local e explicação de processos; IA online opcional com configuração e consentimento. |
+| **PC Center e Gestor de Tarefas** | Métricas disponíveis do sistema e terminação individual protegida no Windows. |
+| **USB e ferramentas** | Análise de dispositivos autorizados, recomendações e operações de otimização. |
+| **Atualizações** | Descoberta de versões no GitHub e verificação Ed25519/SHA-256. Instalação manual enquanto não existir Authenticode. |
 
----
+## Ver a aplicação
 
-## O que é
+<details>
+<summary>Capturas reais — versão pública v0.2.0 (referência histórica)</summary>
 
-O **CyberSafe Assistant** é uma aplicação desktop para Windows que reúne, num painel único:
+![Painel real da v0.2.0](docs/images/v020-dashboard.png)
+![MATRIX na v0.2.0](docs/images/v020-matrix.png)
 
-- **análise de ficheiros** com vários motores independentes (YARA, base de hashes conhecidos,
-  ClamAV e um motor nativo em C++);
-- **monitorização** de processos, hardware e eventos de segurança do sistema;
-- **quarentena** e resposta a ameaças, com histórico e relatórios exportáveis;
-- **gestão do sistema** — gestor de tarefas (terminação individual protegida no Windows), PC Center, otimização e proteção USB.
+Estas capturas são da **v0.2.0**, não demonstram o estado da v0.2.4. Preservadas como evidência real; não são mockups nem imagens de laboratório. As alterações mais recentes estão nas [notas da release](https://github.com/MatrixChill/cybersafe-assistant/releases/latest).
 
-O projeto nasce no âmbito do **Projeto de Aptidão Profissional (PAP)** do curso de
-**Programador/a de Informática** da **Escola Profissional de Gaia** — formação de
-programadores, **não** um curso de cibersegurança; a segurança é o domínio escolhido para o
-produto. Serve simultaneamente como produto funcional e como evidência do processo de engenharia:
-cada capacidade é implementada, testada e documentada, e o produto
-**declara o que não sabe** em vez de simular estados (motores indisponíveis aparecem como
-indisponíveis).
+</details>
 
-## Instalar e verificar
+## Instalar no Windows
 
-**Requisitos mínimos:** Windows 10 ou 11 de 64 bits, ~1 GB livre para a aplicação e as bases de assinaturas, ligação à Internet para atualizar as definições (opcional).
+1. Descarregue o Setup e `SHA256SUMS.txt` da [release oficial](https://github.com/MatrixChill/cybersafe-assistant/releases/latest).
+2. Compare o hash do ficheiro com a linha correspondente em `SHA256SUMS.txt`:
 
-1. Abre a [release estável](https://github.com/MatrixChill/cybersafe-assistant/releases/latest) e descarrega o instalador `.exe` e o ficheiro `SHA256SUMS.txt`.
-2. Verifica a integridade em PowerShell e compara o resultado com a linha do instalador em `SHA256SUMS.txt`:
    ```powershell
-   Get-FileHash -Algorithm SHA256 -LiteralPath "<caminho-do-instalador>.exe"
+   Get-FileHash -Algorithm SHA256 -LiteralPath "<caminho-do-setup>.exe"
    ```
-3. Encerra normalmente o CyberSafe, preserva um backup dos dados e executa o instalador oficial. Sem Authenticode, o Windows pode mostrar editor desconhecido. Se uma política bloquear a execução, conserva a mensagem e não desatives as proteções.
-4. Abre o CyberSafe e confirma a versão `0.2.2`, a sessão, o histórico e o estado dos quatro motores. A versão anterior continua disponível na [release v0.2.1](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.1).
 
-Setup: [CyberSafe-Assistant-Setup-0.2.4.exe](https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.4/CyberSafe-Assistant-Setup-0.2.4.exe), 279442395 bytes. SHA-256: `6a3e9d730ef989c84ac7de701d98b46b7f5e65b9110d5e96032efdb0c880ea2c`.
+3. Ao atualizar, encerre normalmente a aplicação e preserve um backup dos dados antes de executar o Setup oficial.
+4. Confirme a versão, a sessão e o estado dos motores após abrir.
 
-As atualizações seguintes são verificadas pela aplicação: manifesto assinado com **Ed25519** (chave do proprietário, impressão digital fixada em `packages/desktop/src/updater/release-trust.json`), SHA-256 do instalador e recusa de versões mais antigas. A instalação continua manual.
+**Compatibilidade:** Windows 10/11 x64. O instalador não tem assinatura Authenticode; o Windows pode mostrar editor desconhecido. Se uma política bloquear a execução, conserve o aviso e não desative Defender, SmartScreen, UAC ou firewall. [Guia de instalação e atualização](docs/installation.md).
 
-## Funcionalidades
+## Como funciona
 
-### Implementado e coberto por testes
-
-| Área | O que faz |
-|---|---|
-| **Scanner** | Análise rápida, personalizada e de ficheiro individual; progresso real, cancelamento, contagens de analisados / excluídos / inacessíveis |
-| **Motores** | YARA (via `@litko/yara-x`), base de hashes maliciosos, ClamAV (binário oficial vendorizado) e motor nativo C++ (hash SHA-256, entropia, análise PE) |
-| **Quarentena** | Isolamento com metadados, restauro controlado e política de confiança |
-| **Histórico** | Sessões de análise persistidas com resultados, contagens e estado terminal |
-| **Relatórios** | Relatório consolidado A4 exportável em PDF, com impressão como alternativa |
-| **Gestor de Tarefas** | Processos com CPU/RAM; **terminação individual** de aplicações comuns, com confirmação, elegibilidade decidida pelo serviço e processos protegidos (CyberSafe e sistema) excluídos — indisponível em sessão de leitura |
-| **PC Center** | Saúde do sistema: CPU, RAM, disco, bateria, GPU, temperatura e diagnósticos |
-| **Monitorização** | Processos, hardware e eventos de segurança em tempo real |
-| **Otimizar** | Sugestões de limpeza e otimização com base no estado medido |
-| **Proteção USB** | Deteção de dispositivos, leitura apenas e análise de conteúdos |
-| **MATRIX** | Assistente de segurança com consentimento explícito e chave própria (BYOK) |
-| **Configurações** | Tema, identidade visual, arranque e preferências de proteção |
-| **Atualizações** | Verificação de novas versões e estado honesto de disponibilidade |
-
-## Os quatro motores
-
-| Motor | O que faz | Prova mais forte |
-|---|---|---|
-| **HashDB** | Compara o SHA-256 do ficheiro inteiro com assinaturas verificadas | Coincidência exata — é a única prova aceite para quarentena automática |
-| **ClamAV** | Antivírus de código aberto (1.5.4, vendorizado com a fonte correspondente) | Assinatura da base oficial |
-| **YARA** | Regras de padrões no conteúdo; distingue evidência forte de genérica | Regra marcada como evidência forte |
-| **Motor nativo (C++)** | SHA-256, entropia e análise PE no próprio PC | — (complementa; nunca dá «seguro» sozinho) |
-
-Um motor só aparece **ativo** com prova real de funcionamento. Um motor que não conseguiu avaliar um ficheiro torna o resultado **inconclusivo**, nunca «limpo».
-
-## Proteção em tempo real
-
-Vigia pastas como Downloads e Temp. Cada ficheiro novo ou alterado entra numa fila de análise com **prioridade para Downloads**. Numa rajada (por exemplo, uma instalação), os ficheiros que não couberam na fila voltam a ser tentados; a cobertura só é dada como confirmada quando a **versão atual** de cada ficheiro foi analisada, e o que ficar por analisar é avisado. No tempo real, um hash exato verificado decide sem esperar pelo ClamAV — e o resultado diz que ele não foi consultado.
-
-## Quarentena
-
-O ficheiro suspeito é movido para uma pasta protegida, com motor, motivo e SHA-256 registados. **Restaurar** devolve-o ao local original depois de uma confirmação explícita que mostra o destino; **eliminar** é permanente. Políticas: `warn` (avisa), `ask` (pergunta) e `automatic-high-confidence` (isola automaticamente só com prova por hash exato; exige consentimento).
-
-## MATRIX
-
-<p align="center">
-  <img src="docs/images/v020-matrix.png" alt="Painel da MATRIX (captura real da v0.2.0)" width="560">
-  <br><sub>Captura real da MATRIX (v0.2.0).</sub>
-</p>
-
-A **MATRIX** é a assistente do CyberSafe. Explica processos («Explicar na MATRIX» no Gestor de Tarefas), resultados de análises, quarentena, o estado dos motores e problemas de desempenho, com base no que o PC mediu.
-
-- **Local primeiro:** perguntas sobre o próprio CyberSafe e sobre o estado do PC são respondidas no computador, e a resposta diz «Diagnóstico local».
-- **Online opcional:** só no modo Online, com fornecedor configurado pelo utilizador (BYOK), e a resposta diz «IA online».
-- **Privacidade:** medições de processos só saem com autorização explícita para aquela instância (PID + instante de início); nome, caminho e linha de comandos nunca são enviados automaticamente.
-
-### Parcialmente validado
-
-- **Instalador NSIS personalizado** (4 ecrãs, verificação de espaço e caminho): construído e
-  compilado offline, **sem execução real** — a validação final depende de instalação em VM.
-- **Proteção em tempo real** (watchers e recuperação): lógica e testes automatizados presentes;
-  comportamento em instalação real ainda em validação.
-- **Motor nativo C++**: integrado no serviço por *bridge* com estados de saúde explícitos; a
-  comparação de resultados em cenários reais continua em avaliação.
-
-### Planeado
-
-- Gestor de exclusões com interface própria;
-- Melhor desempenho em análises profundas (varrer e classificar sem esgotar o orçamento numa pasta);
-- Diagnóstico mais detalhado de resultados inconclusivos;
-- Compatibilidade gráfica alargada (DPI e aceleração em hardware variado);
-- Instalador com validação completa em máquina limpa.
-
-## Arquitetura
-
-Monorepo npm (`packages/*`) com separação entre interface, orquestração, motores e serviço:
-
-```
-┌──────────────────────────────────────────────────────────────┐
-│  packages/app        React + Vite + Tailwind (renderer)      │
-└───────────────▲──────────────────────────────────────────────┘
-                │ IPC seguro (contextBridge / preload)
-┌───────────────┴──────────────────────────────────────────────┐
-│  packages/desktop    Electron: main, preload, tray, splash   │
-└───────────────▲──────────────────────────────────────────────┘
-                │ named pipe JSON-RPC
-┌───────────────┴──────────────────────────────────────────────┐
-│  packages/service    orquestra scans, quarentena, USB,       │
-│                      monitorização, histórico, atualizações  │
-└───────▲───────────────▲──────────────▲───────────────▲───────┘
-        │               │              │               │
- @cybersafe/core   native-windows   ClamAV         scan-engine.exe
- (YARA, hashes,    (PowerShell      (vendorizado)  (C++: hash,
-  heurística,       read-only)                      entropia, PE)
-  scoring)
+```mermaid
+flowchart LR
+    UI[React + TypeScript] --> Shell[Electron / preload]
+    Shell -->|named pipe| Service[Serviço Node.js]
+    Shell --> API[API local / SQLite]
+    Service --> Engines[ClamAV · YARA · HashDB · C++]
+    Service --> Data[Eventos · Histórico · Quarentena]
 ```
 
-| Pacote | Responsabilidade |
-|---|---|
-| `packages/app` | Interface (React 19, Vite, Tailwind), shell V2 e páginas |
-| `packages/desktop` | Shell Electron, preload, IPC, tray, arranque e ciclo de vida |
-| `packages/service` | Serviço Node: pipeline de análise, quarentena, USB, watchdog |
-| `packages/core` | Motor lógico: YARA, hashes, heurística, scoring, ClamAV, hardware |
-| `packages/native-windows` | Camada PowerShell **read-only** e watchers do Windows |
-| `packages/native-engine` | Executável C++ (CMake): SHA-256, entropia, parsing PE |
-| `packages/api` | API REST (Express + Prisma/SQLite) para contas e assistente |
-| `packages/shared-types` | Contratos TypeScript partilhados (comandos/respostas do serviço) |
-| `packages/extension` | Extensão de navegador para consciencialização de downloads |
+O monorepo separa interface, shell desktop, API local, orquestração e motores nativos. Usa **React, Electron, TypeScript, Node.js, C++, SQLite e CMake**. [Arquitetura e contratos](docs/ARCHITECTURE.md).
 
-Princípios aplicados no código:
+## Desenvolver
 
-- **veredictos não derivam de exit codes** — resultam de evidência medida;
-- **estados incertos nunca são apresentados como seguros** (`unknown` ≠ `off` ≠ `protected`);
-- **operações destrutivas** (terminar processos, eliminar ficheiros) passam por política explícita;
-- **sem segredos no repositório** — chaves vivem em configuração local do utilizador.
-
-## Tecnologias
-
-| Camada | Tecnologias |
-|---|---|
-| Desktop | Electron 33, Vite, electron-builder (NSIS) |
-| Interface | React 19, TypeScript 5.9, Tailwind CSS 4, Framer Motion, Radix UI |
-| Serviço | Node.js (≥ 20), named pipes JSON-RPC, `node-windows` |
-| Análise | `@litko/yara-x` (YARA), hashes SHA-256, ClamAV, motor nativo C++17 |
-| Windows | PowerShell read-only, CIM/WMI, `systeminformation` |
-| API | Express, Prisma + SQLite, JWT (bcrypt), SSE |
-| Inteligência artificial | Fornecedor configurável pelo utilizador (chave BYOK) |
-| Qualidade | `node --test`, `tsx`, TypeScript `--noEmit`, ESLint |
-
-## Desenvolvimento
-
-### Requisitos
-
-- **Node.js ≥ 20** (recomendado 20 LTS ou superior)
-- **Windows 10/11** — a monitorização e o serviço são específicos do Windows
-- **CMake + compilador C++17** — apenas para o motor nativo
-- **ClamAV para Windows** — obtido pelo script de vendorização (não é versionado)
-
-### Instalação
-
-```bash
-npm install
-```
-
-### Executar em desenvolvimento
-
-```bash
-# Serviço, API, app e desktop em conjunto
+```powershell
+git clone https://github.com/MatrixChill/cybersafe-assistant.git
+cd cybersafe-assistant
+npm ci
+npm run build:all
 npm run dev
-
-# Ou individualmente
-npm run dev:service
-npm run dev:api
-npm run dev:app
-npm run dev:desktop
 ```
 
-A janela Electron abre com o renderer servido pelo Vite; a API fica em `http://localhost:4000`.
+O build nativo requer o toolchain Windows e os recursos documentados. Evite executar uma sessão DEV em conflito com uma instalação pessoal. Os testes e o packaging são etapas distintas; `build:all` não gera nem valida uma instalação. [Preparar o ambiente e executar testes](docs/development.md).
 
-### Build
+## Segurança e limites
 
-```bash
-npm run build:all          # pacotes pela ordem de dependências
-npm run build:native       # motor C++ (CMake, Release)
-npm run dist -w @cybersafe/desktop   # empacotamento Windows (local)
-```
+- Motor **Ativo** não certifica cobertura total. Falhas, timeouts e resultados inconclusivos devem permanecer visíveis.
+- A correção ClamAV da v0.2.4 está publicada; a confirmação no portátil afetado continua pendente nas notas do PR #3.
+- A cobertura do watcher é limitada pelas notificações do Windows. USB tem testes automatizados; isso não substitui um ensaio com dispositivo físico.
+- O filtro WFP depende de provisionamento próprio; não representa o estado do firewall do Windows.
+- O updater verifica manifesto e integridade; a instalação assistida permanece desativada. Não há promessa de atualização automática ponta a ponta.
 
-> Os builds locais com a marca NOT_FOR_DISTRIBUTION destinam-se a testes internos. Para instalação manual da edição académica, usa o Setup da release pública RC4 indicado acima.
+Não é uma proteção antivírus infalível nem substitui o Microsoft Defender. [Testes, limitações e divulgação de vulnerabilidades](docs/security-and-testing.md).
 
-### ClamAV (vendorização)
+## Documentação e PAP
 
-O binário do ClamAV **não** está no repositório. O script `scripts/vendor-clamav.mjs` obtém o
-pacote portátil oficial (Cisco/Talos), valida assinatura e digests, e prepara `vendor/clamav/`.
-Sem esse passo, o motor ClamAV apresenta-se como indisponível — e o produto diz exatamente isso.
+[Índice técnico](docs/README.md) · [Motores](docs/engines.md) · [MATRIX](docs/matrix.md) · [Atualizações](docs/updates.md) · [Evidências da PAP](PAP-EVIDENCIAS-TECNICAS/README.md) · [Changelog](CHANGELOG.md)
 
-## Testes
+A [branch Linux Lite](https://github.com/MatrixChill/cybersafe-assistant/tree/experimental/linux-lite) é experimental e não implica equivalência com a edição Windows. As capturas, relatórios e decisões históricas mantêm a versão e o contexto originais.
 
-Os testes usam o runner nativo do Node (`node --test`), com `tsx` onde há TypeScript.
-
-```bash
-npm test -w @cybersafe/core
-npm test -w @cybersafe/service
-npm test -w @cybersafe/app
-npm test -w @cybersafe/desktop
-npm test -w @cybersafe/native-windows
-npm test -w api
-
-npm run typecheck
-npm run lint
-```
-
-Cada suíte cobre contratos reais do produto (pipeline de análise, quarentena, honestidade de
-estados, segurança de *pipes*, ciclo de vida do arranque). Testes que dependem de hardware,
-motores externos ou de uma instalação real estão fora do que a CI consegue provar — e são
-marcados como validação manual.
-
-**Estado dos testes.** O conjunto dirigido de autenticação, persistência, quarentena e *pipe*
-(documentado em `PAP-EVIDENCIAS-TECNICAS/TESTES-AUTOMATICOS-VERIFICADOS.md`) dá **315 PASS / 1 FAIL /
-0 SKIP** em 316 testes. O FAIL está identificado e explicado: a expectativa de
-`threat-history-storage.test.js` ficou desatualizada face à reposição de assinaturas embutidas
-(`ensureOfflineCoverage`), que é comportamento intencional do produto.
-
-Na data desta revisão as suítes completas **foram** executadas, e **não estão todas verdes**. Os
-números seguintes vêm dos logs dessas execuções — diretório de trabalho
-`…\qoder-goal-final-20261101\logs\` — e não de uma contagem manual:
-
-| Suíte | Medido | Observação |
-|---|---|---|
-| `api` | **Dois âmbitos com comando: `npm test` lista 25 de 33 ficheiros = 426 testes / 61 suítes / 426 PASS / 0 FAIL; `npm run test:full` (33 ficheiros) = 456 / 65 suítes / 456 PASS / 0 FAIL** | `api-suite-20261101.log`, medido a 2026-11-01 16:25 nesta linha, serializado. Antes a tabela só tinha uma linha «`api` (ficheiro do guard) 32 PASS» — era sub-representação: a pacote tinha 33 ficheiros de teste e 8 nunca eram selecionados por comando nenhum (`ag36-ai-runtime`, `ag36-parent-config`, `auth-session-restart`, `dev-parent-shutdown`, `file-scan-archive-contract`, `health-payload`, `r7-sample-events`, `upload-limits`, 30 testes no total). Os 8 passam **todos**; incluo `test:full` para que a afirmação seja reproduzível em vez de confiada. Contexto: `guard` verde após `9edd92c` (`api-guard-fix.log`). |
-| `app` | 2857 testes / 2857 PASS / 0 FAIL | re-medido em `635bcbc` com `--test-concurrency=1` (`logs/app-post-definitions-ui.log`). Antes era 2849/2849: os +8 são a apresentação do estado por fonte (`definitions-status-presentation.test.ts`) e a asserção de que a renderização sem ponte não afirma nada sobre as bases. O `eslint` desta suíte devolve 2 erros **pré-existentes** (`ProcessSnapshot` não usado em `electron.d.ts:14`; `react-refresh/only-export-components` em `desfechoVerificacaoDisco`) — contados no `HEAD`, não introduzidos por este trabalho. As 4 falhas de `re-app-eol.log` eram exatamente os 4 guards reescritos (`scanner-v2-visual`, `task-manager-detail`, `toast-engine-contract`, `v2-shell-layout-guard`); cada um passou a afirmar o invariante no caminho de código vivo em vez de fixar um ponteiro. Verde **neste** estado; as 11 falhas anteriores vinham do EOL do checkout e foram corrigidas em `b01ef8f` |
-| `core` | 1104 testes / 1069 PASS / **4 FAIL** / 30 SKIP / 1 TODO | re-medido neste HEAD depois da correção YARA — `core-full-post-yara.log` (antes: `re-core.log`, 1089 / 1029 / 34 FAIL). As 5 falhas do caminho YARA em memória passaram a **SKIP justificado** (`packages/core/test/fixtures/yara-av-denial.js`): o `yara64` não abre o alvo temporário quando o conteúdo é o positivo de controlo, mas o mesmo motor avalia um buffer benigno — o SKIP só acontece com as duas medições em simultâneo e a asserção do positivo não é executada; **SKIP não é PASS**. As 4 que ficam são a fila/vagas de `clamav-slot-priority.test.js` e **continham uma afirmação falsa neste README**: a atribuição a «tempos de timeout» foi retirada porque o `waitFor` da fila expira com o ficheiro isolado; aquecer a sonda de prontidão elimina as expirações e as asserções substantivas falham mesmo assim, com o tempo da suíte a subir de 70 s para 205 s. Nenhuma das duas é apresentada como resolvida |
-| `desktop` | **633 testes / 98 suítes / 633 PASS / 0 FAIL** | medido a 2026-11-01 16:17 nesta linha (`4b860dc`+). Antes na tabela: 611/611 (`test-desktop.log`), depois 628 / 627 PASS / 1 FAIL — a falha era o portão `tsc --noEmit`, cuja linha em falta (o texto do código de erro `rate-limited`) entrou com `97469f1` (`tc3.log` já não regista erros). O crescimento 611→633 vem dos gates de IPC desta linha (canal `service:get-definitions-status` e capacidades do preload, registados com justificação em `r6-l13-ipc-security.test.mjs`, não afrouxados). |
-| `service` | **Dois âmbitos, medidos separadamente: `npm test` = 973 testes / 144 suítes / 931 PASS / **42 FAIL** (`service-npmtest-3fe1fa9.log`, re-medido com o motor nativo presente); `npm run test:full` (pasta inteira, 151 ficheiros) = 1330 testes / 168 suítes / 1271 PASS / **54 FAIL** / 5 SKIP** em 313 s (`service-full-b6f5546.log`) | medido em `42a2bfd` com o `scan-engine.exe` **compilado a partir do código desta linha** — `service-full-nativenox.log`. **Âmbito primeiro e incómodo: o script `test` do `packages/service` não corre a pasta `test/`**; corre 96 entradas explícitas contra 151 ficheiros de teste, logo 55 ficheiros nunca aparecem no número que `npm test` devolve — é exatamente por isso que existe `test:full`. Os 46 anteriores eram o âmbito do `npm test` **sem o motor nativo**; a diferença de 4 é exatamente `p1-3-prefetch-isolation`. **A queda de 66 para 54 está reconciliada ficheiro a ficheiro (com a ressalva medida abaixo), e os blocos batem certo: 54 rodapés `test at test\…` = 54 `fail` do reporter.** As 12 que saíram são (i) `rc22-native-regressao` 4 + `rc22-native-init-guard` 1, (ii) `p1-3-prefetch-isolation` 4 (`:300`, `:323`, `:466`, `:494`) e (iii) `scan-cancel-observability` 3, essas corrigidas em `8236e34`. (i) e (ii) partilham uma causa que está no código: `packages/service/src/engine.ts:3151` — `if (!nativeCompleted && analysis.verdict === "safe") analysis.verdict = "inconclusive"`. Sem binário nativo nenhum veredicto benigno pode ser conclusivo; com o binário construído, a asserção de isolamento volta a discriminar. **RESSALVA DE MODO DE EXECUÇÃO, obtida depois de publicar o 54:** a mesma pasta completa re-corrida em `22ac7a2` deu **57 FAIL**, e os 3 a mais são `dev-canary` (2) e `p0-rpc-queue` (1) — todos passam isolados (`dev-canary` 2/2; `p0-rpc-queue` 3/3 x3) e os dois do canário rebentam em exactamente ~10 s, o orçamento `timeoutMs = 10_000`, quando 147 ficheiros correm em paralelo. O `npm test` do pacote usa `--test-concurrency=1` e dá **962 testes / 920 PASS / 42 FAIL** (mesmo baseline de 42 antes das últimas mudanças, portanto sem regressão). Ou seja: a contagem da pasta completa depende do modo de execução; os 54 são o valor de corrida concurrente, e omiti-lo foi um erro meu. **Não é inferência nem flutuação: `p1-3-prefetch-isolation` executado isolado três vezes dá sempre 8 PASS / 3 FAIL (`:345`, `:397`, `:445`).** `packages/native-engine/build/` está em `.gitignore:9`, por isso **um checkout limpo desta linha reproduz as 9 falhas dependentes do binário** — o número de 54 pressupõe o motor nativo compilado. **As 54 que ficam, agrupadas pela assinatura da asserção e não pelo nome do ficheiro:** (a) **49 — portão de terminação**, `KILL_TERMINATION_DISABLED = true` (`engine.ts:748`) faz `killProcess` devolver `failed` em `:3995` antes de qualquer consulta e qualquer `logKillBlocked`: `process-kill` 30, `tp-f1-r1-identity` 10, `kill-budget` 5, `kill-blocked-log` 2, `p0-runtime-isolation` 1, `tp-f1-process-recovery` 1. A assinatura no log é a do portão: 38 blocos com `actual` `'failed'`/`false`/`undefined` contra estados que só a terminação produz (`protected`, `killed`, `already-exited`, `alias-stub`, `reused`, `timeout`, `access-denied`), 10 blocos de contagem `0 !== 1` / `0 !== 4` — nenhuma query CIM, nenhuma tentativa — e um bloco com a mensagem literal `Terminação de processos indisponível: identidade não pode ser provada de ponta a ponta` (`tp-f1-r1-identity:297`). **É funcionalidade desligada no produto, não instabilidade do host.** (b) **5 — `inconclusive` contra `safe`**: `p1-3-prefetch-isolation` 3 (aqui com a regra extra `scan_inconclusive`, porque o ficheiro perdeu o dono do prefetch e cai no `scanFile`), `recovery-security-pipeline:26` 1 e `scan-post-batch-no-double-clamav:148` 1 (um `.txt` em `%TEMP%`: só a localização chega para o veredicto deixar de ser conclusivo). É o ponto de produto por decidir, não uma falha de harness. **Os 5 SKIP têm agora correspondência exacta**, lida do log e do código: `session14-engine-native.test.js` 4 — `:60`, `:79`, `:103` «invocação real ainda não confirmada (degraded)» e `:121` «binário presente não permite testar estado unavailable via bridge» — e `fecho14-clamav.test.js:148` «Caso 7: clean via spawn mock — NÃO TESTÁVEL sem DB real». **Os 4 do `session14` não são limite do ambiente, são desenho do teste**: o ficheiro lê `checkAvailability()` antes de qualquer invocação e o contrato só permite `active` depois de uma invocação comprovada, portanto o gate está condenado a lê-lo `degraded`. A prova funcional real do binário não está ali — está em `rc22-native-regressao`, que spawns o `scan-engine.exe` sem mocks e passa 11/11 isolado (SHA-256 exacto de fixture benigna, `double_extension` com score 20, ficheiro inexistente → `failure=output` e nunca `safe`, e a transição para `active` só depois da invocação). Nada foi afrouxado para chegar a estes números e **nenhum SKIP ou FAIL é apresentado como PASS** |
-| `scripts` (empacotamento, `source-freeze`, preflight) | **398 testes / 64 suítes / 392 PASS / 0 FAIL / 5 SKIP / 1 TODO** / `exit 0` — `npm run test:scripts` (11 s) | A linha tem **dois** conjuntos que nenhum comando padrão corria: os 26 ficheiros de `scripts/test/` e os 8 `scripts/*.test.mjs` co-localizados. Desde este commit há `test:scripts`, que lista os dois com glob citado pelo próprio Node (o `--test` deste runtime não aceita um diretório como argumento). Medido em `logs/test-scripts-runner.log`, `--test-concurrency=1`, 10,8 s. Antes dava **240 / 234 PASS / 0 FAIL / 5 SKIP / 1 TODO** (`scripts-test-baseline.log`) só com `scripts/test/`; os +143 trouxeram **1 falha real de contrato envelhecido**: `dev-isolated-boot-contract.test.mjs` afirmava que o gate do API *aceitaria* a porta 4000, e `3a95692` (2026-10-30) passou a recusá-la — como nada corria o ficheiro, a premissa apodreceu em silêncio. O caso atualizado assere agora o invariante mais forte (recusam as duas camadas, cada uma por si) e o conjunto fica em 0 FAIL. Os 5 SKIP são **todos** do mesmo género e dizem diretamente ao ponto 4 do pedido: `o app.asar do último build é legível`, `o runtime que a aplicação precisa está dentro do asar`, `os módulos nativos estão FORA do asar`, `BITE: nenhum caminho do build nem da máquina dentro do pacote`, `não há segredos, bases de dados, logs nem sourcemaps no pacote` — todos com «sem artefacto para inspecionar», mais um `staging de produção` que exige `CYBERSAFE_STAGING_E2E=1`. **Ou seja: a verificação de inclusão de recursos no instalador já está escrita e é honesta; está `NOT RUN` porque não há artefacto, e o artefacto depende do `source-freeze` aprovado.** O 1 TODO é uma asserção real que falha de propósito: `scanner-dashboard-visibility` descobriu que a garantia de UX do ecrã de proteção vive hoje em `v2/dashboard/LabDashboard.tsx` + `components/visual/EngineGrid.tsx` (o `DashboardPage.tsx` de 70 linhas é só contentor de dados), e que o pointer «o histórico completo está em Ameaças» **se perdeu** na refactorização v2 — a shell navega pelo modelo `Page` (`App.tsx:573`), não por `<a>`. Mantive a asserção, marquei `todo` com a razão, e não a apaguei: ver task #15. | `o app.asar do último build é legível`, `o runtime que a aplicação precisa está dentro do asar`, `os módulos nativos estão FORA do asar`, `BITE: nenhum caminho do build nem da máquina dentro do pacote`, `não há segredos, bases de dados, logs nem sourcemaps no pacote` — todos com «sem artefacto para inspecionar», mais um `staging de produção` que exige `CYBERSAFE_STAGING_E2E=1`. **Ou seja: a verificação de inclusão de recursos no instalador já está escrita e é honesta; está `NOT RUN` porque não há artefacto, e o artefacto depende do `source-freeze` aprovado.** O 1 TODO é uma asserção real que falha de propósito: `scanner-dashboard-visibility` descobriu que a garantia de UX do ecrã de proteção vive hoje em `v2/dashboard/LabDashboard.tsx` + `components/visual/EngineGrid.tsx` (o `DashboardPage.tsx` de 70 linhas é só contentor de dados), e que o pointer «o histórico completo está em Ameaças» **se perdeu** na refactorização v2 — a shell navega pelo modelo `Page` (`App.tsx:573`), não por `<a>`. Mantive a asserção, marquei `todo` com a razão, e não a apaguei: ver task #15. |
-| `native-windows` | **Dois âmbitos com comando cada um: `npm test` lista 18 de 28 ficheiros; `npm run test:full` corre a pasta inteira = 246 testes / 21 suítes / 246 PASS / 0 FAIL** (`exit 0`, 92 s) | `test-full-20261101.log`, re-medido nesta linha a 2026-11-01 15:42 (antes: `native-windows-full-after.log`). O mesmo padrão do `service`: a lista explícita esconde ficheiros. **Havia cá uma falha real e invisível ao comando do pacote**: `process-enumeration-boundary.test.js:47` asseria `/indisponível\|CIM\|zero registos/i` sobre o ramo de payload corrompido, mas o produto distingue três causas (`spawn` / `parse` / `empty`, `src/index.ts:741/755/797`) e a do JSON inválido é `parse` — «JSON parse: payload de processos não é JSON utilizável». O comportamento estava correcto (rejeitava, como o teste exige); a regex é que pertencia a outra fronteira. Fixei-a ao texto real do contrato, o que é **mais estrito** do que a disjunção anterior: misturar `parse` com `empty` passa a rebentar aqui. 6/6 no ficheiro isolado antes e depois. |
-| `native-engine` (JS) | 25 testes / 25 PASS / 0 FAIL | `npm run test:native` → `packages/native-engine/test/hash-vectors.test.js`. Vetores de SHA-256/entropia do motor C++; a prova de que o binário *funciona* está em `rc22-native-regressao` (suíte `service`), não aqui. |
-
-**Como reproduzir cada número** (nem tudo está no comando por omissão — é esse o
-ponto 3 do pedido):
-
-```
-npm test -w @cybersafe/core            # 1104 (lista explícita do pacote)
-npm test -w @cybersafe/service         #  973 / 931 PASS / 42 FAIL  ← 96 ficheiros listados
-npm run test:full -w @cybersafe/service    # 1330 / 1271 PASS / 54 FAIL / 5 SKIP (151 ficheiros)
-npm test -w @cybersafe/desktop         #  633 / 633 PASS
-npm test -w @cybersafe/app             # 2857
-npm run test:scripts                   # 398 — scripts/test/ + scripts/*.test.mjs
-npm run test:release-checksums         #   7
-npm run test:native                    #  25 vetores do motor C++
-npm run test:full -w @cybersafe/native-windows   # 246
-npm test -w @cybersafe/api               #  426 / 426 PASS
-npm run test:full -w @cybersafe/api        #  456 / 456 PASS (33 ficheiros)
-```
-
-O `--test-concurrency=1` já vai dentro dos comandos novos; os números dependem do
-modo de execução (a mesma pasta do `service` dava 57 FAIL em corrida paralela e 42
-serializada), por isso é que o modo está escrito no comando e não só no log.
-
-**Provas reais atrás de flags de ambiente — medido, não assumido.** Três verificações que usam os
-binários verdadeiros não são corridas por nenhum comando por omissão: `CYBERSAFE_REAL_CLAMSCAN`
-(5 ficheiros), `CYBERSAFE_REALDEV_FIXTURE_SCAN` (9 ficheiros) e `CYBERSAFE_STAGING_E2E` (1). Com
-`CYBERSAFE_REAL_CLAMSCAN=1`, `rc22-motores-clamav` dá **6/6 PASS** — o `clamscan.exe` vendorizado
-(ClamAV 1.5.4) carrega uma `.ndb` nossa e deteta o marcador benigno, deixando o ficheiro limpo, sem
-qualquer byte de EICAR em disco. YARA 4.6.0 já corre de verdade sem flag (`engine-integrity` +
-`yara-classic-engine` + `yara-engine-provenance`: 61 testes / 59 PASS / 2 SKIP de ambiente). O
-contra-experimento interessa à atribuição das falhas: `p1-3-prefetch-isolation` lê essa mesma flag,
-e com o motor ClamAV real ligado mantém **os mesmos 3 FAIL** — logo não são limitação do ambiente
-nem falta de motor, e a pergunta de produto (#11) mantém-se. Uma prova que só existe quando alguém
-lembra de a activar não é prova de suíte: ficar à espera de opt-in é uma decisão por tomar.
-
-**Workflow `ci` no `main`: VERDE, medida.** A run atual é `41302290721` (SHA `9b7e823`,
-2026-11-01T11:31Z, `conclusion: success`); a anterior, `41300363725` (SHA `596fbee`), tinha passado
-os nove passos — instalação de dependências, `build:all`, assinatura de release, vendor YARA e
-manifesto, YARA clássico e proveniência, e a suíte do desktop. Isso **não** é *packaging*: a
-workflow não compila o native-engine, não provisiona ClamAV/YARA nem mede o payload do instalador;
-esses portões são locais/Windows e continuam pendentes. A workflow **não corre a suíte `service`**
-— os números acima são medições locais nesta máquina. Até há poucas horas esta workflow estava
-vermelha: o `npm ci` do runner exigia entradas `@emnapi/*` que o lock não tinha, e seis testes do
-vendor assumiam um `%TEMP%` canónico que o runner não providesse (forma 8.3).
-
-**GitHub Releases: zero, medido.** `gh api repos/MatrixChill/cybersafe-assistant/releases` devolve
-`[]`, `releases/latest` devolve `404 Not Found` e `git ls-remote --tags origin` não lista nenhuma
-`refs/tags/*`. Portanto **não existe artefacto publicado** — nem R6, nem R7 — e qualquer release
-que venha a ser criada é a primeira pública, o que exige a confirmação explícita do proprietário
-sobre versão, canal e distribuição. A repositório é público (`isPrivate: false`), com `main` como
-branch por omissão. O atualizador, a consultar este canal hoje, recebe «sem release»: o estado é de
-canal vazio, não de atualização disponível.
-
-Nenhuma destas linhas significa «suíte aprovada», e a contagem agregada do repositório não é
-declarada como verde.
-
-### Ensaios manuais em máquina virtual (candidatas R5 e R6)
-
-A tabela separa **o que foi comunicado** por quem executou o ensaio manual do **que está
-verificado por evidência neste repositório**. Nenhum resultado manual é apresentado como
-verificado quando não existe registo — e o ensaio manual reporta-se à R5; para a R6 os próprios
-ficheiros da candidata dizem `MEASURED_NOT_INSTALLED` (ver topo deste README). Os logs citados
-**não estão versionados** (`*.log` é ignorado pelo `.gitignore`): vivem na máquina de
-desenvolvimento em `PAP-EVIDENCIAS-TECNICAS/logs/` e o que fica no repositório é o elenco de
-*digests* em `PAP-EVIDENCIAS-TECNICAS/EVIDENCIAS-LOCAIS.sha256`, que os cobre.
-
-| Ensaio | Resultado comunicado (manual, VM) | Evidência verificável neste repositório |
-|---|---|---|
-| EICAR detetado e enviado para quarentena | Detetado e isolado | Testes automatizados de EICAR em YARA, base de hashes e ClamAV (`packages/core/test/*eicar*`, `clamav-*`, `yara-*`); **não** existe log da execução manual |
-| Restauro a partir da quarentena | Ficheiro restaurado | `service-r5-quarantine-restore-result` 5/5 e `core-quarantine-restore-safety` 6/6 (logs locais, com digest em `EVIDENCIAS-LOCAIS.sha256`) |
-| Persistência após reinício (conta, histórico, quarentena, consentimentos) | Mantida | `auth-session-restart` 1/1, `r6-l11-persistence` 5/5, `r7-l3-history` 17/17, `core/recovery-quarantine` 7/7 |
-| Encerramento sem `Object has been destroyed` | Deixou de se reproduzir | Correção no ciclo de vida da janela (`isDestroyed()` nos caminhos de encerramento de `packages/desktop/src/main.ts`) e suíte desktop 611/611 medida (`test-desktop.log`) |
-| Motores, serviço e API | Funcionais | Testes por área (ver `PAP-EVIDENCIAS-TECNICAS/`); a execução no instalador não tem log neste repositório |
-| Gestor de Tarefas — **listar e monitorizar** | Funcional | `processes.list` reconciliada a pedido: 7/7 PASS em `process-kill.test.js` (suíte «processes.list — verdade do SO reconciliada a pedido»), medida isolada `processkill-alone.log` |
-| Gestor de Tarefas — **terminar processo** | **NÃO FUNCIONAL nesta construção** | `KILL_TERMINATION_DISABLED = true` em `packages/service/src/engine.ts:748` recusa todo e qualquer PID antes de qualquer consulta (delta `f1-kill-disable-20261026`: a janela revalidação→`taskkill` não é atómica, e o delta desativa em vez de fingir segurança). 35 falhas de teste vêm daí e estão explicadas acima. A interface **não finge sucesso**: `TaskManagerPage.tsx:579` mostra a mensagem do serviço com `ok: o.success`, e a pregação de sucesso em `processActions.ts:606` só aceita `killed`/`already-exited`. Reactivar é decisão do proprietário, não deste commit |
-
-**Efeitos 3D na máquina virtual — limitação real, não defeito.** O `CoreScene` só é montado quando
-`gpu` está ligado (`gpu = webgl && !lowPower`). Com o perfil de desempenho em `auto` e **4 ou menos
-CPUs lógicas** — o caso da VM usada nos ensaios — o perfil é tratado como económico, o `gpu` fica
-desligado e a cena 3D **nunca é montada**: fica o orbital estático, sem mensagem de erro. Não é uma
-regressão de WebGL; se o WebGL falhasse com `gpu` ligado, apareceria «Variante estática · 3D
-indisponível». O comportamento não foi alterado antes da PAP e continua por explicar na interface.
-
-## Segurança e limitações
-
-- **Não é um antivírus certificado.** Não substitui o Microsoft Defender e não oferece garantia
-  de deteção; a ausência de deteções não prova que um ficheiro seja seguro.
-- **Windows-only.** A monitorização, o serviço e o empacotamento assumem Windows.
-- **Chaves externas** (VirusTotal, fornecedor de IA) são configuradas localmente pelo utilizador;
-  nunca são incluídas no repositório.
-- **Operações destrutivas** (terminar processos, eliminar/quarentenar) são limitadas por política;
-  um administrador malicioso continua a poder contornar a proteção em *user-mode*.
-- **Limites de cobertura:** orçamento de ficheiros por análise, exclusões de sistema e formatos
-  não suportados são declarados nos resultados (analisados / excluídos / inacessíveis).
-- **Instaladores internos** não são distribuíveis e não substituem um processo de assinatura.
-- **Instalador sem assinatura.** Não existe certificado Authenticode: os binários medidos devolvem
-  `TRUST_E_NOSIGNATURE` (`0x800b0100`) e a tabela de certificados tem tamanho 0. Um instalador
-  não assinado **nunca** é descrito aqui como assinado.
-- **Atualizações verificadas, instalação manual.** O canal stable usa a chave pública Ed25519 do proprietário (impressão digital fixada); a instalação assistida está desligada por não haver Authenticode.
-- **Terminação de processos:** o Gestor de Tarefas termina aplicações por *handle* nativo, com confirmação e verificação da instância; o caminho antigo por PID está desligado em Windows.
-- **Validação manual pendente da v0.2.2:** latência EICAR instalada, janela minimizada e reinício do serviço são ensaiados em VM antes de qualquer publicação.
-
-Se encontrares um problema de segurança, não abras uma issue pública com detalhes sensíveis.
-
-## Melhorias futuras
-
-1. Gestor de exclusões com interface dedicada;
-2. Otimização do pipeline de análise (orçamento distribuído, menos trabalho repetido);
-3. Melhor cobertura de formatos e heurísticas;
-4. Diagnóstico explícito de resultados inconclusivos;
-5. Atualizações seguras com verificação de integridade fim-a-fim;
-6. Compatibilidade gráfica e DPI em hardware variado;
-7. Instalador final validado em máquina limpa, com assinatura.
-
-## Documentação
-
-- [Arquitetura](docs/ARCHITECTURE.md) — camadas, fluxos e contratos
-- [Roadmap](docs/ROADMAP.md) — fases e prioridades honestas
-- [FAQ de entrega](docs/FAQ-ENTREGA-PROFESSOR.md) — perguntas típicas sobre o projeto
-- [Transferência para revisão da PAP](docs/PAP-TRANSFERENCIA-20261031.md) — factos comprovados, lacunas e o que o relatório pode afirmar. **Atenção:** este documento descreve a candidata R5 e o estado documental de 2026-10-31; a versão e os artefactos atuais são os do topo deste README, e o delta técnico está no CHANGELOG
-- [Evidências técnicas da PAP](PAP-EVIDENCIAS-TECNICAS/README.md) — oito documentos com provas, limitações e índice de reprodução
-- [CHANGELOG](CHANGELOG.md) — adenda técnica do que mudou depois de o relatório académico ter sido entregue
-- [Camada PowerShell / Windows](docs/POWERSHELL-WINDOWS-LAYER.md)
-- [Toolchain C++ no Windows](docs/TOOLCHAIN-CPP-WINDOWS.md)
-- [Motor nativo](packages/native-engine/README.md) — compilar e testar o `scan-engine`
-- [Índice da documentação](docs/README.md)
-
-## Licença
-
-MIT. Ver [`package.json`](package.json). Componentes de terceiros mantêm as respetivas licenças
-(ver `assets/licenses/`).
+As atribuições de terceiros e a proveniência dos componentes estão em [THIRD-PARTY-NOTICES](assets/licenses/THIRD-PARTY-NOTICES.txt) e [PROVENANCE](assets/licenses/PROVENANCE.json).

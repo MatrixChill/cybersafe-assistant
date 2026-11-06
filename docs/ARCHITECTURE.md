@@ -12,7 +12,7 @@ Monorepo npm (`packages/*`) com cinco camadas principais:
 | `packages/app` | Renderer React (Vite + Tailwind). Não fala com o sistema operativo diretamente. |
 | `packages/desktop` | Processo principal Electron: janela, tray, splash, preload, IPC e ciclo de vida. |
 | `packages/service` | Serviço Node em segundo plano: pipeline de análise, quarentena, USB, watchers, histórico, atualizações. |
-| `packages/core` | Motor lógico: YARA (via `@litko/yara-x`), base de hashes, heurística, scoring, ClamAV, hardware. |
+| `packages/core` | Motor lógico: YARA clássico (adaptador CLI), base de hashes, heurística, scoring, ClamAV, hardware. |
 | `packages/native-windows` | Queries PowerShell **read-only** (allowlist) e watchers Windows. |
 | `packages/native-engine` | Executável C++17 (`scan-engine.exe`): SHA-256, entropia, parsing PE, JSON. |
 | `packages/api` | API REST (Express + Prisma/SQLite) para contas, assistente e eventos. |
@@ -52,7 +52,7 @@ Regras estruturais:
 | Motor | Onde vive | O que faz |
 |---|---|---|
 | Heurístico + scoring | `@cybersafe/core` (`analysis.ts`) | magic numbers, entropia, extensões de risco, metadados, veredicto e severidade |
-| YARA | `@cybersafe/core` + `@litko/yara-x` | regras compiladas em processo Node (biblioteca nativa Rust) |
+| YARA | `@cybersafe/core` + YARA clássico | regras avaliadas pelo adaptador `yara64.exe` / `yarac64.exe` |
 | Base de hashes | `@cybersafe/core` | hashes conhecidos-maliciosos (`known_bad_hash`) |
 | ClamAV | binário oficial vendorizado | assinaturas; batch com orçamento e estados explícitos |
 | Nativo C++ | `packages/native-engine` | hash, entropia, parsing PE; invocado pela *bridge* do serviço |
