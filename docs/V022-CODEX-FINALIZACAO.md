@@ -26,3 +26,15 @@ A instalação assistida continua false. Após novo freeze aprovado: compilar ca
 Após publicação verificada, procurar atualizações na v0.2.1, confirmar versão 0.2.2, descarregar do GitHub oficial e comparar SHA-256 com SHA256SUMS.txt. Encerrar normalmente, preservar backup dos dados e executar o Setup de atualização manual. Sem Authenticode, o Windows pode mostrar editor desconhecido; não desativar proteções. Se a política bloquear a execução, guardar a mensagem. Confirmar versão e motores após abrir. Não se declara atualização automática instalada.
 
 Suite completa do serviço concluída nesta revisão funcional: 1438 testes, 1421 aprovados, 17 ignorados, zero falhas (278,1 s). Os caminhos de logs acima são locais; este documento não contém dados pessoais.
+
+
+## Publicação concluída
+
+Release pública Latest: https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.2
+Tag e fontes do Setup: 7b942bd0f0ecc415ff43b6a4d652c0138fbcaa14. CI Windows 42221254756 aprovada.
+Freeze aprovado: 2032 entradas, digest e6a8e8f012bafbf85232403fb67943fc8422a2ef6dd391f47782b00c0166878c, tree 1290d0efd1c8a7c4330af137a55cc12d7a2842c2. Pré-verificação, packaging e freeze pós-build aprovados.
+Setup CyberSafe-Assistant-Setup-0.2.2.exe: 279427815 bytes; SHA-256 c49165a3d1155dd4b706c1da26d593514bcdaf26b14b339628c1eb9a3700be79. Payload extraído: 425 ficheiros com hashes idênticos, zero extras. Versão ASAR 0.2.2.
+Manifesto Ed25519 assinado offline com a chave aprovada; verificação com o pin da v0.2.1 aprovada. Contrato de atualização reconhece 0.2.1 → 0.2.2; instalação assistida permanece desativada.
+Os três assets foram conferidos pelos digests calculados pelo GitHub. Download público sem autenticação do Setup, manifesto latest e SHA256SUMS.txt concluído; hashes, bytes e assinatura coincidem com os locais. A v0.2.1 e os seus assets foram preservados.
+Seis testes benignos adicionais com clamscan real passaram, sem novo EICAR. Não se instalou este Setup nem se alteraram os dados pessoais. A atualização no novo PC deve ser validada pelo proprietário.
+Este registo e o README são documentação posterior à publicação: não movem a tag, não recompilam o Setup e não reutilizam a aprovação para um novo build.

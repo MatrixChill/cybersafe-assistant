@@ -18,8 +18,8 @@
   <img alt="Estado" src="https://img.shields.io/badge/estado-desenvolvimento%20académico-orange">
 </p>
 
-> **Versão pública estável: [v0.2.1](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.1)** · Windows 10/11 x64.
-> A **v0.2.2** está em preparação (candidata local, **não publicada**). Instalador sem assinatura Authenticode (limitação declarada).
+> **Versão pública estável: [v0.2.2](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.2)** · Windows 10/11 x64.
+> A **v0.2.2** está publicada para instalação manual; manifesto Ed25519 e checksums verificados. Instalador sem assinatura Authenticode (limitação declarada).
 > O CyberSafe complementa — não substitui — o Microsoft Defender: mantém as proteções do Windows ativas.
 
 <p align="center">
@@ -55,7 +55,7 @@ O **CyberSafe Assistant** é uma aplicação desktop para Windows que reúne, nu
   ClamAV e um motor nativo em C++);
 - **monitorização** de processos, hardware e eventos de segurança do sistema;
 - **quarentena** e resposta a ameaças, com histórico e relatórios exportáveis;
-- **gestão do sistema** — gestor de tarefas (só leitura), PC Center, otimização e proteção USB.
+- **gestão do sistema** — gestor de tarefas (terminação individual protegida no Windows), PC Center, otimização e proteção USB.
 
 O projeto nasce no âmbito do **Projeto de Aptidão Profissional (PAP)** do curso de
 **Programador/a de Informática** da **Escola Profissional de Gaia** — formação de
@@ -69,12 +69,15 @@ indisponíveis).
 
 **Requisitos mínimos:** Windows 10 ou 11 de 64 bits, ~1 GB livre para a aplicação e as bases de assinaturas, ligação à Internet para atualizar as definições (opcional).
 
-1. Abre a [release estável](https://github.com/MatrixChill/cybersafe-assistant/releases/latest) e descarrega o instalador `.exe` e o ficheiro `SHA256SUMS`.
-2. Verifica a integridade em PowerShell e compara o resultado com a linha do instalador em `SHA256SUMS`:
+1. Abre a [release estável](https://github.com/MatrixChill/cybersafe-assistant/releases/latest) e descarrega o instalador `.exe` e o ficheiro `SHA256SUMS.txt`.
+2. Verifica a integridade em PowerShell e compara o resultado com a linha do instalador em `SHA256SUMS.txt`:
    ```powershell
    Get-FileHash -Algorithm SHA256 -LiteralPath "<caminho-do-instalador>.exe"
    ```
-3. Executa o instalador. Como não tem Authenticode, o Windows SmartScreen pode avisar — só continues se o hash coincidir.
+3. Encerra normalmente o CyberSafe, preserva um backup dos dados e executa o instalador oficial. Sem Authenticode, o Windows pode mostrar editor desconhecido. Se uma política bloquear a execução, conserva a mensagem e não desatives as proteções.
+4. Abre o CyberSafe e confirma a versão `0.2.2`, a sessão, o histórico e o estado dos quatro motores. A versão anterior continua disponível na [release v0.2.1](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.1).
+
+Setup: [CyberSafe-Assistant-Setup-0.2.2.exe](https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.2/CyberSafe-Assistant-Setup-0.2.2.exe), 279427815 bytes. SHA-256: `c49165a3d1155dd4b706c1da26d593514bcdaf26b14b339628c1eb9a3700be79`.
 
 As atualizações seguintes são verificadas pela aplicação: manifesto assinado com **Ed25519** (chave do proprietário, impressão digital fixada em `packages/desktop/src/updater/release-trust.json`), SHA-256 do instalador e recusa de versões mais antigas. A instalação continua manual.
 

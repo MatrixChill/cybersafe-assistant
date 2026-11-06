@@ -46,9 +46,9 @@ e exigem autorização explícita do dono do projeto.
 
 ---
 
-## `0.2.2` — candidata de manutenção, **NÃO PUBLICADA**
+## `0.2.2` — manutenção publicada em 06/11/2026
 
-Complemento de 06/11: cartões distinguem métricas ausentes; reconciliação limitada por pasta exige análises concluídas e snapshot estável, preservando lacunas reais e contadores históricos. Ver `docs/V022-CODEX-FINALIZACAO.md`. Novo freeze obrigatório.
+Complemento de 06/11: cartões distinguem métricas ausentes; reconciliação limitada por pasta exige análises concluídas e snapshot estável, preservando lacunas reais e contadores históricos. Ver `docs/V022-CODEX-FINALIZACAO.md`. Freeze próprio aplicado ao commit `7b942bd`; Setup e manifesto publicados e verificados. A documentação posterior não altera o artefacto congelado.
 
 Base: `v0.2.1` (`b3a216a`). Branch `fix/v021-realtime-coverage`.
 

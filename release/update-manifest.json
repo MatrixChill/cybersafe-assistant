@@ -1,18 +1,27 @@
 {
   "schema": "cybersafe.release-manifest/1",
   "channel": "stable",
-  "version": "0.2.1",
-  "publishedAt": "2026-11-06T07:27:21.645Z",
-  "notes": "# CyberSafe Assistant v0.2.1\n\n## Correções\n\n- Recuperação da fila de análises após saturação.\n- Prioridade para ficheiros em tempo real no ClamAV, sem interromper análises já ativas.\n\n## Limitações\n\n- A latência EICAR não foi medida no instalador final e o percurso com a janela minimizada ainda não foi validado numa instalação da v0.2.1.\n- O instalador não tem assinatura Authenticode (limitação aceite para a PAP); o Windows pode mostrar avisos de segurança.\n- A instalação assistida dentro da aplicação está desativada. A aplicação deteta a atualização e encaminha para transferência manual do instalador verificado.\n\nCommit: `b3a216a21cd3d38993f7e2a8c6b0ec7164e51420`.",
+  "version": "0.2.2",
+  "publishedAt": "2026-11-06T13:09:11.662Z",
+  "notes": "# CyberSafe Assistant v0.2.2\n\nAtualização de manutenção da edição académica Windows.\n\n## Correções\n- Cartões distinguem ausência de métrica de cobertura e ausência de leitura do serviço.\n- Reconciliação limitada por pasta após notificações sem nome do watcher: exige análises concluídas e snapshot estável; preserva avisos de falhas e contadores históricos.\n- Preserva a prioridade de ficheiros em tempo real, recuperação de filas, melhorias da MATRIX e terminação individual protegida por handle no Gestor de Tarefas.\n\n## Integridade e testes\n- Commit: `7b942bd0f0ecc415ff43b6a4d652c0138fbcaa14`.\n- CI Windows aprovada; freeze oficial aprovado e verificado antes e depois do build.\n- Payload: 425 ficheiros extraídos e comparados por SHA-256, sem divergências.\n- Core: 1225 aprovados, 29 ignorados, 1 TODO; serviço completo: 1421 aprovados, 17 ignorados; app: 3050; desktop: 694; scripts: 484; nativo: 25. Seis ensaios adicionais benignos com ClamAV real aprovados.\n- A deteção EICAR na candidata anterior foi confirmada pelo proprietário. O Setup final deste commit não foi instalado nesta execução; não se apresenta o build como nova validação instalada.\n\n## Limitações e instalação\n- Sem assinatura Authenticode: editor não verificado pelo Windows. Manifesto de atualização assinado Ed25519 com a chave aprovada.\n- Atualização assistida desativada. Usar transferência e instalação manual; não se declara atualização automática ponta a ponta.\n- A reconciliação é limitada a pastas pequenas (32 ficheiros/16 MiB, 256 entradas, profundidade 8). Resultados inconclusivos, alterações, exclusões ou limites conservam a lacuna. Um snapshot reconciliado não certifica entrega histórica de eventos nem proteção integral. WFP não provisionado neste perfil; MATRIX online depende de configuração, consentimento e disponibilidade do fornecedor.\n- Verifique SHA-256 usando SHA256SUMS.txt. Encerre o CyberSafe normalmente, preserve um backup e execute o instalador oficial. Se o Windows bloquear a execução, conserve a mensagem; não desative Defender, SmartScreen, firewall ou UAC.\n\nSHA-256 do Setup: `c49165a3d1155dd4b706c1da26d593514bcdaf26b14b339628c1eb9a3700be79`.\nTamanho: 279427815 bytes. A v0.2.1 e os seus artefactos permanecem preservados.",
   "file": {
-    "url": "https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.1/CyberSafe-Assistant-Setup-0.2.1.exe",
-    "sha256": "6602f3764d7dabad0bfe876b2771629942602985031f30acfdd2f7f24f9cdb83",
-    "sizeBytes": 279420321
+    "url": "https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.2/CyberSafe-Assistant-Setup-0.2.2.exe",
+    "sha256": "c49165a3d1155dd4b706c1da26d593514bcdaf26b14b339628c1eb9a3700be79",
+    "sizeBytes": 279427815
   },
   "publisher": {
     "name": "CyberSafe Assistant — academic unsigned"
   },
   "requiresElevation": true,
-  "buildId": "candidate-20261105-212512-e7b575ec",
-  "sourceCommit": "b3a216a21cd3d38993f7e2a8c6b0ec7164e51420"
+  "buildId": "candidate-20261106-130618-6209b12e",
+  "sourceCommit": "7b942bd0f0ecc415ff43b6a4d652c0138fbcaa14",
+  "compatibility": {
+    "minWindowsBuild": null,
+    "fromVersion": "0.2.1"
+  },
+  "signature": {
+    "algorithm": "ed25519",
+    "value": "p+vpzAwGpVRUZBNAdQGcBHU6xkEKydXa8BuPy0LuCBCHa5zky+XXhNWblAQFwQ7L8nrgDdkGD30nMzM6rjkTCQ==",
+    "signedByFingerprint": "3982C36398918D077A417DDA02E6E7FF6C1F70622684DA4FB43673652E4C8FB6"
+  }
 }
