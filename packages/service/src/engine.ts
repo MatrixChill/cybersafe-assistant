@@ -2327,7 +2327,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       const result = await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true, priority: "realtime", realtimeTraceId: trace ? traceId : undefined });
       if (generation === this.protectionGeneration) this.realtimeRecovery.noteAnalyzed(resolvedPath, fingerprint, await this.realtimeAnalysisOutcome(filePath, fingerprint, result?.results[0]?.verdict));
       if (trace) console.log(`[RealtimePerf] id=${traceId} stage=returned pipelineMs=${(performance.now()-startedAt).toFixed(1)} observedToReturnedMs=${(performance.now()-observedAt).toFixed(1)} verdict=${result?.results[0]?.verdict ?? "cancelled"}`);
-    }, this.realtimePriority(filePath));
+    }, this.realtimePriority(filePath), 0);
     if (trace) console.log(`[RealtimePerf] id=${traceId} stage=admission outcome=${admission} metadataMs=${(queuedAt-observedAt).toFixed(1)} queueDepth=${this.realtimeQueue.size}`);
     if (admission === "full") { this.reportRealtimeOverflow(filePath, "analysis", retry); return false; }
     // Uma versão deste caminho entrou (ou já estava em espera/analisada). Isto
@@ -2362,7 +2362,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
   private reportRealtimeOverflow(caminho = "", stage: SaturationStage = "analysis", retry = false): void {
     // Só a primeira rejeição agenda. Uma retry falhada não cria outra cadeia.
     if (retry) this.realtimeRecovery.recordRejection(path.resolve(caminho), stage);
-    else this.realtimeRecovery.defer(path.resolve(caminho), stage, signal => this.handleFileObservation(caminho, true, signal));
+    else this.realtimeRecovery.defer(path.resolve(caminho), stage, signal => this.handleFileObservation(caminho, true, signal), caminho ? this.realtimePriority(caminho) : "normal");
     this.loss.noteQueueRejection(caminho || "caminho-desconhecido");
     this.overflowLastRejectionAt = Date.now();
     // Um aviso por EPISÓDIO, não um a cada 10 s com o cumulativo da sessão

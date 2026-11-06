@@ -1,6 +1,6 @@
 export type SaturationStage = "metadata" | "analysis";
 type Retry = (signal: AbortSignal) => Promise<boolean>;
-type Entry = { run: Retry; firstAt: number; attempts: number; revision: number };
+type Entry = { run: Retry; firstAt: number; attempts: number; revision: number; high: boolean };
 /**
  * Ciclo de um caminho AFETADO por saturação, até à análise da versão mais recente:
  *  waiting   rejeitado, repetição de admissão agendada;
@@ -63,15 +63,18 @@ export class RealtimeRecovery {
   private readonly clearTimer: NonNullable<Options["clearTimer"]>;
   private readonly onIdle: (() => void) | undefined;
   constructor(options: Options = {}) {
-    // Orçamento medido no incidente de 06/11: 863 caminhos numa instalação.
-    // Com 128 caminhos e 2 min, 475+ eram largados e 545+ expiravam antes de a
-    // fila escoar. O backlog guarda só a chave do caminho (sem conteúdo) e não
-    // aumenta a fila nem a concorrência das análises: teto rígido de 4 096
-    // caminhos, 15 min de prazo. O que passar daqui conta como não recuperado.
-    this.maxPaths = options.maxPaths ?? 4_096; this.maxAttempts = options.maxAttempts ?? 64;
+    // Orçamento MEDIDO (output/v021-budget-*.json, perfil do incidente de 06/11:
+    // 2 196 tentativas, 863 caminhos, chegadas 10x acima do serviço):
+    //   128 -> 766 caminhos sem versão admitida; 512 -> 231; 1 024 -> 0.
+    //   Pico do backlog: 648 caminhos; 1 024 e 4 096 dão resultados iguais.
+    // 1 024 repetições (closure + chave, ~0,45 KB cada) e seguimento de 4 096
+    // chaves. Não aumenta a fila nem a concorrência das análises. Prazo de
+    // 15 min: escoar 648 caminhos a ~200 ms/análise leva ~2-3 min com folga
+    // para análises longas do ClamAV. O que passar daqui é lacuna reportada.
+    this.maxPaths = options.maxPaths ?? 1_024; this.maxAttempts = options.maxAttempts ?? 64;
     this.maxAgeMs = options.maxAgeMs ?? 900_000; this.delayMs = options.delayMs ?? 100;
     this.attemptTimeoutMs = options.attemptTimeoutMs ?? 2_000;
-    this.maxTracked = options.maxTracked ?? this.maxPaths * 4;
+    this.maxTracked = options.maxTracked ?? 4_096;
     for (const value of [this.maxPaths,this.maxTracked,this.maxAttempts,this.maxAgeMs,this.delayMs,this.attemptTimeoutMs]) {
       if (!Number.isSafeInteger(value) || value <= 0) throw new RangeError("Limite de recuperação inválido");
     }
@@ -80,7 +83,7 @@ export class RealtimeRecovery {
     this.clearTimer = options.clearTimer ?? (timer => clearTimeout(timer as ReturnType<typeof setTimeout>));
     this.onIdle = options.onIdle;
   }
-  defer(path: string, stage: SaturationStage, run: Retry): "scheduled" | "deduplicated" | "full" {
+  defer(path: string, stage: SaturationStage, run: Retry, priority: "high" | "normal" = "normal"): "scheduled" | "deduplicated" | "full" {
     const key = path.toLowerCase(); const now = this.now();
     this.recordRejection(path, stage);
     for(const [old,until] of this.terminal) if(until<=now)this.terminal.delete(old);
@@ -89,7 +92,7 @@ export class RealtimeRecovery {
     if(entry){entry.run=run;entry.revision++;return "deduplicated";}
     if(this.entries.size>=this.maxPaths){this.dropped++;this.mark(key,"given-up");return "full";}
     this.mark(key,"waiting");
-    this.entries.set(key,{run,firstAt:now,attempts:0,revision:0});this.schedule();return "scheduled";
+    this.entries.set(key,{run,firstAt:now,attempts:0,revision:0,high:priority==="high"});this.schedule();return "scheduled";
   }
   recordRejection(path: string, stage: SaturationStage): void {
     const key=path.toLowerCase();
@@ -141,7 +144,9 @@ export class RealtimeRecovery {
     metadataRejections:this.metadataRejections,analysisRejections:this.analysisRejections,
     pending:this.entries.size,running:this.busy, recovered:this.recovered,exhausted:this.exhausted,
     expired:this.expired,dropped:this.dropped,suppressed:this.suppressed,cancelled:this.cancelled,
-    distinctPaths:this.affected.size,pathsCapped:this.affectedCapped,affectedPaths:[...this.affected],lastEventAt:this.lastEventAt,lastStage:this.lastStage,
+    // Amostra limitada: a lista inteira (até 4 096) ia em cada leitura de saúde
+    // pelo pipe (363 KB medidos) e nenhum ecrã a usa.
+    distinctPaths:this.affected.size,pathsCapped:this.affectedCapped,affectedPaths:[...this.affected].slice(0,32),lastEventAt:this.lastEventAt,lastStage:this.lastStage,
     lastEventId:this.metadataRejections+this.analysisRejections,
     ...this.coverageCounts(),
   };}
@@ -181,7 +186,11 @@ export class RealtimeRecovery {
     this.timer=this.setTimer(()=>{if(epoch!==this.epoch)return;this.scheduled=false;void this.attempt();},delay);
   }
   private async attempt(): Promise<void> {
-    const next=this.entries.entries().next().value;if(!next || this.busy)return;
+    if(this.busy)return;
+    // Downloads primeiro também na recuperação.
+    let next:[string,Entry]|undefined;
+    for(const item of this.entries){if(item[1].high){next=item;break;}}
+    next??=this.entries.entries().next().value;if(!next)return;
     const [key,entry]=next;
     if(this.now()-entry.firstAt>=this.maxAgeMs){this.expired++;this.giveUp(key);this.finish(key,entry);this.schedule();this.idleCheck();return;}
     this.busy=true;const epoch=this.epoch;const revision=entry.revision;entry.attempts++;

@@ -1,4 +1,6 @@
 type Job = {fingerprint:string;run:()=>Promise<void>;epoch:number};
+/** Lugares da fila guardados para observações novas (Downloads incluídos). */
+export const RECOVERY_RESERVE = 16;
 /** One running file analysis and a bounded, latest-version queue. */
 export class RealtimeFileQueue {
   private pending = new Map<string,Job>();
@@ -8,13 +10,18 @@ export class RealtimeFileQueue {
   private running: {key:string;job:Job}|null=null;
   private epoch=0;
   private spaceListener: (()=>void)|null=null;
+  /** Lugares só para prioridade alta: 16 na fila real de 64. */
+  private get highReserve(){return Math.min(RECOVERY_RESERVE,Math.floor(this.capacity/4));}
   constructor(private readonly capacity=64,private readonly now=Date.now) {}
   get active(){return this.running?1:0;}
   get size(){return this.pending.size + this.priorityPending.size;}
   /** Avisado quando uma análise termina e há lugar livre (recuperação). */
   onSpace(listener:()=>void){this.spaceListener=listener;}
   clear(){this.epoch++;this.pending.clear();this.priorityPending.clear();this.recent.clear();}
-  enqueue(key:string,fingerprint:string,run:()=>Promise<void>,priority:'high'|'normal'='normal'):'queued'|'duplicate'|'full' {
+  /** `reserve`: lugares que este pedido não pode ocupar. As repetições da
+      recuperação usam-no para nunca tirar a vaga a uma observação nova (medido:
+      sem reserva, p95 de Downloads passou de ms a 46 s). */
+  enqueue(key:string,fingerprint:string,run:()=>Promise<void>,priority:'high'|'normal'='normal',reserve=0):'queued'|'duplicate'|'full' {
     const pending=this.pending.get(key) ?? this.priorityPending.get(key);
     const running=this.running?.key===key && this.running.job.epoch===this.epoch ? this.running.job : undefined;
     const old=this.recent.get(key);
@@ -32,7 +39,11 @@ export class RealtimeFileQueue {
       }
       return 'duplicate';
     }
-    if(!pending && this.size>=this.capacity) return 'full';
+    // Prioridade alta (Downloads) pode usar a reserva; trabalho normal, novo ou
+    // repetido, nunca a ocupa. Medido: sem isto um Download novo esperava 13 s+
+    // (p50) ou perdia a vaga atrás de temporários.
+    const limit=this.capacity-(priority==='high'?reserve:Math.max(reserve,this.highReserve));
+    if(!pending && this.size>=limit) return 'full';
     // Um evento prioritario de um caminho ja em espera sobe-o de fila; um
     // evento normal nunca despromove um prioritario ja admitido.
     let target = priority==='high' ? this.priorityPending : this.pending;
@@ -49,6 +60,6 @@ export class RealtimeFileQueue {
     // its Promise; that failure must release the only running slot.
     void (async()=>{await job.run();})().then(()=>{
       if(job.epoch===this.epoch){this.recent.delete(key);this.recent.set(key,{fingerprint:job.fingerprint,at:this.now()});while(this.recent.size>256)this.recent.delete(this.recent.keys().next().value!);}
-    }).catch(()=>undefined).finally(()=>{this.running=null;this.pump();if(this.size<this.capacity)try{this.spaceListener?.();}catch{/* o aviso não pode parar a fila */}});
+    }).catch(()=>undefined).finally(()=>{this.running=null;this.pump();if(this.size<this.capacity-this.highReserve)try{this.spaceListener?.();}catch{/* o aviso não pode parar a fila */}});
   }
 }

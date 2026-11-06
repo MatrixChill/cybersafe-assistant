@@ -161,7 +161,7 @@ test('onIdle avisa quando o backlog esvazia', async () => {
 
 test('fila avisa quando abre espaço', async () => {
   let space=0;
-  const q=new RealtimeFileQueue(2);
+  const q=new RealtimeFileQueue(2); // reserva = 0 em filas pequenas
   q.onSpace(()=>space++);
   let release;
   q.enqueue('a','1',()=>new Promise(r=>release=r));
@@ -171,4 +171,13 @@ test('fila avisa quando abre espaço', async () => {
   release();
   for(let i=0;i<20;i++) await Promise.resolve();
   assert.ok(space>=1);
+});
+
+test('reserva: trabalho normal deixa 16 lugares livres para Downloads', () => {
+  const q=new RealtimeFileQueue(64);
+  q.enqueue('run','1',()=>new Promise(()=>{}));
+  let normal=0; while(q.enqueue(`n${normal}`,'1',async()=>{})==='queued') normal++;
+  assert.equal(normal,48);
+  let high=0; while(q.enqueue(`h${high}`,'1',async()=>{},'high')==='queued') high++;
+  assert.equal(high,16);
 });
