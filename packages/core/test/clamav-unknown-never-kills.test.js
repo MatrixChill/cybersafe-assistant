@@ -33,13 +33,22 @@ import {
 
 const SCAN_ARGS = ["--database=definitions", "--no-summary", "-r", "C:\\scan"];
 
-function makeFakeChild(pid, { died = false } = {}) {
+/**
+ * `handleKill`: o filho próprio pode ser terminado pelo HANDLE (decisão de
+ * 2026-11-06). Por omissão estes testes simulam um handle que NÃO consegue
+ * terminar (lança), para provar o que o contrato de 2026-10-03 continua a
+ * garantir: sem identidade confirmada, o fallback NUNCA é matar por PID, e a
+ * vaga fica envenenada. O caminho do handle tem testes próprios no fim.
+ */
+function makeFakeChild(pid, { died = false, handleKill = false } = {}) {
   const child = new EventEmitter();
   child.pid = pid;
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
-  child.state = { died, kills: 0 };
+  child.state = { died, kills: 0, handleKills: 0 };
   child.kill = () => {
+    if (!handleKill) throw new Error("handle do processo indisponível (simulado)");
+    child.state.handleKills++;
     child.state.kills++;
     if (!child.state.died) child.die(0);
     return true;
@@ -93,7 +102,7 @@ function strangerRow(pid) {
  *    confundir com "chamou e eu nao vi";
  *  - `probeTimestamps` e `probeBudgets`, para tentativas, ESPACAMENTO e orcamento.
  */
-function makeRig({ readings, busyMs = 0, pid = 4242, capture = null } = {}) {
+function makeRig({ readings, busyMs = 0, pid = 4242, capture = null, handleKill = false } = {}) {
   const state = {
     spawnCount: 0,
     probeCalls: 0,
@@ -123,7 +132,7 @@ function makeRig({ readings, busyMs = 0, pid = 4242, capture = null } = {}) {
   const hooks = {
     spawn: () => {
       state.spawnCount++;
-      state.child = makeFakeChild(pid);
+      state.child = makeFakeChild(pid, { handleKill });
       return state.child;
     },
     spawnSync: () => {
@@ -588,5 +597,85 @@ describe("B3 - uma sonda que LANCA é UNKNOWN, nunca um kill e nunca um crash", 
       true,
       "ninguém confirmou a morte, logo a vaga tem de ficar presa — é isto que impede um segundo clamscan",
     );
+  });
+});
+
+describe("2026-11-06 — filho PRÓPRIO sem identidade CIM: termina pelo handle, nunca por PID", () => {
+  it("CIM indisponível + handle válido: termina pelo handle, sem taskkill, e a vaga volta com o close", async () => {
+    const { root, definitionsDir: defs } = await definitionsDir();
+    let spawnCount = 0;
+    const children = [];
+    const spawnFn = () => {
+      const child = makeFakeChild(33000 + spawnCount, { handleKill: true });
+      children.push(child);
+      spawnCount++;
+      return child;
+    };
+    // Qualquer caminho por PID (taskkill) rebenta o teste.
+    const spawnSync = () => { throw new Error("nunca terminar por PID sem identidade"); };
+    const probeIdentity = () => ({ row: null, probeFailed: true, detail: "CIM indisponível" });
+    const bridge = new ClamavBridge({
+      definitionsDir: defs,
+      spawn: createSpawnClamav({ spawn: spawnFn, spawnSync, probeIdentity }),
+      scanTimeoutMs: 80,
+    });
+    try {
+      await fs.writeFile(path.join(root, "a.txt"), "benigno");
+      await bridge.scanFile(path.join(root, "a.txt"));
+      assert.equal(children[0].state.handleKills, 1, "o filho próprio foi terminado pelo handle");
+      assert.equal(children[0].state.died, true);
+      // Vaga não envenenada: o scan seguinte pode arrancar outro clamscan.
+      await fs.writeFile(path.join(root, "b.txt"), "benigno");
+      const second = await bridge.scanFile(path.join(root, "b.txt"));
+      assert.ok(spawnCount >= 2, `a vaga voltou: ${JSON.stringify(second.status)}`);
+    } finally {
+      for (const c of children) c.die(0);
+      await bridge.dispose().catch(() => {});
+      await fs.rm(root, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("handle aceita o pedido mas o SO não confirma a morte: a vaga continua envenenada", async () => {
+    const { root, definitionsDir: defs } = await definitionsDir();
+    let spawnCount = 0;
+    const children = [];
+    const spawnFn = () => {
+      const child = makeFakeChild(34000 + spawnCount, { handleKill: true });
+      // O pedido é aceite, mas o `close` nunca chega (morte não confirmada).
+      child.kill = () => { child.state.handleKills++; return true; };
+      children.push(child);
+      spawnCount++;
+      return child;
+    };
+    const spawnSync = () => { throw new Error("nunca terminar por PID sem identidade"); };
+    const probeIdentity = () => ({ row: null, probeFailed: true, detail: "CIM indisponível" });
+    const bridge = new ClamavBridge({
+      definitionsDir: defs,
+      spawn: createSpawnClamav({ spawn: spawnFn, spawnSync, probeIdentity }),
+      scanTimeoutMs: 80,
+    });
+    try {
+      await fs.writeFile(path.join(root, "a.txt"), "benigno");
+      await bridge.scanFile(path.join(root, "a.txt"));
+      assert.equal(children[0].state.handleKills, 1);
+      const second = await bridge.scanFile(path.join(root, "b.txt"));
+      assert.equal(spawnCount, 1, "sem morte confirmada não nasce outro clamscan");
+      assert.equal(second.status.status, "unavailable");
+    } finally {
+      for (const c of children) c.die(0);
+      await bridge.dispose().catch(() => {});
+      await fs.rm(root, { recursive: true, force: true }).catch(() => {});
+    }
+  });
+
+  it("processo ALHEIO (foreign) continua a nunca ser terminado", async () => {
+    const { state, hooks } = makeRig({ readings: [{ row: strangerRow(4242), probeFailed: false }], handleKill: true });
+    const spawn = createSpawnClamav(hooks);
+    const handle = spawn("C:\Program Files\ClamAV\clamscan.exe", SCAN_ARGS, { scanId: "foreign" });
+    handle.killTree();
+    await new Promise((r) => setTimeout(r, 300));
+    assert.equal(state.child.state.handleKills, 0, "um PID que pertence a outro processo nunca é tocado");
+    state.child.die(0);
+    await handle.outcome;
   });
 });

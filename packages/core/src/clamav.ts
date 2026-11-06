@@ -1989,6 +1989,28 @@ function killProcessTree(
     };
   };
 
+  /**
+   * Filho PRÓPRIO ainda sem `exit`: termina-se pelo HANDLE do processo, não pelo
+   * PID. O ChildProcess do Node mantém o handle do Windows aberto até o filho
+   * sair, e enquanto esse handle existe o Windows não reutiliza o PID — por isso
+   * `child.kill()` não pode atingir outro processo, mesmo sem confirmação CIM.
+   *
+   * Decisão do utilizador (2026-11-06), que refina a de 2026-10-03: sem
+   * identidade confirmada continua a não se matar NENHUM PID alheio; o que muda
+   * é o filho que o CyberSafe lançou. Antes, num PC lento, a consulta CIM não
+   * concluía, o clamscan da prova ficava vivo e a vaga envenenada até ele acabar
+   * sozinho — «prova recusada: vaga envenenada» em ciclo. A vaga continua a só
+   * voltar com o `close` (morte confirmada pelo SO).
+   */
+  const killOwnHandle = (): KillDecision | null => {
+    if (childKnownExited(child) || pid <= 0) return null;
+    try {
+      return child.kill("SIGKILL") ? "killed" : null;
+    } catch {
+      return null;
+    }
+  };
+
   return resolveIdentity().then(async (identity) => {
     switch (identity.verdict) {
       case "free":
@@ -1998,7 +2020,7 @@ function killProcessTree(
         // `ours` só é possível com `capturedCreated` presente. Se mesmo assim
         // não existe, o veredicto não se sustenta e não se mata.
         const captured = expected.capturedCreated;
-        if (!captured) return "skipped-unknown" as const;
+        if (!captured) return killOwnHandle() ?? ("skipped-unknown" as const);
         // A acção decorre sobre a MESMA referência que foi validada.
         const outcome = terminateVerifiedInstance(sync, pid, captured);
         if (outcome.verdict === "free") return "already-gone" as const;
@@ -2020,8 +2042,9 @@ function killProcessTree(
         // se mata. Um processo externo do utilizador é pior do que um processo
         // pesado sem confirmação — o clamscan órfão é detectado como
         // `poisoned` e o scan seguinte responde `unavailable`, que é um estado
-        // HONESTO. Matar às cegas não é.
-        return "skipped-unknown" as const;
+        // HONESTO. Matar às cegas não é. (O filho próprio vivo é a exceção
+        // segura: ver `killOwnHandle`.)
+        return killOwnHandle() ?? ("skipped-unknown" as const);
     }
   });
 }
