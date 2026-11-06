@@ -3,7 +3,7 @@ import type {
   ProtectionStatus,
   TrustDecision,
 } from "@cybersafe/shared-types";
-import { wfpHealth } from "@cybersafe/shared-types";
+import { realtimeCoverage, wfpHealth } from "@cybersafe/shared-types";
 import { resolvePipeName } from "./dev-isolation.js";
 
 export interface RiskThresholds {
@@ -102,12 +102,12 @@ export function effectiveRiskScore(maxRisk: number, engine?: EngineHealth): numb
 
 export function engineIsDegraded(engine?: EngineHealth): boolean {
   if (!engine) return false;
-  // Rejeições de admissão e sinais indeterminados não provam quantos ficheiros
-  // ficaram sem análise. Impedem, porém, confirmar cobertura completa.
-  const loss = engine.realtimeLoss;
-  if ((loss?.queueRejections ?? engine.realtimeDroppedEvents ?? 0) > 0
-    || loss?.watcherCallbacksIndeterminate === true
-    || (loss?.watcherSignals ?? 0) > 0) return true;
+  // Cobertura do tempo real: degrada enquanto NÃO está confirmada (caminhos em
+  // espera, não recuperados, watcher indeterminado ou desfecho não reportado).
+  // Rejeições cujos caminhos voltaram todos a ser admitidos são histórico, não
+  // limitação atual — antes um único pico deixava «Degradado» toda a sessão.
+  const coverage = realtimeCoverage(engine).state;
+  if (coverage === "recovering" || coverage === "unrecovered") return true;
   const subEngines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)];
   // `busy` = prova adiada por ocupação, sem falha observada. Não é degradação.
   return subEngines.some((e) => e && e.busy !== true && e.status !== "active");

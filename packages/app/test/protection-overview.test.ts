@@ -128,5 +128,53 @@ test("perdas do watcher impedem o estado operacional", () => {
     realtime,
     true,
   );
+  // Serviço sem desfecho de recuperação: cobertura não confirmada, em eixo próprio.
+  assert.equal(o.kind, "coverage-unconfirmed");
+  assert.match(o.description, /desfecho da recuperação não reportado/);
+});
+
+// ── v0.2.1: eixo de cobertura do tempo real ─────────────────────────────────
+function recovery(o: Record<string, unknown>) {
+  return { metadataRejections: 0, analysisRejections: 9, pending: 0, running: false, recovered: 9, exhausted: 0,
+    expired: 0, dropped: 0, suppressed: 0, cancelled: 0, distinctPaths: 9, pathsCapped: false, affectedPaths: [],
+    lastEventAt: null, lastStage: "analysis", lastEventId: 9, metadataInFlight: 0, analysisQueueDepth: 0,
+    waiting: 0, unrecovered: 0, analysisPending: 0, analysisConfirmed: 9, inconclusive: 0, versionUnconfirmed: 0,
+    trackedCapped: false, ...o };
+}
+const lossOf = (n: number) => ({ queueRejections: n, watcherSignals: 0, watcherNamelessCallbacks: 0, queuePathsCapped: false,
+  queueDistinctPaths: n, watcherCallbacksIndeterminate: false, raizesComPerda: [] });
+const wfpReason = ["Filtro WFP do CyberSafe: unavailable — filtro WFP inativo — sem tentativa de ativação neste perfil"];
+
+test("histórico todo recuperado + WFP opcional continua 'motores operacionais'", () => {
+  const o = protectionOverview(dashboard({ engineHealth: engine({ realtimeLoss: lossOf(9),
+    realtimeRecovery: recovery({}), degradedReasons: wfpReason }) }), realtime, true);
+  assert.equal(o.kind, "operational-network-off");
+});
+
+test("4 de 4 motores + caminhos não recuperados = eixo de cobertura, não 'Proteção com limitações'", () => {
+  const o = protectionOverview(dashboard({ engineHealth: engine({ realtimeLoss: lossOf(9),
+    realtimeRecovery: recovery({ recovered: 6, unrecovered: 3, analysisConfirmed: 6 }),
+    degradedReasons: ["Cobertura do tempo real não confirmada: 9 tentativas rejeitadas em 9 caminhos; 6 recuperados, 3 não recuperados."] }) }),
+    realtime, true);
+  assert.equal(o.kind, "coverage-unconfirmed");
+  assert.notEqual(o.title, "Proteção com limitações");
+  assert.match(o.title, /cobertura/i);
+  assert.equal(o.tone, "warn");
+  assert.equal(o.allEnginesActive, true);
+  assert.match(o.description, /3 caminhos sem nenhuma versão admitida/);
+});
+
+test("admissão recuperada mas análises por concluir = em recuperação, nunca operacional", () => {
+  const o = protectionOverview(dashboard({ engineHealth: engine({ realtimeLoss: lossOf(9),
+    realtimeRecovery: recovery({ analysisPending: 9, analysisConfirmed: 0 }),
+    degradedReasons: ["Cobertura do tempo real não confirmada: 9 admitidos com análise por concluir."] }) }), realtime, true);
+  assert.equal(o.kind, "coverage-unconfirmed");
+  assert.equal(o.title, "Cobertura do tempo real em recuperação");
+  assert.match(o.description, /9 admitidos com análise por concluir/);
+});
+
+test("motor degradado continua a mandar no título mesmo com perdas", () => {
+  const o = protectionOverview(dashboard({ engineHealth: engine({ realtimeLoss: lossOf(9),
+    realtimeRecovery: recovery({ unrecovered: 3 }), clamav: { status: "degraded" } }) }), realtime, true);
   assert.equal(o.kind, "limited");
 });

@@ -1,4 +1,5 @@
 import type { DashboardSummary, EngineHealth } from "@cybersafe/shared-types";
+import { realtimeCoverage, realtimeCoverageFacts } from "@cybersafe/shared-types";
 import { deriveProtectionLevel, type ProtectionLevel, type RealtimeProtectionInfo } from "./protectionHealth";
 
 /**
@@ -23,8 +24,13 @@ import { deriveProtectionLevel, type ProtectionLevel, type RealtimeProtectionInf
  *     limite é o filtro WFP opcional não iniciado neste perfil →
  *     `operational-network-off`: os motores estão operacionais e o filtro de
  *     rede é dito na sua própria linha, sem alarme geral.
- *  5. Qualquer outro limite real → `limited`.
- *  6. Caso contrário → `operational`.
+ *  5. Quatro motores ativos e o único limite é a cobertura do tempo real
+ *     ainda não confirmada (caminhos em espera ou não recuperados, watcher
+ *     indeterminado) → `coverage-unconfirmed`: eixo próprio, com os números,
+ *     em vez de "Proteção com limitações" ao lado de "4 de 4 motores".
+ *     Histórico TODO recuperado não é limite atual e não bloqueia o passo 4.
+ *  6. Qualquer outro limite real → `limited`.
+ *  7. Caso contrário → `operational`.
  *
  * O WFP não desaparece em nenhum ramo: `networkFilter` continua a ser
  * publicado e a linha própria do modal continua a mostrá-lo. O que muda é não
@@ -39,6 +45,7 @@ export type ProtectionOverviewKind =
   | "monitoring-off"
   | "monitoring-unverified"
   | "operational-network-off"
+  | "coverage-unconfirmed"
   | "limited"
   | "operational";
 
@@ -152,20 +159,22 @@ export function protectionOverview(
     };
   }
 
-  const loss = engine?.realtimeLoss;
-  const losses =
-    (loss?.queueRejections ?? engine?.realtimeDroppedEvents ?? 0) +
-    (loss?.watcherSignals ?? 0);
-  const onlyOptionalNetworkLimits =
+  const coverage = realtimeCoverage(engine);
+  const coverageConfirmed = coverage.state === "complete" || coverage.state === "recovered";
+  const isCoverageReason = (reason: string) => /^Cobertura do tempo real não confirmada/i.test(reason);
+  const isOptionalNetworkReason = (reason: string) => /filtro wfp/i.test(reason) && OPTIONAL_NETWORK_DETAIL.test(reason);
+  const enginesHealthy =
     engine?.serviceRunning === true &&
     engine.osLayerHealthy !== false &&
     allEnginesActive &&
+    (networkFilter === "optional-off" || networkFilter === "active") &&
+    (d.highSeverityEvents ?? 0) === 0;
+  const onlyOptionalNetworkLimits =
+    enginesHealthy &&
     networkFilter === "optional-off" &&
-    (d.highSeverityEvents ?? 0) === 0 &&
     (d.riskScore ?? 0) >= 100 &&
-    losses === 0 &&
-    loss?.watcherCallbacksIndeterminate !== true &&
-    reasons.every((reason) => /filtro wfp/i.test(reason) && OPTIONAL_NETWORK_DETAIL.test(reason));
+    coverageConfirmed &&
+    reasons.every(isOptionalNetworkReason);
 
   if (onlyOptionalNetworkLimits) {
     return {
@@ -175,6 +184,19 @@ export function protectionOverview(
       description:
         "Os quatro motores de análise estão ativos. A proteção de rede adicional do CyberSafe não está ativada neste perfil.",
       tone: "ok",
+    };
+  }
+
+  if (enginesHealthy && !coverageConfirmed && reasons.every((r) => isCoverageReason(r) || isOptionalNetworkReason(r))) {
+    const numbers = realtimeCoverageFacts(coverage);
+    return {
+      ...base,
+      kind: "coverage-unconfirmed",
+      title: coverage.state === "recovering" ? "Cobertura do tempo real em recuperação" : "Cobertura do tempo real não confirmada",
+      description:
+        `Os ${enginesActive} motores de análise estão ativos. ${numbers.join("; ")}.` +
+        (coverage.state === "recovering" ? "" : " Faz uma análise manual das pastas afetadas."),
+      tone: "warn",
     };
   }
 

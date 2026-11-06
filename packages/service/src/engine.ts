@@ -130,7 +130,7 @@ ProcessKillProtectionReason,
   DefinitionsSourceState,
   ProcessTerminationMode,
 } from "@cybersafe/shared-types";
-import { hasDegradedProtections, ENGINE_DISPLAY_NAME, classifyProcessEnumerationError } from "@cybersafe/shared-types";
+import { hasDegradedProtections, ENGINE_DISPLAY_NAME, classifyProcessEnumerationError, realtimeCoverageReason, realtimeCoverage, realtimeCoverageFacts } from "@cybersafe/shared-types";
 import { RealtimeLossLedger } from "./realtime-loss.js";
 import type { KillProtectionContext, KillTargetInfo, PosixTerminationExpectation } from "@cybersafe/core";
 import { PosixProcessProvider, abrirLeasePosixTerminacao } from "@cybersafe/core";
@@ -425,15 +425,17 @@ export class ProtectionEngineService {
   /** Admission can be OFF while a previous module teardown remains unconfirmed. */
   private protectionStopUnconfirmed = false;
   private readonly realtimeQueue = new RealtimeFileQueue();
-  private readonly realtimeRecovery = new RealtimeRecovery();
+  private readonly realtimeRecovery = new RealtimeRecovery({ onIdle: () => this.scheduleOverflowOutcome() });
   private quarantinePolicy: QuarantinePolicy = "warn";
   private lastClamavAvailability: boolean | undefined;
   private lastClamavStatus: string | undefined;
   /** Última notificação de indisponibilidade POR MOTIVO (dedupe de flapping). */
   private lastClamavUnavailablePublish: { key: string; at: number } | undefined;
   private fileObservationReads = 0;
-  private realtimeDroppedEvents = 0;
-  private overflowNoticeAt = -Infinity;
+  /** Episódio de saturação anunciado e ainda sem desfecho publicado. */
+  private overflowEpisode = false;
+  private overflowLastRejectionAt = -Infinity;
+  private overflowOutcomeTimer: ReturnType<typeof setTimeout> | null = null;
   private coverageNoticeAt = -Infinity;
   /** Única fonte dos números de perda: separa fila de watcher e nunca soma cumulativos. */
   private loss = new RealtimeLossLedger();
@@ -579,6 +581,9 @@ export class ProtectionEngineService {
    * porque não pode contar com os field initializers.
    */
   constructor(baseDir?: string) {
+    // Um lugar livre na fila acorda a recuperação: sem isto as repetições só
+    // corriam com recuo cego e o backlog expirava depois da rajada.
+    this.realtimeQueue.onSpace(() => this.realtimeRecovery.nudge());
     this.baseDir = baseDir ?? serviceBaseDir();
     this.definitionsDir = path.join(this.baseDir, "definitions");
     this.clamav = new ClamavBridge({
@@ -1434,7 +1439,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     // A contagem de perda é por sessão de proteção: sem ela, um número de
     // ontem é apresentado como se fosse do estado atual.
     this.loss.reset();
-    this.realtimeDroppedEvents = 0;
+    this.resetOverflowEpisode();
     this.backgroundAbort.abort();
     // O atalho "já está tudo parado" só vale se não houver NADA a parar — e um
     // timer de retomada agendado é precisamente algo a parar. Sem esta cláusula
@@ -2301,9 +2306,10 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     let fingerprint: string;
     try {
       const stat = await fs.lstat(filePath);
-      if (stat.isDirectory() || stat.isSymbolicLink()) return true;
+      if (stat.isDirectory() || stat.isSymbolicLink()) { this.realtimeRecovery.forget(path.resolve(filePath)); return true; }
       fingerprint = `${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}`;
     } catch {
+      this.realtimeRecovery.noteVanished(path.resolve(filePath));
       if (this.protectionState && !this.isShuttingDown && generation === this.protectionGeneration) this.publishInconclusiveFile(filePath, "Ficheiro inacessível ou removido antes da análise.", "file-changed");
       return true;
     } finally {
@@ -2313,16 +2319,37 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || recoverySignal?.aborted) return true;
     const signal = this.backgroundAbort.signal;
     const queuedAt = performance.now();
-    const admission = this.realtimeQueue.enqueue(path.resolve(filePath).toLowerCase(), fingerprint, async () => {
+    const resolvedPath = path.resolve(filePath);
+    const admission = this.realtimeQueue.enqueue(resolvedPath.toLowerCase(), fingerprint, async () => {
       if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || signal.aborted) return;
       const startedAt = performance.now();
       if (trace) console.log(`[RealtimePerf] id=${traceId} stage=start queueWaitMs=${(startedAt-queuedAt).toFixed(1)} observedToStartMs=${(startedAt-observedAt).toFixed(1)}`);
       const result = await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true, priority: "realtime", realtimeTraceId: trace ? traceId : undefined });
+      if (generation === this.protectionGeneration) this.realtimeRecovery.noteAnalyzed(resolvedPath, fingerprint, await this.realtimeAnalysisOutcome(filePath, fingerprint, result?.results[0]?.verdict));
       if (trace) console.log(`[RealtimePerf] id=${traceId} stage=returned pipelineMs=${(performance.now()-startedAt).toFixed(1)} observedToReturnedMs=${(performance.now()-observedAt).toFixed(1)} verdict=${result?.results[0]?.verdict ?? "cancelled"}`);
     }, this.realtimePriority(filePath));
     if (trace) console.log(`[RealtimePerf] id=${traceId} stage=admission outcome=${admission} metadataMs=${(queuedAt-observedAt).toFixed(1)} queueDepth=${this.realtimeQueue.size}`);
     if (admission === "full") { this.reportRealtimeOverflow(filePath, "analysis", retry); return false; }
+    // Uma versão deste caminho entrou (ou já estava em espera/analisada). Isto
+    // só cancela a repetição; a lacuna fecha quando a análise dela terminar.
+    this.realtimeRecovery.noteAdmitted(resolvedPath, fingerprint);
     return true;
+  }
+
+  /**
+   * Desfecho da análise para a cobertura: veredicto só conta se o ficheiro no
+   * disco ainda é a versão admitida. Mudou ou desapareceu durante a análise →
+   * `changed` (a versão atual não está confirmada; a próxima observação dele
+   * reabre o ciclo). Sem resultado ou `inconclusive` → `inconclusive`.
+   */
+  private async realtimeAnalysisOutcome(filePath: string, fingerprint: string, verdict: string | undefined): Promise<"verdict" | "inconclusive" | "changed"> {
+    try {
+      const stat = await fs.lstat(filePath);
+      if (`${stat.size}:${stat.mtimeMs}:${stat.ctimeMs}:${stat.ino}` !== fingerprint) return "changed";
+    } catch {
+      return "changed";
+    }
+    return verdict && verdict !== "inconclusive" ? "verdict" : "inconclusive";
   }
 
   /** Downloads primeiro: e onde o EICAR chega e onde a detecao tardia se nota. */
@@ -2334,15 +2361,59 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
   private reportRealtimeOverflow(caminho = "", stage: SaturationStage = "analysis", retry = false): void {
     // Só a primeira rejeição agenda. Uma retry falhada não cria outra cadeia.
-    if (retry) this.realtimeRecovery.recordRejection(caminho, stage);
+    if (retry) this.realtimeRecovery.recordRejection(path.resolve(caminho), stage);
     else this.realtimeRecovery.defer(path.resolve(caminho), stage, signal => this.handleFileObservation(caminho, true, signal));
-    ++this.realtimeDroppedEvents;
     this.loss.noteQueueRejection(caminho || "caminho-desconhecido");
-    const now = Date.now();
-    if (now - this.overflowNoticeAt < 10000) return;
+    this.overflowLastRejectionAt = Date.now();
+    // Um aviso por EPISÓDIO, não um a cada 10 s com o cumulativo da sessão
+    // (721 notificações no incidente de 06/11). O desfecho — recuperado ou não —
+    // é publicado quando o backlog esvazia; a perda não recuperada não se cala.
+    if (this.overflowEpisode) return;
+    this.overflowEpisode = true;
     const resumo = this.loss.summary();
-    this.overflowNoticeAt = now;
-    this.eventBus.publish("engine.health", "high", `A fila de análise do tempo real está cheia: ${resumo.queueRejections} tentativas não entraram (em ${resumo.queueDistinctPaths} caminhos distintos${resumo.queuePathsCapped ? ", contagem de caminhos limitada" : ""}). Alguns ficheiros podem não ter sido analisados; faça uma análise manual.`, {reason:"queue-overflow",admissionStage:stage,recoveryEventId:this.realtimeRecovery.snapshot().lastEventId,metadataRejections:this.realtimeRecovery.snapshot().metadataRejections,analysisRejections:this.realtimeRecovery.snapshot().analysisRejections,queueDepth:this.realtimeQueue.size,recoveryDepth:this.realtimeRecovery.snapshot().pending,droppedEvents:this.realtimeDroppedEvents,distinctPaths:resumo.queueDistinctPaths,capped:resumo.queuePathsCapped});
+    this.eventBus.publish("engine.health", "high", `A fila de análise do tempo real está cheia: ${resumo.queueRejections} tentativas não entraram (em ${resumo.queueDistinctPaths} caminhos distintos${resumo.queuePathsCapped ? ", contagem de caminhos limitada" : ""}). Os caminhos afetados ficam em espera para nova tentativa; o desfecho será comunicado.`, this.overflowEventData("queue-overflow", undefined, stage));
+  }
+
+  private overflowEventData(reason: "queue-overflow" | "queue-overflow-outcome", coverageState?: string, stage?: SaturationStage) {
+    const rec = this.realtimeRecovery.snapshot();
+    const resumo = this.loss.summary();
+    // `droppedEvents` era um duplicado de `analysisRejections`; sai. Ficam as
+    // tentativas rejeitadas e o desfecho por caminho.
+    return { reason, admissionStage: stage ?? rec.lastStage, recoveryEventId: rec.lastEventId,
+      metadataRejections: rec.metadataRejections, analysisRejections: rec.analysisRejections,
+      rejectedAttempts: resumo.queueRejections, queueDepth: this.realtimeQueue.size, recoveryDepth: rec.pending,
+      admissionRecovered: rec.recovered, waiting: rec.waiting, unrecovered: rec.unrecovered, analysisPending: rec.analysisPending,
+      analysisConfirmed: rec.analysisConfirmed, inconclusive: rec.inconclusive, versionUnconfirmed: rec.versionUnconfirmed,
+      coverageState, distinctPaths: resumo.queueDistinctPaths, capped: resumo.queuePathsCapped };
+  }
+
+  /** O backlog esvaziou: espera um período calmo antes de declarar o desfecho,
+      para uma rajada intermitente não abrir e fechar episódios em série. */
+  private scheduleOverflowOutcome(): void {
+    if (!this.overflowEpisode || this.overflowOutcomeTimer) return;
+    this.overflowOutcomeTimer = setTimeout(() => {
+      this.overflowOutcomeTimer = null;
+      if (!this.overflowEpisode || !this.protectionState) return;
+      const quietFor = Date.now() - this.overflowLastRejectionAt;
+      const coverage = realtimeCoverage({ realtimeLoss: this.loss.summary(), realtimeRecovery: this.realtimeRecovery.snapshot() } as EngineHealth);
+      // O desfecho espera pelas ANÁLISES, não só pelas readmissões.
+      if (coverage.state === "recovering" || quietFor < 10_000) { this.scheduleOverflowOutcome(); return; }
+      this.overflowEpisode = false;
+      const facts = realtimeCoverageFacts(coverage).join("; ");
+      if (coverage.state === "recovered") {
+        this.eventBus.publish("engine.health", "low", `A fila do tempo real voltou ao normal: ${facts}.`, this.overflowEventData("queue-overflow-outcome", coverage.state));
+      } else {
+        this.eventBus.publish("engine.health", "high", `Saturação do tempo real terminada sem cobertura confirmada: ${facts}. Faça uma análise manual das pastas afetadas.`, this.overflowEventData("queue-overflow-outcome", coverage.state));
+      }
+    }, 10_000);
+    this.overflowOutcomeTimer.unref?.();
+  }
+
+  private resetOverflowEpisode(): void {
+    if (this.overflowOutcomeTimer) clearTimeout(this.overflowOutcomeTimer);
+    this.overflowOutcomeTimer = null;
+    this.overflowEpisode = false;
+    this.overflowLastRejectionAt = -Infinity;
   }
 
   /**
@@ -2546,6 +2617,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
   async dispose() {
     ++this.protectionGeneration;
+    this.resetOverflowEpisode();
     this.backgroundAbort.abort();
     this.realtimeQueue.clear();
     this.realtimeRecovery.clear();
@@ -2858,12 +2930,10 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       anyEngineDegraded: false,
     };
     engine.anyEngineDegraded = startupNotReady || hasDegradedProtections(engine) || engineIsDegraded(engine);
-    const perda = this.loss.summary();
-    if (perda.queueRejections > 0 || perda.watcherCallbacksIndeterminate) {
-      // `degradedReasons` é obrigatória no contrato: sem `!` e sem push condicional
-      // sobre um campo que pode não existir.
-      engine.degradedReasons.push("Cobertura do tempo real não confirmada: houve rejeições ou sinais de perda do watcher. Recuperar admissão não confirma análise de todas as versões.");
-    }
+    // Eixo próprio da cobertura: só entra nas razões enquanto não está
+    // confirmada. Histórico todo recuperado não é limitação atual.
+    const coverageReason = realtimeCoverageReason(engine);
+    if (coverageReason) engine.degradedReasons.push(coverageReason);
     if (engine.anyEngineDegraded) {
       for (const key of ["yara", "hashDb", "clamav", "nativeEngine", "wfp"] as const) {
         const sub = key === "wfp" ? engine.wfp : engine[key];

@@ -10,8 +10,20 @@ export function engineHealthPresentation(event: HealthEvent) {
   const data = isRecord(event.data) ? event.data : undefined;
   const tone = event.severity === 'critical' || event.severity === 'high'
     ? 'danger' as const : event.severity === 'medium' ? 'warning' as const : 'info' as const;
+  const num = (v: unknown) => typeof v === 'number' && Number.isFinite(v) ? v : null;
+  if (data?.reason === 'queue-overflow-outcome') {
+    // Só `coverageState: recovered` (versão atual analisada em todos os
+    // caminhos) é positivo. Admissão recuperada sozinha não chega.
+    const confirmed = data.coverageState === 'recovered';
+    return {label: confirmed ? 'Fila de análise recuperada' : 'Lacuna do tempo real', tone,
+      description: event.summary?.trim() || (confirmed
+        ? 'Os caminhos afetados foram analisados na versão atual.'
+        : 'A cobertura dos caminhos afetados não ficou confirmada. Faz uma análise manual das pastas afetadas.')};
+  }
   if (data?.reason === 'queue-overflow') {
-    const count = typeof data.droppedEvents === 'number' && Number.isFinite(data.droppedEvents) ? data.droppedEvents : null;
+    // `rejectedAttempts` (serviço novo) ou `droppedEvents` (serviço antigo): ambos
+    // contam TENTATIVAS rejeitadas, não ficheiros.
+    const count = num(data.rejectedAttempts) ?? num(data.droppedEvents);
     const paths = typeof data.distinctPaths === 'number' && Number.isFinite(data.distinctPaths) ? data.distinctPaths : null;
     return {label:'Fila de análise cheia',tone,description: count === null
       ? 'A fila de análise atingiu o limite. A quantidade de tentativas rejeitadas está indisponível.'

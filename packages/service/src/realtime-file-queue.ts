@@ -7,9 +7,12 @@ export class RealtimeFileQueue {
   private recent = new Map<string,{fingerprint:string;at:number}>();
   private running: {key:string;job:Job}|null=null;
   private epoch=0;
+  private spaceListener: (()=>void)|null=null;
   constructor(private readonly capacity=64,private readonly now=Date.now) {}
   get active(){return this.running?1:0;}
   get size(){return this.pending.size + this.priorityPending.size;}
+  /** Avisado quando uma análise termina e há lugar livre (recuperação). */
+  onSpace(listener:()=>void){this.spaceListener=listener;}
   clear(){this.epoch++;this.pending.clear();this.priorityPending.clear();this.recent.clear();}
   enqueue(key:string,fingerprint:string,run:()=>Promise<void>,priority:'high'|'normal'='normal'):'queued'|'duplicate'|'full' {
     const pending=this.pending.get(key) ?? this.priorityPending.get(key);
@@ -46,6 +49,6 @@ export class RealtimeFileQueue {
     // its Promise; that failure must release the only running slot.
     void (async()=>{await job.run();})().then(()=>{
       if(job.epoch===this.epoch){this.recent.delete(key);this.recent.set(key,{fingerprint:job.fingerprint,at:this.now()});while(this.recent.size>256)this.recent.delete(this.recent.keys().next().value!);}
-    }).catch(()=>undefined).finally(()=>{this.running=null;this.pump();});
+    }).catch(()=>undefined).finally(()=>{this.running=null;this.pump();if(this.size<this.capacity)try{this.spaceListener?.();}catch{/* o aviso não pode parar a fila */}});
   }
 }

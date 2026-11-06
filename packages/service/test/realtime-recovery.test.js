@@ -89,15 +89,18 @@ test('default recovery survives a seven-second occupied analysis slot',async()=>
  assert.equal(h.recovery.snapshot().pending,0);
 });
 
-test('default recovery still expires persistent saturation within its two-minute window',async()=>{
+// v0.2.1: a janela passou de 2 para 15 min (incidente de 06/11: o backlog
+// expirava antes de a fila escoar). Continua finita e com trabalho limitado.
+test('default recovery still expires persistent saturation within its fifteen-minute window',async()=>{
  const h=elapsedHarness();let attempts=0;
  h.recovery.defer('fixture/blocked.txt','analysis',async()=>{attempts++;return false;});
- await h.until(126000);
+ await h.until(906000);
  const snapshot=h.recovery.snapshot();
  assert.equal(snapshot.pending,0);
- assert.equal(snapshot.expired,1);
- assert.ok(attempts<=32,'admission work must remain bounded');
- const before=attempts;await h.until(240000);assert.equal(attempts,before);
+ assert.equal(snapshot.expired+snapshot.exhausted,1);
+ assert.equal(snapshot.unrecovered,1,'expirar sem admissão é lacuna reportada');
+ assert.ok(attempts<=64,'admission work must remain bounded');
+ const before=attempts;await h.until(1800000);assert.equal(attempts,before);
 });
 
 test('real bounded queue admits a rejected file after a seven-second scan completes',async()=>{

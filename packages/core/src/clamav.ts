@@ -3266,6 +3266,25 @@ export function diagnoseClamavBinary(
   };
 }
 
+/**
+ * Estado publicado ENQUANTO uma prova corre. Uma verificação em curso não é
+ * indisponibilidade: depois de um timeout de scan (`degraded`) a prova
+ * publicava `unavailable` e a mudança de estado gerava um segundo alerta a
+ * 13 ms do primeiro (06/11). Mantém-se o último estado OBSERVADO, marcado
+ * `busy`; `active` só se mantém se já estava comprovado — nunca se cria aqui.
+ */
+export function clamavProbeMarker(previous: EngineSubsystemHealth): EngineSubsystemHealth {
+  if (previous.status === "active") {
+    return { ...previous, busy: true, detail: "A verificar o motor ClamAV; mantém-se a última carga comprovada." };
+  }
+  // Prova repetida sobre um marcador já em curso: não aninhar o detalhe.
+  if (previous.busy === true) return previous;
+  if (previous.status === "degraded") {
+    return { status: "degraded", busy: true, detail: `A verificar o motor ClamAV… Último problema observado: ${previous.detail ?? "sem detalhe"}` };
+  }
+  return { status: "unavailable", busy: true, detail: "A verificar o motor ClamAV…" };
+}
+
 export class ClamavBridge {
   private _health: EngineSubsystemHealth = { status: "unavailable", busy: true, detail: "A iniciar ClamAV…" };
   /**
@@ -3513,9 +3532,7 @@ export class ClamavBridge {
   private async probe(): Promise<boolean> {
     // Enquanto a prova corre não há confirmação: a UI deve ler «a verificar»,
     // não «indisponível». O estado final substitui este marcador.
-    this._health = this._health.status === "active"
-      ? { ...this._health, busy: true, detail: "A verificar o motor ClamAV; mantém-se a última carga comprovada." }
-      : { status: "unavailable", busy: true, detail: "A verificar o motor ClamAV…" };
+    this._health = clamavProbeMarker(this._health);
     // A resolução vem PRIMEIRO: a sonda de versão tem de correr sobre o
     // binário que vamos usar a sério. Correr `clamscan --version` pelo nome
     // dava `unavailable` a uma instalação que existe fora do PATH — e era

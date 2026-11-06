@@ -2591,6 +2591,101 @@ export const ENGINE_DISPLAY_NAME: Record<string, string> = {
   firewall: "Filtro WFP do CyberSafe",
 };
 
+/**
+ * Cobertura do tempo real — eixo PRÓPRIO, separado do estado dos motores
+ * (incidente de 06/11: 4 de 4 motores ativos ao lado de «Proteção com
+ * limitações» por rejeições já recuperadas há 20 min).
+ *
+ *  - `complete`: sem rejeições nem sinais do watcher nesta sessão;
+ *  - `recovering`: há caminhos rejeitados em espera de nova admissão;
+ *  - `recovered`: todos os caminhos afetados voltaram a ser ADMITIDOS (não
+ *    prova que todas as versões intermédias foram vistas);
+ *  - `unrecovered`: há caminhos que nenhuma versão chegou a admitir, sinais do
+ *    watcher de quantidade indeterminada, ou um serviço antigo que não publica
+ *    o desfecho — nesse caso não se pode afirmar recuperação.
+ */
+export type RealtimeCoverageState = "complete" | "recovering" | "recovered" | "unrecovered";
+
+/**
+ * Cobertura por caminho afetado. ADMISSÃO recuperada (`admissionRecovered`)
+ * não é análise: `recovered` como estado exige que cada caminho afetado tenha
+ * a versão atual analisada com veredicto (`analysisConfirmed`).
+ *  - `recovering`: há repetições agendadas ou análises por concluir;
+ *  - `unrecovered`: há caminhos sem versão admitida, análises inconclusivas,
+ *    versões alteradas depois da análise, seguimento acima do teto, sinais do
+ *    watcher indeterminados, ou um serviço que não publica o desfecho.
+ */
+export interface RealtimeCoverage {
+  state: RealtimeCoverageState;
+  rejectedAttempts: number;
+  affectedPaths: number;
+  affectedPathsCapped: boolean;
+  admissionRecovered: number;
+  waiting: number;
+  analysisPending: number;
+  analysisConfirmed: number;
+  inconclusive: number;
+  versionUnconfirmed: number;
+  /** `null` quando o serviço não publica o desfecho (desconhecido ≠ zero). */
+  unrecovered: number | null;
+  watcherIndeterminate: boolean;
+}
+
+export function realtimeCoverage(engine?: EngineHealth): RealtimeCoverage {
+  const loss = engine?.realtimeLoss;
+  const rec = engine?.realtimeRecovery;
+  const n = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : 0);
+  const rejectedAttempts = loss?.queueRejections ?? engine?.realtimeDroppedEvents ?? 0;
+  const watcherIndeterminate = loss?.watcherCallbacksIndeterminate === true || (loss?.watcherSignals ?? 0) > 0;
+  const reported = typeof rec?.unrecovered === "number" && typeof rec?.analysisPending === "number";
+  const c = {
+    rejectedAttempts,
+    affectedPaths: loss?.queueDistinctPaths ?? rec?.distinctPaths ?? 0,
+    affectedPathsCapped: loss?.queuePathsCapped === true || rec?.pathsCapped === true || rec?.trackedCapped === true,
+    admissionRecovered: n(rec?.recovered),
+    waiting: n(rec?.waiting),
+    analysisPending: n(rec?.analysisPending),
+    analysisConfirmed: n(rec?.analysisConfirmed),
+    inconclusive: n(rec?.inconclusive),
+    versionUnconfirmed: n(rec?.versionUnconfirmed),
+    unrecovered: reported ? n(rec?.unrecovered) : null,
+    watcherIndeterminate,
+  };
+  let state: RealtimeCoverageState;
+  if (watcherIndeterminate) state = "unrecovered";
+  else if (rejectedAttempts === 0) state = "complete";
+  else if (c.unrecovered === null || c.unrecovered > 0 || c.inconclusive > 0 || c.versionUnconfirmed > 0 || rec?.trackedCapped === true) state = "unrecovered";
+  else if (c.waiting > 0 || c.analysisPending > 0 || n(rec?.pending) > 0) state = "recovering";
+  else state = "recovered";
+  return { ...c, state };
+}
+
+/** Números da cobertura em PT-PT, partilhados pelo serviço e pela UI. */
+export function realtimeCoverageFacts(c: RealtimeCoverage): string[] {
+  const facts: string[] = [];
+  if (c.rejectedAttempts > 0) {
+    facts.push(`${c.rejectedAttempts} tentativas rejeitadas pela fila em ${c.affectedPathsCapped ? "pelo menos " : ""}${c.affectedPaths} caminhos`);
+    if (c.unrecovered === null) facts.push("desfecho da recuperação não reportado pelo serviço");
+    else {
+      if (c.unrecovered > 0) facts.push(`${c.unrecovered} caminhos sem nenhuma versão admitida`);
+      if (c.waiting > 0) facts.push(`${c.waiting} à espera de nova tentativa`);
+      if (c.analysisPending > 0) facts.push(`${c.analysisPending} admitidos com análise por concluir`);
+      if (c.inconclusive > 0) facts.push(`${c.inconclusive} com análise inconclusiva`);
+      if (c.versionUnconfirmed > 0) facts.push(`${c.versionUnconfirmed} alterados ou removidos sem a versão atual confirmada`);
+      facts.push(`${c.analysisConfirmed} com a versão atual analisada`);
+    }
+  }
+  if (c.watcherIndeterminate) facts.push("sinais do watcher sem nome de ficheiro (quantidade indeterminada)");
+  return facts;
+}
+
+/** Razão por eixo para `degradedReasons`; `null` quando a cobertura não limita. */
+export function realtimeCoverageReason(engine?: EngineHealth): string | null {
+  const c = realtimeCoverage(engine);
+  if (c.state === "complete" || c.state === "recovered") return null;
+  return `Cobertura do tempo real não confirmada: ${realtimeCoverageFacts(c).join("; ")}.`;
+}
+
 /** Verifica se algum motor de proteção está degradado ou indisponível. */
 export function hasDegradedProtections(engine: EngineHealth): boolean {
   const engines = [engine.yara, engine.hashDb, engine.clamav, engine.nativeEngine, wfpHealth(engine)];
