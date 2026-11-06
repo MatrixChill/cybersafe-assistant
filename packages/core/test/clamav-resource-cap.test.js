@@ -79,6 +79,24 @@ const REAL_INTEGRATION = CLAMSCAN_AVAILABLE && REAL_CLAMSCAN_OPT_IN;
  */
 const DB_LOADING_MIN_KB = 200_000;
 
+/**
+ * PIDs de clamscan cuja linha de comandos aponta para `fragment` (a pasta do
+ * próprio teste). Numa máquina com o CyberSafe instalado, o serviço real lança
+ * clamscan periodicamente; comparar TODOS os clamscan do sistema antes/depois
+ * contava esses como «órfãos» deste teste (medido: pai = CyberSafe Assistant.exe).
+ */
+function clamscanPidsScanning(fragment) {
+  if (process.platform !== "win32") return [];
+  const needle = fragment.toLowerCase();
+  const r = spawnSync("powershell", ["-NoProfile", "-Command",
+    "Get-CimInstance Win32_Process -Filter \"Name='clamscan.exe'\" | ForEach-Object { \"$($_.ProcessId)`t$($_.CommandLine)\" }"],
+    { encoding: "utf-8", windowsHide: true });
+  return String(r.stdout ?? "").split(/\r?\n/)
+    .map((line) => line.split("\t"))
+    .filter(([pid, cmd]) => Number(pid) > 0 && String(cmd ?? "").toLowerCase().includes(needle))
+    .map(([pid]) => Number(pid));
+}
+
 function liveClamscanRows() {
   if (process.platform !== "win32") return [];
   try {
@@ -540,7 +558,8 @@ describe("ClamavBridge — integração real (OPT-IN: CYBERSAFE_REAL_CLAMSCAN=1)
     assert.equal(res.detected, false, "dados aleatórios não são deteção");
     // O ponto não é o resultado: é que NÃO fica nenhum clamscan vivo depois.
     await sleep(7500);
-    const left = liveClamscanRows().map((row) => row.pid).filter((pid) => !baseline.includes(pid));
+    // Só conta clamscan que analisam a pasta DESTE teste (ver clamscanPidsScanning).
+    const left = clamscanPidsScanning(dir).filter((pid) => !baseline.includes(pid));
     assert.deepEqual(left, [], `clamscan órfão depois do timeout: ${left.join(",")}`);
   });
 
