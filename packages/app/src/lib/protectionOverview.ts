@@ -193,9 +193,9 @@ export function protectionOverview(
       ...base,
       kind: "coverage-unconfirmed",
       title: coverage.state === "recovering" ? "Cobertura do tempo real em recuperação" : "Cobertura do tempo real não confirmada",
-      description:
-        `Os ${enginesActive} motores de análise estão ativos. ${numbers.join("; ")}.` +
-        (coverage.state === "recovering" ? "" : " Faz uma análise manual das pastas afetadas."),
+      description: coverage.state === "recovering"
+        ? `${enginesActive} motores operacionais. A proteção em tempo real está a recuperar algumas análises pendentes: ${numbers.join("; ")}.`
+        : `${enginesActive} motores operacionais, mas a cobertura do tempo real tem lacunas por resolver: ${numbers.join("; ")}. Faz uma análise manual das pastas afetadas.`,
       tone: "warn",
     };
   }

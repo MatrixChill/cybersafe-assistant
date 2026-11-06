@@ -178,3 +178,17 @@ test("motor degradado continua a mandar no título mesmo com perdas", () => {
     realtimeRecovery: recovery({ unrecovered: 3 }), clamav: { status: "degraded" } }) }), realtime, true);
   assert.equal(o.kind, "limited");
 });
+
+test("v0.2.3: recuperação em curso diz '4 motores operacionais' e que está a recuperar", () => {
+  const o = protectionOverview(dashboard({ engineHealth: engine({ realtimeLoss: lossOf(9),
+    realtimeRecovery: recovery({ waiting: 3, analysisConfirmed: 6 }),
+    degradedReasons: ["Cobertura do tempo real não confirmada: 3 à espera de nova tentativa."] }) }), realtime, true);
+  assert.equal(o.kind, "coverage-unconfirmed");
+  assert.match(o.description, /^4 motores operacionais\. A proteção em tempo real está a recuperar algumas análises pendentes/);
+});
+
+test("v0.2.3: removidos antes da análise são informativos e não impedem confirmar", () => {
+  const o = protectionOverview(dashboard({ engineHealth: engine({ realtimeLoss: lossOf(9),
+    realtimeRecovery: recovery({ analysisConfirmed: 5, removed: 4 }), degradedReasons: wfpReason }) }), realtime, true);
+  assert.equal(o.kind, "operational-network-off");
+});

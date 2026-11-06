@@ -2628,6 +2628,8 @@ export interface RealtimeCoverage {
   analysisConfirmed: number;
   inconclusive: number;
   versionUnconfirmed: number;
+  /** Afetados que deixaram de existir antes da análise (informativo). */
+  removed: number;
   /** `null` quando o serviço não publica o desfecho (desconhecido ≠ zero). */
   unrecovered: number | null;
   watcherIndeterminate: boolean;
@@ -2652,6 +2654,7 @@ export function realtimeCoverage(engine?: EngineHealth): RealtimeCoverage {
     analysisConfirmed: n(rec?.analysisConfirmed),
     inconclusive: n(rec?.inconclusive),
     versionUnconfirmed: n(rec?.versionUnconfirmed),
+    removed: n(rec?.removed),
     unrecovered: reported ? n(rec?.unrecovered) : null,
     watcherIndeterminate,
   };
@@ -2675,7 +2678,8 @@ export function realtimeCoverageFacts(c: RealtimeCoverage): string[] {
       if (c.waiting > 0) facts.push(`${c.waiting} à espera de nova tentativa`);
       if (c.analysisPending > 0) facts.push(`${c.analysisPending} admitidos com análise por concluir`);
       if (c.inconclusive > 0) facts.push(`${c.inconclusive} com análise inconclusiva`);
-      if (c.versionUnconfirmed > 0) facts.push(`${c.versionUnconfirmed} alterados ou removidos sem a versão atual confirmada`);
+      if (c.versionUnconfirmed > 0) facts.push(`${c.versionUnconfirmed} alterados durante a análise, com a versão atual por confirmar`);
+      if (c.removed > 0) facts.push(`${c.removed} removidos antes da análise (já não existem)`);
       facts.push(`${c.analysisConfirmed} com a versão atual analisada`);
     }
   }

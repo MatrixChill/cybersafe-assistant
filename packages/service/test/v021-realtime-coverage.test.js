@@ -98,7 +98,30 @@ test('ficheiro removido antes da análise não é dado como confirmado', () => {
   const h=harness();
   h.r.defer('a','analysis',async()=>false);
   h.r.noteVanished('a');
-  assert.equal(h.r.snapshot().versionUnconfirmed,1);
+  // v0.2.3: deixou de existir → contado em `removed` (informativo), nunca confirmado.
+  assert.equal(h.r.snapshot().removed,1);
+  assert.equal(h.r.snapshot().analysisConfirmed,0);
+  assert.equal(h.r.snapshot().versionUnconfirmed,0);
+  assert.equal(h.r.snapshot().pending,0);
+});
+
+test('v0.2.3: alterado durante a análise volta a ser agendado, sem contar rejeição', async () => {
+  const h=harness();
+  h.r.defer('a','analysis',async()=>false);
+  h.r.noteAdmitted('a','v1');
+  h.r.noteAnalyzed('a','v1','changed');
+  const antes=h.r.snapshot().analysisRejections;
+  h.r.requeue('a',async()=>true);
+  const s=h.r.snapshot();
+  assert.equal(s.waiting,1);
+  assert.equal(s.versionUnconfirmed,0);
+  assert.equal(s.analysisRejections,antes);
+  assert.equal(s.pending,1);
+});
+
+test('v0.2.3: requeue ignora caminhos não afetados', () => {
+  const h=harness();
+  h.r.requeue('livre',async()=>true);
   assert.equal(h.r.snapshot().pending,0);
 });
 
