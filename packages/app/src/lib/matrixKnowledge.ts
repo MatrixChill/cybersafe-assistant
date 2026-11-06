@@ -1,3 +1,4 @@
+import { resolveIdentity } from "./buildIdentity";
 /**
  * Conhecimento LOCAL da MATRIX: respostas determinísticas, sem fornecedor de IA.
  *
@@ -14,6 +15,12 @@
  */
 
 export type MatrixIntent =
+  | "clamav-degradado"
+  | "prova-carga"
+  | "cobertura-recuperacao"
+  | "usb"
+  | "arranque"
+  | "versao"
   | "saudacao"
   | "identidade"
   | "capacidades"
@@ -68,6 +75,13 @@ const REGRAS: ReadonlyArray<readonly [MatrixIntent, (t: string) => boolean]> = [
   ["quarentena-restauro", (t) => algum(t, ["restaurar", "restauro", "restaurado", "recuperar"]) && algum(t, ["quarentena", "ficheiro", "isolado", "isolada", "seguro", "risco", "riscos", "perigoso"])],
   ["quarentena", (t) => algum(t, ["quarentena"])],
   ["inconclusivo", (t) => algum(t, ["inconclusivo", "inconclusiva", "inconclusivos", "inconclusivas", "nao concluida", "nao concluido"])],
+  // v0.2.3 — perguntas específicas sobre os problemas reais observados.
+  ["prova-carga", (t) => algum(t, ["prova de carga", "vaga envenenada", "prova recusada"])],
+  ["clamav-degradado", (t) => algum(t, ["clamav", "clamscan"]) && algum(t, ["degradado", "degradada", "indisponivel", "falha", "falhou", "nao funciona", "nao esta ativo"])],
+  ["cobertura-recuperacao", (t) => algum(t, ["em recuperacao", "a recuperar", "recuperacao da cobertura", "cobertura em recuperacao"])],
+  ["usb", (t) => algum(t, ["usb", "pen", "pendrive", "pen drive", "dispositivo externo", "disco externo"])],
+  ["arranque", (t) => algum(t, ["arranque", "arrancar", "demorou a iniciar", "demora a abrir", "demorou a abrir", "demorou a arrancar", "tempo de espera"])],
+  ["versao", (t) => algum(t, ["que versao", "qual a versao", "qual e a versao", "versao do cybersafe", "versao tenho"])],
   ["degradado", (t) => algum(t, ["degradado", "degradada", "limitacoes", "com limitacoes", "cobertura nao confirmada"])],
   ["clamav", (t) => algum(t, ["clamav", "clamscan"])],
   ["yara", (t) => algum(t, ["yara"])],
@@ -104,7 +118,27 @@ export const MATRIX_APRESENTACAO =
   "Posso explicar o que os processos estão a fazer, interpretar os resultados das análises, ajudar com problemas de desempenho e orientar-te nas funcionalidades do CyberSafe — sempre com base no que o teu computador realmente mediu.\n\n" +
   "O que gostarias de fazer hoje?";
 
-const RESPOSTAS: Record<MatrixIntent, string> = {
+const RESPOSTAS: Record<Exclude<MatrixIntent, "versao">, string> = {
+  "clamav-degradado":
+    "O ClamAV só aparece **Ativo** depois de uma prova real: carrega a base de assinaturas e analisa um ficheiro benigno. Aparece degradado quando essa prova não se confirma. As causas mais comuns:\n\n" +
+    "- **carga lenta** — o computador está ocupado ou outro antivírus está a analisar a base; o CyberSafe tenta de novo com mais tempo (até 2 minutos);\n" +
+    "- **um clamscan anterior ainda não terminou** — o motor espera que o Windows confirme o fim antes de voltar a usar a vaga;\n" +
+    "- **base em falta ou incompleta** — só aqui faz sentido atualizar as definições.\n\n" +
+    "O detalhe exato está em **Ver estado dos motores** no Painel.",
+  "prova-carga":
+    "A **prova de carga** é o teste que o CyberSafe faz antes de dizer que o ClamAV está ativo: carrega a base completa e analisa um ficheiro benigno. Se falhar, o motor não é dado como ativo.\n\n" +
+    "«Vaga envenenada» significa que um clamscan anterior foi mandado parar mas o Windows ainda não confirmou que terminou. Para não ter dois processos de ~1 GB ao mesmo tempo, o motor espera por essa confirmação e depois volta a tentar sozinho.",
+  "cobertura-recuperacao":
+    "**Cobertura em recuperação** quer dizer que, numa altura de muitos ficheiros novos (por exemplo, uma instalação), alguns não entraram logo na fila de análise. O CyberSafe está a voltar a tentá-los e a rever as pastas afetadas.\n\n" +
+    "Os quatro motores continuam operacionais; o aviso só desaparece quando a versão atual de cada ficheiro tiver sido analisada. Ficheiros que entretanto foram apagados contam à parte, porque já não há nada para analisar.",
+  usb:
+    "A **proteção USB** deteta pens e discos externos e analisa-os **só em modo leitura** — nunca executa nem altera ficheiros do dispositivo.\n\n" +
+    "- A análise automática só acontece se a ativares nas Definições; a manual pode ser feita a qualquer momento no painel USB.\n" +
+    "- Se tirares o dispositivo a meio, a análise é cancelada e não aparece como concluída.\n\n" +
+    "Para saber se o teu USB foi analisado, abre o painel **USB**: mostra o estado, o número de ficheiros analisados e o resultado da última análise desse dispositivo.",
+  arranque:
+    "Ao abrir, o CyberSafe liga-se ao serviço de proteção e verifica os motores. O ClamAV é o mais lento: tem de carregar uma base de ~170 MB e provar que funciona. Desde a v0.2.3 essa prova corre em segundo plano — o painel abre logo e o ClamAV aparece «A verificar» até a prova terminar.\n\n" +
+    "Se o arranque demorar muito, o ecrã diz que continua a tentar e abre sozinho quando as leituras chegarem. Num computador lento ou com outro antivírus ativo, a primeira prova pode demorar mais.",
   saudacao: "Olá de novo! Em que posso ajudar? Posso explicar um processo, um alerta ou o estado da proteção.",
   identidade:
     "Sou a **MATRIX**, a assistente do CyberSafe. Explico o que o CyberSafe mede no teu computador — processos, análises, quarentena e estado da proteção — em linguagem simples.\n\n" +
@@ -219,9 +253,17 @@ export const INTENCOES_DO_PRODUTO: ReadonlySet<MatrixIntent> = new Set<MatrixInt
   "saudacao", "identidade", "capacidades", "motores", "clamav", "yara", "hashdb", "nativo", "eicar",
   "quarentena-motivo", "quarentena-restauro", "quarentena", "inconclusivo", "degradado",
   "tempo-real", "scanner", "atualizacoes", "otimizar",
+  "clamav-degradado", "prova-carga", "cobertura-recuperacao", "usb", "arranque", "versao",
 ]);
 
 export function respostaLocal(intencao: MatrixIntent): string {
+  if (intencao === "versao") {
+    const id = resolveIdentity();
+    const v = id?.version && id.version !== "desconhecida" ? id.version : null;
+    return v
+      ? `Tens o **CyberSafe Assistant ${v}**. Para procurar uma versão nova, abre **Atualizações** nas Definições: a atualização é verificada (assinatura Ed25519 e SHA-256) e instalada por ti.`
+      : "Não consigo ler a versão desta compilação. Vê-a em **Definições → Sobre**.";
+  }
   return RESPOSTAS[intencao];
 }
 

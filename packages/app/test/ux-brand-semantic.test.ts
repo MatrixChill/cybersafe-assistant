@@ -125,7 +125,8 @@ test("o Belbete mantém identidade vinho e estados semânticos separados", () =>
     CSS.indexOf('[data-theme="cybersafe-red-belbete"].dark'),
     CSS.indexOf("}", CSS.indexOf("--cyber-glow", CSS.indexOf('[data-theme="cybersafe-red-belbete"].dark'))),
   );
-  assert.match(bloco, /--primary: #c55d72/i, "a identidade Red Velvet perdeu o vinho");
+  assert.match(bloco, /--primary: #f27590/i, "a identidade Red Velvet perdeu o vermelho-cereja");
+  assert.match(bloco, /--deep-wine: #7c1737/i, "a identidade Red Velvet perdeu o vinho");
   assert.match(bloco, /--cyber-green: #4ecb83/i, "o positivo deixou de ser verde");
   assert.match(bloco, /--cyber-yellow: #ffbf3e/i, "a atenção deixou de ser âmbar");
   assert.match(bloco, /--cyber-red: #ff5454/i, "o erro deixou de ser vermelho");

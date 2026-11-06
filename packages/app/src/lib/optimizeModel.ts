@@ -347,7 +347,7 @@ export function classificacaoDe(cartao: OptimizeCartao): OptimizeClassificacao {
 }
 
 export const ROTULO_ESTADO: Record<OptimizeEstado, string> = {
-  pendente: "Pendente",
+  pendente: "Por verificar",
   "a-verificar": "A verificar",
   verificado: "Verificado",
   corrigido: "Corrigido",

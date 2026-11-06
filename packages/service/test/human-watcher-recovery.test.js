@@ -40,6 +40,7 @@ function costura({ leitura = null, enqueue = "accepted", reads = 0 } = {}) {
     overflowEpisode: false,
     overflowLastRejectionAt: -Infinity,
     overflowOutcomeTimer: null,
+    watcherSignalAt: new Map(),
     resetOverflowEpisode: () => ProtectionEngineService.prototype["resetOverflowEpisode"].call(e),
     overflowEventData: (...args) => ProtectionEngineService.prototype["overflowEventData"].call(e, ...args),
     realtimeAnalysisOutcome: (...args) => ProtectionEngineService.prototype["realtimeAnalysisOutcome"].call(e, ...args),

@@ -33,8 +33,24 @@ static std::wstring g_notices;
 static std::wstring g_note;
 static Bitmap *g_core = nullptr;
 static double g_phase = 0.0;
+// v0.2.3 — relógio de alta resolução para a animação dos anéis. GetTickCount64
+// tem ~15,6 ms de resolução: com o timer de 33 ms o passo alternava entre ~31 e
+// ~47 ms e a rotação avançava aos solavancos.
+static LARGE_INTEGER g_qpcFreq = {};
+static LARGE_INTEGER g_qpcLast = {};
+static int g_fastPaints = 0;
+static UINT g_frameMs = 33;
+static void AnimClockReset() {
+  if (!g_qpcFreq.QuadPart) QueryPerformanceFrequency(&g_qpcFreq);
+  QueryPerformanceCounter(&g_qpcLast);
+}
+static double AnimClockStep() {
+  LARGE_INTEGER now; QueryPerformanceCounter(&now);
+  double dt = g_qpcFreq.QuadPart ? (double)(now.QuadPart - g_qpcLast.QuadPart) / (double)g_qpcFreq.QuadPart : 0.0;
+  g_qpcLast = now;
+  return dt;
+}
 static bool g_anim = true;
-static ULONGLONG g_last = 0;
 static int g_press = -1;
 static int g_winHover = -1, g_winPress = -1;
 static RECT g_winBtn[3];
@@ -607,7 +623,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       SendMessageW(g_licenseEdit,WM_SETFONT,(WPARAM)g_editFont,TRUE);
       g_note=L"Reparar e Desinstalar: indispon\u00edveis neste percurso. Use o desinstalador instalado nas Defini\u00e7\u00f5es do Windows.";
       Layout(hwnd);
-      if(g_anim){ g_last = GetTickCount64(); SetTimer(hwnd, 3, 33, nullptr); }
+      if(g_anim){ AnimClockReset(); g_frameMs = 33; SetTimer(hwnd, 3, g_frameMs, nullptr); }
       return 0;
     case WM_SIZE:
       if(wp == SIZE_MINIMIZED) { KillTimer(hwnd, 3); return 0; }
@@ -619,7 +635,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       }
       if(g_anim){
         if(IsIconic(hwnd)) KillTimer(hwnd, 3);
-        else { g_last = GetTickCount64(); SetTimer(hwnd, 3, 33, nullptr); }
+        else { AnimClockReset(); SetTimer(hwnd, 3, g_frameMs, nullptr); }
       }
       InvalidateRect(hwnd, nullptr, FALSE);
       return 0;
@@ -628,8 +644,15 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
       const auto paintStart = GetTickCount64();
       Paint(hwnd, dc);
       EndPaint(hwnd, &ps);
-      // Give input and NSIS status messages room on slower graphics hardware.
-      if(g_anim && GetTickCount64() - paintStart >= 28) SetTimer(hwnd, 3, 66, nullptr);
+      // Give input and NSIS status messages room on slower graphics hardware —
+      // mas sem ficar preso a 15 fps: antes, UM desenho lento (ex.: durante a
+      // extração) baixava o timer para 66 ms para sempre. Agora volta a 33 ms
+      // depois de três desenhos rápidos seguidos.
+      if(g_anim) {
+        const ULONGLONG spent = GetTickCount64() - paintStart;
+        if(spent >= 28) { g_fastPaints = 0; if(g_frameMs != 66) { g_frameMs = 66; SetTimer(hwnd, 3, g_frameMs, nullptr); } }
+        else if(g_frameMs != 33 && ++g_fastPaints >= 3) { g_frameMs = 33; g_fastPaints = 0; SetTimer(hwnd, 3, g_frameMs, nullptr); }
+      }
       return 0;
     }
     case WM_MOUSEMOVE: {
@@ -703,9 +726,7 @@ static LRESULT CALLBACK WndProc(HWND hwnd, UINT msg, WPARAM wp, LPARAM lp){
     }
     case WM_TIMER:
       if(wp == 3){
-        ULONGLONG now = GetTickCount64();
-        double dt = (double)(now - g_last) / 1000.0;
-        g_last = now;
+        double dt = AnimClockStep();
         if(dt > 0.25) dt = 0.25;
         if(!IsWindowVisible(hwnd) || IsIconic(hwnd) || GetForegroundWindow() != hwnd) return 0;
         g_phase += dt;

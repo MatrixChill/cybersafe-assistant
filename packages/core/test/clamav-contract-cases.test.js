@@ -32,13 +32,18 @@ import { isLoadProof, makeLoadProofHandle } from "./fixtures/clamav-load-proof.j
 
 const SCAN_ARGS = ["--database=definitions", "--no-summary", "-r", "C:\\scan"];
 
-function makeFakeChild(pid, { died = false } = {}) {
+// Handle inutilizável por omissão (lança): estes contratos provam que, sem
+// identidade confirmada, o fallback NUNCA é terminar por PID. O caminho do
+// handle do filho próprio (decisão de 2026-11-06) está em
+// clamav-unknown-never-kills.test.js.
+function makeFakeChild(pid, { died = false, handleKill = false } = {}) {
   const child = new EventEmitter();
   child.pid = pid;
   child.stdout = new EventEmitter();
   child.stderr = new EventEmitter();
   child.state = { died, kills: 0 };
   child.kill = () => {
+    if (!handleKill) throw new Error("handle do processo indisponível (simulado)");
     child.state.kills++;
     if (!child.state.died) child.die(0);
     return true;
@@ -154,7 +159,7 @@ describe("CONTRATO 7 - UNKNOWN nunca mata", () => {
     const capturado = { row: oursRow(4242, criacao), probeFailed: false, detail: "captura" };
     const lido = { row: oursRow(4242, criacao), probeFailed: false, detail: "leitura" };
     const { sync, state } = makeTerminationSync({ created: criacao, descendants: 2 });
-    const child = makeFakeChild(4242);
+    const child = makeFakeChild(4242, { handleKill: true });
     const spawn = createSpawnClamav({
       spawn: () => child,
       spawnSync: sync,

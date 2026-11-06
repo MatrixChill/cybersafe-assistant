@@ -88,9 +88,13 @@ export const BOOT_COPY = {
   readyDetail: "O serviço respondeu e as leituras necessárias chegaram.",
   protectionOff: "A proteção está desligada — o arranque não a ativa; o estado real está no painel.",
   degraded: "O serviço respondeu com componentes limitados; o detalhe está no painel.",
-  unknown: "Prontidão ainda não confirmada.",
+  unknown: "O serviço está a demorar mais do que o habitual.",
+  // v0.2.3: o arranque continua a tentar sozinho e abre quando as leituras
+  // chegarem; o texto antigo («o tempo de espera terminou») fazia parecer uma
+  // falha um serviço que só estava a arrancar devagar. Continua a não afirmar
+  // proteção.
   unknownDetail:
-    "O tempo de espera terminou sem confirmar as leituras necessárias. Não há garantia de que a proteção esteja a funcionar; podes continuar em modo limitado, com esta limitação visível.",
+    "Continuo a tentar ligar e abro o painel assim que as leituras chegarem. Até lá, não há garantia de que a proteção esteja a funcionar; podes entrar já em modo limitado, com esta limitação visível.",
   unknownPending: "Por confirmar",
   unknownLimitation: "Modo limitado — prontidão não confirmada. Nada aqui afirma que a proteção esteja a funcionar.",
   unavailableLimitation: "Sem serviço confirmado, nenhum estado de proteção é afirmado.",

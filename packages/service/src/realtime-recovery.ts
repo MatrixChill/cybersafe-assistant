@@ -9,10 +9,12 @@ type Entry = { run: Retry; firstAt: number; attempts: number; revision: number; 
  *  confirmed a análise dessa versão terminou com veredicto e o ficheiro não mudou;
  *  inconclusive a análise terminou sem veredicto (inconclusivo/cancelada);
  *  stale     a análise terminou mas o ficheiro mudou depois da admissão: a
- *            versão atual não está confirmada.
+ *            versão atual não está confirmada (e volta a ser agendada);
+ *  gone      o ficheiro deixou de existir antes de ser analisado: não há
+ *            conteúdo a analisar — informativo, não é lacuna atual.
  * Só `confirmed` fecha a lacuna. Admitir não é analisar.
  */
-export type TrackedState = "waiting" | "given-up" | "queued" | "confirmed" | "inconclusive" | "stale";
+export type TrackedState = "waiting" | "given-up" | "queued" | "confirmed" | "inconclusive" | "stale" | "gone";
 export type AnalysisOutcome = "verdict" | "inconclusive" | "changed";
 type Tracked = { state: TrackedState; fingerprint: string | null };
 interface Options {
@@ -125,7 +127,10 @@ export class RealtimeRecovery {
       rejeição nunca foi vista. Não se finge confirmação. */
   noteVanished(path: string): void {
     const key=path.toLowerCase();const t=this.tracked.get(key);if(!t)return;
-    t.state="stale";const entry=this.entries.get(key);
+    // v0.2.3: no notebook, centenas de temporários apagados numa instalação
+    // ficavam para sempre «alterados/removidos sem confirmação». Um ficheiro que
+    // já não existe não tem versão atual a analisar; fica contado à parte.
+    t.state="gone";const entry=this.entries.get(key);
     if(entry){this.entries.delete(key);this.terminal.set(key,this.holdUntil(entry));this.idleCheck();}
   }
   /** Afinal não é ficheiro (diretório, junction): não há cobertura a confirmar. */
@@ -133,6 +138,16 @@ export class RealtimeRecovery {
     const key=path.toLowerCase();if(!this.tracked.delete(key))return;
     const entry=this.entries.get(key);
     if(entry){this.entries.delete(key);this.terminal.set(key,this.holdUntil(entry));this.idleCheck();}
+  }
+  /**
+   * A versão analisada já não é a atual (o ficheiro mudou durante a análise):
+   * volta a agendar a admissão da versão atual. Não conta como nova rejeição.
+   */
+  requeue(path: string, run: Retry, priority: "high" | "normal" = "normal"): void {
+    const key=path.toLowerCase();const t=this.tracked.get(key);if(!t || this.entries.has(key))return;
+    if(this.entries.size>=this.maxPaths)return;
+    t.state="waiting";this.terminal.delete(key);
+    this.entries.set(key,{run,firstAt:this.now(),attempts:0,revision:0,high:priority==="high"});this.schedule();
   }
   /** A fila abriu espaço: tenta já, sem esperar pelo recuo. */
   nudge(): void {
@@ -154,11 +169,11 @@ export class RealtimeRecovery {
       só uma parte da lacuna: `analysisPending`, `inconclusive` e
       `versionUnconfirmed` também impedem confirmar cobertura. */
   private coverageCounts(){
-    const c={waiting:0,unrecovered:this.trackedOverflow,analysisPending:0,analysisConfirmed:0,inconclusive:0,versionUnconfirmed:0};
+    const c={waiting:0,unrecovered:this.trackedOverflow,analysisPending:0,analysisConfirmed:0,inconclusive:0,versionUnconfirmed:0,removed:0};
     for(const t of this.tracked.values()){
       if(t.state==="waiting")c.waiting++;else if(t.state==="given-up")c.unrecovered++;
       else if(t.state==="queued")c.analysisPending++;else if(t.state==="confirmed")c.analysisConfirmed++;
-      else if(t.state==="inconclusive")c.inconclusive++;else c.versionUnconfirmed++;
+      else if(t.state==="inconclusive")c.inconclusive++;else if(t.state==="gone")c.removed++;else c.versionUnconfirmed++;
     }
     return {...c,trackedCapped:this.trackedOverflow>0};
   }

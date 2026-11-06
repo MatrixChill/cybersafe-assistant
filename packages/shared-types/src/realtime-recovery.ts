@@ -18,4 +18,6 @@ export interface RealtimeRecoverySnapshot {
    */
   waiting?: number; unrecovered?: number; analysisPending?: number; analysisConfirmed?: number;
   inconclusive?: number; versionUnconfirmed?: number; trackedCapped?: boolean;
+  /** Afetados que deixaram de existir antes da análise (informativo, não é lacuna). */
+  removed?: number;
 }

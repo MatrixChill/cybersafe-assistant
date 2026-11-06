@@ -1,4 +1,4 @@
-import { WatcherReconciler, reconcileWatcherRoot } from "./watcher-reconciliation.js";
+import { WatcherReconciler, reconcileRecentWatcherRoot } from "./watcher-reconciliation.js";
 import { RpcRequestQueue, INDEPENDENT_READ_METHODS } from './rpc-request-queue.js';
 import { createDefinitionsUpdateResult } from "./definition-update-result.js";
 import {
@@ -428,6 +428,8 @@ export class ProtectionEngineService {
   private readonly realtimeQueue = new RealtimeFileQueue();
   private readonly realtimeRecovery = new RealtimeRecovery({ onIdle: () => this.scheduleOverflowOutcome() });
   private quarantinePolicy: QuarantinePolicy = "warn";
+  /** Prova de arranque do ClamAV em segundo plano (testes e encerramento podem esperar por ela). */
+  clamavStartupProbe: Promise<void> | null = null;
   private lastClamavAvailability: boolean | undefined;
   private lastClamavStatus: string | undefined;
   /** Última notificação de indisponibilidade POR MOTIVO (dedupe de flapping). */
@@ -442,6 +444,8 @@ export class ProtectionEngineService {
   private loss = new RealtimeLossLedger();
   /** Últimos buracos de cobertura reportados pelo filho do watcher (janela limitada). */
   private watcherReconciler?: WatcherReconciler;
+  /** Hora do primeiro sinal sem nome ainda por reconciliar, por pasta. */
+  private watcherSignalAt = new Map<string, number>();
   private coverageGaps: { path: string; motivo: string; detectedAt: string }[] = [];
   /**
    * Raiz de dados do serviço. Injetável para que um teste nunca escreva em
@@ -590,6 +594,7 @@ export class ProtectionEngineService {
     this.definitionsDir = path.join(this.baseDir, "definitions");
     this.clamav = new ClamavBridge({
       definitionsDir: this.definitionsDir,
+      proofLog: (line) => { void this.actionsLog?.write("[CLAMAV-PROOF] " + line + " at=" + new Date().toISOString()); },
       fallbackDatabaseDir: async () => {
         const seed = await seedClamavDatabase({ seedDir: process.env.CYBERSAFE_CLAMAV_SEED_DIR, definitionsDir: this.definitionsDir });
         if (seed.status === "invalid") console.warn(`[Service] ${seed.reason}`);
@@ -1072,9 +1077,18 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     // ClamAV (Workstream C): corre o probe UMA vez no arranque — binário +
     // base de assinaturas. Sem isto, protection.getState mostra clamav
     // "Not checked" para sempre mesmo com o clamscan instalado.
+    //
+    // v0.2.3: a prova NÃO bloqueia o arranque. Antes, `await` aqui fazia o
+    // serviço só ficar pronto depois da prova de carga (até 30 s, mais espera
+    // pela vaga); num PC lento a interface esgotava o seu prazo e mostrava
+    // «tempo de espera terminou» / «não foi possível sincronizar». Agora o
+    // serviço fica pronto e o ClamAV publica «A verificar o motor ClamAV…»
+    // (busy, nunca active) até a prova acabar — o mesmo arranque progressivo
+    // do motor nativo e do YARA.
     const clamavT0 = performance.now();
-    await this.clamav.isAvailable();
-    console.log(`[Service] engine-init clamavMs=${Math.round(performance.now() - clamavT0)} status=${this.clamav.health.status}`);
+    this.clamavStartupProbe = this.clamav.isAvailable()
+      .then(() => console.log(`[Service] engine-init clamavMs=${Math.round(performance.now() - clamavT0)} status=${this.clamav.health.status}`))
+      .catch((err: unknown) => console.error("[Service] engine-init clamav probe falhou:", err));
 
     // ── DEFINIÇÕES NÃO DEPENDEM DA PROTEÇÃO ESTAR LIGADA ─────────────────────
     //
@@ -1441,6 +1455,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     // A contagem de perda é por sessão de proteção: sem ela, um número de
     // ontem é apresentado como se fosse do estado atual.
     this.watcherReconciler?.clear();
+    this.watcherSignalAt.clear();
     this.loss.reset();
     this.resetOverflowEpisode();
     this.backgroundAbort.abort();
@@ -2328,7 +2343,13 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       const startedAt = performance.now();
       if (trace) console.log(`[RealtimePerf] id=${traceId} stage=start queueWaitMs=${(startedAt-queuedAt).toFixed(1)} observedToStartMs=${(startedAt-observedAt).toFixed(1)}`);
       const result = await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true, priority: "realtime", realtimeTraceId: trace ? traceId : undefined });
-      if (generation === this.protectionGeneration) this.realtimeRecovery.noteAnalyzed(resolvedPath, fingerprint, await this.realtimeAnalysisOutcome(filePath, fingerprint, result?.results[0]?.verdict));
+      if (generation === this.protectionGeneration) {
+        const desfecho = await this.realtimeAnalysisOutcome(filePath, fingerprint, result?.results[0]?.verdict);
+        this.realtimeRecovery.noteAnalyzed(resolvedPath, fingerprint, desfecho);
+        // Mudou durante a análise: a versão atual volta à fila em vez de ficar
+        // à espera de um evento do watcher que pode nunca chegar.
+        if (desfecho === "changed") this.realtimeRecovery.requeue(resolvedPath, retrySignal => this.handleFileObservation(filePath, true, retrySignal), this.realtimePriority(filePath));
+      }
       if (trace) console.log(`[RealtimePerf] id=${traceId} stage=returned pipelineMs=${(performance.now()-startedAt).toFixed(1)} observedToReturnedMs=${(performance.now()-observedAt).toFixed(1)} verdict=${result?.results[0]?.verdict ?? "cancelled"}`);
     }, this.realtimePriority(filePath), 0);
     if (trace) console.log(`[RealtimePerf] id=${traceId} stage=admission outcome=${admission} metadataMs=${(queuedAt-observedAt).toFixed(1)} queueDepth=${this.realtimeQueue.size}`);
@@ -2437,16 +2458,20 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     if (motivo === "overflow" && path.isAbsolute(caminho) && this.protectionState && !this.isShuttingDown) {
       this.watcherReconciler ??= new WatcherReconciler(async root => {
         const signal = this.backgroundAbort.signal;
-        return reconcileWatcherRoot(root, async file => {
+        // Só o que mudou desde pouco antes do PRIMEIRO sinal pendente desta pasta.
+        const desde = (this.watcherSignalAt.get(root) ?? Date.now()) - 10_000;
+        return reconcileRecentWatcherRoot(root, desde, async file => {
           if (this.exclusions.isExcluded(file) || signal.aborted) return false;
           const result = await this.scanArtifact(file, "service", {backgroundSignal: signal, skipVirusTotal:true, readOnly:true, priority:"realtime"});
           const verdict = result?.results[0]?.verdict;
           return verdict === "safe" || verdict === "malicious" || verdict === "suspicious";
         }, signal);
       }, root => {
+        this.watcherSignalAt.delete(root);
         this.loss.confirmRootSnapshot(root);
         this.eventBus.publish("engine.health", "low", "Reconciliação concluída: os ficheiros presentes na pasta foram analisados e a lista permaneceu estável.", {reason:"watcher-snapshot-reconciled", historicalDeliveryConfirmed:false});
       });
+      if (!this.watcherSignalAt.has(caminho)) this.watcherSignalAt.set(caminho, Date.now());
       this.watcherReconciler.schedule(caminho);
     }
 
@@ -2858,6 +2883,13 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
             "[CLAMAV] recovery attempt=" + this.clamavRecoveryAttempts + " result=" +
               (ok ? "active" : "still-degraded") + " status=" + this.clamav.health.status,
           );
+          // v0.2.4: uma prova recusada por vaga envenenada (ou à espera da
+          // confirmação do fim da anterior) não gasta uma das 6 tentativas.
+          // Antes, um ciclo destes esgotava-as e o motor ficava degradado para
+          // sempre mesmo depois de a vaga voltar. O recuo (até 5 min) mantém-se.
+          if (!ok && /vaga envenenada|não terminou|não foi confirmado|morte não confirmada/i.test(this.clamav.health.detail ?? "")) {
+            this.clamavRecoveryAttempts = Math.max(0, this.clamavRecoveryAttempts - 1);
+          }
           if (ok) {
             this.eventBus.publish("engine.health", "low", "ClamAV recuperado e disponível.", {
               engine: "ClamAV", status: this.clamav.health.status,

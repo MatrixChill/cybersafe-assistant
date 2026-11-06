@@ -77,7 +77,7 @@ export const V2_THEME_META: Record<V2Theme, { name: string; subtitle: string }> 
   neon: { name: "Neon", subtitle: "Energia violeta, luz ciano e detalhes magenta." },
   terminal: { name: "Terminal", subtitle: "Fósforo, grelha e rigor monoespaçado." },
   aurora: { name: "Líquido / Aurora", subtitle: "Luz difusa, vidro e cores em suspensão." },
-  belbete: { name: "Belbete Red Velvet", subtitle: "Bordô aveludado, cacau profundo e camadas de marfim." },
+  belbete: { name: "Belbete Red Velvet", subtitle: "Vermelho aveludado, bordô, carmim e ameixa escura." },
   glass: { name: "Cyber Glass", subtitle: "Profundidade, luz e precisão." },
   tactical: { name: "Cyber Tactical", subtitle: "Informação em primeiro plano." },
   light: { name: "Cyber Light Pro", subtitle: "Clareza em qualquer ambiente." },
