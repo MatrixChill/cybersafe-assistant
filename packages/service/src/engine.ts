@@ -428,6 +428,8 @@ export class ProtectionEngineService {
   private readonly realtimeQueue = new RealtimeFileQueue();
   private readonly realtimeRecovery = new RealtimeRecovery({ onIdle: () => this.scheduleOverflowOutcome() });
   private quarantinePolicy: QuarantinePolicy = "warn";
+  /** Prova de arranque do ClamAV em segundo plano (testes e encerramento podem esperar por ela). */
+  clamavStartupProbe: Promise<void> | null = null;
   private lastClamavAvailability: boolean | undefined;
   private lastClamavStatus: string | undefined;
   /** Última notificação de indisponibilidade POR MOTIVO (dedupe de flapping). */
@@ -1072,9 +1074,18 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     // ClamAV (Workstream C): corre o probe UMA vez no arranque — binário +
     // base de assinaturas. Sem isto, protection.getState mostra clamav
     // "Not checked" para sempre mesmo com o clamscan instalado.
+    //
+    // v0.2.3: a prova NÃO bloqueia o arranque. Antes, `await` aqui fazia o
+    // serviço só ficar pronto depois da prova de carga (até 30 s, mais espera
+    // pela vaga); num PC lento a interface esgotava o seu prazo e mostrava
+    // «tempo de espera terminou» / «não foi possível sincronizar». Agora o
+    // serviço fica pronto e o ClamAV publica «A verificar o motor ClamAV…»
+    // (busy, nunca active) até a prova acabar — o mesmo arranque progressivo
+    // do motor nativo e do YARA.
     const clamavT0 = performance.now();
-    await this.clamav.isAvailable();
-    console.log(`[Service] engine-init clamavMs=${Math.round(performance.now() - clamavT0)} status=${this.clamav.health.status}`);
+    this.clamavStartupProbe = this.clamav.isAvailable()
+      .then(() => console.log(`[Service] engine-init clamavMs=${Math.round(performance.now() - clamavT0)} status=${this.clamav.health.status}`))
+      .catch((err: unknown) => console.error("[Service] engine-init clamav probe falhou:", err));
 
     // ── DEFINIÇÕES NÃO DEPENDEM DA PROTEÇÃO ESTAR LIGADA ─────────────────────
     //
