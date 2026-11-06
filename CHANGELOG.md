@@ -75,7 +75,7 @@ Base: `v0.2.1` (`b3a216a`). Branch `fix/v021-realtime-coverage`.
   indica que abriu a confirmação. Textos PT-PT corrigidos.
 
 ### Limitações mantidas
-- Terminação de processos desligada em Windows (decisão R7).
+- A terminação antiga por PID (`killProcess`) continua desligada em Windows (decisão R7); o Gestor de Tarefas termina por handle nativo, com confirmação e verificação da instância.
 - Sem assinatura Authenticode.
 - Latência EICAR instalada e janela minimizada: validação manual em VM.
 

@@ -6,13 +6,13 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { ProtectionEngineService } from "../dist/engine.js";
 
-// Em Windows a terminação está DESLIGADA por decisão R7
-// (`KILL_TERMINATION_DISABLED`, engine.ts): `killProcess` recusa antes de
-// qualquer consulta. Estes casos exercitam o caminho ativo, que só existe na
+// Em Windows o `killProcess` LEGADO (por PID) está DESLIGADO por decisão R7
+// (`KILL_TERMINATION_DISABLED`, engine.ts): recusa antes de qualquer consulta.
+// A terminação do Gestor de Tarefas é outro caminho (handle nativo + bilhete). Estes casos exercitam o caminho ativo, que só existe na
 // plataforma com prova de identidade de ponta a ponta (/proc). Em Windows são
 // ignorados COM MOTIVO — não passam — e a recusa é provada noutro teste.
 const KILL_DESLIGADO_WIN = process.platform === "win32"
-  ? "terminação desligada em Windows (R7, KILL_TERMINATION_DISABLED): caminho ativo inexistente nesta plataforma"
+  ? "killProcess legado desligado em Windows (R7, KILL_TERMINATION_DISABLED): este caminho por PID não existe nesta plataforma; a terminação individual por handle é testada em individual-process-termination"
   : false;
 
 /**
@@ -464,7 +464,7 @@ test("R2: foto fresca + CIM sem a linha ⇒ already-exited confirmado, sem taskk
 
 after(() => rmSync(BASE, { recursive: true, force: true }));
 
-test("Windows: terminação recusada antes de qualquer consulta ou taskkill (R7)", { skip: process.platform !== "win32" && "só Windows" }, async () => {
+test("Windows: killProcess legado recusado antes de qualquer consulta ou taskkill (R7)", { skip: process.platform !== "win32" && "só Windows" }, async () => {
   const engine = await engineWith([entry()], 5_000);
   let queries = 0;
   let taskkill = 0;

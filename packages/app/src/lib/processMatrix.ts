@@ -592,7 +592,7 @@ export function buildProcessLocalReply(diagnostic: ProcessDiagnostic | null, sel
       : chosen
         ? 'Se for uma aplicação tua, fecha-a pela própria janela depois de guardar o trabalho — encerrar à força pode perder dados não guardados.'
         : 'Escolhe primeiro um processo no Gestor de Tarefas.',
-    'No CyberSafe, terminar processos está desligado em Windows: a identidade do processo não pode ser provada de ponta a ponta, por isso nenhuma ação é executada a partir daqui.',
+    'No Gestor de Tarefas, o CyberSafe só termina um processo depois de confirmares e de verificar que ainda é a mesma instância que escolheste (PID e instante de início); processos protegidos do Windows são recusados.',
   ].join(' ');
 
   return [

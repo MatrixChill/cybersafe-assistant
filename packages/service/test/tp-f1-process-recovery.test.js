@@ -11,7 +11,7 @@ import { ProtectionEngineService } from "../dist/engine.js";
 // plataforma com prova de identidade de ponta a ponta (/proc). Em Windows são
 // ignorados COM MOTIVO — não passam — e a recusa é provada noutro teste.
 const KILL_DESLIGADO_WIN = process.platform === "win32"
-  ? "terminação desligada em Windows (R7, KILL_TERMINATION_DISABLED): caminho ativo inexistente nesta plataforma"
+  ? "killProcess legado desligado em Windows (R7, KILL_TERMINATION_DISABLED): este caminho por PID não existe nesta plataforma; a terminação individual por handle é testada em individual-process-termination"
   : false;
 import { classifyProcessEnumerationError } from "@cybersafe/shared-types";
 import { ProcessSnapshotFailure } from "@cybersafe/native-windows";
