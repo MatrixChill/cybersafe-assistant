@@ -4,6 +4,15 @@ import os from "node:os";
 import path from "node:path";
 import { mkdtempSync, rmSync } from "node:fs";
 import { ProtectionEngineService } from "../dist/engine.js";
+
+// Em Windows a terminação está DESLIGADA por decisão R7
+// (`KILL_TERMINATION_DISABLED`, engine.ts): `killProcess` recusa antes de
+// qualquer consulta. Estes casos exercitam o caminho ativo, que só existe na
+// plataforma com prova de identidade de ponta a ponta (/proc). Em Windows são
+// ignorados COM MOTIVO — não passam — e a recusa é provada noutro teste.
+const KILL_DESLIGADO_WIN = process.platform === "win32"
+  ? "terminação desligada em Windows (R7, KILL_TERMINATION_DISABLED): caminho ativo inexistente nesta plataforma"
+  : false;
 import { classifyProcessEnumerationError } from "@cybersafe/shared-types";
 import { ProcessSnapshotFailure } from "@cybersafe/native-windows";
 
@@ -77,7 +86,7 @@ test("falha → cache com truth failed; retry devido → SO outra vez e recupera
   assert.equal(recuperada.processes.length, 1);
 });
 
-test("PID reutilizado: foto antiga + CIM com outra identidade → reused, sem taskkill", async (t) => {
+test("PID reutilizado: foto antiga + CIM com outra identidade → reused, sem taskkill", { skip: KILL_DESLIGADO_WIN }, async (t) => {
   const engine = new ProtectionEngineService(BASE);
   t.after(async () => {
     await engine.dispose().catch(() => undefined);

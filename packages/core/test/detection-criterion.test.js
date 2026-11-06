@@ -50,7 +50,7 @@ rule strong_probe { meta: cybersafe_evidence = "strong" strings: $a = "CS-STRONG
   assert.equal(strong.recommendedAction, "quarantined");
 });
 
-test("P2: EICAR hash and real YARA buffer match remain strong without writing EICAR to disk", async (t) => {
+test("P2: EICAR stays strong by exact hash; the shipped YARA canary rule is generic (no EICAR on disk)", async (t) => {
   const signatures = new SignatureDatabase();
   await signatures.load(fileURLToPath(new URL("./missing-quality-hashes.json", import.meta.url)));
   const sha256 = "275a021bbfb6489e54d471899f7db9d1663fc695ec2fe2a2c4538aabf651fd0f";
@@ -64,8 +64,13 @@ test("P2: EICAR hash and real YARA buffer match remain strong without writing EI
   const matches = positiveControlMatchOrSkip(t, yara, marker);
   if (matches === null) return;
   assert.equal(matches.length, 1);
-  assert.equal(matches[0].evidence, "strong");
-  for (const input of [{ ...clean, signatureMatch: true }, { ...clean, yaraMatches: matches.length, strongYaraMatches: 1 }]) {
+  // O corpus enviado chama a esta regra `CyberSafe_Canary_EICAR` e declara-a
+  // «test canary - not production detection», sem `hash1`: é evidência
+  // GENÉRICA por decisão do autor da regra. A prova forte do EICAR é o hash
+  // exato (HashDB), verificado acima; não se promove uma regra canário.
+  assert.equal(matches[0].ruleId, "CyberSafe_Canary_EICAR");
+  assert.equal(matches[0].evidence, "generic");
+  for (const input of [{ ...clean, signatureMatch: true }, { ...clean, yaraMatches: 1, strongYaraMatches: 1 }]) {
     const r = scoreThreat(input);
     assert.equal(r.severity, "critical");
     assert.equal(r.recommendedAction, "quarantined");

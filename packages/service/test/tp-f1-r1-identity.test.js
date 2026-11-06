@@ -6,6 +6,15 @@ import { mkdtempSync, rmSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { ProtectionEngineService } from "../dist/engine.js";
 
+// Em Windows a terminação está DESLIGADA por decisão R7
+// (`KILL_TERMINATION_DISABLED`, engine.ts): `killProcess` recusa antes de
+// qualquer consulta. Estes casos exercitam o caminho ativo, que só existe na
+// plataforma com prova de identidade de ponta a ponta (/proc). Em Windows são
+// ignorados COM MOTIVO — não passam — e a recusa é provada noutro teste.
+const KILL_DESLIGADO_WIN = process.platform === "win32"
+  ? "terminação desligada em Windows (R7, KILL_TERMINATION_DISABLED): caminho ativo inexistente nesta plataforma"
+  : false;
+
 /**
  * TP-PAP-F1-RUNTIME-20261026 — R1/R2 (reviews Codex).
  *
@@ -88,7 +97,7 @@ test("R1 RED: cache e CIM sem CreationDate não podem chegar ao taskkill", async
   }
 });
 
-test("R1: fonte sem CreationDate é recusada mesmo com cache válido e foto velha", async () => {
+test("R1: fonte sem CreationDate é recusada mesmo com cache válido e foto velha", { skip: KILL_DESLIGADO_WIN }, async () => {
   const engine = await engineWith([entry()], 5_000);
   let taskkill = 0;
   let queries = 0;
@@ -161,7 +170,7 @@ test("R1: CreationDate inválida/futura na FONTE também não prova identidade",
   }
 });
 
-test("R1: nome/comando iguais com CreationDate diferente são PID reutilizado", async () => {
+test("R1: nome/comando iguais com CreationDate diferente são PID reutilizado", { skip: KILL_DESLIGADO_WIN }, async () => {
   const engine = await engineWith([entry({ startedAt: OLD })], 5_000);
   let taskkill = 0;
   engine.queryCimProcesses = async () => [
@@ -183,7 +192,7 @@ test("R1: nome/comando iguais com CreationDate diferente são PID reutilizado", 
   }
 });
 
-test("R1: processo jovem com foto velha é revalidado (frescura é da foto)", async () => {
+test("R1: processo jovem com foto velha é revalidado (frescura é da foto)", { skip: KILL_DESLIGADO_WIN }, async () => {
   const engine = await engineWith([entry({ startedAt: YOUNG })], 5_000);
   let taskkill = 0;
   let queries = 0;
@@ -205,7 +214,7 @@ test("R1: processo jovem com foto velha é revalidado (frescura é da foto)", as
   }
 });
 
-test("R2: foto fresca continua a revalidar; criação igual segue para taskkill", async () => {
+test("R2: foto fresca continua a revalidar; criação igual segue para taskkill", { skip: KILL_DESLIGADO_WIN }, async () => {
   const antigo = new Date(Date.now() - 3_600_000).toISOString();
   const engine = await engineWith([entry({ startedAt: antigo })], 0);
   let taskkill = 0;
@@ -228,7 +237,7 @@ test("R2: foto fresca continua a revalidar; criação igual segue para taskkill"
   }
 });
 
-test("R1: fonte vazia na revalidação é already-exited confirmado, sem taskkill", async () => {
+test("R1: fonte vazia na revalidação é already-exited confirmado, sem taskkill", { skip: KILL_DESLIGADO_WIN }, async () => {
   const engine = await engineWith([entry()], 5_000);
   let taskkill = 0;
   engine.queryCimProcesses = async () => [];
@@ -294,7 +303,7 @@ test("R1: CIM devolveu o PID mas não há referência de snapshot ⇒ recusa", a
   }
 });
 
-test("R1: sem cache e CIM falhou ⇒ failed; sem cache e CIM vazio ⇒ failed distinto", async () => {
+test("R1: sem cache e CIM falhou ⇒ failed; sem cache e CIM vazio ⇒ failed distinto", { skip: KILL_DESLIGADO_WIN }, async () => {
   const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
   await new Promise((resolve, reject) => {
     child.once("spawn", resolve);
@@ -330,7 +339,7 @@ test("R1: sem cache e CIM falhou ⇒ failed; sem cache e CIM vazio ⇒ failed di
   }
 });
 
-test("R1: PID protegido é recusado antes de qualquer consulta/ação, mesmo sem cache", async () => {
+test("R1: PID protegido é recusado antes de qualquer consulta/ação, mesmo sem cache", { skip: KILL_DESLIGADO_WIN }, async () => {
   const engine = new ProtectionEngineService(BASE);
   let queries = 0;
   let taskkill = 0;
@@ -355,7 +364,7 @@ test("R1: PID protegido é recusado antes de qualquer consulta/ação, mesmo sem
   }
 });
 
-test("R1: kill normal com cache/foto/identidade válidos continua a funcionar", async () => {
+test("R1: kill normal com cache/foto/identidade válidos continua a funcionar", { skip: KILL_DESLIGADO_WIN }, async () => {
   const child = spawn(process.execPath, ["-e", "setTimeout(() => {}, 30000)"], { stdio: "ignore" });
   await new Promise((resolve, reject) => {
     child.once("spawn", resolve);
@@ -388,7 +397,7 @@ test("R1: kill normal com cache/foto/identidade válidos continua a funcionar", 
   }
 });
 
-test("R2 RED: foto de 1 ms + PID reutilizado (mesmo nome/comando, criação diferente) não chega ao taskkill", async () => {
+test("R2 RED: foto de 1 ms + PID reutilizado (mesmo nome/comando, criação diferente) não chega ao taskkill", { skip: KILL_DESLIGADO_WIN }, async () => {
   const outro = new Date(Date.now() - 5_000).toISOString();
   const engine = await engineWith([entry({ startedAt: OLD })], 1);
   let taskkill = 0;
@@ -434,7 +443,7 @@ test("R2: foto fresca + CIM falhou ⇒ failed, nunca taskkill", async () => {
   }
 });
 
-test("R2: foto fresca + CIM sem a linha ⇒ already-exited confirmado, sem taskkill", async () => {
+test("R2: foto fresca + CIM sem a linha ⇒ already-exited confirmado, sem taskkill", { skip: KILL_DESLIGADO_WIN }, async () => {
   const engine = await engineWith([entry()], 5);
   let taskkill = 0;
   engine.queryCimProcesses = async () => [];
@@ -454,3 +463,21 @@ test("R2: foto fresca + CIM sem a linha ⇒ already-exited confirmado, sem taskk
 });
 
 after(() => rmSync(BASE, { recursive: true, force: true }));
+
+test("Windows: terminação recusada antes de qualquer consulta ou taskkill (R7)", { skip: process.platform !== "win32" && "só Windows" }, async () => {
+  const engine = await engineWith([entry()], 5_000);
+  let queries = 0;
+  let taskkill = 0;
+  engine.queryCimProcesses = async () => { queries += 1; return [entry()]; };
+  engine.runTaskkill = async () => { taskkill += 1; return { ok: true, status: "ok", exitCode: 0 }; };
+  try {
+    const result = await engine.killProcess(987650);
+    assert.equal(result.success, false);
+    assert.equal(result.status, "failed");
+    assert.match(String(result.error ?? ""), /Terminação de processos indisponível/);
+    assert.equal(queries, 0);
+    assert.equal(taskkill, 0);
+  } finally {
+    await dispose(engine);
+  }
+});

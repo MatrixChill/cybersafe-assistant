@@ -32,6 +32,9 @@ for (const kind of ['bounded-entry', 'malformed', 'inner-inconclusive', 'complet
     const result = manager.getScan(id);
     assert.equal(result.filesAnalyzed, 1, 'outer ZIP remains one candidate');
     assert.equal(result.filesInconclusive, kind === 'complete' ? 0 : 1);
-    if (kind !== 'complete') assert.ok(result.inconclusiveByReason.some(r => r.reason === 'coverage-incomplete' && r.count === 1));
+    // 0b944ef passou a nomear a causa pela evidência: um arquivo por verificar
+    // diz-se `archive-incomplete` (rótulo próprio na UI), não o genérico
+    // `coverage-incomplete`. A lacuna continua obrigatória e contada uma vez.
+    if (kind !== 'complete') assert.ok(result.inconclusiveByReason.some(r => r.reason === 'archive-incomplete' && r.count === 1));
   });
 }
