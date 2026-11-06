@@ -116,3 +116,28 @@ test("sugestões: PT-PT, sem valores fixos e todas com resposta conhecida", asyn
     assert.ok(conhecida, `sem resposta conhecida: ${l}`);
   }
 });
+
+const CENARIOS_V023: Array<[string, string]> = [
+  ["Porque o ClamAV está degradado?", "clamav-degradado"],
+  ["O que significa prova de carga falhada?", "prova-carga"],
+  ["Porque os quatro motores estão ativos e a proteção tem limitações?", "degradado"],
+  ["O que significa cobertura em recuperação?", "cobertura-recuperacao"],
+  ["O meu USB foi analisado?", "usb"],
+  ["Porque o serviço demorou a arrancar?", "arranque"],
+  ["Que versão do CyberSafe tenho?", "versao"],
+  ["Como faço uma atualização segura?", "atualizacoes"],
+  ["Como posso libertar espaço no disco?", "otimizar"],
+];
+for (const [pergunta, esperada] of CENARIOS_V023) {
+  test(`v0.2.3: «${pergunta}» → ${esperada}`, () => {
+    assert.equal(classificarIntencao(pergunta), esperada);
+    assert.ok(INTENCOES_DO_PRODUTO.has(esperada as never), "responde com o conhecimento do produto");
+    assert.ok(respostaLocal(esperada as never).length > 40);
+  });
+}
+test("v0.2.3: sem identidade de build, a versão não é inventada", () => {
+  assert.match(respostaLocal("versao" as never), /Não consigo ler a versão|CyberSafe Assistant \d/);
+});
+test("v0.2.3: o ClamAV degradado não manda sempre atualizar definições", () => {
+  assert.match(respostaLocal("clamav-degradado" as never), /só aqui faz sentido atualizar/);
+});
