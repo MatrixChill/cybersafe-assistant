@@ -1,0 +1,18 @@
+{
+  "schema": "cybersafe.release-manifest/1",
+  "channel": "stable",
+  "version": "0.2.1",
+  "publishedAt": "2026-11-06T07:27:21.645Z",
+  "notes": "# CyberSafe Assistant v0.2.1\n\n## Correções\n\n- Recuperação da fila de análises após saturação.\n- Prioridade para ficheiros em tempo real no ClamAV, sem interromper análises já ativas.\n\n## Limitações\n\n- A latência EICAR não foi medida no instalador final e o percurso com a janela minimizada ainda não foi validado numa instalação da v0.2.1.\n- O instalador não tem assinatura Authenticode (limitação aceite para a PAP); o Windows pode mostrar avisos de segurança.\n- A instalação assistida dentro da aplicação está desativada. A aplicação deteta a atualização e encaminha para transferência manual do instalador verificado.\n\nCommit: `b3a216a21cd3d38993f7e2a8c6b0ec7164e51420`.",
+  "file": {
+    "url": "https://github.com/MatrixChill/cybersafe-assistant/releases/download/v0.2.1/CyberSafe-Assistant-Setup-0.2.1.exe",
+    "sha256": "6602f3764d7dabad0bfe876b2771629942602985031f30acfdd2f7f24f9cdb83",
+    "sizeBytes": 279420321
+  },
+  "publisher": {
+    "name": "CyberSafe Assistant — academic unsigned"
+  },
+  "requiresElevation": true,
+  "buildId": "candidate-20261105-212512-e7b575ec",
+  "sourceCommit": "b3a216a21cd3d38993f7e2a8c6b0ec7164e51420"
+}
