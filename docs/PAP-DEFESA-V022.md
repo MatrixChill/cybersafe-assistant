@@ -89,3 +89,13 @@ Os ignorados têm motivo escrito no próprio teste (ex.: caminho por PID desliga
 Ver `output/V022-PAP-DEMO-CHECKLIST.md` (local): painel, Scanner sobre ficheiros benignos, restauro
 de uma entrada de teste, política de quarentena, MATRIX («Quem és?», «O que é o ClamAV?», «Explicar
 na MATRIX» de um processo teu), Atualizações → Verificar.
+
+## 10. O que mudou na v0.2.3 (estabilidade)
+
+- **ClamAV:** `core/src/clamav.ts` → `killOwnHandle` (terminar o próprio `clamscan` pelo handle),
+  `clamavLoadProofFailureDetail` (diagnóstico por causa) e o prazo adaptativo da prova (30 → 120 s).
+- **Arranque:** `service/src/engine.ts` → a prova do ClamAV corre em segundo plano (`clamavStartupProbe`).
+- **Cobertura:** `service/src/watcher-reconciliation.ts` → `reconcileRecentWatcherRoot`;
+  `service/src/realtime-recovery.ts` → estados `gone` e `requeue`.
+- **Diagnóstico portátil:** `scripts/diagnostics/cybersafe-diagnostico.ps1` (só leitura, caminhos
+  sanitizados).

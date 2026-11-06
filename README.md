@@ -20,6 +20,7 @@
 
 > **Versão pública estável: [v0.2.2](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.2)** · Windows 10/11 x64.
 > A **v0.2.2** está publicada para instalação manual; manifesto Ed25519 e checksums verificados. Instalador sem assinatura Authenticode (limitação declarada).
+> A **v0.2.3** (estabilidade do ClamAV, arranque e cobertura do tempo real) está em preparação — **não publicada**; ver [CHANGELOG](CHANGELOG.md).
 > O CyberSafe complementa — não substitui — o Microsoft Defender: mantém as proteções do Windows ativas.
 
 <p align="center">

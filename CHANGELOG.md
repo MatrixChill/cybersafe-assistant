@@ -46,6 +46,49 @@ e exigem autorização explícita do dono do projeto.
 
 ---
 
+## `0.2.3` — estabilidade (candidata, **NÃO PUBLICADA**)
+
+Base: `v0.2.2` (`7b942bd`). Branch `fix/v023-stability`. Corrige o que foi observado com a v0.2.2
+instalada num segundo computador.
+
+### ClamAV e arranque
+- **Vaga envenenada persistente:** ao expirar a prova de carga, a terminação do `clamscan` exigia
+  identidade por CIM; num PC lento a consulta não concluía e o processo ficava vivo (~1 GB) com o
+  motor indisponível. O filho próprio ainda vivo é terminado pelo *handle* (o Windows não reutiliza
+  o PID enquanto o handle está aberto); PIDs alheios continuam intocados e a vaga só volta com a
+  morte confirmada (decisão do utilizador, 06/11/2026).
+- **Prazo adaptativo:** depois de uma prova expirada com o processo terminado e confirmado, a seguinte
+  tem o dobro do prazo, até 120 s; uma prova bem-sucedida repõe os 30 s.
+- **Diagnóstico por causa:** «corra freshclam» só aparece quando a base falta ou não carrega; uma vaga
+  envenenada ou uma carga lenta são explicadas como tal.
+- **Arranque progressivo:** o serviço deixou de esperar pela prova do ClamAV para ficar pronto (era a
+  causa do «tempo de espera terminou» / «não foi possível sincronizar» num PC lento). O ClamAV mostra
+  «A verificar» até à prova; nunca «Ativo» sem ela.
+
+### Cobertura do tempo real
+- Reconciliação de sinais sem nome só dos ficheiros que mudaram desde o sinal (5000 entradas, 10 s,
+  200 ficheiros), em vez de reanalisar a pasta inteira com teto de 32 ficheiros (falhava sempre em
+  Downloads/Desktop/Temp e a lacuna ficava para sempre).
+- Ficheiros apagados antes da análise passam a «removidos» (informativo); ficheiros alterados durante
+  a análise voltam a ser agendados.
+- Painel: «4 motores operacionais. A proteção em tempo real está a recuperar algumas análises
+  pendentes» enquanto recupera.
+
+### Interface e outros
+- **Red Velvet** sem castanho: ameixa, vinho, carmim e cereja (AA medido em 200 combinações).
+- **Setup Orbital:** anéis com relógio de alta resolução e ritmo que recupera após desenhos lentos.
+- **MATRIX:** responde a «ClamAV degradado», «prova de carga», «cobertura em recuperação», USB, arranque
+  lento e versão.
+- **Otimizar:** verificação ainda não corrida diz «Por verificar».
+- **Diagnóstico portátil** só de leitura: `scripts/diagnostics/cybersafe-diagnostico.ps1`.
+
+### Limitações mantidas
+- Sem Authenticode (instalação assistida desligada).
+- A correção do notebook afetado só fica comprovada depois de correr lá (diagnóstico portátil).
+- USB validado por testes automáticos; sem ensaio com uma pen física nesta ronda.
+
+---
+
 ## `0.2.2` — manutenção publicada em 06/11/2026
 
 Complemento de 06/11: cartões distinguem métricas ausentes; reconciliação limitada por pasta exige análises concluídas e snapshot estável, preservando lacunas reais e contadores históricos. Ver `docs/V022-CODEX-FINALIZACAO.md`. Freeze próprio aplicado ao commit `7b942bd`; Setup e manifesto publicados e verificados. A documentação posterior não altera o artefacto congelado.
