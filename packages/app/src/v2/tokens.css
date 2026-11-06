@@ -164,26 +164,29 @@ html[data-v2-theme="terminal"] {--v2-font-ui:"Cascadia Code",Consolas,monospace;
 }
 html[data-v2-theme="aurora"] {--v2-bg:#10172d;--v2-panel:#1a2940;--v2-raised:#2d3e55;--v2-inset:#111d30;--v2-sidebar:#131c32;--v2-topbar:#19243c;--v2-border:#405571;--v2-border-strong:#7187a1;--v2-text:#f0f5ff;--v2-muted:#c0cce0;--v2-subtle:#a4b6d0;--v2-accent:#a4f1e0;--v2-accent-ink:#0a302b;--v2-accent-soft:#274b53;--v2-chart:#9be8dd;--v2-page-background:radial-gradient(ellipse at 85% 4%,#9865b955,transparent 48%),radial-gradient(ellipse at 18% 60%,#167d8255,transparent 50%),#10172d;--v2-hero:linear-gradient(120deg,#1b3e49a8,#5a3c6b99);--v2-card-radius:22px
 }
-html[data-v2-theme="belbete"] {--v2-bg:#180d13;--v2-panel:#271820;--v2-raised:#3a252f;--v2-inset:#1e1018;--v2-sidebar:#1a0e15;--v2-topbar:#24151d;--v2-border:#563a45;--v2-border-strong:#866371;--v2-text:#f6eaf0;--v2-muted:#c7afb9;--v2-subtle:#b99daa;--v2-accent:#e5bdba;--v2-accent-ink:#36151f;--v2-accent-soft:#4b2936;--v2-chart:#d2a3b2;--v2-page-background:radial-gradient(ellipse at 80% 0%,#85354c44,transparent 52%),#180d13;--v2-hero:linear-gradient(125deg,#361925,#492638);--v2-card-radius:16px
+html[data-v2-theme="belbete"] {--v2-bg:#100b12;--v2-panel:#1c101b;--v2-raised:#261522;--v2-inset:#160c15;--v2-sidebar:#120a12;--v2-topbar:#1a0f19;--v2-border:#3e1f33;--v2-border-strong:#6b2d4a;--v2-text:#f6edf1;--v2-muted:#bda8b3;--v2-subtle:#a8909c;--v2-accent:#f27590;--v2-accent-ink:#1a0710;--v2-accent-soft:#4a1426;--v2-chart:#f3a6b9;--v2-page-background:radial-gradient(ellipse at 85% 5%,#b72d5033,transparent 55%),radial-gradient(ellipse at 8% 100%,#7c173722,transparent 50%),#100b12;--v2-hero:linear-gradient(120deg,#3a1026,#7c1737);--v2-card-radius:16px
 }
-/* Current lab src/ultimate.css */
+/* v0.2.3 Red Velvet: vermelho aveludado, bordô, carmim e ameixa escura. O
+   bloco anterior (creme #fff3de, caramelo #f1d5ad, fundo #1c1010) sobrepunha-se
+   ao de cima e deixava o tema castanho. Semânticas (sucesso/aviso/erro) ficam
+   nos tokens comuns: o vermelho aqui é identidade, não perigo. */
 html[data-v2-theme="belbete"] {
-  --v2-bg: #1c1010;
-  --v2-panel: #2d1c1b;
-  --v2-raised: #422927;
-  --v2-inset: #211311;
-  --v2-sidebar: #201311;
-  --v2-topbar: #291a18;
-  --v2-border: #65443b;
-  --v2-border-strong: #987667;
-  --v2-text: #fff3de;
-  --v2-muted: #d9c2aa;
-  --v2-subtle: #c2a68e;
-  --v2-accent: #f1d5ad;
-  --v2-accent-ink: #3a1818;
-  --v2-accent-soft: #57302d;
-  --v2-chart: #edc9aa;
-  --v2-hero: linear-gradient(120deg, #45221f, #6d3035);
-  --v2-page-background:
-    radial-gradient(ellipse at 85% 5%, #79303944, transparent 55%), #1c1010
+  --v2-bg:#100b12;
+  --v2-panel:#1c101b;
+  --v2-raised:#261522;
+  --v2-inset:#160c15;
+  --v2-sidebar:#120a12;
+  --v2-topbar:#1a0f19;
+  --v2-border:#3e1f33;
+  --v2-border-strong:#6b2d4a;
+  --v2-text:#f6edf1;
+  --v2-muted:#bda8b3;
+  --v2-subtle:#a8909c;
+  --v2-accent:#f27590;
+  --v2-accent-ink:#1a0710;
+  --v2-accent-soft:#4a1426;
+  --v2-chart:#f3a6b9;
+  --v2-page-background:radial-gradient(ellipse at 85% 5%,#b72d5033,transparent 55%),radial-gradient(ellipse at 8% 100%,#7c173722,transparent 50%),#100b12;
+  --v2-hero:linear-gradient(120deg,#3a1026,#7c1737);
+  --v2-card-radius:16px
 }

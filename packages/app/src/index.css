@@ -1055,36 +1055,36 @@
 
 /* Dark — superfícies bordô/cacau, tinta creme, detalhes de veludo */
 [data-theme="cybersafe-red-belbete"].dark {
-  --background: #170d10;
-  --foreground: #f5e9dd;
-  --card: rgba(67, 24, 34, 0.74);
-  --card-foreground: #f5e9dd;
-  --popover: rgba(52, 19, 27, 0.94);
-  --popover-foreground: #f5e9dd;
-  --primary: #c55d72;
-  --primary-foreground: #210b11;
-  --secondary: rgba(197, 93, 114, 0.16);
-  --secondary-foreground: #f5e9dd;
-  --muted: rgba(197, 93, 114, 0.12);
-  --muted-foreground: #d8a5a5;
-  --accent: rgba(197, 93, 114, 0.22);
-  --accent-foreground: #f0c6cd;
+  --background: #100b12;
+  --foreground: #f6edf1;
+  --card: rgba(38, 21, 34, 0.78);
+  --card-foreground: #f6edf1;
+  --popover: rgba(28, 16, 27, 0.95);
+  --popover-foreground: #f6edf1;
+  --primary: #f27590;
+  --primary-foreground: #1a0710;
+  --secondary: rgba(183, 45, 80, 0.16);
+  --secondary-foreground: #f6edf1;
+  --muted: rgba(183, 45, 80, 0.12);
+  --muted-foreground: #bda8b3;
+  --accent: rgba(232, 79, 107, 0.2);
+  --accent-foreground: #f3a6b9;
   --destructive: #ff5454;
   --destructive-foreground: #fff;
-  --border: rgba(197, 93, 114, 0.24);
-  --input: rgba(197, 93, 114, 0.24);
-  --ring: #c55d72;
+  --border: rgba(183, 45, 80, 0.26);
+  --input: rgba(183, 45, 80, 0.26);
+  --ring: #f27590;
   --radius: 0.75rem;
 
-  --sidebar: rgba(67, 24, 34, 0.58);
-  --sidebar-border: rgba(197, 93, 114, 0.2);
-  --sidebar-active: rgba(146, 44, 66, 0.26);
-  --sidebar-foreground: #f5e9dd;
-  --sidebar-primary: #c55d72;
-  --sidebar-primary-foreground: #210b11;
-  --sidebar-accent: rgba(146, 44, 66, 0.2);
-  --sidebar-accent-foreground: #f0c6cd;
-  --sidebar-ring: #c55d72;
+  --sidebar: rgba(18, 10, 18, 0.72);
+  --sidebar-border: rgba(183, 45, 80, 0.2);
+  --sidebar-active: rgba(124, 23, 55, 0.32);
+  --sidebar-foreground: #f6edf1;
+  --sidebar-primary: #f27590;
+  --sidebar-primary-foreground: #1a0710;
+  --sidebar-accent: rgba(124, 23, 55, 0.24);
+  --sidebar-accent-foreground: #f3a6b9;
+  --sidebar-ring: #f27590;
 
   /* Semânticas independentes — identidade ≠ perigo (iguais aos outros temas) */
   --cyber-cyan: #4dc9d8;
@@ -1094,21 +1094,23 @@
   --cyber-purple: #b49bff;
   --cyber-pink: #ff7ab0;
   --cyber-magenta: #ff5aa0;
-  --cyber-glow: rgba(197, 93, 114, 0.18);
+  --cyber-glow: rgba(232, 79, 107, 0.18);
 
-  /* Camadas de veludo: bordô profundo → vinho → cacau */
-  --deep-wine: #6b2030;
-  --burgundy: #431822;
-  --ruby: #c55d72;
+  /* v0.2.3 — veludo vermelho: vinho #7c1737, carmim #b72d50, cereja #e84f6b,
+     rosa #f3a6b9 sobre ameixa #100b12/#1c101b/#261522. Sem cacau. */
+  --deep-wine: #7c1737;
+  --burgundy: #261522;
+  --ruby: #b72d50;
 
   font-family: var(--font-inter);
 
   background:
-    radial-gradient(circle at 14% 0%, rgba(146, 44, 66, 0.42), transparent 42%),
-    radial-gradient(circle at 86% 100%, rgba(88, 44, 34, 0.38), transparent 48%),
-    linear-gradient(160deg, #1d1014 0%, var(--background) 58%, #120a0c 100%);
+    radial-gradient(circle at 14% 0%, rgba(124, 23, 55, 0.42), transparent 42%),
+    radial-gradient(circle at 86% 100%, rgba(183, 45, 80, 0.16), transparent 48%),
+    linear-gradient(160deg, #1c101b 0%, var(--background) 58%, #0b070c 100%);
   color: var(--foreground);
 }
+
 
 [data-theme="cybersafe-red-belbete"].dark .nav-item.active {
   background: linear-gradient(90deg, rgba(197, 93, 114, 0.2), transparent);

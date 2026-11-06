@@ -53,15 +53,18 @@ function contrast(a: string, b: string): number {
 const dark = block('[data-theme="cybersafe-red-belbete"].dark');
 const light = block('[data-theme="cybersafe-red-belbete"]:not(.dark)');
 
-test("escuro: superfícies bordô/cacau e tinta creme (não é preto com risca)", () => {
-  assert.equal(token(dark, "background"), "#170d10");
-  assert.equal(token(dark, "foreground"), "#f5e9dd");
-  assert.match(token(dark, "card"), /rgba\(67, 24, 34, 0\.74\)/, "o cartão não é bordô translúcido");
-  assert.equal(token(dark, "primary"), "#c55d72");
-  assert.equal(token(dark, "primary-foreground"), "#210b11");
-  assert.equal(token(dark, "muted-foreground"), "#d8a5a5");
-  assert.equal(token(dark, "burgundy"), "#431822");
-  assert.equal(token(dark, "ruby"), "#c55d72");
+// v0.2.3: o utilizador pediu o tema menos castanho — vermelho aveludado,
+// bordô, carmim e ameixa escura. As verificações AA abaixo continuam.
+test("escuro: ameixa quase preta, superfícies vinho e cereja legível (sem cacau)", () => {
+  assert.equal(token(dark, "background"), "#100b12");
+  assert.equal(token(dark, "foreground"), "#f6edf1");
+  assert.match(token(dark, "card"), /rgba\(38, 21, 34, 0\.78\)/, "o cartão não é vinho translúcido");
+  assert.equal(token(dark, "primary"), "#f27590");
+  assert.equal(token(dark, "primary-foreground"), "#1a0710");
+  assert.equal(token(dark, "muted-foreground"), "#bda8b3");
+  assert.equal(token(dark, "deep-wine"), "#7c1737");
+  assert.equal(token(dark, "ruby"), "#b72d50");
+  assert.doesNotMatch(dark, /#f5e9dd|rgba\(88, 44, 34/i, "nada de creme nem cacau no escuro");
 });
 
 test("claro: fundo creme/marfim e detalhes Red Velvet", () => {
@@ -73,10 +76,9 @@ test("claro: fundo creme/marfim e detalhes Red Velvet", () => {
   assert.equal(token(light, "muted-foreground"), "#6f4149");
 });
 
-test("a paleta de referência está toda presente (#431822, #922C42, #C55D72, #F5E9DD, #D8A5A5)", () => {
-  const section = dark + light;
-  for (const cor of ["#431822", "#922c42", "#c55d72", "#f5e9dd", "#d8a5a5"]) {
-    assert.ok(section.toLowerCase().includes(cor), `falta a referência ${cor}`);
+test("a paleta Red Velvet v0.2.3 está presente (vinho, carmim, cereja, rosa, ameixa)", () => {
+  for (const cor of ["#7c1737", "#b72d50", "#f27590", "#f3a6b9", "#100b12"]) {
+    assert.ok(dark.toLowerCase().includes(cor), `falta a referência ${cor}`);
   }
 });
 
