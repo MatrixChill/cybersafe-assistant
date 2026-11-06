@@ -1,6 +1,6 @@
 <p align="center"><img src="assets/branding/generated/icon-128.png" alt="Logótipo oficial CyberSafe" width="88"></p>
 
-![CyberSafe Assistant — segurança e contexto no mesmo painel](docs/media/cybersafe-banner.svg)
+![CyberSafe Assistant — segurança e contexto no mesmo painel](docs/media/cybersafe-banner.png)
 
 <p align="center">
 <a href="https://github.com/MatrixChill/cybersafe-assistant/releases/latest"><img alt="Última release" src="https://img.shields.io/github/v/release/MatrixChill/cybersafe-assistant?color=0891b2"></a>
