@@ -124,6 +124,17 @@ export class MalwareAnalyzer {
     // deixado de existir a meio (medido: o Defender apaga-o enquanto o
     // clamscan o abre). Tratar isso como `detected: false` é publicar um
     // veredicto sobre um ficheiro que ninguém examinou.
+    // HashDB ANTES do ClamAV: o SHA-256 do ficheiro inteiro já está calculado e
+    // a consulta custa microssegundos. No tempo real, um hash exato que coincide
+    // com uma assinatura verificada é prova definitiva; esperar pela vaga global
+    // e pela recarga da base do clamscan (~15 s medidos) só atrasava a deteção
+    // e a quarentena. Análises manuais continuam a correr todos os motores.
+    const signatureStarted = timing ? Date.now() : 0;
+    const signatureMatch = this.deps.signatures.match(sha256);
+    if (timing) console.log(`[ScanPerf] ENGINE_PHASE engine=hashdb elapsedMs=${Date.now() - signatureStarted} outcome=${signatureMatch ? "match" : "clean"}`);
+    const hashIsProof = !!signatureMatch && signatureMatch.source !== DEV_CANARY_SIGNATURE.source;
+    const clamavSkippedByHash = hashIsProof && options?.priority === "realtime" && !options?.clamavOutcome;
+
     let clamavDetected = false;
     let clamavVerdict: "detected" | "clean" | "error" | undefined;
     let clamavDetail: string | undefined;
@@ -136,7 +147,7 @@ export class MalwareAnalyzer {
       clamavDetected = options.clamavOutcome.verdict === "detected";
       clamavVerdict = options.clamavOutcome.verdict;
       clamavDetail = options.clamavOutcome.detail;
-    } else if (this.deps.clamav) {
+    } else if (this.deps.clamav && !clamavSkippedByHash) {
       // A prioridade desce até à vaga global: uma análise automática de
       // ficheiro/processo é BACKGROUND e nunca pode ultrapassar o scan que o
       // utilizador pediu (P0 SCANNER_RUNTIME_ZERO_PROGRESS). Sem isto, os
@@ -167,11 +178,7 @@ export class MalwareAnalyzer {
     const scanInconclusive =
       analysisCancelled ||
       yaraScanInconclusive ||
-      (clamavVerdict !== "clean" && clamavVerdict !== "detected");
-
-    const signatureStarted = timing ? Date.now() : 0;
-    const signatureMatch = this.deps.signatures.match(sha256);
-    if (timing) console.log(`[ScanPerf] ENGINE_PHASE engine=hashdb elapsedMs=${Date.now() - signatureStarted} outcome=${signatureMatch ? "match" : "clean"}`);
+      (!clamavSkippedByHash && clamavVerdict !== "clean" && clamavVerdict !== "detected");
 
     // Canário dev-only (benigno): detetado por hash (conteúdo exato) ou por
     // conteúdo no cabeçalho já lido (robusto a newline/BOM do teste manual).
@@ -250,7 +257,10 @@ export class MalwareAnalyzer {
       verdict: scanInconclusive && score.verdict === "safe" ? "inconclusive" : score.verdict,
       severity: score.severity,
       riskScore: score.riskScore,
-      confidence: scanInconclusive ? Math.min(baseConfidence, 0.3) : baseConfidence,
+      // Um motor que não concluiu é lacuna DITA (fator abaixo), mas não enfraquece
+      // uma prova por hash exato: antes, um timeout do ClamAV sob carga baixava a
+      // confiança para 0,3 e bloqueava a quarentena automática dessa deteção.
+      confidence: scanInconclusive && !knownBadHash ? Math.min(baseConfidence, 0.3) : baseConfidence,
       rulesTriggered: Array.from(rules),
       // (ver o comentário do `verdict` abaixo)
       factors: scanInconclusive
@@ -271,7 +281,7 @@ export class MalwareAnalyzer {
                       category: "heuristic" as const,
                     }]
               : []),
-            ...(clamavVerdict !== "clean" && clamavVerdict !== "detected"
+            ...(!clamavSkippedByHash && clamavVerdict !== "clean" && clamavVerdict !== "detected"
               ? [{
                   id: "clamav-inconclusive",
                   label: clamavDetail ?? "O motor de scan não conseguiu avaliar este ficheiro",
@@ -288,7 +298,14 @@ export class MalwareAnalyzer {
                 }]
               : []),
           ]
-        : score.factors,
+        : clamavSkippedByHash
+          ? [...score.factors, {
+              id: "clamav-skipped-known-hash",
+              label: "ClamAV não consultado: o SHA-256 do ficheiro inteiro coincide com uma assinatura verificada da base de hashes.",
+              weight: 0,
+              category: "signature" as const,
+            }]
+          : score.factors,
       recommendedAction: score.recommendedAction,
       signer,
       publisherTrusted: trust.publisherTrusted,
