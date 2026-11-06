@@ -360,7 +360,7 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
     setResumoLote(null);
     const api = window.electronAPI;
     if (!api) {
-      setResumoLote({ tipo: "sem_confirmacao", texto: "Sem ligacao ao servico de quarentena nesta janela; nada foi tentado." });
+      setResumoLote({ tipo: "sem_confirmacao", texto: "Sem ligação ao serviço de quarentena nesta janela; nada foi tentado." });
       return;
     }
     if (alvos.length === 0) return;
@@ -458,7 +458,7 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
           <span className="row-meta">{selecionados.size} selecionado{selecionados.size === 1 ? "" : "s"}</span>
           <button type="button" disabled={aLote || busyId !== null} onClick={() => { setBandeira(null); setResumoLote(null); setLote({ acao: "restore" }); }} className={BOTAO_NEUTRO}>Restaurar selecionados</button>
           <button type="button" disabled={aLote || busyId !== null} onClick={() => { setBandeira(null); setResumoLote(null); setLote({ acao: "delete" }); }} className={BOTAO_DESTRUTIVO}>Eliminar selecionados</button>
-          <button type="button" disabled={aLote} onClick={() => setSelecionados(new Set())} className={BOTAO_NEUTRO}>Limpar selecao</button>
+          <button type="button" disabled={aLote} onClick={() => setSelecionados(new Set())} className={BOTAO_NEUTRO}>Limpar seleção</button>
         </>
       )}
       <button
@@ -584,18 +584,21 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
         <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-border bg-secondary/30 p-2.5">
           <p role="alert" className="row-note min-w-0 flex-1 text-foreground">
             {lote.acao === "delete"
-              ? "Eliminar permanentemente " + selecionados.size + (selecionados.size === 1 ? " ficheiro" : " ficheiros") + "? Esta acao e irreversivel."
+              ? "Eliminar permanentemente " + selecionados.size + (selecionados.size === 1 ? " ficheiro" : " ficheiros") + "? Esta ação é irreversível."
               : "Restaurar " + selecionados.size + (selecionados.size === 1 ? " ficheiro" : " ficheiros") + " para os locais originais?"}
           </p>
           <div className="flex shrink-0 items-center gap-1.5">
             <button type="button" onClick={() => setLote(null)} className={BOTAO_NEUTRO}>Cancelar</button>
-            <button type="button" onClick={() => void runLote(lote.acao)} className={lote.acao === "delete" ? BOTAO_DESTRUTIVO : BOTAO_LIGADO}>{lote.acao === "delete" ? "Eliminar" : "Restaurar"}</button>
+            {/* O segundo passo diz o que faz e recebe o foco: com o mesmo
+                rótulo do botão que o abriu, parecia que o primeiro clique não
+                tinha feito nada. */}
+            <button type="button" autoFocus onClick={() => void runLote(lote.acao)} className={lote.acao === "delete" ? BOTAO_DESTRUTIVO : BOTAO_LIGADO}>{lote.acao === "delete" ? "Confirmar eliminação" : "Confirmar restauro"}</button>
           </div>
         </div>
       )}
 
       {aLote && (
-        <p role="status" className="row-meta flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> A comunicar o lote ao servico, um ficheiro de cada vez...</p>
+        <p role="status" className="row-meta flex items-center gap-2"><Loader2 className="h-3.5 w-3.5 animate-spin" aria-hidden /> A comunicar o lote ao serviço, um ficheiro de cada vez…</p>
       )}
       {lista.afirmaVazia ? (
         <div className="stat-card p-10 text-center">
@@ -656,7 +659,7 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
                       onClick={() => alternarSelecao(entry.id)}
                       aria-pressed={selecionados.has(entry.id)}
                       className={selecionados.has(entry.id) ? BOTAO_LIGADO : BOTAO_NEUTRO}
-                      aria-label={(selecionados.has(entry.id) ? "Retirar da selecao: " : "Selecionar para lote: ") + entry.fileName}
+                      aria-label={(selecionados.has(entry.id) ? "Retirar da seleção: " : "Selecionar para lote: ") + entry.fileName}
                     >
                       {selecionados.has(entry.id) ? "Selecionado" : "Selecionar"}
                     </button>
@@ -674,8 +677,9 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
                     <button
                       type="button"
                       disabled={busyId !== null}
-                      onClick={() => { setBandeira(null); setPending({ id: entry.id, action: "restore" }); }}
-                      className={BOTAO_NEUTRO}
+                      onClick={() => { setBandeira(null); if (aConfirmar === "restore") setPending(null); else setPending({ id: entry.id, action: "restore" }); }}
+                      aria-expanded={aConfirmar === "restore"}
+                      className={aConfirmar === "restore" ? BOTAO_LIGADO : BOTAO_NEUTRO}
                       aria-label={`Restaurar ${entry.fileName} para o local original`}
                     >
                       <RotateCcw className="h-3.5 w-3.5" aria-hidden /> Restaurar
@@ -683,7 +687,8 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
                     <button
                       type="button"
                       disabled={busyId !== null}
-                      onClick={() => { setBandeira(null); setPending({ id: entry.id, action: "delete" }); }}
+                      onClick={() => { setBandeira(null); if (aConfirmar === "delete") setPending(null); else setPending({ id: entry.id, action: "delete" }); }}
+                      aria-expanded={aConfirmar === "delete"}
                       className={BOTAO_DESTRUTIVO}
                       aria-label={`Eliminar ${entry.fileName} permanentemente`}
                     >
@@ -746,7 +751,7 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
                       >
                         {aConfirmar === "delete"
                           ? "Eliminar permanentemente? Esta ação é irreversível."
-                          : "Restaurar este ficheiro para o local original?"}
+                          : `Restaurar «${entry.fileName}» para ${entry.originalPath}?`}
                       </p>
                       <div className="flex shrink-0 items-center gap-1.5">
                         <button
@@ -759,6 +764,7 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
                         </button>
                         <button
                           type="button"
+                          autoFocus
                           onClick={() => void run(entry, aConfirmar)}
                           className={aConfirmar === "delete" ? BOTAO_DESTRUTIVO : BOTAO_LIGADO}
                           aria-label={
@@ -767,7 +773,7 @@ export default function QuarantinePage({ entries, onChanged, embedded = false, q
                               : `Confirmar restauro de ${entry.fileName}`
                           }
                         >
-                          {aConfirmar === "delete" ? "Eliminar" : "Restaurar"}
+                          {aConfirmar === "delete" ? "Confirmar eliminação" : "Confirmar restauro"}
                         </button>
                       </div>
                     </div>
