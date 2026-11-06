@@ -18,18 +18,24 @@
   <img alt="Estado" src="https://img.shields.io/badge/estado-desenvolvimento%20académico-orange">
 </p>
 
-> **Entrega académica Windows x64 · 0.2.0-rc.4.** Pré-release pública para instalação manual. O Setup não tem Authenticode e o updater de produção está desativado. O CyberSafe complementa a aprendizagem e a observação do sistema. Mantém as proteções do Windows ativas.
+> **Versão pública estável: [v0.2.1](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.1)** · Windows 10/11 x64.
+> A **v0.2.2** está em preparação (candidata local, **não publicada**). Instalador sem assinatura Authenticode (limitação declarada).
+> O CyberSafe complementa — não substitui — o Microsoft Defender: mantém as proteções do Windows ativas.
 
-1. Descarrega o Setup e o SHA256SUMS na [release RC4](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.0-rc.4).
-2. Em PowerShell, usa `Get-FileHash -Algorithm SHA256 -LiteralPath <caminho-do-setup>` e compara com `5ee8375e7ba8d1427933a6f6fb52d6222425dee74a01f46119639774eb1176bc`.
-3. Executa o Setup Orbital B interativamente. Se o Windows bloquear a execução, regista a mensagem. Após instalação, seleciona «Abrir CyberSafe».
-
-A [entrega técnica da PAP](docs/PAP-ENTREGA-WINDOWS-RC4.md) reúne arquitetura, aceitação física, limitações e roteiro de defesa. As referências a candidatas R5/R6 e ensaios anteriores abaixo são históricas.
+<p align="center">
+  <img src="docs/images/v020-dashboard.png" alt="Painel do CyberSafe Assistant (captura real da v0.2.0)" width="760">
+  <br><sub>Captura real do painel (v0.2.0).</sub>
+</p>
 
 ## Índice
 
 - [O que é](#o-que-é)
+- [Instalar e verificar](#instalar-e-verificar)
 - [Funcionalidades](#funcionalidades)
+- [Os quatro motores](#os-quatro-motores)
+- [Proteção em tempo real](#proteção-em-tempo-real)
+- [Quarentena](#quarentena)
+- [MATRIX](#matrix)
 - [Arquitetura](#arquitetura)
 - [Tecnologias](#tecnologias)
 - [Desenvolvimento](#desenvolvimento)
@@ -59,6 +65,19 @@ cada capacidade é implementada, testada e documentada, e o produto
 **declara o que não sabe** em vez de simular estados (motores indisponíveis aparecem como
 indisponíveis).
 
+## Instalar e verificar
+
+**Requisitos mínimos:** Windows 10 ou 11 de 64 bits, ~1 GB livre para a aplicação e as bases de assinaturas, ligação à Internet para atualizar as definições (opcional).
+
+1. Abre a [release estável](https://github.com/MatrixChill/cybersafe-assistant/releases/latest) e descarrega o instalador `.exe` e o ficheiro `SHA256SUMS`.
+2. Verifica a integridade em PowerShell e compara o resultado com a linha do instalador em `SHA256SUMS`:
+   ```powershell
+   Get-FileHash -Algorithm SHA256 -LiteralPath "<caminho-do-instalador>.exe"
+   ```
+3. Executa o instalador. Como não tem Authenticode, o Windows SmartScreen pode avisar — só continues se o hash coincidir.
+
+As atualizações seguintes são verificadas pela aplicação: manifesto assinado com **Ed25519** (chave do proprietário, impressão digital fixada em `packages/desktop/src/updater/release-trust.json`), SHA-256 do instalador e recusa de versões mais antigas. A instalação continua manual.
+
 ## Funcionalidades
 
 ### Implementado e coberto por testes
@@ -79,23 +98,44 @@ indisponíveis).
 | **Configurações** | Tema, identidade visual, arranque e preferências de proteção |
 | **Atualizações** | Verificação de novas versões e estado honesto de disponibilidade |
 
+## Os quatro motores
+
+| Motor | O que faz | Prova mais forte |
+|---|---|---|
+| **HashDB** | Compara o SHA-256 do ficheiro inteiro com assinaturas verificadas | Coincidência exata — é a única prova aceite para quarentena automática |
+| **ClamAV** | Antivírus de código aberto (1.5.4, vendorizado com a fonte correspondente) | Assinatura da base oficial |
+| **YARA** | Regras de padrões no conteúdo; distingue evidência forte de genérica | Regra marcada como evidência forte |
+| **Motor nativo (C++)** | SHA-256, entropia e análise PE no próprio PC | — (complementa; nunca dá «seguro» sozinho) |
+
+Um motor só aparece **ativo** com prova real de funcionamento. Um motor que não conseguiu avaliar um ficheiro torna o resultado **inconclusivo**, nunca «limpo».
+
+## Proteção em tempo real
+
+Vigia pastas como Downloads e Temp. Cada ficheiro novo ou alterado entra numa fila de análise com **prioridade para Downloads**. Numa rajada (por exemplo, uma instalação), os ficheiros que não couberam na fila voltam a ser tentados; a cobertura só é dada como confirmada quando a **versão atual** de cada ficheiro foi analisada, e o que ficar por analisar é avisado. No tempo real, um hash exato verificado decide sem esperar pelo ClamAV — e o resultado diz que ele não foi consultado.
+
+## Quarentena
+
+O ficheiro suspeito é movido para uma pasta protegida, com motor, motivo e SHA-256 registados. **Restaurar** devolve-o ao local original depois de uma confirmação explícita que mostra o destino; **eliminar** é permanente. Políticas: `warn` (avisa), `ask` (pergunta) e `automatic-high-confidence` (isola automaticamente só com prova por hash exato; exige consentimento).
+
+## MATRIX
+
+<p align="center">
+  <img src="docs/images/v020-matrix.png" alt="Painel da MATRIX (captura real da v0.2.0)" width="560">
+  <br><sub>Captura real da MATRIX (v0.2.0).</sub>
+</p>
+
+A **MATRIX** é a assistente do CyberSafe. Explica processos («Explicar na MATRIX» no Gestor de Tarefas), resultados de análises, quarentena, o estado dos motores e problemas de desempenho, com base no que o PC mediu.
+
+- **Local primeiro:** perguntas sobre o próprio CyberSafe e sobre o estado do PC são respondidas no computador, e a resposta diz «Diagnóstico local».
+- **Online opcional:** só no modo Online, com fornecedor configurado pelo utilizador (BYOK), e a resposta diz «IA online».
+- **Privacidade:** medições de processos só saem com autorização explícita para aquela instância (PID + instante de início); nome, caminho e linha de comandos nunca são enviados automaticamente.
+
 ### Parcialmente validado
 
 - **Instalador NSIS personalizado** (4 ecrãs, verificação de espaço e caminho): construído e
   compilado offline, **sem execução real** — a validação final depende de instalação em VM.
 - **Proteção em tempo real** (watchers e recuperação): lógica e testes automatizados presentes;
   comportamento em instalação real ainda em validação.
-- **Motor nativo C++: sem build nesta linha, medido.** `packages/native-engine/build` não existe na
-  árvore `pap/final-qoder-20261101` e `npm run build:native` (CMake, `package.json:16`) nunca foi
-  corrido aqui. Os únicos `scan-engine.exe` encontrados em disco pertencem a artefactos de **outras**
-  linhas (`freebuff2-packaging-p0-20261024-60m/…/resources/`,
-  `pap-autonomous-core-freebuff-20261029/out/TP-VM016-ARCHIVE/EXTRACT/resources/` e mais três
-  cópias de gate-runtime de 2026-10-29), que não são prova desta construção. Consequência directa:
-  os 4 testes `rc22-native-regressao` falham por o binário não existir («+ 'unavailable' −
-  'output'», cabeçalho do próprio teste: «scan-engine.exe real, sem mocks») — é **NOT RUN
-  disfarçado de `FAIL`**, não comportamento partido; e o requisito de verificar dependências
-  nativas do instalador (§13, ponto 14) não pode ser satisfeito antes de uma decisão de
-  compilação.
 - **Motor nativo C++**: integrado no serviço por *bridge* com estados de saúde explícitos; a
   comparação de resultados em cenários reais continua em avaliação.
 
@@ -347,17 +387,9 @@ indisponível». O comportamento não foi alterado antes da PAP e continua por e
 - **Instalador sem assinatura.** Não existe certificado Authenticode: os binários medidos devolvem
   `TRUST_E_NOSIGNATURE` (`0x800b0100`) e a tabela de certificados tem tamanho 0. Um instalador
   não assinado **nunca** é descrito aqui como assinado.
-- **Verificação automática de atualizações não está confiável fim-a-fim.** Em
-  `packages/desktop/src/updater/release-trust.json`, `enabled` é `false` e a chave pública e o
-  *fingerprint* estão vazios («Publication public key not provisioned. Never replace with a fixture
-  key.»). Enquanto o dono do projeto não provisionar a chave de publicação Ed25519,
-  `createProductionUpdater()` devolve deliberadamente o *updater* não configurado — *fail-closed*,
-  sem chave inventada. A verificação de integridade está escrita e testada, mas não há caminho de
-  atualização real terminado.
-- **Prova do *updater* é automatizada, não manual.** A evidência existente são testes de máquina de
-  estados e dos buracos de §12.7 (`packages/desktop/test/updater-statemachine.test.mjs`,
-  `updater-gap-tests.test.mjs`). Isso **não** é validação manual de instalação, atualização ou
-  interrupção: esses passos continuam à espera de um humano na máquina virtual.
+- **Atualizações verificadas, instalação manual.** O canal stable usa a chave pública Ed25519 do proprietário (impressão digital fixada); a instalação assistida está desligada por não haver Authenticode.
+- **Terminação de processos:** o Gestor de Tarefas termina aplicações por *handle* nativo, com confirmação e verificação da instância; o caminho antigo por PID está desligado em Windows.
+- **Validação manual pendente da v0.2.2:** latência EICAR instalada, janela minimizada e reinício do serviço são ensaiados em VM antes de qualquer publicação.
 
 Se encontrares um problema de segurança, não abras uma issue pública com detalhes sensíveis.
 
