@@ -46,6 +46,23 @@ e exigem autorização explícita do dono do projeto.
 
 ---
 
+## `0.2.4` — correção do ClamAV degradado no notebook (candidata, **NÃO PUBLICADA**)
+
+Base: `v0.2.3` (`f8062a5`). Evidência: notebook i5-8350U com a v0.2.3, ClamAV degradado com «o fim da
+prova não foi confirmado pelo Windows» e nenhum `clamscan` vivo no diagnóstico.
+
+- O período de 2 s para confirmar a morte do `clamscan` da prova começava no pedido de terminação; a
+  terminação só acontecia depois da consulta de identidade CIM (lenta num PC destes). O período passa a
+  contar depois da terminação, com teto absoluto de 15 s. A vaga continua a só voltar com o `close`.
+- O prazo adaptativo da prova passa a crescer também quando a morte não foi confirmada (antes a
+  mensagem apagava o «timeout» e a prova seguinte voltava a ter 30 s).
+- Recusas por vaga envenenada deixam de gastar as 6 tentativas de recuperação do serviço.
+- Telemetria `[CLAMAV-PROOF]` em `actions.log` e diagnóstico portátil com a cronologia das provas.
+
+Limitação: validação no notebook afetado pendente (correr o diagnóstico depois de instalar).
+
+---
+
 ## `0.2.3` — estabilidade, publicada em 06/11/2026
 
 Base: `v0.2.2` (`7b942bd`). Branch `fix/v023-stability`. Corrige o que foi observado com a v0.2.2

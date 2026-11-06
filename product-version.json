@@ -1,6 +1,6 @@
 {
-  "version": "0.2.3",
+  "version": "0.2.4",
   "channel": "stable",
-  "codename": "v0.2.3-stability",
+  "codename": "v0.2.4-clamav-proof",
   "note": "Fonte canónica da versão do produto. Lida por scripts/app-version.mjs, injectada no manifesto da aplicação empacotada e no renderer (__BUILD__)."
 }
