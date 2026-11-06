@@ -709,7 +709,15 @@ function scanPerfLog(event: string, scanId?: string, details = ""): void {
   );
 }
 
+let clamavProofSeq = 0;
+
 export interface ClamavBridgeOptions {
+  /**
+   * Telemetria da prova de carga (v0.2.4): uma linha por evento, com id de
+   * correlação, PID, prazo e contadores da vaga. Sem caminhos de ficheiros
+   * analisados nem dados pessoais (a base é dita só pelo nome da pasta).
+   */
+  proofLog?: (line: string) => void;
   /**
    * Directório da base de assinaturas quando o chamador já o conhece.
    * Tem a prioridade máxima — é o `--datadir` passado ao `clamscan`.
@@ -908,6 +916,8 @@ const MAX_BATCH_TIMEOUT_MS = 30 * 60_000;
  * ficar preso à espera de um processo que já não responde.
  */
 const DEFAULT_KILL_GRACE_MS = 2_000;
+/** Teto absoluto desde o pedido de terminação até à decisão + grace (v0.2.4). */
+const KILL_DECISION_HARD_CAP_MS = 15_000;
 
 /**
  * Semáforo GLOBAL de clamscans.
@@ -2428,11 +2438,28 @@ return {
           // presa para sempre — resolve, mas MARCANDO que a morte não foi
           // confirmada. É essa marca que impede a bridge de libertar a vaga com
           // o processo ainda vivo (2 clamscans × ~1 GB = o P0 original).
+          //
+          // v0.2.4 (notebook i5-8350U): o grace de 2 s começava AQUI, mas a
+          // terminação só acontece depois de a identidade CIM se resolver
+          // (consultas síncronas de ~1 s cada num PC lento). O grace expirava
+          // antes da terminação, o desfecho saía «morte não confirmada» e a
+          // vaga era envenenada com o processo já a morrer. Agora o grace conta
+          // DEPOIS da decisão; o teto absoluto mantém a garantia de não ficar
+          // preso se a decisão nunca chegar.
+          const armarGrace = () => {
+            if (settled) return;
+            if (graceTimer) clearTimeout(graceTimer);
+            graceTimer = setTimeout(() => {
+              deathUnconfirmed = true;
+              finish(null);
+            }, DEFAULT_KILL_GRACE_MS);
+          };
           if (graceTimer) clearTimeout(graceTimer);
           graceTimer = setTimeout(() => {
             deathUnconfirmed = true;
             finish(null);
-          }, DEFAULT_KILL_GRACE_MS);
+          }, KILL_DECISION_HARD_CAP_MS);
+          void killDecision.then(armarGrace, armarGrace);
         }
       },
       outcome,
@@ -2973,7 +3000,9 @@ export function clamavLoadProofFailureDetail(dir: string, proof: ClamavLoadProof
     return `Base presente em ${dir}, mas um clamscan anterior ainda não terminou (o Windows não confirmou o fim). O CyberSafe volta a provar a carga quando ele terminar; não é preciso atualizar as definições.`;
   }
   if (/^timeout/i.test(erro)) {
-    return `Base presente em ${dir}, mas a carga demorou mais do que o prazo (${erro}). Acontece com o computador ocupado ou com o antivírus a analisar a base; nova tentativa automática com prazo maior.`;
+    const semConfirmacao = /morte não confirmada/i.test(erro);
+    return `Base presente em ${dir}, mas a carga demorou mais do que o prazo (${erro.split(";")[0]}). Acontece com o computador lento ou ocupado; nova tentativa automática com prazo maior` +
+      (semConfirmacao ? ", depois de o Windows confirmar o fim da prova anterior." : ".");
   }
   if (/morte não confirmada/i.test(erro)) {
     return `Base presente em ${dir}, mas o fim da prova não foi confirmado pelo Windows; o motor fica indisponível até essa confirmação.`;
@@ -3639,7 +3668,9 @@ export class ClamavBridge {
       if (proof.deferred === true) this.probeDeferredPending = true;
       if (this.options.probeTimeoutMs === undefined) {
         if (decided.health.status === "active") this.adaptiveProbeTimeoutMs = null;
-        else if (/^timeout/i.test(proof.error ?? "") && !/morte não confirmada/i.test(proof.error ?? "")) {
+        // v0.2.4: também quando a morte não foi confirmada — a vaga continua
+        // envenenada até ao close, mas a prova seguinte já tem mais tempo.
+        else if (/^timeout/i.test(proof.error ?? "")) {
           const atual = this.adaptiveProbeTimeoutMs ?? CLAMAV_LOAD_PROBE_TIMEOUT_MS;
           this.adaptiveProbeTimeoutMs = Math.min(atual * 2, CLAMAV_LOAD_PROBE_MAX_TIMEOUT_MS);
         }
@@ -3675,6 +3706,13 @@ export class ClamavBridge {
    * vida dos scans. `probeClamavLoad` ficou como runner puro dos testes.
    */
   private async runLoadProof(chosen: ClamavDbCandidate): Promise<ClamavLoadProof> {
+    const proofId = `p${++clamavProofSeq}`;
+    const proofT0 = Date.now();
+    const plog = (ev: string, extra = "") => {
+      try {
+        this.options.proofLog?.(`id=${proofId} ev=${ev} t=${Date.now() - proofT0}ms active=${globalClamavSlots.active} poisoned=${globalClamavSlots.poisoned} waitingHealth=${globalClamavSlots.waitingHealth.length}${extra ? " " + extra : ""}`);
+      } catch { /* a telemetria nunca interfere com a prova */ }
+    };
     // ── VAGA (POSSE) PRIMEIRO — o mesmo semáforo dos scans. ──
     //
     // HOLD CODEX (REV4): sem `acquireClamavSlot`, a prova podia correr
@@ -3684,6 +3722,7 @@ export class ClamavBridge {
     // adquire a vaga como qualquer job (background, espera com limite do
     // probe), e a vaga só é libertada/envenenada QUEM A POSSUI.
     const probeTimeoutMs = this.options.probeTimeoutMs ?? this.adaptiveProbeTimeoutMs ?? CLAMAV_LOAD_PROBE_TIMEOUT_MS;
+    plog("start", `budgetMs=${probeTimeoutMs} db=${path.basename(chosen.dir)}`);
     const slotWaitMs = this.options.probeSlotWaitMs ?? CLAMAV_LOAD_PROBE_SLOT_WAIT_MS;
     // Cancelamento da ESPERA pela vaga: um controlador próprio cujo timer se
     // limpa assim que a vaga decide (o `AbortSignal.timeout` deixava um timer
@@ -3705,6 +3744,7 @@ export class ClamavBridge {
       clearTimeout(slotWaitTimer);
       if (this.probeSlotAbort === slotAbort) this.probeSlotAbort = null;
     }
+    plog("slot", `result=${slot}`);
     if (slot === "poisoned") {
       // Há um clamscan vivo cuja morte ninguém confirmou: não admitimos outro
       // (2 GB em voo). Honesto: prova sem spawn, motor degradado.
@@ -3797,12 +3837,14 @@ export class ClamavBridge {
       }
       this.liveHandles.add(handle);
       if (typeof handle.pid === "number") trackClamavPid(handle.pid);
+      plog("spawn", `pid=${handle.pid ?? "unknown"}`);
 
       // Deadline da bridge: mata e ESPERA pelo outcome (morte real).
       let timedOut = false;
       deadline = setTimeout(() => {
         timedOut = true;
         scanPerfLog("LOAD_PROOF_TIMEOUT", "load-proof", `origin=load-proof pid=${handle?.pid ?? "unknown"} budgetMs=${probeTimeoutMs} termination=requested`);
+        plog("timeout", `pid=${handle?.pid ?? "unknown"} termination=requested`);
         handle?.killTree();
       }, probeTimeoutMs);
       // TP-VM016-CLAM-REAL — o deadline é um KILLER DE FALLBACK, não trabalho:
@@ -3823,6 +3865,7 @@ export class ClamavBridge {
         stderr: outcome.stderr,
         exitCode: outcome.code,
       };
+      plog("outcome", `code=${outcome.code ?? "null"} timedOut=${timedOut} deathUnconfirmed=${outcome.deathUnconfirmed === true}`);
       if (timedOut) proof.error = `timeout (carga > ${probeTimeoutMs} ms)`;
       if (this.disposed) proof.error = "bridge descartado (shutdown)";
       // Morte NÃO confirmada pelo SO: o clamscan pode continuar vivo com a
@@ -3831,7 +3874,11 @@ export class ClamavBridge {
       // carga sem a prova do SO. A vaga envenenada É NOSSA: adquirimo-la acima.
       if (outcome.deathUnconfirmed === true) {
         deathUnconfirmed = true;
-        proof.error = "morte não confirmada pelo SO (prova de carga)";
+        // v0.2.4: não apagar o timeout — é ele que diz que a carga foi lenta e
+        // que a próxima prova precisa de mais tempo.
+        proof.error = timedOut
+          ? `timeout (carga > ${probeTimeoutMs} ms); morte não confirmada pelo SO`
+          : "morte não confirmada pelo SO (prova de carga)";
       }
       return proof;
     } catch (err: any) {
@@ -3850,6 +3897,12 @@ export class ClamavBridge {
         if (deathUnconfirmed) poisonClamavSlot();
         else releaseClamavSlot();
         slotHeld = false;
+        plog("slot-decision", deathUnconfirmed ? "slot=poisoned" : "slot=released");
+        if (deathUnconfirmed && handle && typeof handle.onDeathConfirmed === "function") {
+          // A vaga envenenada é libertada pelo spawner no `close`; isto só
+          // regista quando essa confirmação chegou (e o estado da vaga depois).
+          handle.onDeathConfirmed(() => setTimeout(() => plog("death-confirmed-late"), 0));
+        }
       }
       if (fixturePath) {
         this.activeProbePaths.delete(path.resolve(fixturePath));

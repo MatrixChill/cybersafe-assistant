@@ -34,3 +34,10 @@ test("prazo adaptativo tem teto explícito", () => {
   assert.equal(CLAMAV_LOAD_PROBE_TIMEOUT_MS, 30_000);
   assert.equal(CLAMAV_LOAD_PROBE_MAX_TIMEOUT_MS, 120_000);
 });
+
+test("v0.2.4: timeout com morte não confirmada diz as duas coisas e mantém a nova tentativa", () => {
+  const t = clamavLoadProofFailureDetail(DIR, { stdout: null, stderr: null, exitCode: null, error: "timeout (carga > 30000 ms); morte não confirmada pelo SO" });
+  assert.match(t, /demorou mais do que o prazo \(timeout \(carga > 30000 ms\)\)/);
+  assert.match(t, /depois de o Windows confirmar o fim da prova anterior/);
+  assert.doesNotMatch(t, /freshclam/);
+});

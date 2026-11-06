@@ -594,6 +594,7 @@ export class ProtectionEngineService {
     this.definitionsDir = path.join(this.baseDir, "definitions");
     this.clamav = new ClamavBridge({
       definitionsDir: this.definitionsDir,
+      proofLog: (line) => { void this.actionsLog?.write("[CLAMAV-PROOF] " + line + " at=" + new Date().toISOString()); },
       fallbackDatabaseDir: async () => {
         const seed = await seedClamavDatabase({ seedDir: process.env.CYBERSAFE_CLAMAV_SEED_DIR, definitionsDir: this.definitionsDir });
         if (seed.status === "invalid") console.warn(`[Service] ${seed.reason}`);
@@ -2882,6 +2883,13 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
             "[CLAMAV] recovery attempt=" + this.clamavRecoveryAttempts + " result=" +
               (ok ? "active" : "still-degraded") + " status=" + this.clamav.health.status,
           );
+          // v0.2.4: uma prova recusada por vaga envenenada (ou à espera da
+          // confirmação do fim da anterior) não gasta uma das 6 tentativas.
+          // Antes, um ciclo destes esgotava-as e o motor ficava degradado para
+          // sempre mesmo depois de a vaga voltar. O recuo (até 5 min) mantém-se.
+          if (!ok && /vaga envenenada|não terminou|não foi confirmado|morte não confirmada/i.test(this.clamav.health.detail ?? "")) {
+            this.clamavRecoveryAttempts = Math.max(0, this.clamavRecoveryAttempts - 1);
+          }
           if (ok) {
             this.eventBus.publish("engine.health", "low", "ClamAV recuperado e disponível.", {
               engine: "ClamAV", status: this.clamav.health.status,

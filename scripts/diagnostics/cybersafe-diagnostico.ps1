@@ -75,17 +75,34 @@ foreach ($f in $logs) {
   }
 }
 
+L ""; L "== Cronologia das provas do ClamAV (v0.2.4+, actions.log)"
+$acoes = Join-Path $perfil '.cybersafe-service\logs\actions.log'
+if (Test-Path $acoes) {
+  # Só as linhas próprias da prova/recuperação: não contêm caminhos de ficheiros.
+  $linhas = Get-Content $acoes -Tail 4000 -ErrorAction SilentlyContinue | Where-Object { $_ -match '^\[CLAMAV-PROOF\]|^\[CLAMAV\]' } | Select-Object -Last 80
+  if ($linhas) { $linhas | ForEach-Object { L $_ } } else { L "sem linhas [CLAMAV-PROOF] (versão anterior à 0.2.4 ou nenhuma prova ainda)" }
+} else { L "actions.log inexistente" }
+
 if ($MedirClamAV -and (Test-Path $clam)) {
-  L ""; L "== Medição da carga do ClamAV (1 clamscan, ficheiro benigno)"
+  L ""; L "== Medição da carga do ClamAV (1 clamscan, ficheiro benigno, limite 180 s)"
+  $emCurso = Get-CimInstance Win32_Process -Filter "Name='clamscan.exe'" -ErrorAction SilentlyContinue | Where-Object { $_.CommandLine -like '*CyberSafe*' -or $_.CommandLine -like '*cybersafe*' }
+  if ($emCurso) { L "medição NÃO feita: há um clamscan do CyberSafe em curso (prova ou análise); repete daqui a alguns minutos"; $MedirClamAV = $false }
+}
+
+if ($MedirClamAV -and (Test-Path $clam)) {
   $base = $bases | Where-Object { Test-Path (Join-Path $_ 'main.cvd') } | Select-Object -First 1
   if ($base) {
     $fx = Join-Path $env:TEMP "cybersafe-diag-$([guid]::NewGuid().ToString('N')).txt"
     Set-Content -LiteralPath $fx -Value 'ficheiro benigno do diagnóstico CyberSafe' -Encoding ASCII
+    $saida = Join-Path $env:TEMP "cybersafe-diag-out-$([guid]::NewGuid().ToString('N')).txt"
     $sw = [Diagnostics.Stopwatch]::StartNew()
-    $r = & $clam "--database=$base" --no-summary $fx 2>&1
+    # Processo PRÓPRIO, com limite: se passar de 180 s é terminado pelo próprio objeto (nunca por nome/PID alheio).
+    $proc = Start-Process -FilePath $clam -ArgumentList @("--database=`"$base`"", '--no-summary', "`"$fx`"") -NoNewWindow -PassThru -RedirectStandardOutput $saida
+    if (-not $proc.WaitForExit(180000)) { try { $proc.Kill() } catch {}; $proc.WaitForExit(10000) | Out-Null; L "tempo > 180 s: medição interrompida (o próprio clamscan foi terminado)" }
     $sw.Stop()
-    L ("tempo {0:N1} s, exit {1}, base {2}" -f $sw.Elapsed.TotalSeconds, $LASTEXITCODE, $base)
-    L ("saída: " + (($r | Select-Object -First 3) -join ' | '))
+    L ("tempo {0:N1} s, exit {1}, base {2}" -f $sw.Elapsed.TotalSeconds, $proc.ExitCode, $base)
+    L ("saída: " + ((Get-Content $saida -ErrorAction SilentlyContinue | Select-Object -First 3) -join ' | '))
+    Remove-Item -LiteralPath $saida -Force -ErrorAction SilentlyContinue
     Remove-Item -LiteralPath $fx -Force -ErrorAction SilentlyContinue
   } else { L "sem base com main.cvd para medir" }
 }
