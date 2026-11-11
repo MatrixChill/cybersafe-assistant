@@ -1,17 +1,25 @@
-# Documentação CyberSafe Assistant
+# CyberSafe documentation / Documentação
+
+**English:** [Install](installation.md) · [Develop](development.md) · [FAQ](faq.md) · [Roadmap](roadmap-public.md) · [Contribute](../CONTRIBUTING.md) · [Security](../SECURITY.md) · [Licensing](licensing.md) · [Demo script](demo.md)
+
+**Português de Portugal:** [README](../README.pt-PT.md) · [Instalação](installation.pt-PT.md) · [Desenvolvimento](development.pt-PT.md). Os restantes documentos técnicos abaixo mantêm a língua e a versão originais.
 
 Ponto de entrada para utilizar, desenvolver e avaliar o projeto. A **main** contém a edição Windows; a [branch Linux Lite](https://github.com/MatrixChill/cybersafe-assistant/tree/experimental/linux-lite) é experimental e permanece separada.
 
 | Começar por | Conteúdo |
 |---|---|
-| [Instalação](installation.md) | Download oficial, checksums e atualização manual |
+| [Instalação](installation.pt-PT.md) | Download oficial, checksums e atualização manual |
 | [Arquitetura](ARCHITECTURE.md) | Camadas, IPC e serviço local |
 | [Motores](engines.md) | ClamAV, YARA, HashDB e Native C++ |
 | [MATRIX](matrix.md) | Diagnóstico local, IA online e consentimento |
-| [Desenvolvimento](development.md) | Ambiente, comandos de testes e build |
+| [Desenvolvimento](development.pt-PT.md) | Ambiente, comandos de testes e build |
 | [Testes e segurança](security-and-testing.md) | Evidência, limitações e comunicação responsável |
 | [Atualizações](updates.md) | Feed, Ed25519, integridade e gates de release |
 | [PAP](../PAP-EVIDENCIAS-TECNICAS/README.md) | Evidências técnicas e contexto académico |
+
+## Comunidade e apresentação
+
+[Contribuir](../CONTRIBUTING.md) · [Conduta](../CODE_OF_CONDUCT.md) · [Segurança](../SECURITY.md) · [Licença](licensing.md) · [Guião de vídeo EN/PT](demo.md) · [Textos de divulgação para revisão](outreach.md) · [Revisão da apresentação](GITHUB-PRESENTATION-REVIEW-20261111.md)
 
 ## Referências e arquivo técnico
 
@@ -20,7 +28,7 @@ Os documentos datados abaixo e os checkpoints preservam decisões e evidências 
 | Documento | Conteúdo |
 |-----------|-----------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Camadas, fluxo de pedidos, motores, serviço e segurança aplicada |
-| [ROADMAP.md](./ROADMAP.md) | Estado real, validação pendente e próximos passos |
+| [ROADMAP.md](./ROADMAP.md) | Snapshot histórico de outubro; [roadmap público atual](roadmap-public.md) |
 | [PAP-TRANSFERENCIA-20261031.md](./PAP-TRANSFERENCIA-20261031.md) | Transferência para a revisão do relatório PAP: factos, lacunas e capítulos a atualizar |
 | [../PAP-EVIDENCIAS-TECNICAS/README.md](../PAP-EVIDENCIAS-TECNICAS/README.md) | Índice dos oito documentos de evidência técnica |
 | [FAQ-ENTREGA-PROFESSOR.md](./FAQ-ENTREGA-PROFESSOR.md) | Perguntas típicas (Electron, motor, C++, indústria) |
