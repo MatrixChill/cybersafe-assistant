@@ -1,0 +1,33 @@
+name: Feature request / Sugestão
+description: Describe a problem and a scoped improvement, in English or Portuguese.
+title: "[Feature]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check existing issues and the public roadmap first. Do not include private data.
+        Pode escrever em português. Consulte primeiro as issues e o roadmap.
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem / Problema
+      description: Who encounters this problem and what is difficult today?
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed improvement / Melhoria proposta
+      description: Describe the behavior and a concrete way to evaluate it. Avoid unverified protection claims.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives and scope / Alternativas e âmbito
+      description: Include existing workarounds and what should remain out of scope.
+  - type: textarea
+    id: safety
+    attributes:
+      label: Privacy, security and compatibility / Privacidade, segurança e compatibilidade
+      description: Does this involve data transmission, elevated permissions, file operations or new dependencies?
