@@ -10,6 +10,8 @@ The rights holder needs to approve an appropriate license text and scope, confir
 
 Until clarified, do not assume permission for redistribution, relicensing or incorporation into another product from public visibility or npm metadata alone. For substantial code contributions, agree on the applicable terms with the owner first. Bug reports and documentation feedback can still be discussed without submitting sensitive material.
 
+For background, [GitHub's licensing guide](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository) distinguishes public visibility and GitHub viewing/forking rights from a license to use, modify and distribute software. This document records the unresolved project status; it does not choose terms for the owner.
+
 ## Existing attribution records
 
 - [Third-party notices](../assets/licenses/THIRD-PARTY-NOTICES.txt).

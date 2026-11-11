@@ -39,11 +39,11 @@ Criado por **Caio Amorim** no âmbito da **Prova de Aptidão Profissional**, exp
 <details>
 <summary>Capturas reais — versão pública v0.2.0 (referência histórica)</summary>
 
-![Painel real da v0.2.0](docs/images/v020-dashboard.png)
-![MATRIX na v0.2.0](docs/images/v020-matrix.png)
+![Diagnóstico expandido do Gestor de Tarefas — arquivo v0.2.0](docs/images/v020-dashboard.png)
+![Simulador de phishing — arquivo v0.2.0](docs/images/v020-matrix.png)
 ![Gestor de Tarefas na v0.2.0](docs/images/v020-gestor-tarefas.png)
 
-Estas capturas são da **v0.2.0**, não demonstram o estado da v0.2.4. Preservadas como evidência real; não são mockups nem imagens de laboratório. As alterações mais recentes estão nas [notas da release](https://github.com/MatrixChill/cybersafe-assistant/releases/latest).
+Estas capturas estão arquivadas como **v0.2.0**, não demonstram o estado da v0.2.4. Os nomes históricos dos ficheiros não correspondem sempre às páginas mostradas: consulte o [índice das imagens](docs/images/README.md). Falta uma captura atual do Dashboard e da conversa MATRIX. Preservadas como evidência real; não são mockups nem imagens de laboratório. As alterações mais recentes estão nas [notas da release](https://github.com/MatrixChill/cybersafe-assistant/releases/latest).
 
 </details>
 

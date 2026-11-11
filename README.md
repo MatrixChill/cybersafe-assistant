@@ -30,15 +30,15 @@ Created by **Caio Amorim** for Portugal's **Prova de Aptidão Profissional (PAP)
 
 ### A look inside
 
-**Real screenshots from v0.2.0 — historical UI reference, not evidence for v0.2.4.** The current release is **v0.2.4**; see its [release notes](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.4) for changes. No current-version recording is claimed here.
+**Real screenshots from v0.2.0 — historical UI reference, not evidence for v0.2.4.** The current release is **v0.2.4**; see its [release notes](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.4) for changes. No current-version recording is claimed here. Historical filenames are preserved; see the [image index](docs/images/README.md) for their actual contents. A MATRIX chat capture and a current Dashboard capture remain to be recorded.
 
-![CyberSafe dashboard, captured in v0.2.0](docs/images/v020-dashboard.png)
+![Task Manager in v0.2.0](docs/images/v020-gestor-tarefas.png)
 
 <details>
-<summary>MATRIX and Task Manager — actual v0.2.0 screenshots</summary>
+<summary>Process diagnostics and phishing simulator — actual historical screenshots</summary>
 
-![MATRIX process explanation interface in v0.2.0](docs/images/v020-matrix.png)
-![Task Manager in v0.2.0](docs/images/v020-gestor-tarefas.png)
+![Expanded process diagnostics, archived as v0.2.0](docs/images/v020-dashboard.png)
+![Phishing simulator, archived as v0.2.0](docs/images/v020-matrix.png)
 
 </details>
 

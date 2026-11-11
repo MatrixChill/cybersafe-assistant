@@ -20,7 +20,7 @@ The [ClamShield README](https://github.com/orloxgr/ClamShield) opens in English 
 |---|---|
 | PT-only entry point | English README plus prominent PT-PT alternative; PT technical history preserved. |
 | Official logo in banner, but no international path | Reuse the real logo inside the same cyan/violet orbits; English banner variant. No new identity. |
-| Screenshots hidden and mostly dashboard/MATRIX | Visible historical dashboard plus MATRIX/Task Manager gallery, all labelled v0.2.0. No v0.2.4 capture fabricated. |
+| Historical image filenames mistaken for screen identities | Visual review identifies the real Task Manager, process diagnostics and phishing simulator screens. Original files preserved, captions corrected; no Dashboard/MATRIX chat or v0.2.4 capture fabricated. |
 | Short installation/development notes | English practical guides, retained PT versions, FAQ and safe recovery boundaries. |
 | Public roadmap still describing October/0.1.10 | Current status map plus explicit historical label on the preserved original. |
 | Missing community policy/forms | Contributing guide, conduct/security policies, issue forms and PR checklist. |
@@ -38,6 +38,10 @@ The [ClamShield README](https://github.com/orloxgr/ClamShield) opens in English 
 ## Repository metadata
 
 The About description was changed to English, the homepage points to official Latest releases, and the relevant `sqlite` / `file-analysis` topics were added. Existing topics remain. No experimental feature, security setting or Discussion space was enabled. These repository metadata changes are separate from the reviewable file diff.
+
+## Validation evidence
+
+Local checks resolved 162 documentation references, decoded seven unique images, parsed all three issue-template YAML files and checked field structure. Seven version-coherence tests passed. GitHub GFM rendered the README; both READMEs and six referenced image assets returned HTTP 200 from the PR branch with bytes matching local files at that check. Visual inspection additionally caught and corrected the historical screenshot caption mismatch. These checks do not constitute installed acceptance or detection tests.
 
 ## Review boundaries and remaining owner decisions
 
