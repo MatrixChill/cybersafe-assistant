@@ -41,7 +41,7 @@ The About description was changed to English, the homepage points to official La
 
 ## Validation evidence
 
-Local checks resolved 162 documentation references, decoded seven unique images, parsed all three issue-template YAML files and checked field structure. Seven version-coherence tests passed. GitHub GFM rendered the README; both READMEs and six referenced image assets returned HTTP 200 from the PR branch with bytes matching local files at that check. Visual inspection additionally caught and corrected the historical screenshot caption mismatch. These checks do not constitute installed acceptance or detection tests.
+Local checks resolved 162 documentation references, decoded six unique images, parsed all three issue-template YAML files and checked field structure. Seven version-coherence tests passed. GitHub GFM rendered the README; both READMEs and six referenced image assets returned HTTP 200 from the PR branch with bytes matching local files at that check. Visual inspection additionally caught and corrected the historical screenshot caption mismatch. These checks do not constitute installed acceptance or detection tests.
 
 ## Review boundaries and remaining owner decisions
 
