@@ -72,10 +72,12 @@ export class ServiceClient {
   private readonly pipeName: string;
 
   private readonly pipeToken?: string;
+  private readonly log: typeof console.log;
 
-  constructor(pipeName: string = PIPE_NAME, pipeToken?: string, private readonly log = console.log) {
+  constructor(pipeName: string = PIPE_NAME, pipeToken?: string, log = console.log) {
     this.pipeName = pipeName;
     this.pipeToken = pipeToken;
+    this.log = log;
   }
 
   async connect() {
