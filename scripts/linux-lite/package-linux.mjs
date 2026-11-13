@@ -156,7 +156,7 @@ export function estadoRenderer(distDir, { root = RAIZ } = {}) {
  * O PREFLIGHT diz o que falta ANTES de perder minutos num build. Cada linha é
  * uma verificação com a sua razão nomeada — `indefinido` não é um passe.
  */
-export function preflight() {
+export function preflight(alvos = ["deb", "AppImage"]) {
   const falhas = [];
   const verificar = (nome, ok, porque) => {
     if (!ok) falhas.push(`${nome}: ${porque}`);
@@ -227,7 +227,7 @@ export function preflight() {
   // Só as ferramentas que o BUILD chama. `unsquashfs` não está aqui de
   // propósito: quem desembrulha o AppImage na verificação é o runtime do
   // próprio pacote, e se ele falhar a linha sai `DESCONHECIDO` com a razão.
-  for (const ferramenta of ["dpkg-deb", "mksquashfs"]) {
+  for (const ferramenta of alvos.flatMap((alvo) => alvo === "deb" ? ["dpkg-deb"] : alvo === "AppImage" ? ["mksquashfs"] : [])) {
     verificar(ferramenta, which(ferramenta), "não está no PATH (necessário para escrever o .deb e o squashfs do AppImage)");
   }
 
@@ -390,8 +390,7 @@ function construir(alvos) {
     "--config",
     "electron-builder.linux-lite.yml",
     `--config.extraMetadata.version=${version}`,
-    "--linux",
-    ...alvos,
+    ...(alvos[0] === "dir" ? ["--config.extraMetadata.license=LicenseRef-Pending", "--linux", "--dir"] : ["--linux", ...alvos]),
     "--x64",
     "--publish",
     "never",
@@ -546,12 +545,18 @@ function deComEXE(resultado, rotulo) {
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) process.exitCode = main(process.argv.slice(2));
 
+export function selectLinuxTargets(argv) {
+  const selected = [
+    ["--arch-stage", "dir"],
+    ["--deb-only", "deb"],
+    ["--appimage-only", "AppImage"],
+  ].filter(([flag]) => argv.includes(flag));
+  if (selected.length > 1) throw new Error("Escolha um único alvo Linux.");
+  return selected.length ? [selected[0][1]] : ["deb", "AppImage"];
+}
+
 export function main(argv) {
-  const alvos = argv.includes("--appimage-only")
-    ? ["AppImage"]
-    : argv.includes("--deb-only")
-      ? ["deb"]
-      : ["deb", "AppImage"];
+  const alvos = selectLinuxTargets(argv);
   const soCheck = argv.includes("--check");
 
   // Reler um pacote já escrito não precisa de ambiente de build nenhum.
@@ -561,7 +566,7 @@ export function main(argv) {
     return verificationPassed(resultado.inspections, []) ? 0 : 1;
   }
 
-  const falhas = preflight();
+  const falhas = preflight(alvos);
   for (const f of falhas) console.log(`PREFLIGHT_FALHA ${f}`);
   if (falhas.length) {
     console.log(`PREFLIGHT ${falhas.length} obstáculo(s) — nada foi construído.`);
@@ -577,6 +582,16 @@ export function main(argv) {
     return 1;
   }
   console.log("BUILD ok");
+  if (alvos[0] === "dir") {
+    const palco = path.join(SAIDA, "linux-unpacked");
+    const bin = path.join(palco, "cybersafe-assistant-linux-lite");
+    const asar = path.join(palco, "resources", "app.asar");
+    const ok = existsSync(bin) && lerCabeca(bin).equals(Buffer.from("7f454c46", "hex"))
+      && existsSync(asar) && statSync(asar).size > 0
+      && !readdirSync(palco, { recursive: true }).some((f) => /\.(exe|dll|sys|msi)$/i.test(f));
+    console.log(ok ? "ARCH_STAGE ok (ELF e app.asar; não é um pacote Arch)" : "ARCH_STAGE inválido");
+    return ok ? 0 : 1;
+  }
   const resultado = verificarArtefactos(alvos);
   for (const linha of resultado.relatorio) console.log(linha);
   return verificationPassed(resultado.inspections, alvos) ? 0 : 1;

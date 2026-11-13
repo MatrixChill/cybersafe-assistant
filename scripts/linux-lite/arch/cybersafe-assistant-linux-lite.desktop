@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=CyberSafe Assistant Linux Lite
+Comment=Análise de ficheiros e diagnóstico do sistema
+Exec=cybersafe-assistant-linux-lite
+Icon=cybersafe-assistant-linux-lite
+Terminal=false
+Categories=System;Security;

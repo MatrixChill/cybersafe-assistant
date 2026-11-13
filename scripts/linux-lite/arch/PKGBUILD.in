@@ -1,0 +1,45 @@
+# Generated recipe inputs are filled by prepare-recipe.sh from a Git commit.
+pkgname=cybersafe-assistant-linux-lite
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Academic desktop security and diagnostics for Linux (experimental)'
+arch=('x86_64')
+url='https://github.com/MatrixChill/cybersafe-assistant'
+license=('LicenseRef-Pending')
+depends=('alsa-lib' 'at-spi2-core' 'gtk3' 'libcups' 'libdrm' 'libx11'
+         'libxcb' 'libxcomposite' 'libxdamage' 'libxext' 'libxfixes'
+         'libxkbcommon' 'libxrandr' 'libxshmfence' 'mesa' 'nspr' 'nss')
+makedepends=('nodejs' 'npm' 'python')
+optdepends=('clamav: signature scanner and database tooling'
+            'yara: rule scanner'
+            'libsecret: supported desktop credential storage')
+options=('!strip' '!debug')
+source=('cybersafe-source.tar.gz')
+sha256sums=('@SHA256@')
+
+build() {
+  cd "$srcdir/cybersafe"
+  npm ci
+  npm run build:all
+  node scripts/linux-lite/package-linux.mjs --arch-stage
+}
+
+check() {
+  cd "$srcdir/cybersafe"
+  node --test scripts/test/linux-lite-package*.test.mjs
+}
+
+package() {
+  cd "$srcdir/cybersafe"
+  local target="$pkgdir/opt/cybersafe-assistant-linux-lite"
+  install -d "$target" "$pkgdir/usr/bin"
+  cp -a packages/desktop/release-linux/linux-unpacked/. "$target/"
+  ln -s /opt/cybersafe-assistant-linux-lite/cybersafe-assistant-linux-lite \
+    "$pkgdir/usr/bin/cybersafe-assistant-linux-lite"
+  install -Dm644 scripts/linux-lite/arch/cybersafe-assistant-linux-lite.desktop \
+    "$pkgdir/usr/share/applications/cybersafe-assistant-linux-lite.desktop"
+  install -Dm644 assets/branding/generated/icon-256.png \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/cybersafe-assistant-linux-lite.png"
+  install -Dm644 assets/licenses/THIRD-PARTY-NOTICES.txt \
+    "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-NOTICES.txt"
+}
