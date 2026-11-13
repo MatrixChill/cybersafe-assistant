@@ -405,9 +405,15 @@ function construir(alvos) {
  * aberto pelo `offset` squashfs declarado no cabeçalho ELF. O que não puder
  * ser lido fica `DESCONHECIDO`, nunca «sem .exe».
  */
-function verificarArtefactos() {
-  if (!existsSync(SAIDA)) return { ficheiros: [], relatorio: ["sem diretório release-linux"] };
-  const ficheiros = readdirSync(SAIDA).filter((f) => statSync(path.join(SAIDA, f)).isFile() && !f.endsWith(".yml"));
+export function verificationPassed(inspections, required) {
+  return inspections.length > 0 && inspections.every(({ ok }) => ok === true)
+    && required.every((format) => inspections.some((entry) => entry.format === format));
+}
+
+function verificarArtefactos(alvos = []) {
+  const inspections = [];
+  if (!existsSync(SAIDA)) return { inspections, relatorio: ["sem diretório release-linux"] };
+  const ficheiros = readdirSync(SAIDA).filter((f) => statSync(path.join(SAIDA, f)).isFile() && /\.(?:deb|AppImage)$/.test(f) && (!alvos.length || alvos.includes(f.endsWith(".deb") ? "deb" : "AppImage")));
   const relatorio = [];
   for (const nome of ficheiros) {
     const completo = path.join(SAIDA, nome);
@@ -423,9 +429,14 @@ function verificarArtefactos() {
       // A identidade que o gestor de pacotes mostra tem de ser a canónica, e os
       // outros campos de `extraMetadata` têm de sobreviver ao `--config` da
       // linha de comandos (uma substituição rasa do objeto apagava-mo-los).
-      relatorio.push(identidadeDoDeb(info));
+      const identidade = identidadeDoDeb(info);
+      relatorio.push(identidade);
       const conteudo = executar("dpkg-deb", ["--contents", completo], { maxBuffer: 256 * 1024 * 1024 });
       relatorio.push(deComEXE(conteudo, "DEB_CONTEUDO"));
+      inspections.push({ format: "deb", ok: identidade.includes('"versaoOk":true') && conteudo.ok
+        && !/\.(exe|dll|sys|msi)(?:\s|$)/im.test(conteudo.saida)
+        && /\/resources\/app\.asar(?:\s|$)/m.test(conteudo.saida)
+        && /cybersafe-assistant-linux-lite\.desktop(?:\s|$)/m.test(conteudo.saida) });
     }
     if (nome.endsWith(".AppImage")) {
       // O «sem .exe» do AppImage tem de ser medido dentro do squashfs, não
@@ -437,6 +448,9 @@ function verificarArtefactos() {
       const extraido = executar(completo, ["--appimage-extract"], { cwd: pasta });
       const raiz = path.join(pasta, "squashfs-root");
       const visto = existsSync(raiz) ? readdirSync(raiz, { recursive: true, encoding: "utf8" }) : null;
+      inspections.push({ format: "AppImage", ok: extraido.ok && !!visto
+        && visto.includes("AppRun") && visto.includes(path.join("resources", "app.asar"))
+        && !visto.some((f) => /\.(exe|dll|sys|msi)$/i.test(f)) });
       relatorio.push(
         visto
           ? `APPIMAGE_CONTEUDO ${JSON.stringify({
@@ -450,7 +464,7 @@ function verificarArtefactos() {
       rmSync(pasta, { recursive: true, force: true });
     }
   }
-  return { ficheiros, relatorio };
+  return { inspections, relatorio };
 }
 
 /**
@@ -542,8 +556,9 @@ export function main(argv) {
 
   // Reler um pacote já escrito não precisa de ambiente de build nenhum.
   if (argv.includes("--verify-only")) {
-    for (const linha of verificarArtefactos().relatorio) console.log(linha);
-    return 0;
+    const resultado = verificarArtefactos();
+    for (const linha of resultado.relatorio) console.log(linha);
+    return verificationPassed(resultado.inspections, []) ? 0 : 1;
   }
 
   const falhas = preflight();
@@ -562,6 +577,7 @@ export function main(argv) {
     return 1;
   }
   console.log("BUILD ok");
-  for (const linha of verificarArtefactos().relatorio) console.log(linha);
-  return 0;
+  const resultado = verificarArtefactos(alvos);
+  for (const linha of resultado.relatorio) console.log(linha);
+  return verificationPassed(resultado.inspections, alvos) ? 0 : 1;
 }
