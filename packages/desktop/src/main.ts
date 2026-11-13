@@ -342,6 +342,8 @@ function createWindow() {
     requested: preferences.windowMaterial ?? null,
   });
 
+  const preloadArguments = [`--cybersafe-api-base=${perfil.apiBase}`];
+  if (process.env.CYBERSAFE_DEBUG_SCAN === "1") preloadArguments.push("--cybersafe-debug-scan");
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 820,
@@ -368,7 +370,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: process.platform === "linux",
+      additionalArguments: preloadArguments,
     },
   });
 
