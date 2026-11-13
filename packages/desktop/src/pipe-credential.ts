@@ -120,9 +120,18 @@ function readExisting(
   f: Pick<typeof fs, "lstatSync" | "readFileSync">,
   credentialPath: string,
 ): string {
-  refuseLinks(f, PIPE_CREDENTIAL_FILENAME, credentialPath, true);
-  const current = String(f.readFileSync(credentialPath, "utf8")).trim();
-  if (PIPE_CREDENTIAL_PATTERN.test(current)) return current;
+  // `wx` publishes the directory entry before writeFileSync finishes writing.
+  // A competing first boot can therefore observe an empty file. Keep the sync
+  // startup API, but give that narrow window at most 100 ms without spinning,
+  // overwriting or accepting invalid content. Nonempty invalid files fail now;
+  // a permanently empty file still fails closed after the bounded wait.
+  for (let attempt = 0; ; attempt++) {
+    refuseLinks(f, PIPE_CREDENTIAL_FILENAME, credentialPath, true);
+    const current = String(f.readFileSync(credentialPath, "utf8")).trim();
+    if (PIPE_CREDENTIAL_PATTERN.test(current)) return current;
+    if (current !== "" || attempt >= 20) break;
+    Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 5);
+  }
   throw new Error(
     `Credência do pipe inválida em ${credentialPath}: esperado 64 hex. ` +
       "Não é substituída automaticamente (um serviço vivo continuaria com a antiga e o lockout voltava); " +
