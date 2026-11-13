@@ -5,7 +5,7 @@ pkgrel=1
 pkgdesc='Academic desktop security and diagnostics for Linux (experimental)'
 arch=('x86_64')
 url='https://github.com/MatrixChill/cybersafe-assistant'
-license=('LicenseRef-Pending')
+license=('MIT')
 depends=('alsa-lib' 'at-spi2-core' 'gtk3' 'libcups' 'libdrm' 'libx11'
          'libxcb' 'libxcomposite' 'libxdamage' 'libxext' 'libxfixes'
          'libxkbcommon' 'libxrandr' 'libxshmfence' 'mesa' 'nspr' 'nss' 'nodejs' 'gcc-libs')
@@ -59,6 +59,13 @@ package() {
     "$pkgdir/usr/share/applications/cybersafe-assistant-linux-lite.desktop"
   install -Dm644 assets/branding/generated/icon-256.png \
     "$pkgdir/usr/share/icons/hicolor/256x256/apps/cybersafe-assistant-linux-lite.png"
-  install -Dm644 assets/licenses/THIRD-PARTY-NOTICES.txt \
-    "$pkgdir/usr/share/licenses/$pkgname/THIRD-PARTY-NOTICES.txt"
+  ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron \
+    scripts/linux-lite/arch/collect-licenses.mjs "$target" \
+    "$pkgdir/usr/share/licenses/$pkgname" "$srcdir/cybersafe/LICENSE"
+  # Stylesheets incorporated by index.css are not JS modules in Vite's report.
+  for dependency in tailwindcss tw-animate-css; do
+    node -e 'const p=require("./node_modules/"+process.argv[1]+"/package.json");if(p.license!=="MIT")throw Error("CSS license requires review")' "$dependency"
+    install -Dm644 "node_modules/$dependency/LICENSE" \
+      "$pkgdir/usr/share/licenses/$pkgname/$dependency-LICENSE"
+  done
 }

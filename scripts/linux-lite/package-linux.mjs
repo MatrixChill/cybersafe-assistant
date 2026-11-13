@@ -390,7 +390,7 @@ function construir(alvos) {
     "--config",
     "electron-builder.linux-lite.yml",
     `--config.extraMetadata.version=${version}`,
-    ...(alvos[0] === "dir" ? ["--config.extraMetadata.license=LicenseRef-Pending", "--linux", "--dir"] : ["--linux", ...alvos]),
+    ...(alvos[0] === "dir" ? ["--config.extraMetadata.license=MIT", "--linux", "--dir"] : ["--linux", ...alvos]),
     "--x64",
     "--publish",
     "never",
