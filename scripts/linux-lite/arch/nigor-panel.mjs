@@ -13,6 +13,9 @@ function label(values, key) {
 }
 
 export function formatPanel(snapshot) {
+  if (snapshot === null) {
+    return 'Serviço: indisponível\n\nSem confirmação do estado de proteção ou dos motores.\nAbra o CyberSafe para iniciar ou verificar o serviço.';
+  }
   if (snapshot.version !== 1) throw new Error('Versão de estado incompatível.');
   const { protection, engines, latestScan, alerts, metrics } = snapshot;
   const monitor = protection.enabled === true ? 'ativa' : protection.enabled === false ? 'desativada' : 'sem leitura';
@@ -37,7 +40,11 @@ export function formatPanel(snapshot) {
 }
 
 async function readPanel() {
-  const { stdout } = await exec('/usr/bin/cybersafe-nigor-status', [], { timeout: 7000, maxBuffer: 65536 });
+  let snapshot = null;
+  try {
+    const { stdout } = await exec('/usr/bin/cybersafe-nigor-status', [], { timeout: 7000, maxBuffer: 65536 });
+    snapshot = JSON.parse(stdout);
+  } catch { /* offline stays unknown; opening the application remains available */ }
   const firewall = await probeFirewall();
   const firewallLabels = {
     running: 'em execução', active: 'ativo', inactive: 'inativo',
@@ -45,7 +52,7 @@ async function readPanel() {
     'rules-present': 'regras presentes', 'no-rules-reported': 'sem regras reportadas',
     unknown: 'sem leitura',
   };
-  return formatPanel(JSON.parse(stdout)) + '\n\n' + Object.entries(firewall)
+  return formatPanel(snapshot) + '\n\n' + Object.entries(firewall)
     .map(([backend, state]) => 'Firewall (' + backend + '): ' + label(firewallLabels, state)).join('\n');
 }
 
