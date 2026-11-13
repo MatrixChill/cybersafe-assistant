@@ -20,6 +20,10 @@ sha256sums=('@SHA256@')
 build() {
   cd "$srcdir/cybersafe"
   npm ci
+  # npm 12 can suppress dependency lifecycle scripts.
+  if [[ ! -x node_modules/electron/dist/electron ]]; then
+    node node_modules/electron/install.js
+  fi
   npm run build:all
   cmake -S packages/native-engine -B packages/native-engine/build -DCMAKE_BUILD_TYPE=Release
   cmake --build packages/native-engine/build
