@@ -5,10 +5,10 @@ import { randomBytes } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { ProtectionEngineService } from '../../service/dist/engine.js';
-import { ServiceClient } from '../src/service-client.ts';
-import { readNigorStatus } from '../src/nigor-client.ts';
+
 
 test('Nigor v1 reads the real service over authenticated Unix IPC', { skip: process.platform !== 'linux' }, async () => {
+  const { readNigorStatus } = await import("../dist/nigor-client.js");
   const dir = await mkdtemp(join(tmpdir(), 'cs-nigor-'));
   const token = randomBytes(32).toString('hex');
   const previous = process.env.CYBERSAFE_PIPE_TOKEN;
@@ -23,8 +23,8 @@ test('Nigor v1 reads the real service over authenticated Unix IPC', { skip: proc
   try {
     const socket = join(dir, 'engine.sock');
     await engine.startPipeServer(socket);
-    await assert.rejects(readNigorStatus(new ServiceClient(socket, randomBytes(32).toString('hex'))));
-    const snapshot = await readNigorStatus(new ServiceClient(socket, token));
+    await assert.rejects(readNigorStatus(socket, randomBytes(32).toString('hex')));
+    const snapshot = await readNigorStatus(socket, token);
     assert.equal(snapshot.version, 1);
     assert.equal(typeof snapshot.serviceRunning, 'boolean');
     assert.equal(snapshot.protection.enabled, false);

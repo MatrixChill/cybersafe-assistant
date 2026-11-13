@@ -34,7 +34,7 @@ check() {
   cd "$srcdir/cybersafe"
   node --test scripts/test/linux-lite-package*.test.mjs scripts/test/linux-lite-arch-*.test.mjs
   CYBERSAFE_TEST_LINUX_NATIVE=1 node --test packages/service/test/linux-native-arch.test.js
-  node --import tsx --test packages/desktop/test/nigor-status-integration.test.mjs
+  node --test packages/desktop/test/nigor-status-integration.test.mjs
 }
 
 package() {

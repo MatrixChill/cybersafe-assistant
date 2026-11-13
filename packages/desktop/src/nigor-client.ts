@@ -1,7 +1,8 @@
 import { ServiceClient } from "./service-client";
 import { projectNigorStatus } from "./nigor-status";
 
-export async function readNigorStatus(client: ServiceClient, timeoutMs = 5000) {
+export async function readNigorStatus(pipeName: string | undefined, token: string, timeoutMs = 5000) {
+  const client = new ServiceClient(pipeName, token, console.error);
   const signal = AbortSignal.timeout(timeoutMs);
   const disconnect = () => client.disconnect();
   signal.addEventListener("abort", disconnect, { once: true });
@@ -24,7 +25,7 @@ if (process.env.CYBERSAFE_NIGOR_STATUS === "1") {
   if (process.platform !== "linux" || !/^[a-f0-9]{64}$/.test(token ?? "")) {
     process.exitCode = 2;
   } else {
-    readNigorStatus(new ServiceClient(undefined, token, console.error)).then(
+    readNigorStatus(undefined, token).then(
       (snapshot) => console.log(JSON.stringify(snapshot)),
       () => { console.error("Serviço CyberSafe indisponível ou autenticação recusada."); process.exitCode = 1; },
     );
