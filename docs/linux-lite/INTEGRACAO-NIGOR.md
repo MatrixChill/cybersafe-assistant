@@ -120,6 +120,10 @@ Não é um pacote publicado, assinado ou aprovado para distribuição geral.
 - Depois de parar aplicação e serviço, `quick_check` read-only aprovou as quatro
   bases SQLite encontradas no perfil do laboratório. Não são as 13 bases Windows.
 - Painel Zenity abriu e fechou em X11 com serviço disponível e indisponível.
+- Módulos de quarentena do pacote instalado: isolamento confirmado, recusa de
+  sobrescrita no restauro, preservação do substituto e restauro posterior com
+  SHA-256 e modo POSIX conferidos. Resultado positivo sintético sobre ficheiro
+  benigno; não é deteção de malware nem prova do percurso completo pela UI.
 - Regressão desktop em Arch: **690 passes, seis skips, zero falhas**.
 - Regressão ampla inicial do serviço em Arch: **892 passes, 130 falhas, um skip**.
   Não está aprovada. Entre as causas comprovadas estão fixtures de caminhos
@@ -130,6 +134,16 @@ Não é um pacote publicado, assinado ou aprovado para distribuição geral.
   As restantes falhas precisam de triagem; não foram apagadas ou desativadas.
 - A correção do cooldown e as regressões do gate/recarga passaram em **51 testes**.
 - CI Windows das fontes do pacote: dois jobs `verify` aprovados.
+
+O ensaio de quarentena é reproduzível apenas num laboratório descartável:
+
+```bash
+NODE_ENV=test ELECTRON_RUN_AS_NODE=1 /usr/bin/cybersafe-assistant-linux-lite \
+  scripts/linux-lite/arch/verify-quarantine-installed.mjs --disposable-fixture
+```
+
+O script recusa root e outras plataformas, cria exclusivamente uma fixture
+temporária e preserva os resultados e a auditoria. Não usa dados existentes.
 
 ### ClamAV: diagnóstico e limite do ensaio
 
@@ -151,7 +165,7 @@ proteção integral. Não houve novo ensaio EICAR nesta sessão.
 ### Pendências de aceitação
 
 Sessão Nigor real, Wayland nativo, USB físico, notificações e tray na sessão do
-utilizador, quarentena/restauro instalados com fixtures e fornecedores MATRIX
+utilizador, percurso UI/IPC da quarentena/restauro e fornecedores MATRIX
 online continuam por validar. O painel não substitui uma extensão do shell.
 O updater Windows continua indisponível no Linux. A licença global permanece
 pendente. A branch e o PR #5 continuam experimentais e sem merge.

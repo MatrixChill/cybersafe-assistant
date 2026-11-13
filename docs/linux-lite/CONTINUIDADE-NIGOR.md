@@ -8,5 +8,6 @@
 - Correções: cooldown FreshClam não é sucesso mesmo com exit zero; logger IPC compatível com type stripping do Node; fixtures de processo, walk e ausência do ELF isoladas do host.
 - Testes: desktop 690 pass/6 skip; grupo de definições/gate 51 pass; autenticação 9 pass; fixtures corrigidas 39 pass. Regressão ampla inicial do serviço 892 pass/130 fail/1 skip: continua sem aprovação; não confundir os grupos corrigidos com repetição integral verde.
 - Próximo: confirmar a CI Linux remota, triar os restantes testes do serviço e continuar a integração dos diagnósticos Linux na aplicação principal. Não substituir estados desconhecidos por zeros ou proteção ativa.
-- Gates reais: sessão Nigor/Wayland, USB físico, tray/notificações nativas, quarentena/restauro instalados, fornecedores MATRIX e licença global. Nenhum ensaio WSL comprova estes gates.
+- Quarentena: módulos instalados passaram a fixture positiva sintética (isolamento, recusa de sobrescrita, restauro, SHA e permissões). Script opt-in em `scripts/linux-lite/arch/verify-quarantine-installed.mjs`; não prova deteção nem UI/IPC.
+- Gates reais: sessão Nigor/Wayland, USB físico, tray/notificações nativas, UI/IPC da quarentena/restauro, fornecedores MATRIX e licença global. Nenhum ensaio WSL comprova estes gates.
 - Preservar Windows instalado, releases públicas, PAP e PR #4. Não operar a aplicação pessoal para mostrar o updater; esse pedido foi cancelado.
