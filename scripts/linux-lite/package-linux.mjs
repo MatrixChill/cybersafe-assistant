@@ -156,7 +156,7 @@ export function estadoRenderer(distDir, { root = RAIZ } = {}) {
  * O PREFLIGHT diz o que falta ANTES de perder minutos num build. Cada linha é
  * uma verificação com a sua razão nomeada — `indefinido` não é um passe.
  */
-export function preflight() {
+export function preflight(alvos = ["deb", "AppImage"]) {
   const falhas = [];
   const verificar = (nome, ok, porque) => {
     if (!ok) falhas.push(`${nome}: ${porque}`);
@@ -227,7 +227,7 @@ export function preflight() {
   // Só as ferramentas que o BUILD chama. `unsquashfs` não está aqui de
   // propósito: quem desembrulha o AppImage na verificação é o runtime do
   // próprio pacote, e se ele falhar a linha sai `DESCONHECIDO` com a razão.
-  for (const ferramenta of ["dpkg-deb", "mksquashfs"]) {
+  for (const ferramenta of alvos.flatMap((alvo) => alvo === "deb" ? ["dpkg-deb"] : alvo === "AppImage" ? ["mksquashfs"] : [])) {
     verificar(ferramenta, which(ferramenta), "não está no PATH (necessário para escrever o .deb e o squashfs do AppImage)");
   }
 
@@ -390,8 +390,7 @@ function construir(alvos) {
     "--config",
     "electron-builder.linux-lite.yml",
     `--config.extraMetadata.version=${version}`,
-    "--linux",
-    ...alvos,
+    ...(alvos[0] === "dir" ? ["--config.extraMetadata.license=MIT", "--linux", "--dir"] : ["--linux", ...alvos]),
     "--x64",
     "--publish",
     "never",
@@ -405,9 +404,15 @@ function construir(alvos) {
  * aberto pelo `offset` squashfs declarado no cabeçalho ELF. O que não puder
  * ser lido fica `DESCONHECIDO`, nunca «sem .exe».
  */
-function verificarArtefactos() {
-  if (!existsSync(SAIDA)) return { ficheiros: [], relatorio: ["sem diretório release-linux"] };
-  const ficheiros = readdirSync(SAIDA).filter((f) => statSync(path.join(SAIDA, f)).isFile() && !f.endsWith(".yml"));
+export function verificationPassed(inspections, required) {
+  return inspections.length > 0 && inspections.every(({ ok }) => ok === true)
+    && required.every((format) => inspections.some((entry) => entry.format === format));
+}
+
+function verificarArtefactos(alvos = []) {
+  const inspections = [];
+  if (!existsSync(SAIDA)) return { inspections, relatorio: ["sem diretório release-linux"] };
+  const ficheiros = readdirSync(SAIDA).filter((f) => statSync(path.join(SAIDA, f)).isFile() && /\.(?:deb|AppImage)$/.test(f) && (!alvos.length || alvos.includes(f.endsWith(".deb") ? "deb" : "AppImage")));
   const relatorio = [];
   for (const nome of ficheiros) {
     const completo = path.join(SAIDA, nome);
@@ -423,9 +428,14 @@ function verificarArtefactos() {
       // A identidade que o gestor de pacotes mostra tem de ser a canónica, e os
       // outros campos de `extraMetadata` têm de sobreviver ao `--config` da
       // linha de comandos (uma substituição rasa do objeto apagava-mo-los).
-      relatorio.push(identidadeDoDeb(info));
+      const identidade = identidadeDoDeb(info);
+      relatorio.push(identidade);
       const conteudo = executar("dpkg-deb", ["--contents", completo], { maxBuffer: 256 * 1024 * 1024 });
       relatorio.push(deComEXE(conteudo, "DEB_CONTEUDO"));
+      inspections.push({ format: "deb", ok: identidade.includes('"versaoOk":true') && conteudo.ok
+        && !/\.(exe|dll|sys|msi)(?:\s|$)/im.test(conteudo.saida)
+        && /\/resources\/app\.asar(?:\s|$)/m.test(conteudo.saida)
+        && /cybersafe-assistant-linux-lite\.desktop(?:\s|$)/m.test(conteudo.saida) });
     }
     if (nome.endsWith(".AppImage")) {
       // O «sem .exe» do AppImage tem de ser medido dentro do squashfs, não
@@ -437,6 +447,9 @@ function verificarArtefactos() {
       const extraido = executar(completo, ["--appimage-extract"], { cwd: pasta });
       const raiz = path.join(pasta, "squashfs-root");
       const visto = existsSync(raiz) ? readdirSync(raiz, { recursive: true, encoding: "utf8" }) : null;
+      inspections.push({ format: "AppImage", ok: extraido.ok && !!visto
+        && visto.includes("AppRun") && visto.includes(path.join("resources", "app.asar"))
+        && !visto.some((f) => /\.(exe|dll|sys|msi)$/i.test(f)) });
       relatorio.push(
         visto
           ? `APPIMAGE_CONTEUDO ${JSON.stringify({
@@ -450,7 +463,7 @@ function verificarArtefactos() {
       rmSync(pasta, { recursive: true, force: true });
     }
   }
-  return { ficheiros, relatorio };
+  return { inspections, relatorio };
 }
 
 /**
@@ -532,21 +545,28 @@ function deComEXE(resultado, rotulo) {
 const isMain = process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url);
 if (isMain) process.exitCode = main(process.argv.slice(2));
 
+export function selectLinuxTargets(argv) {
+  const selected = [
+    ["--arch-stage", "dir"],
+    ["--deb-only", "deb"],
+    ["--appimage-only", "AppImage"],
+  ].filter(([flag]) => argv.includes(flag));
+  if (selected.length > 1) throw new Error("Escolha um único alvo Linux.");
+  return selected.length ? [selected[0][1]] : ["deb", "AppImage"];
+}
+
 export function main(argv) {
-  const alvos = argv.includes("--appimage-only")
-    ? ["AppImage"]
-    : argv.includes("--deb-only")
-      ? ["deb"]
-      : ["deb", "AppImage"];
+  const alvos = selectLinuxTargets(argv);
   const soCheck = argv.includes("--check");
 
   // Reler um pacote já escrito não precisa de ambiente de build nenhum.
   if (argv.includes("--verify-only")) {
-    for (const linha of verificarArtefactos().relatorio) console.log(linha);
-    return 0;
+    const resultado = verificarArtefactos();
+    for (const linha of resultado.relatorio) console.log(linha);
+    return verificationPassed(resultado.inspections, []) ? 0 : 1;
   }
 
-  const falhas = preflight();
+  const falhas = preflight(alvos);
   for (const f of falhas) console.log(`PREFLIGHT_FALHA ${f}`);
   if (falhas.length) {
     console.log(`PREFLIGHT ${falhas.length} obstáculo(s) — nada foi construído.`);
@@ -562,6 +582,17 @@ export function main(argv) {
     return 1;
   }
   console.log("BUILD ok");
-  for (const linha of verificarArtefactos().relatorio) console.log(linha);
-  return 0;
+  if (alvos[0] === "dir") {
+    const palco = path.join(SAIDA, "linux-unpacked");
+    const bin = path.join(palco, "cybersafe-assistant-linux-lite");
+    const asar = path.join(palco, "resources", "app.asar");
+    const ok = existsSync(bin) && lerCabeca(bin).equals(Buffer.from("7f454c46", "hex"))
+      && existsSync(asar) && statSync(asar).size > 0
+      && !readdirSync(palco, { recursive: true }).some((f) => /\.(exe|dll|sys|msi)$/i.test(f));
+    console.log(ok ? "ARCH_STAGE ok (ELF e app.asar; não é um pacote Arch)" : "ARCH_STAGE inválido");
+    return ok ? 0 : 1;
+  }
+  const resultado = verificarArtefactos(alvos);
+  for (const linha of resultado.relatorio) console.log(linha);
+  return verificationPassed(resultado.inspections, alvos) ? 0 : 1;
 }

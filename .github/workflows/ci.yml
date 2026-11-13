@@ -13,6 +13,57 @@ permissions:
   contents: read
 
 jobs:
+  linux-smoke:
+    name: Linux build, Unix IPC and native scanner
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+      - name: Install locked dependencies without native lifecycle scripts
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Prepare the pinned esbuild used by tsx
+        run: node node_modules/esbuild/install.js
+      - name: Install the classic YARA required by corpus regression tests
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends yara
+      - name: Build all workspaces and check desktop types
+        run: |
+          npm run build:all
+          npm run typecheck -w @cybersafe/desktop
+      - name: Build the Linux native scanner
+        run: |
+          cmake -S packages/native-engine -B packages/native-engine/build -DCMAKE_BUILD_TYPE=Release
+          cmake --build packages/native-engine/build --parallel 2
+      - name: Linux packaging contracts and authenticated Nigor client
+        run: |
+          node --test scripts/test/linux-lite-package*.test.mjs scripts/test/linux-lite-arch-*.test.mjs
+          CYBERSAFE_TEST_LINUX_NATIVE=1 node --test packages/service/test/linux-native-arch.test.js
+          node --test packages/desktop/test/nigor-status-integration.test.mjs packages/desktop/test/nigor-actions.test.mjs
+      - name: POSIX service, freshness, authentication and definition regression tests
+        run: >-
+          node --test --test-concurrency=1
+          packages/service/test/p3-scan-walk-pseudo-fs.test.js
+          packages/service/test/p3-quarantine-mount-points.test.js
+          packages/service/test/p3-quarantine-mount-engine.test.js
+          packages/service/test/p3-quarantine-audit-engine.test.js
+          packages/service/test/p3-usb-detection-posix.test.js
+          packages/service/test/processes-list-contract.test.js
+          packages/service/test/process-truth-ttl.test.js
+          packages/service/test/qa3-native-result.test.js
+          packages/service/test/s4-pipe-auth.test.js
+          packages/service/test/freshclam-cooldown.test.js
+          packages/service/test/definitions-update-truth.test.js
+          packages/service/test/p1-1-clam-db-gate.test.js
+          packages/service/test/p1-1-error-live-child.test.js
+      - name: Complete desktop suite on Linux
+        run: npm test -w @cybersafe/desktop
+      # This source/runtime job does not certify Arch packaging, graphical
+      # Nigor/Wayland sessions, USB hardware or the full cross-platform suite.
   verify:
     runs-on: windows-latest
     timeout-minutes: 45

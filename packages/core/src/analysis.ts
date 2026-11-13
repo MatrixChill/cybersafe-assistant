@@ -212,7 +212,9 @@ export class MalwareAnalyzer {
     // peso zero, para que o utilizador leia "análise não concluída" em vez de
     // "limpo" quando o motor não chegou a ver o ficheiro.
     if (scanInconclusive) rules.add("scan_inconclusive");
-    if (artifactPath.toLowerCase().includes("\\downloads\\") || artifactPath.toLowerCase().includes("\\temp\\")) {
+    const location = artifactPath.toLowerCase();
+    if (location.includes("\\downloads\\") || location.includes("\\temp\\") ||
+        (process.platform === "linux" && /\/(?:downloads|tmp|temp)\//.test(location))) {
       rules.add("suspicious_location");
     }
     if (trust.publisherTrusted) rules.add("trusted_publisher");

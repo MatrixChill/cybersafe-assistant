@@ -28,8 +28,11 @@ ipcRenderer.on("app:scan-session", (_event: unknown, delivery: { state?: unknown
 // perfil (4100+), empacotado é o valor de produção já conhecido pelo componente.
 // Sem isto o renderer teria um URL fixo, e um dev apontaria para a API da
 // instalação do utilizador.
-if (process.env.CYBERSAFE_API_BASE) {
-  contextBridge.exposeInMainWorld("__CYBERSAFE_API_BASE__", process.env.CYBERSAFE_API_BASE);
+const apiArgument = "--cybersafe-api-base=";
+const preloadArguments = process.argv ?? [];
+const apiBase = preloadArguments.find((argument: string) => argument.startsWith(apiArgument))?.slice(apiArgument.length);
+if (apiBase) {
+  contextBridge.exposeInMainWorld("__CYBERSAFE_API_BASE__", apiBase);
 }
 
 contextBridge.exposeInMainWorld("electronAPI", {
@@ -147,7 +150,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     const listener = (_event: Electron.IpcRendererEvent, value: any) => {
       // Filter for scan.progress events only
       const isScanProgress = value?.type === "scan.progress" && value?.data;
-      if (process.env.CYBERSAFE_DEBUG_SCAN === "1") {
+      if (preloadArguments.includes("--cybersafe-debug-scan")) {
         console.log(`[ScanPreload] event type=${value?.type} isScanProgress=${isScanProgress} at=${new Date().toISOString()}`, value?.data ? { id: value.data.id, status: value.data.status, progress: value.data.progress } : null);
       }
       if (isScanProgress && !shuttingDown) {

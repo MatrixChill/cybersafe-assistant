@@ -80,15 +80,16 @@ export class NativeEngineBridge {
     // e os 4 candidatos de arvore de repo abaixo continuam a resolver.
     const resourcesPath = (process as NodeJS.Process & { resourcesPath?: string }).resourcesPath;
     // Check multiple potential locations for the binary
+    const binaryName = process.platform === "linux" ? "scan-engine" : "scan-engine.exe";
     const possiblePaths = [
-      ...(resourcesPath ? [path.resolve(resourcesPath, "scan-engine.exe")] : []),
+      ...(resourcesPath ? [path.resolve(resourcesPath, binaryName)] : []),
       // ELECTRON_RUN_AS_NODE pode não expor resourcesPath no serviço filho.
       // O executável anfitrião continua a ser o Electron da instalação.
-      path.resolve(path.dirname(process.execPath), "resources", "scan-engine.exe"),
-      path.resolve(__dirname, "../../native-engine/build/Release/scan-engine.exe"),
-      path.resolve(process.cwd(), 'packages/native-engine/build/Release/scan-engine.exe'),
-      path.resolve(process.cwd(), 'packages/native-engine/build/scan-engine.exe'),
-      path.resolve(process.cwd(), 'packages/native-engine/bin/scan-engine.exe'),
+      path.resolve(path.dirname(process.execPath), "resources", binaryName),
+      path.resolve(__dirname, "../../native-engine/build/Release", binaryName),
+      path.resolve(process.cwd(), "packages/native-engine/build/Release", binaryName),
+      path.resolve(process.cwd(), "packages/native-engine/build", binaryName),
+      path.resolve(process.cwd(), "packages/native-engine/bin", binaryName),
     ];
 
     for (const p of possiblePaths) {
@@ -111,7 +112,7 @@ export class NativeEngineBridge {
     this.checked = true;
 
     if (!fs.existsSync(this.binaryPath)) {
-      this._health = { status: "unavailable", detail: "scan-engine.exe não foi encontrado (não integrado)" };
+      this._health = { status: "unavailable", detail: "Motor nativo não foi encontrado (não integrado)" };
       return this._health;
     }
 
@@ -119,7 +120,7 @@ export class NativeEngineBridge {
     if (!evidence) {
       this._health = {
         status: "degraded",
-        detail: `scan-engine.exe presente; invocação real ainda não confirmada (${this.binaryPath})`,
+        detail: `Motor nativo presente; invocação real ainda não confirmada (${this.binaryPath})`,
       };
       return this._health;
     }
@@ -245,8 +246,8 @@ export class NativeEngineBridge {
     this.binaryPath = this.getBinaryPath();
     this.checked = true;
     if (!fs.existsSync(this.binaryPath)) {
-      this._health = { status: "unavailable", detail: "scan-engine.exe não foi encontrado (não integrado)" };
-      return { ok: false, result: null, error: "scan-engine.exe não foi encontrado", failure: "unavailable" };
+      this._health = { status: "unavailable", detail: "Motor nativo não foi encontrado (não integrado)" };
+      return { ok: false, result: null, error: "Motor nativo não foi encontrado", failure: "unavailable" };
     }
     if (options.signal?.aborted) {
       return { ok: false, result: null, error: "cancelled before start", failure: "cancelled", cancelled: true };

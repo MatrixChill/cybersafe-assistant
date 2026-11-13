@@ -1,0 +1,71 @@
+# Generated recipe inputs are filled by prepare-recipe.sh from a Git commit.
+pkgname=cybersafe-assistant-linux-lite
+pkgver=@VERSION@
+pkgrel=1
+pkgdesc='Academic desktop security and diagnostics for Linux (experimental)'
+arch=('x86_64')
+url='https://github.com/MatrixChill/cybersafe-assistant'
+license=('MIT')
+depends=('alsa-lib' 'at-spi2-core' 'gtk3' 'libcups' 'libdrm' 'libx11'
+         'libxcb' 'libxcomposite' 'libxdamage' 'libxext' 'libxfixes'
+         'libxkbcommon' 'libxrandr' 'libxshmfence' 'mesa' 'nspr' 'nss' 'nodejs' 'gcc-libs')
+makedepends=('nodejs-lts-krypton' 'npm' 'python' 'cmake')
+optdepends=('zenity: native graphical quick-status panel'
+            'clamav: signature scanner and database tooling'
+            'yara: rule scanner'
+            'libsecret: supported desktop credential storage')
+options=('!strip' '!debug')
+source=('cybersafe-source.tar.gz')
+sha256sums=('@SHA256@')
+
+build() {
+  cd "$srcdir/cybersafe"
+  npm ci
+  # npm 12 can suppress dependency lifecycle scripts.
+  if [[ ! -x node_modules/electron/dist/electron ]]; then
+    node node_modules/electron/install.js
+  fi
+  npm run build:all
+  cmake -S packages/native-engine -B packages/native-engine/build -DCMAKE_BUILD_TYPE=Release
+  cmake --build packages/native-engine/build
+  node scripts/linux-lite/package-linux.mjs --arch-stage
+}
+
+check() {
+  cd "$srcdir/cybersafe"
+  node --test scripts/test/linux-lite-package*.test.mjs scripts/test/linux-lite-arch-*.test.mjs
+  CYBERSAFE_TEST_LINUX_NATIVE=1 node --test packages/service/test/linux-native-arch.test.js
+  node --test packages/desktop/test/nigor-status-integration.test.mjs packages/desktop/test/nigor-actions.test.mjs
+}
+
+package() {
+  cd "$srcdir/cybersafe"
+  local target="$pkgdir/opt/cybersafe-assistant-linux-lite"
+  install -d "$target" "$pkgdir/usr/bin"
+  cp -a packages/desktop/release-linux/linux-unpacked/. "$target/"
+  install -Dm755 packages/native-engine/build/Release/scan-engine "$target/resources/scan-engine"
+  install -Dm644 scripts/linux-lite/arch/nigor-panel.mjs "$target/nigor-panel.mjs"
+  install -Dm755 scripts/linux-lite/arch/nigor-panel.sh "$pkgdir/usr/bin/cybersafe-nigor-panel"
+  install -Dm644 scripts/linux-lite/arch/nigor-status.mjs "$target/nigor-status.mjs"
+  install -Dm755 scripts/linux-lite/arch/nigor-launcher.sh "$pkgdir/usr/bin/cybersafe-nigor-status"
+  install -Dm644 scripts/linux-lite/arch/run-service.mjs "$target/run-service.mjs"
+  install -Dm644 scripts/linux-lite/arch/cybersafe-linux.service "$pkgdir/usr/lib/systemd/user/cybersafe-linux.service"
+  ln -s /opt/cybersafe-assistant-linux-lite/cybersafe-assistant-linux-lite \
+    "$pkgdir/usr/bin/cybersafe-assistant-linux-lite"
+  install -Dm644 scripts/linux-lite/arch/diagnose.mjs "$target/diagnose.mjs"
+  install -Dm644 scripts/linux-lite/arch/firewall.mjs "$target/firewall.mjs"
+  install -Dm755 scripts/linux-lite/arch/diagnose-launcher.sh "$pkgdir/usr/bin/cybersafe-linux-diagnose"
+  install -Dm644 scripts/linux-lite/arch/cybersafe-assistant-linux-lite.desktop \
+    "$pkgdir/usr/share/applications/cybersafe-assistant-linux-lite.desktop"
+  install -Dm644 assets/branding/generated/icon-256.png \
+    "$pkgdir/usr/share/icons/hicolor/256x256/apps/cybersafe-assistant-linux-lite.png"
+  ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron \
+    scripts/linux-lite/arch/collect-licenses.mjs "$target" \
+    "$pkgdir/usr/share/licenses/$pkgname" "$srcdir/cybersafe/LICENSE"
+  # Stylesheets incorporated by index.css are not JS modules in Vite's report.
+  for dependency in tailwindcss tw-animate-css; do
+    node -e 'const p=require("./node_modules/"+process.argv[1]+"/package.json");if(p.license!=="MIT")throw Error("CSS license requires review")' "$dependency"
+    install -Dm644 "node_modules/$dependency/LICENSE" \
+      "$pkgdir/usr/share/licenses/$pkgname/$dependency-LICENSE"
+  done
+}

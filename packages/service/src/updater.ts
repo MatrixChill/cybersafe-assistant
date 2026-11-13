@@ -1283,7 +1283,12 @@ export class DefinitionUpdater {
       child.on("close", (code) => {
         fecharGate();
         DefinitionUpdater.activeProcesses.delete(child);
-        if (code === 0) resolve();
+        // FreshClam 1.5.4 can exit zero during the CDN cooldown without
+        // checking any database. Preserve failure/backoff and do not advance
+        // the successful-check timestamp or invoke the reload hook.
+        if (code === 0 && /You are still on cool-down until after:/i.test(stdout + "\n" + stderr)) {
+          reject(new Error("FreshClam em período de espera do CDN; definições não verificadas nesta tentativa."));
+        } else if (code === 0) resolve();
         else {
           // O `--quiet` e omitido em diagnostico, por isso o stderr tem o erro
           // real. Traduzir em vez de despejar o bruto no log.

@@ -57,7 +57,8 @@ test('real bridge with binary absent propagates unavailable without spawning', a
   const { engine, file } = await fixture(t, null);
   NativeEngineBridge.scan = realScan;
   const exists = syncFs.existsSync;
-  syncFs.existsSync = p => String(p).endsWith('scan-engine.exe') ? false : exists(p);
+  const binary = process.platform === 'win32' ? 'scan-engine.exe' : 'scan-engine';
+  syncFs.existsSync = p => path.basename(String(p)) === binary ? false : exists(p);
   syncBuiltinESMExports();
   t.after(() => { syncFs.existsSync = exists; syncBuiltinESMExports(); });
   const result = (await engine.scanArtifact(file, 'system-scanner', { skipVirusTotal: true, readOnly: true })).results[0];

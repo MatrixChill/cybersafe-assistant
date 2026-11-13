@@ -11,3 +11,4 @@ vendor/yara/COPYING.txt -text
 packages/core/test/fixtures/yara-eicar-only-real-corpus.yar -text
 definitions/hashes/default.json -text
 packages/service/definitions/hashes/default.json -text
+scripts/linux-lite/arch/* text eol=lf
