@@ -9,6 +9,7 @@ ExecStart=/usr/bin/node /opt/cybersafe-assistant-linux-lite/run-service.mjs
 Restart=on-failure
 RestartPreventExitStatus=78
 RestartSec=5
+KillMode=mixed
 TimeoutStopSec=30
 UMask=0077
 NoNewPrivileges=yes
