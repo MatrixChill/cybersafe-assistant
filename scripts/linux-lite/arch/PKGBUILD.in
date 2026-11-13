@@ -8,8 +8,8 @@ url='https://github.com/MatrixChill/cybersafe-assistant'
 license=('LicenseRef-Pending')
 depends=('alsa-lib' 'at-spi2-core' 'gtk3' 'libcups' 'libdrm' 'libx11'
          'libxcb' 'libxcomposite' 'libxdamage' 'libxext' 'libxfixes'
-         'libxkbcommon' 'libxrandr' 'libxshmfence' 'mesa' 'nspr' 'nss')
-makedepends=('nodejs' 'npm' 'python')
+         'libxkbcommon' 'libxrandr' 'libxshmfence' 'mesa' 'nspr' 'nss' 'nodejs')
+makedepends=('npm' 'python')
 optdepends=('clamav: signature scanner and database tooling'
             'yara: rule scanner'
             'libsecret: supported desktop credential storage')
@@ -26,7 +26,7 @@ build() {
 
 check() {
   cd "$srcdir/cybersafe"
-  node --test scripts/test/linux-lite-package*.test.mjs
+  node --test scripts/test/linux-lite-package*.test.mjs scripts/test/linux-lite-arch-diagnose.test.mjs
 }
 
 package() {
@@ -36,6 +36,7 @@ package() {
   cp -a packages/desktop/release-linux/linux-unpacked/. "$target/"
   ln -s /opt/cybersafe-assistant-linux-lite/cybersafe-assistant-linux-lite \
     "$pkgdir/usr/bin/cybersafe-assistant-linux-lite"
+  install -Dm755 scripts/linux-lite/arch/diagnose.mjs "$pkgdir/usr/bin/cybersafe-linux-diagnose"
   install -Dm644 scripts/linux-lite/arch/cybersafe-assistant-linux-lite.desktop \
     "$pkgdir/usr/share/applications/cybersafe-assistant-linux-lite.desktop"
   install -Dm644 assets/branding/generated/icon-256.png \
