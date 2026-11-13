@@ -1,0 +1,17 @@
+[Unit]
+Description=CyberSafe Assistant Linux Lite user service
+StartLimitIntervalSec=60
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/bin/node /opt/cybersafe-assistant-linux-lite/run-service.mjs
+Restart=on-failure
+RestartPreventExitStatus=78
+RestartSec=5
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=yes
+
+[Install]
+WantedBy=default.target

@@ -26,7 +26,7 @@ build() {
 
 check() {
   cd "$srcdir/cybersafe"
-  node --test scripts/test/linux-lite-package*.test.mjs scripts/test/linux-lite-arch-diagnose.test.mjs
+  node --test scripts/test/linux-lite-package*.test.mjs scripts/test/linux-lite-arch-*.test.mjs
 }
 
 package() {
@@ -34,6 +34,8 @@ package() {
   local target="$pkgdir/opt/cybersafe-assistant-linux-lite"
   install -d "$target" "$pkgdir/usr/bin"
   cp -a packages/desktop/release-linux/linux-unpacked/. "$target/"
+  install -Dm644 scripts/linux-lite/arch/run-service.mjs "$target/run-service.mjs"
+  install -Dm644 scripts/linux-lite/arch/cybersafe-linux.service "$pkgdir/usr/lib/systemd/user/cybersafe-linux.service"
   ln -s /opt/cybersafe-assistant-linux-lite/cybersafe-assistant-linux-lite \
     "$pkgdir/usr/bin/cybersafe-assistant-linux-lite"
   install -Dm755 scripts/linux-lite/arch/diagnose.mjs "$pkgdir/usr/bin/cybersafe-linux-diagnose"
