@@ -101,10 +101,10 @@ Não altera firewalls, não inicia proteção automaticamente e não pede root.
 
 ## Pacote e validação de 13/11/2026
 
-Fontes do pacote: `fb64a3c7a15552ad21e0bc5ab5cfeb1f2a677b54`.
-Artefacto interno: `output/arch-candidate/cybersafe-assistant-linux-lite-0.2.4-1-x86_64.pkg.tar.zst`.
-Tamanho: **111692136 bytes**.
-SHA-256: `34e20fd0b326faa2d28a4785af02703c5cedbf60bda71e1d4927f1de003388b8`.
+Fontes do pacote de encerramento: `8a05d7b0637d9fb6fc66e4716c03635e38c51877`.
+Artefacto interno: `output/arch-closing-8a05d7b/cybersafe-assistant-linux-lite-0.2.4-1-x86_64.pkg.tar.zst`.
+Tamanho: **111698686 bytes**.
+SHA-256: `b4ee707908fdd8e54851879f590ae3303f9763073993ad88db4e21908e53fed5`.
 `SOURCE-IDENTITY`, receita, SHA256SUMS e log de build acompanham o pacote.
 Não é um pacote publicado, assinado ou aprovado para distribuição geral.
 
@@ -124,7 +124,7 @@ Não é um pacote publicado, assinado ou aprovado para distribuição geral.
   sobrescrita no restauro, preservação do substituto e restauro posterior com
   SHA-256 e modo POSIX conferidos. Resultado positivo sintético sobre ficheiro
   benigno; não é deteção de malware nem prova do percurso completo pela UI.
-- Regressão desktop em Arch: **690 passes, seis skips, zero falhas**.
+- Regressão desktop final em Arch: **692 passes, seis skips, zero falhas**.
 - Regressão ampla inicial do serviço em Arch: **892 passes, 130 falhas, um skip**.
   Não está aprovada. Entre as causas comprovadas estão fixtures de caminhos
   Windows, uso do provider Windows em testes de cache e interferência de bases
@@ -133,7 +133,16 @@ Não é um pacote publicado, assinado ou aprovado para distribuição geral.
   corrigidas de cache, binário ausente e walk passaram em 39 testes dirigidos.
   As restantes falhas precisam de triagem; não foram apagadas ou desativadas.
 - A correção do cooldown e as regressões do gate/recarga passaram em **51 testes**.
-- CI Windows das fontes do pacote: dois jobs `verify` aprovados.
+- CI Linux adicionada: build, ELF, IPC e regressões aprovados. A CI Windows
+  revelou uma corrida de criação da credencial: o leitor podia apanhar o ficheiro
+  exclusivo ainda vazio. Foi corrigida com espera limitada a 100 ms apenas nesse
+  estado, sem rotação ou sobrescrita. Os 16 testes de credencial passaram,
+  incluindo dois processos concorrentes e recusa de ficheiro permanentemente vazio.
+  Nas fontes finais `8a05d7b`, os jobs Linux e Windows passaram nas duas runs
+  remotas (push e PR): `43509183249` e `43509191170`.
+- O pacote final foi instalado no laboratório: 173 entradas verificadas pelo
+  pacman; SHA-256 de 131 ficheiros regulares em `PAYLOAD-SHA256.json`, incluindo
+  ELF e app.asar, sem executáveis Windows. Serviço, motores e painel responderam.
 
 O ensaio de quarentena é reproduzível apenas num laboratório descartável:
 
@@ -169,3 +178,24 @@ utilizador, percurso UI/IPC da quarentena/restauro e fornecedores MATRIX
 online continuam por validar. O painel não substitui uma extensão do shell.
 O updater Windows continua indisponível no Linux. A licença global permanece
 pendente. A branch e o PR #5 continuam experimentais e sem merge.
+
+## Decisão de distribuição desta fase
+
+**Sem publicação pública do binário nesta sessão.** O gate pedido para as
+permissões de distribuição não ficou fechado: não há texto global aprovado e o
+artefacto declara `LicenseRef-Pending`. Os avisos históricos dos motores estão
+orientados ao payload Windows e não constituem, por si, o inventário completo do
+Linux, incluindo o renderer incorporado. Não foi inventada uma licença MIT.
+
+O inventário técnico local identificou 157 pacotes de runtime no ASAR e preservou
+os avisos encontrados, além de `LICENSE.electron.txt` e `LICENSES.chromium.html`.
+Isso não é uma aprovação jurídica nem uma verificação integral das obrigações.
+A aprovação do titular e o fecho dos avisos aplicáveis são necessários para dar
+o gate como satisfeito. Código e testes ficam no PR; pacote, receita, proveniência,
+hashes, logs e notas de pré-release ficam preservados localmente.
+
+As falhas restantes da regressão ampla impedem declarar a edição pronta para
+produção. Parte foi comprovadamente atribuída a fixtures/ambiente; o restante
+continua por triar. Não houve falha crítica de integridade, arranque ou perda de
+dados nos ensaios instalados executados. Esses resultados não autorizam prometer
+proteção integral ou estabilidade de todos os percursos.
