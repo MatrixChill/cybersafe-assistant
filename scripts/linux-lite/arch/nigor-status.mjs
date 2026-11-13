@@ -12,7 +12,7 @@ try {
   const token = readToken(join(config, 'cybersafe-assistant-linux-lite'), process.getuid());
   const app = dirname(fileURLToPath(import.meta.url));
   const entry = join(app, 'resources/app.asar/dist/nigor-client.js');
-  const client = spawn(join(app, 'cybersafe-assistant-linux-lite'), [entry], {
+  const client = spawn(join(app, 'cybersafe-assistant-linux-lite'), [entry, ...process.argv.slice(2)], {
     stdio: 'inherit',
     env: {
       PATH: '/usr/bin',
