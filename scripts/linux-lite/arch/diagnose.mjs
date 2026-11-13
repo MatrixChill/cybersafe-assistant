@@ -2,6 +2,7 @@
 import { accessSync, constants, statSync } from 'node:fs';
 import { delimiter, isAbsolute, join, resolve } from 'node:path';
 import { pathToFileURL } from 'node:url';
+import { probeFirewall } from './firewall.mjs';
 
 export function diagnose({ platform, uid, session, hasCommand }) {
   return {
@@ -29,7 +30,9 @@ function hasCommand(name) {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
   const session = process.env.WAYLAND_DISPLAY ? 'wayland' : process.env.DISPLAY ? 'x11' : null;
-  console.log(JSON.stringify(diagnose({
+  const result = diagnose({
     platform: process.platform, uid: process.getuid?.(), session, hasCommand,
-  })));
+  });
+  if (process.platform === 'linux') result.firewall = await probeFirewall();
+  console.log(JSON.stringify(result));
 }

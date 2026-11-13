@@ -38,7 +38,9 @@ package() {
   install -Dm644 scripts/linux-lite/arch/cybersafe-linux.service "$pkgdir/usr/lib/systemd/user/cybersafe-linux.service"
   ln -s /opt/cybersafe-assistant-linux-lite/cybersafe-assistant-linux-lite \
     "$pkgdir/usr/bin/cybersafe-assistant-linux-lite"
-  install -Dm755 scripts/linux-lite/arch/diagnose.mjs "$pkgdir/usr/bin/cybersafe-linux-diagnose"
+  install -Dm644 scripts/linux-lite/arch/diagnose.mjs "$target/diagnose.mjs"
+  install -Dm644 scripts/linux-lite/arch/firewall.mjs "$target/firewall.mjs"
+  install -Dm755 scripts/linux-lite/arch/diagnose-launcher.sh "$pkgdir/usr/bin/cybersafe-linux-diagnose"
   install -Dm644 scripts/linux-lite/arch/cybersafe-assistant-linux-lite.desktop \
     "$pkgdir/usr/share/applications/cybersafe-assistant-linux-lite.desktop"
   install -Dm644 assets/branding/generated/icon-256.png \
