@@ -28,12 +28,12 @@ A receita contém um SHA-256 do arquivo de fontes e grava o commit em SOURCE-IDE
 
 | Área | Estado desta entrega |
 |---|---|
-| Receita, checksum de fontes e preparação Electron | Implementado; sintaxe/arquivo e build de diretório validados em Ubuntu WSL2, não em Arch |
+| Receita, checksum de fontes e preparação Electron | Construídos com makepkg sem privilégios em Arch/WSL2; Node 24 LTS e Electron 33.4.11 |
 | Pacote .pkg.tar.zst, instalação e renderer X11 | Validados em Arch/WSL2 com Xvfb. Sessão Nigor e Wayland nativo pendentes |
-| Scanner, ClamAV/YARA, HashDB, processos, volumes, quarentena, MATRIX | Percursos Linux Lite reutilizados; consultar evidências históricas nesta pasta. Sem novo ensaio instalado; C++ nativo/ELF não comprovado |
+| Scanner, ClamAV/YARA, HashDB, processos, volumes, quarentena, MATRIX | Scanner benigno, histórico, processos e C++ nativo executados no pacote Arch instalado. USB físico e fornecedores MATRIX continuam por validar |
 | Monitorização | Parcial; observação não prova deteção ou prevenção. Sem novo bloqueio preventivo |
-| Serviço systemd e integração Nigor | Arranque, reinício, recuperação após falha e paragem verificados em Arch/WSL2. Cliente JSON e painel de texto verificados com dados reais |
-| Firewall Linux | Diagnóstico de leitura disponível no CLI. Integração visual pendente |
+| Serviço systemd e integração Nigor | Arranque, reinício, recuperação após falha e paragem verificados em Arch/WSL2. Cliente JSON, ações consentidas e painel gráfico implementados |
+| Firewall Linux | Diagnóstico de leitura no CLI e no painel rápido. Integração nos cartões da aplicação principal pendente |
 
 No Ubuntu 26.04/WSL2, com Node 22.23.4 e fontes de a75fc29, passaram npm ci, npm run build:all, o gate SQLite/Electron ABI 130 e o alvo --arch-stage. Os guardas verificaram o renderer 0.2.4, entrada da API, executável ELF e app.asar. Isso não prova arranque gráfico ou funcionamento dos motores. Em Windows/Node 24.13.0 passaram 15 testes dirigidos de packaging, diagnóstico e bindings Linux/Windows.
 
@@ -69,4 +69,89 @@ O pacote de ensaio `cybersafe-assistant-linux-lite-0.2.4-1-x86_64.pkg.tar.zst` f
 - O motor C++ analisou uma fixture e devolveu o SHA-256 esperado. ClamAV e YARA detetaram fixtures benignas com definições próprias de teste. ClamAV apareceu degradado no serviço instalado. Uma análise do serviço de um ficheiro registou 1/1 analisado, 1 inconclusivo e 0 ameaças.
 - Os testes dirigidos Arch/WSL2 tiveram 123 passes e 1 TODO no core e 82 passes no serviço. Incluíram regressões de POSIX, USB, quarentena, fila em tempo real, histórico e HashDB. USB físico, Wayland nativo, sessão Nigor e os fornecedores MATRIX continuam por validar.
 
-O contrato JSON v1 contém `serviceRunning`, `protection`, `engines`, `latestScan`, `history`, `alerts` e `metrics`. Use `null` como estado sem leitura. As listas têm no máximo cinco entradas por consulta e omitem caminhos e mensagens livres. O contrato é de leitura. Integração de ações de análise, eventos contínuos e widgets do shell continua pendente.
+O contrato JSON v1 de estado contém `serviceRunning`, `protection`, `engines`, `latestScan`, `history`, `alerts` e `metrics`. Use `null` como estado sem leitura. Histórico e alertas têm no máximo cinco entradas e omitem caminhos e mensagens livres. As operações consentidas e a consulta de processos estão descritas abaixo. Eventos contínuos e integração específica do shell Nigor continuam pendentes.
+
+## Cliente e painel funcionais
+
+O transporte é o socket Unix autenticado existente, não um novo servidor HTTP.
+A credencial é lida do perfil privado e nunca é passada pela linha de comando.
+Os comandos seguintes executam-se como o mesmo utilizador do serviço:
+
+```bash
+cybersafe-nigor-status
+cybersafe-nigor-status processes
+cybersafe-nigor-panel --dialog
+cybersafe-nigor-status scan --consent /caminho/absoluto/para/pasta-de-teste
+cybersafe-nigor-status cancel --consent ID_DEVOLVIDO_PELO_SCAN
+```
+
+`processes` devolve no máximo 50 linhas com PID, nome limitado, CPU e memória,
+total e frescura fornecida pelo serviço. Não exporta comandos, caminhos ou
+nomes de contas. Cache após falha continua identificado como cache/falha.
+Os valores desconhecidos permanecem `null`.
+
+As ações reutilizam `scan.start` e `scan.cancel`. Sem `--consent`, sem destino
+absoluto, perante symlink ou com autenticação errada, o pedido é recusado.
+Aceitação do pedido não significa análise concluída: consulte o histórico.
+
+O painel gráfico usa Zenity, opcional no pacote, e contém Atualizar, Abrir
+CyberSafe e Fechar. Também abre com o serviço parado, mostrando indisponível
+sem inventar saúde. A entrada desktop inclui a ação Estado de proteção.
+Não altera firewalls, não inicia proteção automaticamente e não pede root.
+
+## Pacote e validação de 13/11/2026
+
+Fontes do pacote: `fb64a3c7a15552ad21e0bc5ab5cfeb1f2a677b54`.
+Artefacto interno: `output/arch-candidate/cybersafe-assistant-linux-lite-0.2.4-1-x86_64.pkg.tar.zst`.
+Tamanho: **111692136 bytes**.
+SHA-256: `34e20fd0b326faa2d28a4785af02703c5cedbf60bda71e1d4927f1de003388b8`.
+`SOURCE-IDENTITY`, receita, SHA256SUMS e log de build acompanham o pacote.
+Não é um pacote publicado, assinado ou aprovado para distribuição geral.
+
+- Build completo dos oito workspaces, typecheck desktop e makepkg/check passaram.
+- Instalação no laboratório Arch/WSL2; `pacman -Qkk`: 173 ficheiros, zero alterações.
+- Aplicação instalada em X11/Xvfb, sem desativar o sandbox: login real com conta
+  sintética, Dashboard, histórico, bridge e API com SQLite pronto verificados.
+- Consulta instalada de processos: dados reais e estado `ok`. Análise pelo
+  cliente instalado: 1/1 ficheiro benigno, zero falhas, zero inconclusivos.
+- O renderer reutilizou o serviço autenticado. Após terminar esse processo
+  gráfico de ensaio por SIGTERM, a unidade persistente continuou ativa.
+  Isto não substitui a aceitação manual do menu da tray num desktop Nigor.
+- Depois de parar aplicação e serviço, `quick_check` read-only aprovou as quatro
+  bases SQLite encontradas no perfil do laboratório. Não são as 13 bases Windows.
+- Painel Zenity abriu e fechou em X11 com serviço disponível e indisponível.
+- Regressão desktop em Arch: **690 passes, seis skips, zero falhas**.
+- Regressão ampla inicial do serviço em Arch: **892 passes, 130 falhas, um skip**.
+  Não está aprovada. Entre as causas comprovadas estão fixtures de caminhos
+  Windows, uso do provider Windows em testes de cache e interferência de bases
+  ClamAV do host. A incompatibilidade de sintaxe TypeScript introduzida no
+  logger foi corrigida: os nove testes de autenticação passaram. As fixtures
+  corrigidas de cache, binário ausente e walk passaram em 39 testes dirigidos.
+  As restantes falhas precisam de triagem; não foram apagadas ou desativadas.
+- A correção do cooldown e as regressões do gate/recarga passaram em **51 testes**.
+- CI Windows das fontes do pacote: dois jobs `verify` aprovados.
+
+### ClamAV: diagnóstico e limite do ensaio
+
+O perfil de ensaio tinha apenas `bytecode.cvd`; por isso o serviço reportou
+degradado por falta da base diária. FreshClam confirmou cooldown do CDN. Não
+foram repetidos downloads nem alterado o controlo do fornecedor. Bases oficiais
+já obtidas e verificadas em `/var/lib/clamav` foram copiadas e comparadas byte a
+byte no perfil descartável; depois da prova de carga o ClamAV apareceu ativo.
+Isso não demonstra que a atualização automática online tenha sido concluída.
+
+Foi reproduzido um defeito: FreshClam 1.5.4 pode sair com código zero durante o
+cooldown sem verificar definições. O serviço agora recusa esse resultado,
+preservando erro/backoff em vez de avançar a confirmação. O teste cobre stdout,
+stderr e um aviso antigo seguido de uma verificação bem-sucedida.
+
+As regras YARA e HashDB têm cobertura limitada; carregar motores não comprova
+proteção integral. Não houve novo ensaio EICAR nesta sessão.
+
+### Pendências de aceitação
+
+Sessão Nigor real, Wayland nativo, USB físico, notificações e tray na sessão do
+utilizador, quarentena/restauro instalados com fixtures e fornecedores MATRIX
+online continuam por validar. O painel não substitui uma extensão do shell.
+O updater Windows continua indisponível no Linux. A licença global permanece
+pendente. A branch e o PR #5 continuam experimentais e sem merge.
