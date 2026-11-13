@@ -22,7 +22,7 @@ export async function readNigorStatus(pipeName: string | undefined, token: strin
 
 if (process.env.CYBERSAFE_NIGOR_STATUS === "1") {
   const token = process.env.CYBERSAFE_PIPE_TOKEN;
-  if (process.platform !== "linux" || !/^[a-f0-9]{64}$/.test(token ?? "")) {
+  if (process.platform !== "linux" || !token || !/^[a-f0-9]{64}$/.test(token)) {
     process.exitCode = 2;
   } else {
     readNigorStatus(undefined, token).then(
