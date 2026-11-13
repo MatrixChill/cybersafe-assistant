@@ -37,3 +37,23 @@ A receita contém um SHA-256 do arquivo de fontes e grava o commit em SOURCE-IDE
 No Ubuntu 26.04/WSL2, com Node 22.23.4 e fontes de a75fc29, passaram npm ci, npm run build:all, o gate SQLite/Electron ABI 130 e o alvo --arch-stage. Os guardas verificaram o renderer 0.2.4, entrada da API, executável ELF e app.asar. Isso não prova arranque gráfico ou funcionamento dos motores. Em Windows/Node 24.13.0 passaram 15 testes dirigidos de packaging, diagnóstico e bindings Linux/Windows.
 
 O próximo ensaio precisa de Arch x86_64 descartável com X11 ou Wayland: instalar, abrir sem elevar, conferir renderer/login/SQLite, analisar uma pasta de texto benigno, confirmar histórico e estado dos motores, testar quarentena/restauro com fixtures, observar criação de ficheiros, fechar e verificar processos. Só depois rever integração e distribuição Nigor.
+
+## Continuação: serviço de utilizador, sandbox e firewall
+
+O pacote inclui `cybersafe-linux.service` como unidade opcional de utilizador.
+Depois de instalar num ambiente de teste, abrir e fechar normalmente a aplicação
+para gerar a credencial privada. Com a aplicação fechada, executar
+`systemctl --user daemon-reload`, `systemctl --user start cybersafe-linux.service`
+e consultar `journalctl --user -u cybersafe-linux.service`. Reabrir a aplicação
+e verificar a reutilização autenticada do serviço. Para reverter, parar e,
+se tiver sido ativada no arranque, desativar a unidade. O pacote não a ativa.
+O ciclo de vida instalado continua por validar.
+
+O renderer pede sandbox no Linux e recebe a configuração do preload por
+argumentos explícitos. O teste de fonte não substitui um arranque Electron real.
+
+O JSON de `cybersafe-linux-diagnose` inclui estados independentes de firewalld,
+UFW e nftables. Não eleva permissões, não publica regras nem modifica o sistema.
+Um backend ausente ou sem permissão não significa proteção desativada. O ensaio
+WSL real encontrou os três comandos ausentes; os estados conhecidos e a recusa
+de permissão foram testados com respostas controladas.
