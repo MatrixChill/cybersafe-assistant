@@ -452,6 +452,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 let isServiceRunning = false;
 let serviceProcess: ChildProcess | null = null;
+let externalLinuxService = false;
 let statusInterval: ReturnType<typeof setInterval> | null = null;
 
 // API local empacotada (P0 — instalador). É AUXILIAR: se falhar, a proteção, a
@@ -556,6 +557,7 @@ async function startServiceProcess(): Promise<ServiceStartOutcome> {
     log: (message) => console.log(message),
   });
   if (reuse.status === "reused") {
+    externalLinuxService = process.platform === "linux";
     console.log("[Electron] Serviço existente autenticado.");
     return { status: "connected" };
   }
@@ -979,9 +981,13 @@ async function quitCyberSafe() {
   tray?.setToolTip("Encerrando CyberSafe...");
 
   console.log("[Electron] Electron shutdown requested");
-  console.log("[Electron] Enviando comando de shutdown ao serviço...");
-  await client.requestShutdown().catch((err) =>
-    console.error("[Electron] Shutdown request falhou:", err));
+  if (externalLinuxService) {
+    client.disconnect();
+  } else {
+    console.log("[Electron] Enviando comando de shutdown ao serviço...");
+    await client.requestShutdown().catch((err) =>
+      console.error("[Electron] Shutdown request falhou:", err));
+  }
   console.log("[Electron] Ligação ao serviço fechada; a terminar o Electron.");
   logExitEvent("quit-app-quit");
 
