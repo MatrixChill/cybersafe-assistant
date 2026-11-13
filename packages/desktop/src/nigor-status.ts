@@ -32,6 +32,32 @@ function percent(value: number | null | undefined, status: string | undefined) {
     && value >= 0 && value <= 100 ? value : null;
 }
 
+/** Bounded read-only process view for the authenticated local shell client.
+ * Keep producer freshness: cached rows after failure are never called current.
+ * Command lines, executable paths and account names stay inside the service.
+ */
+export function projectNigorProcesses(result: ServiceResponseMap["processes.list"]) {
+  const nonnegative = (value: number) => Number.isFinite(value) && value >= 0 ? value : null;
+  const epoch = (value: number | null) => {
+    if (value === null || !Number.isFinite(value)) return null;
+    const date = new Date(value);
+    return Number.isFinite(date.getTime()) ? date.toISOString() : null;
+  };
+  return {
+    version: 1,
+    state: known(result.truth.state, new Set(["never", "in-progress", "ok", "failed", "unreported"])),
+    servedFrom: known(result.truth.servedFrom, new Set(["snapshot", "cache"])),
+    enumeratedAt: epoch(result.truth.enumeratedAt),
+    total: result.processes.length,
+    processes: result.processes.slice(0, 50).map((process) => ({
+      pid: count(process.pid),
+      name: process.name.replace(/[\u0000-\u001f\u007f]/g, " ").slice(0, 128),
+      cpuPercent: nonnegative(process.cpu),
+      memoryMb: nonnegative(process.memoryMb),
+    })),
+  };
+}
+
 export function projectNigorStatus({ protection, scans, events, hardware }: Snapshot) {
   const { engine } = protection;
   const history = scans.entries.slice(0, 5).map((scan) => ({

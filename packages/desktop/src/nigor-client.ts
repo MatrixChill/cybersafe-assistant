@@ -1,7 +1,7 @@
 import { lstat } from "node:fs/promises";
 import { isAbsolute } from "node:path";
 import { ServiceClient } from "./service-client";
-import { projectNigorStatus } from "./nigor-status";
+import { projectNigorStatus, projectNigorProcesses } from "./nigor-status";
 
 async function withClient<T>(
   pipeName: string | undefined, token: string,
@@ -29,6 +29,11 @@ export async function readNigorStatus(pipeName: string | undefined, token: strin
     ]);
     return projectNigorStatus({ protection, scans, events, hardware });
   }, timeoutMs);
+}
+
+export async function readNigorProcesses(pipeName: string | undefined, token: string, timeoutMs = 5000) {
+  return withClient(pipeName, token, async (client) =>
+    projectNigorProcesses(await client.request("processes.list", undefined)), timeoutMs);
 }
 
 export async function startNigorScan(
@@ -68,6 +73,7 @@ if (process.env.CYBERSAFE_NIGOR_STATUS === "1") {
     const args = process.argv.slice(2);
     async function runCommand() {
       if (args.length === 0) return readNigorStatus(undefined, token!);
+      if (args.length === 1 && args[0] === "processes") return readNigorProcesses(undefined, token!);
       if (args.length !== 3 || args[1] !== "--consent") throw new Error("Argumentos inválidos.");
       switch (args[0]) {
         case "scan": return startNigorScan(undefined, token!, args[2], true);
