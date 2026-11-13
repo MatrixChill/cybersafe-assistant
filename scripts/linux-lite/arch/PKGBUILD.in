@@ -34,6 +34,8 @@ package() {
   local target="$pkgdir/opt/cybersafe-assistant-linux-lite"
   install -d "$target" "$pkgdir/usr/bin"
   cp -a packages/desktop/release-linux/linux-unpacked/. "$target/"
+  install -Dm644 scripts/linux-lite/arch/nigor-status.mjs "$target/nigor-status.mjs"
+  install -Dm755 scripts/linux-lite/arch/nigor-launcher.sh "$pkgdir/usr/bin/cybersafe-nigor-status"
   install -Dm644 scripts/linux-lite/arch/run-service.mjs "$target/run-service.mjs"
   install -Dm644 scripts/linux-lite/arch/cybersafe-linux.service "$pkgdir/usr/lib/systemd/user/cybersafe-linux.service"
   ln -s /opt/cybersafe-assistant-linux-lite/cybersafe-assistant-linux-lite \
