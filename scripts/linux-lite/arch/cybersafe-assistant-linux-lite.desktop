@@ -6,3 +6,10 @@ Exec=cybersafe-assistant-linux-lite
 Icon=cybersafe-assistant-linux-lite
 Terminal=false
 Categories=System;Security;
+
+Actions=QuickStatus;
+
+[Desktop Action QuickStatus]
+Name=Estado de proteção
+Exec=cybersafe-nigor-panel --dialog
+Icon=cybersafe-assistant-linux-lite

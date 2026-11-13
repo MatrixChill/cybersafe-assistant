@@ -10,7 +10,8 @@ depends=('alsa-lib' 'at-spi2-core' 'gtk3' 'libcups' 'libdrm' 'libx11'
          'libxcb' 'libxcomposite' 'libxdamage' 'libxext' 'libxfixes'
          'libxkbcommon' 'libxrandr' 'libxshmfence' 'mesa' 'nspr' 'nss' 'nodejs' 'gcc-libs')
 makedepends=('nodejs-lts-krypton' 'npm' 'python' 'cmake')
-optdepends=('clamav: signature scanner and database tooling'
+optdepends=('zenity: native graphical quick-status panel'
+            'clamav: signature scanner and database tooling'
             'yara: rule scanner'
             'libsecret: supported desktop credential storage')
 options=('!strip' '!debug')
@@ -34,7 +35,7 @@ check() {
   cd "$srcdir/cybersafe"
   node --test scripts/test/linux-lite-package*.test.mjs scripts/test/linux-lite-arch-*.test.mjs
   CYBERSAFE_TEST_LINUX_NATIVE=1 node --test packages/service/test/linux-native-arch.test.js
-  node --test packages/desktop/test/nigor-status-integration.test.mjs
+  node --test packages/desktop/test/nigor-status-integration.test.mjs packages/desktop/test/nigor-actions.test.mjs
 }
 
 package() {
