@@ -24,7 +24,7 @@ endif()
 
 if(CYBERSAFE_NIGOR_REFERENCE)
   find_package(PkgConfig REQUIRED)
-  pkg_check_modules(XLIBS REQUIRED IMPORTED_TARGET x11 xft)
+  pkg_check_modules(XLIBS REQUIRED IMPORTED_TARGET x11 xft zlib)
   add_executable(cybersafe-security-center reference/security_center.cpp)
   target_link_libraries(cybersafe-security-center PRIVATE cybersafe_nigor PkgConfig::XLIBS)
   target_compile_options(cybersafe-security-center PRIVATE -Wall -Wextra)
