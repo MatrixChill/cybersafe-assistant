@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { createHash, generateKeyPairSync, sign } from 'node:crypto';
+import { createHash, createPublicKey, generateKeyPairSync, sign } from 'node:crypto';
 import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -67,8 +67,11 @@ test('sem chave pública configurada o canal fica not-configured e nada é pedid
   const r = await checkForUpdate({ installed: v('0.2.4-1'), channel: 'experimental', config: { manifestBase: BASE, publicKeys: [] }, fetchImpl: impl });
   assert.equal(r.state, 'not-configured');
   assert.equal(calls.length, 0);
-  // O ficheiro incorporado deste repositório ainda não tem chave: falha fechada.
-  assert.equal(loadChannelConfig().publicKeys.length, 0);
+  // A chave incorporada no pacote é exatamente uma chave pública Ed25519 (nunca privada).
+  const embedded = loadChannelConfig();
+  assert.equal(embedded.publicKeys.length, 1);
+  assert.doesNotMatch(embedded.publicKeys[0], /PRIVATE/);
+  assert.equal(createPublicKey(embedded.publicKeys[0]).asymmetricKeyType, 'ed25519');
 });
 
 test('manifesto assinado com versão maior → available, com notas, tamanho e assinatura verificada', async () => {
