@@ -53,7 +53,7 @@ Regras:
 
 ## Atualizações (`cybersafe-linux-update check`)
 
-`state`: `not-configured` (canal sem chave pública no pacote — estado atual) ·
+`state`: `not-configured` (pacote sem chave pública) · `no-release` (sem versões no canal) ·
 `up-to-date` · `available` (com `available.version`, `size`, `notes`,
 `signature: "ed25519-verified"`) · `downgrade-refused` · `invalid` · `error`.
 

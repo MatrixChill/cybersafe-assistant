@@ -54,6 +54,7 @@ import {
 } from "./updater/bridge.js";
 import { runAutomaticCheck, startAutomaticChecks } from "./updater/automatic-checks.js";
 import { createProductionUpdater } from "./updater/production.js";
+import { runLinuxUpdate } from "./linux-updates.js";
 import type { Updater } from "./updater/updater.js";
 import type { UpdaterResult } from "./updater/index.js";
 import { PIPE_NAME, CLAMAV_BINARY_ENV, stripDevIsolationEnv } from "@cybersafe/core";
@@ -1546,6 +1547,11 @@ function registerIpc(
   };
   handle("app:update-get-snapshot", async () =>
     appUpdater ? toAppUpdateSnapshot(appUpdater.snapshotCopy()) : failureSnapshot("unconfigured", updateVersion(), "updater não inicializado"));
+  // Atualizações Linux (pacote Arch): canal próprio, nunca o updater Windows.
+  handle("linux-update:run", (_event, command: unknown, consent: unknown) =>
+    command === "check" || command === "download" || command === "install"
+      ? runLinuxUpdate(command, consent === true)
+      : Promise.resolve({ ok: false, result: null, error: "invalid-response" }));
   handle("app:update-check", () => withUpdater((u) => u.check()));
   handle("app:update-download", () => withUpdater((u) => u.download()));
   handle("app:update-reveal", () => withUpdater((u) => u.revealVerifiedDownload((file) => shell.showItemInFolder(file))));

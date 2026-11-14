@@ -96,9 +96,9 @@ async function fetchBytes(fetchImpl, url, limit) {
 
 /**
  * Consulta o canal. Devolve sempre um objeto com `state`:
- *   not-configured | up-to-date | available | downgrade-refused | invalid | error
+ *   not-configured | no-release | up-to-date | available | downgrade-refused | invalid | error
  */
-export async function checkForUpdate({ installed, channel = 'stable', config, fetchImpl = fetch, now = () => new Date() }) {
+export async function checkForUpdate({ installed, channel = 'experimental', config, fetchImpl = fetch, now = () => new Date() }) {
   const checkedAt = now().toISOString();
   const base = { schema: 1, channel, checkedAt, installed: installed ? formatVersion(installed) : null };
   if (!config.manifestBase || config.publicKeys.length === 0) {
@@ -107,7 +107,13 @@ export async function checkForUpdate({ installed, channel = 'stable', config, fe
   if (channel !== 'stable' && channel !== 'experimental') return { ...base, state: 'invalid', reason: 'channel' };
   try {
     const url = `${config.manifestBase.replace(/\/$/, '')}/manifest-${channel}.json`;
-    const bytes = await fetchBytes(fetchImpl, url, MAX_MANIFEST_BYTES);
+    let bytes;
+    try {
+      bytes = await fetchBytes(fetchImpl, url, MAX_MANIFEST_BYTES);
+    } catch (error) {
+      if (error?.message === 'HTTP 404') return { ...base, state: 'no-release', message: 'Ainda não há versões publicadas neste canal.' };
+      throw error;
+    }
     const sig = (await fetchBytes(fetchImpl, `${url}.sig`, 1024)).toString('utf8');
     if (!verifyManifestSignature(bytes, sig, config.publicKeys)) {
       return { ...base, state: 'invalid', reason: 'signature', message: 'Assinatura do manifesto inválida; a atualização foi ignorada.' };
@@ -202,9 +208,10 @@ export function paths(env = process.env) {
 export function readPrefs(file) {
   try {
     const p = JSON.parse(readFileSync(file, 'utf8'));
-    return { channel: p.channel === 'experimental' ? 'experimental' : 'stable', autoDownload: p.autoDownload === true };
+    return { channel: p.channel === 'stable' ? 'stable' : 'experimental', autoDownload: p.autoDownload === true };
   } catch {
-    return { channel: 'stable', autoDownload: false };
+    // A edição Linux só tem pré-releases: o canal por omissão é o experimental.
+    return { channel: 'experimental', autoDownload: false };
   }
 }
 

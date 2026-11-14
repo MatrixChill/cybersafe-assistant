@@ -179,6 +179,14 @@ contextBridge.exposeInMainWorld("electronAPI", {
   // Updater da aplicação — superfície restrita (AppUpdateBridge). Sem URLs/caminhos
   // vindos do renderer; `install` exige confirmation+expectedVersion; `onState`
   // devolve unsubscribe.
+  // Só em Linux: o renderer usa a presença deste objeto para mostrar a secção Linux.
+  ...(process.platform === "linux" ? {
+    linuxUpdate: {
+      check: () => invoke("linux-update:run", "check", false),
+      download: () => invoke("linux-update:run", "download", false),
+      install: (consent: boolean) => invoke("linux-update:run", "install", consent === true),
+    },
+  } : {}),
   appUpdate: {
     getSnapshot: () => invoke("app:update-get-snapshot"),
     check: () => invoke("app:update-check"),

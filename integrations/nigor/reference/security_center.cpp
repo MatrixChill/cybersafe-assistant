@@ -347,6 +347,7 @@ class SecurityCenter {
     const auto& u = *update_->value;
     const char* state = u.state == UpdateState::Available ? "Nova versão disponível" : u.state == UpdateState::UpToDate ? "Atualizado"
                       : u.state == UpdateState::NotConfigured ? "Canal de atualizações ainda não configurado neste pacote"
+                      : u.state == UpdateState::NoRelease ? "Ainda não há versões publicadas neste canal"
                       : u.state == UpdateState::DowngradeRefused ? "Versão do canal é anterior à instalada (recusada)"
                       : u.state == UpdateState::Invalid ? "Manifesto inválido ou assinatura recusada" : u.state == UpdateState::Error ? "Erro ao consultar o canal" : "Estado desconhecido";
     text(x0, y, state, u.state == UpdateState::Available ? theme_.accent : theme_.fg, bold_);

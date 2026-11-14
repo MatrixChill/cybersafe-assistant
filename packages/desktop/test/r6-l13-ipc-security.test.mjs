@@ -103,7 +103,10 @@ for (const packaged of [false, true]) {
     //   leitura sem efeito; revisado a 2026-11-01 junto com o contrato `definitions.status`).
     // Six additional guarded channels: three AI credentials and three protected termination.
     // app:update-set-preview changes the persisted channel preference and must use the same sender guard.
-    assert.equal(f.handlers.size, 69, "audit covers every currently registered channel; review any surface change");
+    // + linux-update:run (atualizações do pacote Arch, 14/11): argumentos fixos
+    //   check|download|install, install só com consentimento; mesma guarda de emissor.
+    assert.equal(f.handlers.size, 70, "audit covers every currently registered channel; review any surface change");
+    assert.ok(f.handlers.has("linux-update:run"));
     assert.ok(f.handlers.has("app:update-set-preview"));
     assert.ok(f.handlers.has("app:update-reveal")); // folder reveal: same trusted document guard
     assert.ok(f.handlers.has("service:usb-scan"));

@@ -214,7 +214,7 @@ struct Status {
   std::optional<double> cpuPercent, ramPercent;
 };
 
-enum class UpdateState { NotConfigured, UpToDate, Available, DowngradeRefused, Invalid, Error, Unknown };
+enum class UpdateState { NotConfigured, NoRelease, UpToDate, Available, DowngradeRefused, Invalid, Error, Unknown };
 struct UpdateStatus {
   UpdateState state = UpdateState::Unknown;
   std::optional<std::string> installed, available, checkedAt, notes, channel;
@@ -322,7 +322,7 @@ inline Result<UpdateStatus> parseUpdate(std::string_view text) {
   if (!schema || *schema != 1) return {std::nullopt, {ErrorKind::IncompatibleVersion, "Versão do atualizador incompatível."}};
   UpdateStatus u;
   auto st = detail::str(json->get("state")).value_or("");
-  u.state = st == "not-configured" ? UpdateState::NotConfigured : st == "up-to-date" ? UpdateState::UpToDate : st == "available" ? UpdateState::Available
+  u.state = st == "not-configured" ? UpdateState::NotConfigured : st == "no-release" ? UpdateState::NoRelease : st == "up-to-date" ? UpdateState::UpToDate : st == "available" ? UpdateState::Available
           : st == "downgrade-refused" ? UpdateState::DowngradeRefused : st == "invalid" ? UpdateState::Invalid : st == "error" ? UpdateState::Error : UpdateState::Unknown;
   u.installed = detail::str(json->get("installed"));
   u.checkedAt = detail::str(json->get("checkedAt"));

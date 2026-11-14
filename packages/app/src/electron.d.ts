@@ -53,6 +53,12 @@ export interface AiCredentialsResultado extends Partial<AiCredentialsEstado> {
 }
 
 export interface ElectronAPI {
+  /** Só presente em Linux: atualizações do pacote Arch (cybersafe-linux-update). */
+  linuxUpdate?: {
+    check: () => Promise<import("./lib/linuxUpdateModel").LinuxUpdateWire>;
+    download: () => Promise<import("./lib/linuxUpdateModel").LinuxUpdateWire>;
+    install: (consent: boolean) => Promise<import("./lib/linuxUpdateModel").LinuxUpdateWire>;
+  };
   getServiceConnectionState: () => Promise<{ connected: boolean }>;
   onServiceConnectionState: (callback: (state: { connected: boolean }) => void) => () => void;
   authSession: { read: () => Promise<string | null>; write: (token: string, remember: boolean) => Promise<void>; clear: () => Promise<void> };

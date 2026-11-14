@@ -17,6 +17,7 @@ import { useState, useEffect } from "react";
 import { aboutIdentityLines, electronVersionFromUserAgent, formatBuildBadge, resolveIdentity, technicalInfoText } from "../lib/buildIdentity";
 import ExclusionsSection from "../components/ExclusionsSection";
 import { UpdatesSection } from "../components/updates/UpdatesSection";
+import { LinuxUpdatesSection } from "../components/updates/LinuxUpdatesSection";
 import { SurfaceHeroPreview } from "../components/visual/SurfaceHeroPreview";
 import { V2_MOVEMENT_ORDER, V2_MOVEMENT_LABELS, V2_PERFORMANCE_ORDER, V2_PERFORMANCE_LABELS } from "../v2/theme";
 import type { QuarantinePolicy } from "@cybersafe/shared-types";
@@ -936,7 +937,8 @@ export default function SettingsPage() {
 
       <div id="settings-atualizacoes" role="region" aria-labelledby="settings-atualizacoes-title" tabIndex={-1} className="space-y-4 scroll-mt-32">
         <h2 id="settings-atualizacoes-title" className="font-mono text-lg font-semibold text-foreground">Atualizações</h2>
-      <UpdatesSection />
+      {/* Linux: canal próprio (pacote Arch); Windows mantém o updater existente. */}
+      {typeof window !== "undefined" && window.electronAPI?.linuxUpdate ? <LinuxUpdatesSection /> : <UpdatesSection />}
       </div>
 
       <div id="settings-matrix" role="region" aria-labelledby="settings-matrix-title" tabIndex={-1} className="space-y-4 scroll-mt-32">

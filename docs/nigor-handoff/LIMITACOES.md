@@ -7,14 +7,14 @@
 - Arranque com a sessão do utilizador, menu e Definições do Nigor.
 
 ## Ainda não suportado pelo CyberSafe
-- **Atualizações:** verificação, download autenticado e instalação via pacman estão
-  implementados, mas o canal está `not-configured`: falta o mantenedor gerar o par
-  de chaves (`scripts/linux-lite/update-manifest.mjs keygen` fora do repositório),
-  incorporar a chave pública e publicar o primeiro manifesto assinado. Até lá
-  não há atualização automática. Um repositório pacman assinado é a evolução
-  recomendada (ver nota abaixo).
-- Não existe ainda secção de atualizações dentro da aplicação Electron; o estado
-  está disponível por `cybersafe-linux-update` e no Security Center.
+- **Atualizações:** canal ativo com chave pública Ed25519 incorporada a partir do
+  pacote 0.2.4-2 (manifesto `manifest-experimental.json` assinado na release
+  `linux-update-channel`). Pacotes anteriores (0.2.4-1) não têm a chave e têm de ser
+  atualizados manualmente uma vez. A instalação é sempre confirmada e autorizada
+  pelo polkit; não existe instalação silenciosa. Um repositório pacman assinado
+  continua a ser a evolução recomendada (ver nota abaixo).
+- A secção «Atualizações» da aplicação Electron em Linux usa este canal; ainda não
+  foi testada numa sessão gráfica com agente polkit real (só testes de modelo/IPC).
 - O histórico não traz o ID da análise: o Nigor não consegue associar um
   `scanId` aceite à entrada do histórico (extensão de contrato prevista).
 - Alertas só desde o arranque do serviço (registo em memória).

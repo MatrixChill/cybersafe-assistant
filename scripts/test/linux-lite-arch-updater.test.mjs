@@ -154,3 +154,9 @@ test('instalação: exige consentimento, utilizador normal e o mesmo SHA-256; s�
     assert.equal(plan.argv.some((a) => /noconfirm|SigLevel/i.test(a)), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
+
+test('canal sem manifesto publicado (404) → no-release, não erro', async () => {
+  const impl = async () => new Response('not found', { status: 404 });
+  const r = await checkForUpdate({ installed: v('0.2.4-2'), channel: 'stable', config, fetchImpl: impl });
+  assert.equal(r.state, 'no-release');
+});
