@@ -16,8 +16,7 @@ import type {
   ReadingStatus,
 } from "@cybersafe/shared-types";
 import { readGraphics, readTemperature } from "./temperature.js";
-import { describeBatteryHealth, type BatteryHealth } from "./battery-health.js";
-import { plausibleBatteryMinutes } from "@cybersafe/shared-types";
+import { describeBatteryHealth, plausibleBatteryMinutes, type BatteryHealth } from "./battery-health.js";
 import { readStorageHealth, type StorageHealth } from "./storage-health.js";
 import { readMemoryStatus, readPowerStatus } from "./win-kernel.js";
 import type { KernelMemoryStatus, KernelPowerStatus } from "./win-kernel.js";

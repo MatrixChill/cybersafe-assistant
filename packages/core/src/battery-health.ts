@@ -166,3 +166,6 @@ export function describeBatteryHealth(input: BatteryHealthInput): BatteryHealth 
     cycleCount: cycles,
   };
 }
+
+/** Plausibilidade do tempo restante (regra única em shared-types); reexportada aqui para o hardware.ts. */
+export { plausibleBatteryMinutes } from "@cybersafe/shared-types";
