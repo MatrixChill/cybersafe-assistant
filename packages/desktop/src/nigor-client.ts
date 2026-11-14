@@ -24,7 +24,7 @@ export async function readNigorStatus(pipeName: string | undefined, token: strin
     const [protection, scans, events, hardware] = await Promise.all([
       client.request("protection.getState", undefined),
       client.request("scan.history", { limit: 5 }),
-      client.request("events.list", { limit: 50 }),
+      client.request("events.list", { limit: 250 }),
       client.request("hardware.snapshot", undefined),
     ]);
     return projectNigorStatus({ protection, scans, events, hardware });

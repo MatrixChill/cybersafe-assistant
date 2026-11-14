@@ -8,6 +8,7 @@ type Snapshot = {
 };
 
 const engineStates = new Set(["active", "degraded", "unavailable", "error"]);
+const engineReasons = new Set(["not-installed", "no-definitions", "exec-failed", "starting"]);
 const protectionStates = new Set(["safe", "attention", "critical", "degraded"]);
 const scanStates = new Set(["completed", "cancelled", "failed"]);
 const alertTypes = new Set(["threat.detected", "quarantine.failed", "process.blocked"]);
@@ -82,13 +83,27 @@ export function projectNigorStatus({ protection, scans, events, hardware }: Snap
       hashDb: known(engine.hashDb?.status, engineStates),
       native: known(engine.nativeEngine?.status, engineStates),
     },
+    // Aditivo (v1): motivo estruturado de um motor não ativo, quando o serviço
+    // o envia (≥ esta versão). `null` = sem motivo reportado, nunca «saudável».
+    engineReasons: {
+      clamav: known(engine.clamav?.reason, engineReasons),
+      yara: known(engine.yara?.reason, engineReasons),
+      hashDb: known(engine.hashDb?.reason, engineReasons),
+      native: known(engine.nativeEngine?.reason, engineReasons),
+    },
     latestScan: history[0] ?? null,
     history,
-    alerts: events.filter(({ type }) => alertTypes.has(type)).slice(0, 5).map((event) => ({
+    // O replay chega do mais antigo para o mais recente: os alertas são os
+    // cinco MAIS RECENTES (antes eram os cinco mais antigos da janela).
+    alerts: events.filter(({ type }) => alertTypes.has(type)).reverse().slice(0, 5).map((event) => ({
       type: event.type,
       severity: known(event.severity, alertSeverities),
       timestamp: timestamp(event.timestamp),
     })),
+    // Aditivo (v1): os alertas vêm do registo de eventos em memória do serviço
+    // (desde o seu arranque). O histórico de análises é persistente; por isso
+    // `latestScan.threatsFound > 0` com `alerts` vazio não é contradição.
+    alertsScope: "service-session",
     metrics: {
       cpuPercent: percent(hardware.cpu.usage, hardware.cpu.usageStatus),
       ramPercent: percent(hardware.ram.usagePercent, hardware.ram.usageStatus),
