@@ -2,6 +2,7 @@ import type { BootReadiness } from "../lib/bootReadiness";
 import { BOOT_COPY } from "../lib/bootReadiness";
 import { BOOT_BODY_COPY } from "../lib/loadingStates";
 import { BrandLogo } from "./BrandLogo";
+import { CyberSafeVisualCore } from "./visual/CyberSafeVisualCore";
 import { AlertCircle, CheckCircle2, Loader2 } from "lucide-react";
 
 /**
@@ -42,15 +43,16 @@ export function BootScreen({ readiness, steps, onEnterLimited }: BootScreenProps
       <div className="absolute top-1/3 left-1/2 -translate-x-1/2 -translate-y-1/2 w-[500px] h-[500px] bg-primary/8 rounded-full blur-[150px] pointer-events-none" />
 
       <div className="flex flex-col items-center gap-5 w-full max-w-sm relative z-10">
-        <div className="relative">
-          <div className="auth-logo-icon animate-pulse">
-            {/* Logótipo oficial (BrandLogo, arte final do produto), não um escudo genérico.
-                Tamanho md = 40 px, igual ao que estava: dimensões e proporções preservadas.
-                O escudo lucide saiu daqui; a marca vive num só sítio. */}
-            <BrandLogo size="md" variant="auto" label="" />
-          </div>
-          <div className="absolute -inset-4 rounded-full border border-primary/20 animate-ping opacity-30" />
-        </div>
+        {/* CyberSafe Visual Core partilhado (Windows e Linux): versão CSS leve,
+            sem WebGL no arranque; parado com prefers-reduced-motion e quando o
+            arranque não está ocupado (UNKNOWN). Substitui o pulse/ping antigo. */}
+        <CyberSafeVisualCore
+          size="sm"
+          renderer="css"
+          tone={unknown ? "attention" : "loading"}
+          animate={!unknown && readiness.busy === true}
+          center={<BrandLogo size="md" variant="auto" label="" />}
+        />
 
         <div className="text-center">
           <h1 className="text-2xl font-bold font-mono tracking-tight text-foreground">CyberSafe</h1>
