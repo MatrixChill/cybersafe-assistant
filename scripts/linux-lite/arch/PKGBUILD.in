@@ -1,7 +1,7 @@
 # Generated recipe inputs are filled by prepare-recipe.sh from a Git commit.
 pkgname=cybersafe-assistant-linux-lite
 pkgver=@VERSION@
-pkgrel=1
+pkgrel=2
 pkgdesc='Academic desktop security and diagnostics for Linux (experimental)'
 arch=('x86_64')
 url='https://github.com/MatrixChill/cybersafe-assistant'
@@ -59,6 +59,10 @@ package() {
   install -Dm644 scripts/linux-lite/arch/updater.mjs "$target/updater.mjs"
   install -Dm644 scripts/linux-lite/arch/update-channel.json "$target/update-channel.json"
   install -Dm755 scripts/linux-lite/arch/update-launcher.sh "$pkgdir/usr/bin/cybersafe-linux-update"
+  # Componentes de integração Nigor (fontes C++20 + documentação), sem binários.
+  install -d "$pkgdir/usr/share/cybersafe-assistant-linux-lite/nigor-integration"
+  cp -a integrations/nigor/. "$pkgdir/usr/share/cybersafe-assistant-linux-lite/nigor-integration/"
+  cp -a docs/nigor-handoff "$pkgdir/usr/share/cybersafe-assistant-linux-lite/nigor-integration/docs"
   install -Dm644 scripts/linux-lite/arch/cybersafe-assistant-linux-lite.desktop \
     "$pkgdir/usr/share/applications/cybersafe-assistant-linux-lite.desktop"
   install -Dm644 assets/branding/generated/icon-256.png \
