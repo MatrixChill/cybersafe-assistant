@@ -17,6 +17,7 @@ import type {
 } from "@cybersafe/shared-types";
 import { readGraphics, readTemperature } from "./temperature.js";
 import { describeBatteryHealth, type BatteryHealth } from "./battery-health.js";
+import { plausibleBatteryMinutes } from "@cybersafe/shared-types";
 import { readStorageHealth, type StorageHealth } from "./storage-health.js";
 import { readMemoryStatus, readPowerStatus } from "./win-kernel.js";
 import type { KernelMemoryStatus, KernelPowerStatus } from "./win-kernel.js";
@@ -134,7 +135,17 @@ const STORAGE_HEALTH_STALE_TTL_MS = 90_000;
 const STORAGE_HEALTH_READ_MS = 60_000;
 
 /** Provider real da leitura de bateria; nunca publicado sem leitura real. */
-const BATTERY_SOURCE = "systeminformation";
+/**
+ * Origem da leitura de bateria, dita pela plataforma que correu a leitura.
+ * Em Linux o `si.battery()` lê `/sys/class/power_supply` (a mesma fonte do
+ * UPower). Fora de Linux mantém-se o valor histórico (contrato Windows
+ * inalterado). Nunca se diz «Windows» numa máquina Linux.
+ */
+export function batterySourceFor(platform: NodeJS.Platform = process.platform): string {
+  if (platform === "linux") return "linux:sysfs-power_supply";
+  return "systeminformation";
+}
+const BATTERY_SOURCE = batterySourceFor();
 
 /**
  * Prazo da PRIMEIRA leitura do armazenamento (ms).
@@ -1026,8 +1037,13 @@ export class HardwareHealthEngine {
     this.staticMetrics.batteryPercent =
       typeof b.percent === "number" && Number.isFinite(b.percent) ? b.percent : 0;
     this.staticMetrics.isCharging = b.isCharging === true;
-    this.staticMetrics.timeRemaining =
-      typeof b.timeRemaining === "number" && b.timeRemaining > 0 ? b.timeRemaining : null;
+    // Estimativa só quando é plausível: em Linux a autonomia vem de
+    // energy_now/power_now e um power_now ~0 dá valores absurdos (216 h).
+    this.staticMetrics.timeRemaining = plausibleBatteryMinutes({
+      minutes: b.timeRemaining,
+      percent: b.percent,
+      isCharging: b.isCharging,
+    });
     this.batteryState = {
       updatedAt: now,
       status: this.staticMetrics.hasBattery ? "present" : "absent",

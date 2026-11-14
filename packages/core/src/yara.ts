@@ -636,6 +636,23 @@ export class YaraEngine {
     // corpus que caiu para o canário) não é usado.
     this._manifest = await readManifest(this.manifestPath, ruleContent);
 
+    // Sem executáveis do motor nesta plataforma não há nada a compilar: é
+    // «não instalado», não um erro do corpus. Decidido ANTES da compilação para
+    // que a falta do binário (ex.: Linux sem `yara`) não seja lida como «o
+    // corpus não compila» — o que rebaixava o motor a `error` («Erro crítico»
+    // no Dashboard) e reescrevia o ficheiro de regras com o canário.
+    // Em POSIX o resolutor só aceita binários POSIX (nunca `.exe`/PE).
+    if (!resolveYaraClassicBinaries()) {
+      this.scanner = null;
+      this._health = {
+        status: "unavailable",
+        reason: "not-installed",
+        detail: `YARA clássico indisponível neste sistema (procurado em ${descricaoProcuraYara()}).`,
+        coverage: "unknown",
+      };
+      return;
+    }
+
     const buildScanner = (): { scanner: YaraClassicScanner } => {
       const binaries = resolveYaraClassicBinaries();
       if (!binaries) {

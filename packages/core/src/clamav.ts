@@ -2718,6 +2718,7 @@ export function classifyClamavHealth(facts: ClamavProbeFacts): { available: bool
         available: false,
         health: {
           status: "unavailable",
+          reason: "not-installed",
           detail:
             `ClamAV existe no disco mas não é motor desta plataforma: ${primeiro.nome} ${primeiro.motivo}${outros}. ` +
             "Instale o ClamAV do sistema (ex. apt install clamav) ou aponte CYBERSAFE_CLAMSCAN_PATH para um binário Linux.",
@@ -2726,7 +2727,13 @@ export function classifyClamavHealth(facts: ClamavProbeFacts): { available: bool
     }
     return {
       available: false,
-      health: { status: "unavailable", detail: `clamscan not found or failed: ${facts.versionError ?? "unknown"}` },
+      health: {
+        status: "unavailable",
+        // «Não instalado» só quando o sistema disse que o executável não existe;
+        // outra falha a correr `--version` é «erro ao executar».
+        reason: /ENOENT|not found|não encontrad/i.test(facts.versionError ?? "") || facts.versionError == null ? "not-installed" : "exec-failed",
+        detail: `clamscan not found or failed: ${facts.versionError ?? "unknown"}`,
+      },
     };
   }
   if (!facts.versionOutput.includes("ClamAV")) {
@@ -3351,11 +3358,11 @@ export function clamavProbeMarker(previous: EngineSubsystemHealth): EngineSubsys
   if (previous.status === "degraded") {
     return { status: "degraded", busy: true, detail: `A verificar o motor ClamAV… Último problema observado: ${previous.detail ?? "sem detalhe"}` };
   }
-  return { status: "unavailable", busy: true, detail: "A verificar o motor ClamAV…" };
+  return { status: "unavailable", busy: true, reason: "starting", detail: "A verificar o motor ClamAV…" };
 }
 
 export class ClamavBridge {
-  private _health: EngineSubsystemHealth = { status: "unavailable", busy: true, detail: "A iniciar ClamAV…" };
+  private _health: EngineSubsystemHealth = { status: "unavailable", busy: true, reason: "starting", detail: "A iniciar ClamAV…" };
   /**
    * A saúde do ULTIMO probe: binario + base presentes + frescura das
    * definicoes. E a autoridade sobre a BASE; `_health` e o que a UI ve agora.
@@ -4508,7 +4515,7 @@ export class ClamavBridge {
       // Um clamscan que não arranca não é deteção nem motor activo: dizemos
       // o que happened em vez de fingir que escaneámos.
       if (/ENOENT|not found|não.*encontrad/i.test(outcome.stderr) && outcome.code === null) {
-        this._health = { status: "unavailable", detail: "clamscan não encontrado" };
+        this._health = { status: "unavailable", reason: "not-installed", detail: "clamscan não encontrado" };
         return {
           files: filePaths.map((file) => ({ file, verdict: "error" as const, reason: "engine-missing" as const, detail: this._health.detail })),
           detected: false,
