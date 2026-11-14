@@ -171,7 +171,7 @@ test("o cartão de bateria usa a leitura do contrato e esconde a barra sem leitu
 
 test("o armazenamento mostra a proveniência e declara o que não é lido", () => {
   assert.match(SRC, /data-testid="disk-read-provenance"/);
-  assert.match(SRC, /diskReadProvenance\(disk, nowMs\)/);
+  assert.match(SRC, /diskReadProvenance\(disk, nowMs(, platform)?\)/);
   assert.match(SRC, /data-testid="disk-smart-note"/);
   assert.match(SRC, /data-testid="disk-sensor-state"/);
   assert.match(SRC, /data-testid="board-sensor-state"/);

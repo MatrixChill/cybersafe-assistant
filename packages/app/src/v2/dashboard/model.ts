@@ -1,4 +1,5 @@
-import type { DashboardSummary, EngineHealth } from "@cybersafe/shared-types";
+import type { DashboardSummary, EngineHealth, EngineSubsystemHealth } from "@cybersafe/shared-types";
+import { ENGINE_DISPLAY_NAME, engineContextCopy, engineUserReason, engineUserSummary } from "@cybersafe/shared-types";
 import type { RealtimeProtectionInfo } from "@/lib/protectionHealth";
 import type { V2Tone } from "../ui";
 import { protectionOverview, type ProtectionOverview } from "@/lib/protectionOverview";
@@ -68,7 +69,13 @@ export function engineCards(
     return {
       ...e,
       state,
-      label: raw === "unavailable" ? "Indisponível" : STATE_LABEL[state],
+      // «Não instalado» / «Erro ao executar» vêm da normalização partilhada;
+      // o detalhe técnico fica no diagnóstico completo.
+      label:
+        report && engineUserReason(e.key, report) && raw !== "active"
+          ? engineContextCopy(e.key, report).estado
+          : raw === "unavailable" ? "Indisponível" : STATE_LABEL[state],
+      friendly: report ? engineContextCopy(e.key, report) : null,
       coverage:
         report?.coverage === "limited"
           ? "Cobertura limitada"
@@ -87,9 +94,28 @@ export function engineCards(
  * recebida, e a UI só a mostra quando existe. Sem lista, o hero mantém a frase
  * genérica — não inventa uma causa.
  */
+/**
+ * O serviço publica as razões dos motores como `«Nome»: «status» — «detail»`
+ * (ex.: `ClamAV: unavailable — clamscan not found or failed: spawn clamscan
+ * ENOENT`). O hero mostra a frase curta da normalização partilhada; o texto
+ * técnico completo continua em ProtectionDetails (diagnóstico).
+ */
+const ENGINE_REASON = /^(.+?): (active|degraded|unavailable|error) — /;
+const ENGINE_KEYS = ["yara", "hashDb", "clamav", "nativeEngine"] as const;
+export function friendlyEngineReason(reason: string, engine?: EngineHealth): string {
+  const m = ENGINE_REASON.exec(reason);
+  if (!m) return reason;
+  const key = ENGINE_KEYS.find((k) => ENGINE_DISPLAY_NAME[k] === m[1]);
+  if (!key) return reason;
+  const sub: EngineSubsystemHealth = engine?.[key] ?? { status: m[2] as EngineSubsystemHealth["status"], detail: reason.slice(m[0].length) };
+  // Só se reescreve o que a normalização reconhece (não instalado, sem bases,
+  // erro ao executar, a verificar); o resto mantém a razão do serviço.
+  return engineUserReason(key, sub) ? engineUserSummary(key, sub) : reason;
+}
+
 export function dashboardLimitationSummary(engine?: EngineHealth): string | null {
   const reasons = (engine?.degradedReasons ?? [])
-    .map((reason) => reason.trim())
+    .map((reason) => friendlyEngineReason(reason.trim(), engine))
     .filter((reason) => reason !== "");
   if (reasons.length === 0) return null;
   // Duas causas chegam para identificar o problema; o diagnóstico completo

@@ -487,10 +487,18 @@ export default function LabDashboard(
             recebido; a sua idade não é afirmada.
           </p>
           <div className="inset">
+            {/* Frase curta normalizada na vista principal; o texto técnico do
+                provider (ENOENT, caminhos) só dentro do detalhe técnico. */}
             <p>
-              {selected.report?.detail ??
-                "Sem detalhe confirmado pelo serviço."}
+              {selected.friendly?.texto ?? "Sem detalhe confirmado pelo serviço."}
             </p>
+            {selected.friendly?.contexto && <p className="dialog-copy">{selected.friendly.contexto}</p>}
+            {selected.report?.detail && (
+              <details>
+                <summary>Detalhe técnico</summary>
+                <p className="font-mono break-all">{selected.report.detail}</p>
+              </details>
+            )}
           </div>
           <div className="dialog-actions">
             <Button

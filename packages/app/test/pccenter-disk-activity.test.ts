@@ -96,7 +96,7 @@ describe("PC Center — atividade de disco na interface", () => {
     assert.match(pagina, /data-testid="disk-activity"/);
     assert.match(pagina, /data-testid="disk-activity-state"/);
     assert.match(pagina, /data-testid="disk-activity-provenance"/);
-    assert.match(pagina, /\{diskAtividadeIndisponivelTexto\(disk\)\}/);
+    assert.match(pagina, /diskActivityUnavailableLinux\(platform\) \?\? diskAtividadeIndisponivelTexto\(disk\)/);
   });
 
   test("com leitura: velocidades, operações, ocioso e a fonte declarada", () => {

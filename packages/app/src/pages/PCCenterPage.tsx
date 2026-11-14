@@ -27,6 +27,13 @@ import { cpuUsageDisplay } from "@/lib/cpuUsage";
 import { ramUsageDisplay } from "@/lib/ramUsageDisplay";
 import { networkReadingDisplay } from "@/lib/networkReadings";
 import { batteryDisplay, snapshotAgeText, type BatteryOrigin } from "@/lib/batteryDisplay";
+import {
+  cpuTemperatureProvenance,
+  diskActivitySource,
+  diskActivityUnavailableLinux,
+  diskNoReadReason,
+  temperatureUnavailableHint,
+} from "@/lib/platformSources";
 import { devHwTraceAttrs, type DevTraceConnection } from "@/lib/devTrace";
 import { buildFindingGuidance, type DiskSnapshot, type HardwareSnapshot, type PcState, type PcStateLevel, type PcUsageMetric } from "@cybersafe/shared-types";
 import PCHealthSection from "@/components/PCHealthSection";
@@ -167,8 +174,8 @@ export function batteryReadout(percent: number | null): { text: string; width: n
 }
 
 /** Proveniência da leitura de armazenamento: agora, última leitura boa, ou motivo. */
-export function diskReadProvenance(disk: DiskSnapshot, nowMs: number): string {
-  const reason = disk.reason?.trim() || "O Windows não devolveu uma leitura do armazenamento.";
+export function diskReadProvenance(disk: DiskSnapshot, nowMs: number, platform?: string | null): string {
+  const reason = disk.reason?.trim() || diskNoReadReason(platform);
   if (disk.readStatus === "ok") return "Volumes medidos agora pelo serviço.";
   const age = snapshotAgeText(disk.lastGoodAt, nowMs);
   if (disk.readStatus === "stale") return age ? `${reason} Último valor bom ${age}.` : reason;
@@ -208,7 +215,7 @@ export function StorageCard({
   const atividade = diskActivityRows(disk);
   // `useNow` em vez de `Date.now()` no corpo do render (ver lib/diskDisplay).
   const nowMs = useNow();
-  const problem = diskUnavailableText(disk, nowMs) ? diskReadProvenance(disk, nowMs) : null;
+  const problem = diskUnavailableText(disk, nowMs) ? diskReadProvenance(disk, nowMs, platform) : null;
   const readSummary = disk.readStatus === "ok"
     ? "Volumes medidos agora pelo serviço."
     : disk.readStatus === "stale"
@@ -343,7 +350,7 @@ export function StorageCard({
               data-testid="disk-activity-provenance"
               className="text-[10px] font-mono leading-snug text-muted-foreground"
             >
-              {DISK_ATIVIDADE_FONTE}
+              {diskActivitySource(platform, DISK_ATIVIDADE_FONTE)}
             </p>
           </div>
         ) : (
@@ -351,7 +358,7 @@ export function StorageCard({
             data-testid="disk-activity-state"
             className="mt-3 pt-2 border-t border-border text-[10px] font-mono leading-snug text-muted-foreground"
           >
-            {diskAtividadeIndisponivelTexto(disk)}
+            {diskActivityUnavailableLinux(platform) ?? diskAtividadeIndisponivelTexto(disk)}
           </p>
         )}
         {/* Proveniência da leitura: agora, última leitura boa, ou o motivo real. */}
@@ -713,6 +720,7 @@ function SimpleView({ hardware, pcState, batteryOrigin }: { hardware: HardwareSn
             <span className="text-[10px] text-muted-foreground/70 mt-1 font-mono">Lida {snapshotAgeText(hardware.battery.updatedAt, nowMs)}</span>
           )}
           {battery.originText && <span className="text-[10px] text-muted-foreground/70 mt-1 font-mono">{battery.originText}</span>}
+          {battery.sourceText && <span data-testid="simple-battery-source" className="text-[10px] text-muted-foreground/70 mt-1 font-mono">{battery.sourceText}</span>}
           {battery.healthText && (
             <span data-testid="simple-battery-health" className="text-[10px] text-muted-foreground/70 mt-1 font-mono">
               {battery.healthText}{battery.capacityText ? ` · ${battery.capacityText}` : ""}
@@ -760,6 +768,7 @@ export function AdvancedView({
   const netReading = networkReadingDisplay(hardware?.network);
   // Bateria: decide pelo status (C2). Sem status, só o legado hasBattery.
   const batteryDisp = batteryDisplay(hardware?.battery, batteryOrigin);
+  const temperatureHint = temperatureUnavailableHint(hardware?.system?.platform, TEMPERATURE_UNAVAILABLE_HINT);
   const batteryCardVisible = hardware?.battery?.status !== undefined || hardware?.battery?.hasBattery === true;
   // Sem percentagem lida não há barra nem «— %»: só o texto do estado.
   const batteryCard = batteryReadout(batteryDisp.percent);
@@ -861,12 +870,12 @@ export function AdvancedView({
                 <span className={cn("text-sm font-medium font-mono flex items-center justify-end gap-1",
                   cpuTemperature.value != null ? classeTermica("cpu", cpuTemperature.value) : "text-muted-foreground"
                 )}
-                  title={cpuTemperature.value != null ? motivoTermico("cpu", cpuTemperature.value) : TEMPERATURE_UNAVAILABLE_HINT}
+                  title={cpuTemperature.value != null ? motivoTermico("cpu", cpuTemperature.value) : temperatureHint}
                 >
                   <Thermometer className="w-3 h-3" />
                   {cpuTemperature.value != null
                     ? `${cpuTemperature.value}°C`
-                    : <span title={TEMPERATURE_UNAVAILABLE_HINT} className="cursor-help">{cpuTemperature.text}</span>}
+                    : <span title={temperatureHint} className="cursor-help">{cpuTemperature.text}</span>}
                 </span>
               </div>
             </div>
@@ -898,7 +907,7 @@ export function AdvancedView({
         </div>
 
         {/* Disk Card — a mesma regra do Dashboard vive em StorageCard/lib/diskDisplay */}
-        <StorageCard disk={hardware.disk} onAnalisarVolume={onAnalisarVolume} />
+        <StorageCard disk={hardware.disk} platform={hardware.system?.platform} onAnalisarVolume={onAnalisarVolume} />
 
         </div>
         <div className="min-w-0 flex flex-col gap-6">
@@ -1029,12 +1038,12 @@ export function AdvancedView({
                   <span className={cn("text-sm font-medium font-mono flex items-center justify-end gap-1",
                     gpuTemperature.value != null ? classeTermica("gpu", gpuTemperature.value) : "text-muted-foreground"
                   )}
-                    title={gpuTemperature.value != null ? motivoTermico("gpu", gpuTemperature.value) : TEMPERATURE_UNAVAILABLE_HINT}
+                    title={gpuTemperature.value != null ? motivoTermico("gpu", gpuTemperature.value) : temperatureHint}
                   >
                     <Thermometer className="w-3 h-3" />
                     {gpuTemperature.value != null
                       ? `${gpuTemperature.value}°C`
-                      : <span title={TEMPERATURE_UNAVAILABLE_HINT} className="cursor-help">{gpuTemperature.text}</span>}
+                      : <span title={temperatureHint} className="cursor-help">{gpuTemperature.text}</span>}
                   </span>
                   {gpuTemperature.value != null && (
                     <span data-testid="gpu-temp-provenance" className="mt-0.5 block text-[10px] font-mono text-muted-foreground/70">
@@ -1176,7 +1185,7 @@ export function AdvancedView({
                 )}
                 {hardware.battery.source && batteryCard.width != null && (
                   <p data-testid="battery-source" className="mt-1 font-mono text-[10px] text-muted-foreground/70">
-                    Fonte: {hardware.battery.source}
+                    {batteryDisp.sourceText ?? `Fonte: ${hardware.battery.source}`}
                     {snapshotAgeText(hardware.battery.updatedAt, nowMs) ? ` · lida ${snapshotAgeText(hardware.battery.updatedAt, nowMs)}` : ""}
                   </p>
                 )}
@@ -1332,6 +1341,7 @@ export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceCo
   // Metadados DEV-only, calculados no commit que pinta esta amostra — sem `useMemo` sobre
   // refs e sem `Date.now()` obrigatório. Fora de DEV o objecto é vazio: nem atributos, nem
   // trabalho extra no render (o custo evitado é CPU/render, não memória do DOM).
+  const temperatureHint = temperatureUnavailableHint(hardware?.system?.platform, TEMPERATURE_UNAVAILABLE_HINT);
   const devTraceAttrs = devHwTraceAttrs({
     dev: import.meta.env?.DEV === true,
     hardware,
@@ -1413,11 +1423,11 @@ export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceCo
                 <span title={motivoTermico("cpu", cpuTemperature.value)} className={cn("text-2xl font-mono font-bold", classeTermica("cpu", cpuTemperature.value))}>{cpuTemperature.value}°C</span>
                 <p className="text-xs text-muted-foreground mt-1 font-mono truncate" title={hardware.cpu.model}>{hardware.cpu.model}</p>
                 <p data-testid="cpu-temp-provenance" className="text-[10px] text-muted-foreground/60 mt-0.5 font-mono">
-                  {hardware.cpu.temperatureStatus === "stale" ? "Última leitura guardada" : "Leitura do Windows"}
+                  {cpuTemperatureProvenance(hardware.system?.platform, hardware.cpu.temperatureStatus === "stale")}
                 </p>
               </>
             ) : (
-              <span className="text-sm font-mono text-muted-foreground" title={TEMPERATURE_UNAVAILABLE_HINT}>{cpuTemperature.text}</span>
+              <span className="text-sm font-mono text-muted-foreground" title={temperatureHint}>{cpuTemperature.text}</span>
             )}
           </div>
 
@@ -1450,7 +1460,7 @@ export default function PCCenterPage({ hardware, pcState, dataOrigin, devTraceCo
                 </>
               ) : (
                 <>
-                  <span className="text-sm font-mono text-muted-foreground" title={TEMPERATURE_UNAVAILABLE_HINT}>{gpuTemperature.text}</span>
+                  <span className="text-sm font-mono text-muted-foreground" title={temperatureHint}>{gpuTemperature.text}</span>
                   {/* A placa ESTÁ detetada: sem o modelo aqui, a falta de
                       temperatura lia-se como falta de placa gráfica. */}
                   <p className="text-xs text-muted-foreground mt-1 font-mono truncate" title={hardware.gpu.model}>{hardware.gpu.model}</p>

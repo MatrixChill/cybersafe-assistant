@@ -134,9 +134,9 @@ describe("contrato battery.status (CONTRATO_ESTAVEL_BATTERY)", () => {
     assert.equal(batteryDisplay(withStatus("error"), "LIVE").label, "Erro ao ler a bateria");
   });
 
-  test("timeRemaining null (ou 0) a descarregar é '—', nunca '0 min'", () => {
-    assert.equal(batteryDisplay(withStatus("present", { hasBattery: true, percent: 50, timeRemaining: null }), "LIVE").timeText, "—");
-    assert.equal(batteryDisplay(withStatus("present", { hasBattery: true, percent: 50, timeRemaining: 0 }), "LIVE").timeText, "—");
+  test("timeRemaining null (ou 0) a descarregar é «Estimativa indisponível», nunca '0 min'", () => {
+    assert.equal(batteryDisplay(withStatus("present", { hasBattery: true, percent: 50, timeRemaining: null }), "LIVE").timeText, "Estimativa indisponível");
+    assert.equal(batteryDisplay(withStatus("present", { hasBattery: true, percent: 50, timeRemaining: 0 }), "LIVE").timeText, "Estimativa indisponível");
   });
 
   test("present com updatedAt válido mostra a idade da última leitura boa", () => {
