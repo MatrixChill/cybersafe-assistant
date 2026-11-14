@@ -417,9 +417,22 @@ export type EngineSubsystemStatus = "active" | "degraded" | "unavailable" | "err
  */
 export type EngineSubsystemCoverage = "normal" | "limited" | "unknown";
 
+/**
+ * Motivo ESTRUTURADO de um estado não ativo, para a UI principal não ter de
+ * ler o `detail` técnico. Opcional: serviços antigos não o enviam e a UI cai
+ * numa classificação conservadora do `detail` (`engineUserReason`).
+ *  - `not-installed`   o executável do motor não existe nesta plataforma;
+ *  - `no-definitions`  instalado, mas sem bases/regras utilizáveis;
+ *  - `exec-failed`     instalado, mas falhou ao executar;
+ *  - `starting`        primeira verificação ainda em curso.
+ */
+export type EngineSubsystemReason = "not-installed" | "no-definitions" | "exec-failed" | "starting";
+
 export interface EngineSubsystemHealth {
   status: EngineSubsystemStatus;
   detail?: string;
+  /** Motivo estruturado (ver `EngineSubsystemReason`); ausente em serviços antigos. */
+  reason?: EngineSubsystemReason;
   /**
    * Prova de carga adiada por o motor estar ocupado, sem falha observada.
    * `status` mantém a última confirmação; `busy` impede que a ocupação seja
@@ -2727,7 +2740,8 @@ export {
 } from "./finding-guidance.js";
 export type { FindingGuidance } from "./finding-guidance.js";
 export type { ProcessIntelligenceContext } from "./process-intelligence.js";
-export { engineContextCopy, engineStatusPt } from "./engine-context.js";
+export { engineContextCopy, engineStatusPt, engineUserReason, engineUserSummary } from "./engine-context.js";
+export { plausibleBatteryMinutes, BATTERY_ESTIMATE_MAX_MINUTES } from "./battery-estimate.js";
 export type { EngineContextCopy } from "./engine-context.js";
 
 // Validação de formato de email partilhada entre a app e a API (16/10/2026):
