@@ -1,26 +1,29 @@
 # Security reporting and product limits
 
-CyberSafe is an academic Windows security application, not a certified antivirus replacement. Keep Microsoft Defender and other Windows protections enabled.
+CyberSafe provides file analysis and diagnostics on Windows, with experimental Arch and Nigor editions. No edition claims certified or complete antivirus coverage. Keep the platform's protections enabled.
 
 ## Versions and support
 
-The current public release at this review is **v0.2.4**. Use the [latest release](https://github.com/MatrixChill/cybersafe-assistant/releases/latest) and identify the exact version when reporting a problem. Historical releases remain for traceability; no long-term support or guaranteed response time is promised for any version.
+The [download index](docs/downloads.md) distinguishes Windows Stable v0.2.4, Arch Preview 3 and Nigor OS Edition Preview 1 as checked on 2026-11-16. Identify both release and package revision in reports. Historical versions remain available for traceability. No long-term support, security response SLA or bug bounty is promised.
 
 ## Report a suspected vulnerability
 
-Private vulnerability reporting was **disabled** when checked on 2026-11-11. Do not assume that a public issue or advisory-creation URL is confidential.
+Private vulnerability reporting was **disabled** when checked on **2026-11-16**. A public issue is visible to other people.
 
-If GitHub shows a private **Report a vulnerability** option on the repository's Security page, use it and confirm that the report is private before submitting. Otherwise, open only a minimal, non-sensitive issue asking the owner for a private reporting channel, or use a private contact method the owner has explicitly provided. Wait for that channel before sharing an exploit, affected private data or sensitive logs. No security email address has been designated here.
+If GitHub shows a private **Report a vulnerability** option on the repository's Security page, confirm that it is private before submitting. Otherwise, open only a minimal, non-sensitive issue asking the owner for a private reporting channel, or use a private contact method the owner has explicitly provided. Wait for that channel before sharing exploit details, affected private data or sensitive logs. No security email address has been designated here.
 
-After a private channel is agreed, useful details include affected version, platform, impact, safe reproduction steps and a minimal redacted example. Do not include API keys, passwords, SQLite dumps, quarantine contents or live malware. Do not test on other people's systems without permission. Coordinate disclosure with the owner; there is no bug bounty or response SLA promised.
+After a private channel is agreed, include affected edition/version, impact, authorized safe reproduction and a minimal redacted example. Never attach credentials, private databases, quarantine contents or malware. Test only on systems for which you have permission.
 
 ## Known boundaries
 
-- Watcher observation is not proof that an artifact reached all engines or that coverage is complete.
-- ClamAV timeouts, rule/hash coverage limits and inaccessible files can produce degraded or inconclusive states.
-- WFP depends on its separately provisioned component; it is not a declaration of Windows firewall status.
-- MATRIX online requests require provider configuration and consent. Local responses do not prove an external-provider response.
-- Release manifests use Ed25519 and bind download integrity to SHA-256. Windows installers currently lack Authenticode; assisted update installation remains disabled.
-- A build, a unit test or a handoff fixture does not establish installed end-to-end protection or update success.
+- A watcher observation does not demonstrate that every engine analyzed an artifact. Queue pressure, inaccessible paths and timeouts affect coverage.
+- Linux distributed monitoring detects after writes. Lab prevention work does not establish protection before execution in the shipped package.
+- Linux user services do not prove protection before user login.
+- YARA rules and known hashes have limited coverage. Active engines do not certify a clean system.
+- WFP requires its separately provisioned Windows component and does not represent the state of the Windows firewall.
+- MATRIX online requests require configuration and consent. A local explanation does not establish an external-provider response.
+- Windows Setup lacks Authenticode. The stable installed updater remains limited to manual installation.
+- Linux/Nigor v2 helpers revalidate signature, edition and protected staged bytes. Legacy clients require the documented manual migration. Full graphical polkit update acceptance remains separate from helper tests.
+- Passing CI, a benign scan or a handoff fixture does not establish complete installed protection.
 
-See [testing evidence and limitations](docs/security-and-testing.md), [updates](docs/updates.md), [licensing status](docs/licensing.md) and [the public roadmap](docs/roadmap-public.md).
+See [edition guides and channels](docs/downloads.md), [support](docs/support.md), [technical testing evidence](docs/security-and-testing.md) and [licensing](docs/licensing.md).

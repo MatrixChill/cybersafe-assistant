@@ -1,6 +1,6 @@
 ## Problem and resulting behavior
 
-Explain the concrete problem, scope and before/after behavior. English or Portuguese is welcome.
+Identify the affected edition(s), concrete problem, scope and resulting behavior. English or Portuguese is welcome.
 
 ## Evidence and validation
 
@@ -9,9 +9,9 @@ List the commands actually executed and their results. Identify skipped prerequi
 ## Review checklist
 
 - [ ] I reviewed the diff for secrets, private paths, personal data and unrelated changes.
-- [ ] I checked relevant links/images or ran focused regression tests; results are listed above.
+- [ ] I checked relevant links/images, language pairs and edition/version labels or ran focused regression tests; results are listed above.
 - [ ] I preserved inconclusive states, consent and security gates; I made no unsupported protection or performance claims.
-- [ ] I reviewed CONTRIBUTING.md and the pending licensing status; applicable terms for substantial code contributions were discussed with the owner.
+- [ ] I reviewed CONTRIBUTING.md, the MIT license and applicable third-party terms.
 - [ ] I identified material AI/tool assistance and verified the resulting content myself.
 
 ## Risks and remaining work

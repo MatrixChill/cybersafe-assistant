@@ -1,3 +1,5 @@
+> Historical outreach review from 2026-11-11. The root MIT license has since been approved and is incorporated in this documentation PR. For current platforms and license scope, use [downloads](downloads.md) and [licensing](licensing.md). Community rules and draft claims below require a fresh review before any external post.
+
 # Outreach kit — owner review required
 
 Drafts for review, **not posted**. Verify the current version, links and community rules again before using them. No paid/bought stars, repeated cross-posting, unsolicited direct messages or unsupported security claims. Ask for specific feedback rather than votes. The missing approved project license must not be hidden behind an “open source” label.

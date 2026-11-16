@@ -1,3 +1,5 @@
+> Historical review. The 2026-11-16 [repository presentation review](GITHUB-PRESENTATION-REVIEW-20261116.md) supersedes the platform and licensing status below. Original observations remain for traceability.
+
 # GitHub presentation review — 2026-11-11
 
 ## Scope and baseline

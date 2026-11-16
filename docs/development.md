@@ -49,3 +49,23 @@ Documentation-only changes need link/image checks, version/source verification a
 Official packaging starts with `node scripts/package-windows.mjs --check`. A `--candidate` build requires the exact approved source inventory, dependency/resource provenance, databases, licenses and freeze/preflight gates. Do not reuse an approval for a different tree, generate substitute trust keys or change a verifier to get a PASS. See [release signing](RELEASE-SIGNING-RUNBOOK.md).
 
 Do not commit private keys, API credentials, local profiles, database dumps, quarantine contents or generated installer payloads. PRs must be reviewed; no automatic merge or publication is implied.
+
+## Arch and Nigor source
+
+Linux/Nigor sources are under review on `codex/nigor-arch-20261113` in [PR #5](https://github.com/MatrixChill/cybersafe-assistant/pull/5). The public Nigor Preview 1 identifies commit `b1f38b134623c7b36273526f1050078a2c07cb36`; generic Preview 3 identifies `32e627bbbeaee0b933e2ab505f674499e688c354`. Use a separate checkout and record the commit before comparing results.
+
+On an authorized disposable Arch system, inspect the selected commit's `scripts/linux-lite/arch/PKGBUILD.in`. The recipe declares Node/npm, Python, CMake and native runtime/build dependencies. Use a normal build user and review any dependency-installation transaction.
+
+```sh
+git clone --branch codex/nigor-arch-20261113 https://github.com/MatrixChill/cybersafe-assistant.git cybersafe-linux
+cd cybersafe-linux
+# For the exact public Nigor Preview 1 source:
+git switch --detach b1f38b134623c7b36273526f1050078a2c07cb36
+bash scripts/linux-lite/arch/prepare-recipe.sh --nigor ../cybersafe-nigor-recipe
+cd ../cybersafe-nigor-recipe
+makepkg -s
+```
+
+Omit `--nigor` and choose a fresh recipe directory for generic Arch. Recipe revisions from a newer commit can differ from a published Preview. Inspect `SOURCE-IDENTITY`, package metadata and checksums. Successful `makepkg` runs the recipe's checks; desktop startup, keyring, polkit, service persistence, actual scanning and recovery require distinct acceptance.
+
+Focused tests depend on the selected source branch and platform. Preserve failures and skips rather than claiming an all-platform PASS. The [edition guide](nigor-os/README.md) records the physical Nigor gates. No installed test or package build is performed by this documentation PR.

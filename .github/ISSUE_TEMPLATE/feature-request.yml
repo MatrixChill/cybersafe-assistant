@@ -7,6 +7,13 @@ body:
       value: |
         Check existing issues and the public roadmap first. Do not include private data.
         Pode escrever em português. Consulte primeiro as issues e o roadmap.
+  - type: input
+    id: edition
+    attributes:
+      label: Affected edition(s) / Edições afetadas
+      description: Windows, Linux / Arch, Nigor OS Edition or shared components.
+    validations:
+      required: true
   - type: textarea
     id: problem
     attributes:

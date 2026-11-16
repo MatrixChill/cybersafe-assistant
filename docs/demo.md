@@ -17,6 +17,10 @@ Do not edit a failure into a success. If scanning takes longer than the slot, sh
 | 55–70 s | Open PC Center and Task Manager, without terminating anything | “Available measurements help inspect the system; missing sensors remain unknown.” | “As medições disponíveis ajudam a observar o sistema; sensores ausentes continuam sem medição.” |
 | 70–85 s | Show official releases and limitations | “An academic project by Caio Amorim. Verify the download and keep Defender enabled. Windows signing and assisted updates remain limited.” | “Um projeto PAP de Caio Amorim. Verifique o download e mantenha o Defender ativo. A assinatura Windows e as atualizações assistidas continuam limitadas.” |
 
+## Linux and Nigor capture additions
+
+Record the exact package revision and release tag as well as the application version. On Nigor, show local entry without an account, the optional session action and the real engine/service state. On generic Arch, show its account-based entry. Use a dedicated benign profile. Never expose a socket credential, account token or private keyring prompt. Native Nigor acceptance remains separate from an Xvfb capture.
+
 ## Capture checklist
 
 - Record version, date, Windows build, benign corpus description and actual scan count/duration.

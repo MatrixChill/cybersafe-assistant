@@ -1,113 +1,101 @@
-<p align="center"><a href="README.md"><b>English</b></a> · Português de Portugal</p>
+<p align="center"><a href="README.md">English</a> · <b>Português de Portugal</b></p>
 
 <p align="center"><img src="assets/branding/generated/icon-128.png" alt="Logótipo oficial CyberSafe" width="88"></p>
 
-![CyberSafe Assistant — segurança e contexto no mesmo painel](docs/media/cybersafe-banner.png)
+![CyberSafe Assistant — identidade orbital oficial](docs/media/cybersafe-banner.png)
 
 <p align="center">
-<a href="https://github.com/MatrixChill/cybersafe-assistant/releases/latest"><img alt="Última release" src="https://img.shields.io/github/v/release/MatrixChill/cybersafe-assistant?color=0891b2"></a>
-<a href="https://github.com/MatrixChill/cybersafe-assistant/actions/workflows/ci.yml"><img alt="CI Windows" src="https://github.com/MatrixChill/cybersafe-assistant/actions/workflows/ci.yml/badge.svg?branch=main"></a>
-<img alt="Windows 10 e 11 x64" src="https://img.shields.io/badge/Windows-10%20%2F%2011%20x64-0b5067">
-<img alt="Electron 33" src="https://img.shields.io/badge/Electron-33-224653">
-<img alt="React 19 e TypeScript" src="https://img.shields.io/badge/React%2019-TypeScript-3178c6">
-<a href="docs/licensing.md"><img alt="Licença por clarificar" src="https://img.shields.io/badge/licen%C3%A7a-por%20clarificar-8a6418"></a>
+<a href="https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.4"><img alt="Windows estável v0.2.4" src="https://img.shields.io/badge/Windows-v0.2.4-0891b2"></a>
+<a href="https://github.com/MatrixChill/cybersafe-assistant/actions/workflows/ci.yml"><img alt="CI Windows da main" src="https://github.com/MatrixChill/cybersafe-assistant/actions/workflows/ci.yml/badge.svg?branch=main"></a>
+<a href="LICENSE"><img alt="Licença MIT do código original" src="https://img.shields.io/badge/license-MIT-0891b2"></a>
 </p>
 
-<p align="center"><a href="https://github.com/MatrixChill/cybersafe-assistant/releases/latest"><b>Descarregar para Windows</b></a> · <a href="docs/README.md">Documentação</a> · <a href="https://github.com/MatrixChill/cybersafe-assistant/tree/experimental/linux-lite">Linux Lite experimental</a></p>
+**O CyberSafe Assistant reúne análise de ficheiros com vários motores, diagnóstico do sistema e assistência contextual numa interface desktop.** O Windows é a distribuição estável. Arch Linux e Nigor OS têm pacotes experimentais, com compatibilidade e validação próprias.
 
-O **CyberSafe Assistant** é uma aplicação desktop de segurança para Windows. Reúne análise de ficheiros com quatro motores, monitorização do sistema, quarentena e assistência MATRIX numa interface comum.
+Criado por **Caio Amorim**, começou na **Prova de Aptidão Profissional (PAP)** e continua em desenvolvimento. Combina **Electron, React, TypeScript, Node.js, SQLite e C++** com ClamAV, YARA e análise por hashes.
 
-Criado por **Caio Amorim** no âmbito da **Prova de Aptidão Profissional**, explora a integração entre software desktop, componentes nativos e decisões de segurança explicáveis. É um projeto académico: complementa as proteções do Windows e apresenta limitações quando uma análise não pode ser concluída.
+[Downloads](docs/downloads.pt-PT.md) · [Documentação](docs/README.md) · [Contribuir](CONTRIBUTING.pt-PT.md) · [Segurança](SECURITY.md) · [Roadmap](docs/roadmap-public.md)
 
-**Licença por clarificar:** não existe texto global aprovado na raiz. Consulte o [estado da licença](docs/licensing.md) antes de assumir permissões de reutilização.
+## Escolher a edição
 
-## O que pode fazer
+| Plataforma | Release disponível | Requisitos e comportamento | Começar |
+|---|---|---|---|
+| **Windows** | **Estável v0.2.4** | Windows 10/11 x64. Instalação manual. Setup ainda sem Authenticode. | [Download](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.4) · [Instalação e recuperação](docs/installation.pt-PT.md) |
+| **Linux / Arch** | **Experimental Preview 3**, pacote 0.2.4-3 | Arch x86_64/glibc, pacman e dependências declaradas. Entrada na interface com conta. | [Download](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/linux-v0.2.4-arch-preview.3) · [Guia Linux](docs/linux/README.pt-PT.md) |
+| **Nigor OS Edition** | **Experimental Preview 1**, pacote 0.2.4-2 | Nigor baseado em Arch x86_64. Pacote próprio, painel local sem conta e login opcional. | [Download](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/nigor-v0.2.4-preview.1) · [Guia Nigor](docs/nigor-os/README.pt-PT.md) |
 
-| Área | Funcionalidades |
-|---|---|
-| **Scanner** | Análises rápidas e personalizadas, progresso, cancelamento, histórico e relatórios PDF. |
-| **Quatro motores** | ClamAV, regras YARA, HashDB e análise nativa em C++. Estados de saúde e resultados inconclusivos explícitos. |
-| **Monitorização** | Eventos de ficheiros e processos, recuperação de filas e diagnóstico de lacunas de cobertura. |
-| **Quarentena** | Isolamento e restauro controlado, com metadados e verificações de identidade e destino. |
-| **MATRIX** | Diagnóstico local e explicação de processos; IA online opcional com configuração e consentimento. |
-| **PC Center e Gestor de Tarefas** | Métricas disponíveis do sistema e terminação individual protegida no Windows. |
-| **USB e ferramentas** | Análise de dispositivos autorizados, recomendações e operações de otimização. |
-| **Atualizações** | Descoberta de versões no GitHub e verificação Ed25519/SHA-256. Instalação manual enquanto não existir Authenticode. |
+O número da Preview Nigor e a revisão do pacote Arch identificam coisas diferentes. A Preview 1 inclui o pacote **0.2.4-2**. Os dois pacotes Arch entram em conflito e a migração é explícita. O [índice de downloads](docs/downloads.pt-PT.md) apresenta assets, checksums e canais. Os antigos pacotes Debian/AppImage mantêm os seus limites documentados.
 
-## Ver a aplicação
+## Funcionalidades e limites por plataforma
+
+| Área | Capacidade disponível | Limite |
+|---|---|---|
+| **Scanner** | Análises rápidas/personalizadas, cancelamento, resultados por motor, histórico e relatórios PDF. | Consultar a edição concreta. Um resultado inconclusivo ou uma falha de motor deixa a análise incompleta. |
+| **ClamAV** | Assinaturas e análise dos arquivos suportados. | Definições, limites dos arquivos, carregamento e timeouts afetam a deteção. O clamd persistente Linux é opcional e ocupa memória significativa. |
+| **YARA / HashDB / C++ nativo** | Regras, hashes conhecidos, cálculo de hashes, entropia e sinais heurísticos. | A cobertura depende das regras, hashes e análises realmente disponíveis. |
+| **Monitorização / quarentena** | Observação de ficheiros e processos, recuperação de filas, isolamento, metadados e restauro controlado. | Há lacunas de cobertura. O Linux deteta após escrita e a edição distribuída mantém a prevenção desativada. A quarentena entre sistemas de ficheiros tem evidência de laboratório. |
+| **Histórico / relatórios** | Resultados persistentes e diagnóstico contextual. | Evidência histórica conserva a versão e o ambiente originais. |
+| **PC Center / Gestor de Tarefas** | Métricas disponíveis de hardware, sistema e processos. | Os sensores variam. A terminação protegida Windows é específica dessa plataforma. |
+| **MATRIX** | Explicações locais e fornecedor online opcional. | O uso online exige configuração e consentimento. Uma resposta local não comprova resposta do fornecedor. |
+| **USB / diagnóstico** | Análise dos dispositivos suportados, dependências e cobertura. | Um ensaio de sistemas de ficheiros não demonstra todos os dispositivos USB físicos. |
+| **Atualizações** | Descoberta GitHub, manifestos Ed25519, SHA-256 e pedidos explícitos de instalação. | O Windows usa instalação manual. Linux/Nigor têm canais e requisitos de compatibilidade próprios. [Estado dos canais](docs/downloads.pt-PT.md#canais-de-atualização). |
+| **Integração Nigor** | Cliente local autenticado, JSON, adaptador C++20, Security Center de referência e serviço de utilizador. | Barra, desktop, notificações, agente polkit e porta-chaves pertencem ao Nigor. A integração física continua por validar. |
+
+## Capturas reais da interface
+
+**Arquivo Windows v0.2.0.** São interfaces históricas reais. Ainda faltam capturas atuais de v0.2.4, Arch e Nigor, com versão e revisão de privacidade. O [índice de imagens](docs/images/README.md) identifica os originais e o [guião de demonstração](docs/demo.md) prepara uma gravação benigna.
+
+![Lista do Gestor de Tarefas — arquivo Windows v0.2.0](docs/images/v020-gestor-tarefas.png)
 
 <details>
-<summary>Capturas reais — versão pública v0.2.0 (referência histórica)</summary>
+<summary>Outras interfaces históricas</summary>
 
-![Diagnóstico expandido do Gestor de Tarefas — arquivo v0.2.0](docs/images/v020-dashboard.png)
-![Simulador de phishing — arquivo v0.2.0](docs/images/v020-matrix.png)
-![Gestor de Tarefas na v0.2.0](docs/images/v020-gestor-tarefas.png)
-
-Estas capturas estão arquivadas como **v0.2.0**, não demonstram o estado da v0.2.4. Os nomes históricos dos ficheiros não correspondem sempre às páginas mostradas: consulte o [índice das imagens](docs/images/README.md). Falta uma captura atual do Dashboard e da conversa MATRIX. Preservadas como evidência real; não são mockups nem imagens de laboratório. As alterações mais recentes estão nas [notas da release](https://github.com/MatrixChill/cybersafe-assistant/releases/latest).
+![Diagnóstico expandido de processos — arquivo Windows v0.2.0](docs/images/v020-dashboard.png)
+![Simulador de phishing — arquivo Windows v0.2.0](docs/images/v020-matrix.png)
 
 </details>
 
-## Instalar no Windows
-
-1. Descarregue o Setup e `SHA256SUMS.txt` da [release oficial](https://github.com/MatrixChill/cybersafe-assistant/releases/latest).
-2. Compare o hash do ficheiro com a linha correspondente em `SHA256SUMS.txt`:
-
-   ```powershell
-   Get-FileHash -Algorithm SHA256 -LiteralPath "<caminho-do-setup>.exe"
-   ```
-
-3. Ao atualizar, encerre normalmente a aplicação e preserve um backup dos dados antes de executar o Setup oficial.
-4. Confirme a versão, a sessão e o estado dos motores após abrir.
-
-**Compatibilidade:** Windows 10/11 x64. O instalador não tem assinatura Authenticode; o Windows pode mostrar editor desconhecido. Se uma política bloquear a execução, conserve o aviso e não desative Defender, SmartScreen, UAC ou firewall. [Guia de instalação e atualização](docs/installation.pt-PT.md).
-
-## Como funciona
+## Arquitetura
 
 ```mermaid
 flowchart LR
-    UI[React + TypeScript] --> Shell[Electron / preload]
-    Shell -->|named pipe| Service[Serviço Node.js]
-    Shell --> API[API local / SQLite]
-    Service --> Engines[ClamAV · YARA · HashDB · C++]
-    Service --> Data[Eventos · Histórico · Quarentena]
+    UI["React / TypeScript"] --> Shell["Electron main / preload"]
+    Shell -->|"IPC autenticado"| Service["Serviço Node.js"]
+    Shell --> API["API local de contas"]
+    API --> SQL["SQLite"]
+    Service --> Engines["ClamAV / YARA / HashDB / C++"]
+    Service --> State["Histórico / eventos / quarentena"]
+    Nigor["Componentes nativos Nigor"] --> Client["CLI / adaptador C++20"]
+    Client -->|"Socket Unix autenticado"| Service
+    Shell --> Updates["Atualizador da edição"]
+    Nigor --> Updates
+    Updates --> Releases["GitHub / manifestos Ed25519"]
 ```
 
-O monorepo separa interface, shell desktop, API local, orquestração e motores nativos. Usa **React, Electron, TypeScript, Node.js, C++, SQLite e CMake**. [Arquitetura e contratos](docs/ARCHITECTURE.md).
+O Windows usa named pipes e o Linux usa sockets Unix autenticados. A API de contas e o serviço local têm mecanismos de autenticação distintos. A conta opcional do Nigor preserva a autenticação do serviço. O atualizador verifica metadados e bytes antes de solicitar instalação autorizada. [Guia de arquitetura](docs/architecture/README.pt-PT.md).
 
-## Desenvolver
+## Instalar e utilizar
 
-```powershell
-git clone https://github.com/MatrixChill/cybersafe-assistant.git
-cd cybersafe-assistant
-npm ci
-npm run build:all
-npm run dev
-```
+Use os assets da mesma [release da sua edição](docs/downloads.pt-PT.md), confirme o checksum e preserve um backup frio antes de atualizar. Comece por uma pequena pasta de ficheiros benignos descartáveis. Reveja motores, resultados e histórico antes de concluir.
 
-O build nativo requer o toolchain Windows e os recursos documentados. Evite executar uma sessão DEV em conflito com uma instalação pessoal. Os testes e o packaging são etapas distintas; `build:all` não gera nem valida uma instalação. [Preparar o ambiente e executar testes](docs/development.pt-PT.md).
+[Instalação Windows](docs/installation.pt-PT.md) · [Linux / Arch](docs/linux/README.pt-PT.md) · [Instalação e migração Nigor](docs/nigor-os/README.pt-PT.md) · [FAQ](docs/faq.md)
 
-## Segurança e limites
+## Desenvolvimento e contribuições
 
-- Motor **Ativo** não certifica cobertura total. Falhas, timeouts e resultados inconclusivos devem permanecer visíveis.
-- A correção ClamAV da v0.2.4 está publicada; a confirmação no portátil afetado continua pendente nas notas do PR #3.
-- A cobertura do watcher é limitada pelas notificações do Windows. USB tem testes automatizados; isso não substitui um ensaio com dispositivo físico.
-- O filtro WFP depende de provisionamento próprio; não representa o estado do firewall do Windows.
-- O updater verifica manifesto e integridade; a instalação assistida permanece desativada. Não há promessa de atualização automática ponta a ponta.
+O [guia de desenvolvimento](docs/development.pt-PT.md) cobre branches, Node.js, dependências nativas, packaging Arch e testes dirigidos. O trabalho Linux/Nigor está em revisão no [PR #5](https://github.com/MatrixChill/cybersafe-assistant/pull/5). Esta documentação é revista no [PR #4](https://github.com/MatrixChill/cybersafe-assistant/pull/4).
 
-Não é uma proteção antivírus infalível nem substitui o Microsoft Defender. [Testes, limitações e divulgação de vulnerabilidades](docs/security-and-testing.md).
+Pode relatar erros reproduzíveis, rever documentação, traduzir guias ou contribuir com alterações delimitadas. Indique a edição, versão do produto/pacote e ambiente realmente testado. Consulte [CONTRIBUTING](CONTRIBUTING.pt-PT.md), [suporte](docs/support.md) e o [Código de Conduta](CODE_OF_CONDUCT.md).
 
-## Documentação e PAP
+## Segurança, evidência e roadmap
 
-[Índice técnico](docs/README.md) · [Motores](docs/engines.md) · [MATRIX](docs/matrix.md) · [Atualizações](docs/updates.md) · [Evidências da PAP](PAP-EVIDENCIAS-TECNICAS/README.md) · [Changelog](CHANGELOG.md)
+O CyberSafe não anuncia certificação ou cobertura total de malware. Mantenha as proteções da plataforma ativas. Eventos do watcher, motores Ativos e CI aprovada demonstram aspetos diferentes. A [política de segurança](SECURITY.md) explica limites e o percurso atual para comunicar vulnerabilidades.
 
-A [branch Linux Lite](https://github.com/MatrixChill/cybersafe-assistant/tree/experimental/linux-lite) é experimental e não implica equivalência com a edição Windows. As capturas, relatórios e decisões históricas mantêm a versão e o contexto originais.
+A v0.2.4 Windows corrige a recuperação do ciclo de vida ClamAV. O trabalho de laboratório Linux/Nigor cobre lotes, clamd opcional, staging protegido e quarentena entre sistemas de ficheiros. Aceitação do desktop Nigor, mais dispositivos e atualização instalada pelo percurso de autorização gráfica continuam a ser gates explícitos. Consulte o [roadmap público](docs/roadmap-public.md) e os guias de cada edição.
 
-As atribuições de terceiros e a proveniência dos componentes estão em [THIRD-PARTY-NOTICES](assets/licenses/THIRD-PARTY-NOTICES.txt) e [PROVENANCE](assets/licenses/PROVENANCE.json).
+## Autor, licença e histórico
 
-## Contribuir e acompanhar
+**Caio Amorim** criou o CyberSafe na PAP e continua o seu desenvolvimento. As [evidências académicas](PAP-EVIDENCIAS-TECNICAS/README.md), checkpoints datados e o [guia do arquivo](docs/archive/README.md) conservam o contexto original.
 
-Aceitam-se relatos reproduzíveis e revisão documental em português ou inglês. Consulte [CONTRIBUTING](CONTRIBUTING.md), o [Código de Conduta](CODE_OF_CONDUCT.md), a [política de segurança](SECURITY.md), o [FAQ](docs/faq.md) e o [roadmap público atual](docs/roadmap-public.md) (em inglês).
+O código original tem a [licença MIT aprovada pelo titular](LICENSE). Software e assets de terceiros conservam as suas licenças. [Licença e proveniência](docs/licensing.md) explica o âmbito, atribuições e obrigações de distribuição.
 
-**Licença por clarificar:** os metadados npm indicam MIT, mas não existe texto global aprovado na raiz. O proprietário confirmou esta pendência. Não se atribuem novos direitos nem se apresenta uma licença OSI como confirmada. [Estado da licença e atribuições](docs/licensing.md).
-
-Está preparado um [guião de demonstração de 60–90 segundos](docs/demo.md), em inglês e PT-PT. Não representa uma gravação já executada.
+[Changelog](CHANGELOG.md) · [MATRIX](docs/matrix.md) · [Arquitetura técnica](docs/ARCHITECTURE.md)

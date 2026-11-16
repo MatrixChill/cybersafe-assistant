@@ -1,27 +1,31 @@
-# Licensing status
+# Licensing and provenance
 
-Reviewed on 2026-11-11 with the project owner. **There is no approved project-wide license text in the repository root.** The owner confirmed that no approved text is currently available.
+[Português de Portugal](#licença-e-proveniência) · [MIT text](../LICENSE)
 
-The root and some workspace `package.json` files declare `MIT`, but that metadata does not resolve the missing license text or establish that all components can be relicensed together. GitHub currently identifies no repository license. The documentation therefore does not advertise CyberSafe as MIT-licensed or as an OSI-licensed project.
+The owner approved MIT for original CyberSafe code with **Copyright (c) 2026 Caio Amorim** and confirmed the necessary rights/permissions in the project handoff. The approved text was committed as `554f079` on the Linux/Nigor branch. This documentation PR incorporates that same text in the root [LICENSE](../LICENSE), reconciling the npm MIT metadata with an explicit license file.
 
-## What remains to be decided
+At this review, `main` has not merged this document or the root text. GitHub's default-branch license detection can therefore remain empty until the PR is reviewed and merged. The earlier November 11 licensing-pending statement is historical and has been superseded by the owner's approval.
 
-The rights holder needs to approve an appropriate license text and scope, confirm rights to the original code and branding, and review compatibility with the components actually distributed. Only then should repository licensing, metadata and any license badge be reconciled. This documentation change neither changes a license nor grants new permissions.
+## Scope and distribution records
 
-Until clarified, do not assume permission for redistribution, relicensing or incorporation into another product from public visibility or npm metadata alone. For substantial code contributions, agree on the applicable terms with the owner first. Bug reports and documentation feedback can still be discussed without submitting sensitive material.
+| Material | Treatment |
+|---|---|
+| Original CyberSafe code | MIT as approved by the owner. Preserve the copyright and license notice. |
+| Dependencies and bundled executables | Retain their own licenses and notices. The root license does not relicense third-party software. |
+| Signature databases, YARA rules and other data | Review the exact version, origin and redistribution terms. A working detection test does not establish a license grant. |
+| Branding and third-party media | Preserve recorded provenance and attribution. Review a new asset's ownership and permitted distribution before inclusion. |
+| Historical artifacts | Keep their original source identity and notices. Adding a root license does not regenerate or silently change an existing binary. |
 
-For background, [GitHub's licensing guide](https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/licensing-a-repository) distinguishes public visibility and GitHub viewing/forking rights from a license to use, modify and distribute software. This document records the unresolved project status; it does not choose terms for the owner.
+The maintained attribution sources are [THIRD-PARTY-NOTICES](../assets/licenses/THIRD-PARTY-NOTICES.txt), [PROVENANCE](../assets/licenses/PROVENANCE.json) and the notices supplied with each [release](downloads.md). Classic YARA and historical YARA-X/Rust records have different scopes.
 
-## Existing attribution records
+Linux/Nigor packages supply runtime notices and source identity, including Electron/Chromium and applicable renderer dependencies. Their packaging review is recorded in [PR #5](https://github.com/MatrixChill/cybersafe-assistant/pull/5). This documentation review checks consistency and preserves the records. It does not establish a complete legal clearance of every historical dependency, database or asset.
 
-- [Third-party notices](../assets/licenses/THIRD-PARTY-NOTICES.txt).
-- [Component provenance](../assets/licenses/PROVENANCE.json).
-- [Release signing and verification](RELEASE-SIGNING-RUNBOOK.md).
+Future distributions need a component inventory, source hashes/origins, relevant license texts and attribution, and review of redistribution obligations. Resolve an unclear redistribution permission with the rights holder before distribution.
 
-The notices distinguish the current classic YARA engine from historical YARA-X/Rust records. A historical dependency archive or PAP test authorization is not a new distribution license. Component notices remain under their existing terms; this review is not a full legal clearance of every dependency or artifact.
+## Licença e proveniência
 
-## Estado da licença
+O titular aprovou MIT para o código original do CyberSafe e confirmou os direitos/permissões. Este PR reutiliza o texto já registado na branch Linux/Nigor, com copyright de Caio Amorim em 2026. A ausência de reconhecimento na `main` depende da revisão e integração do ficheiro de raiz.
 
-Não existe texto de licença global aprovado na raiz. Os metadados npm indicam MIT, mas o proprietário confirmou que não dispõe de texto aprovado. A pendência fica explícita, sem acrescentar uma licença ou atribuir direitos. Cabe ao titular confirmar o texto, o âmbito e a compatibilidade dos componentes antes de anunciar o projeto como open source com licença OSI.
+Dependências, executáveis, bases de assinaturas, regras e assets de terceiros mantêm os seus termos. Os avisos e a proveniência têm de acompanhar os componentes distribuídos. Esta revisão documental não certifica juridicamente todas as distribuições históricas.
 
-[README](../README.md) · [Português](../README.pt-PT.md)
+[Contributing](../CONTRIBUTING.md) · [Third-party notices](../assets/licenses/THIRD-PARTY-NOTICES.txt)

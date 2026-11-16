@@ -13,14 +13,25 @@ body:
     attributes:
       label: Product version / Versão do produto
       description: Use the product version shown in the app, not an npm workspace version.
-      placeholder: v0.2.4
+      placeholder: Windows v0.2.4; Arch 0.2.4-3; Nigor Preview 1 / 0.2.4-2
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition / Edição
+      options:
+        - Windows Stable
+        - Linux / Arch Experimental
+        - Nigor OS Edition Experimental
+        - Development checkout / Checkout de desenvolvimento
     validations:
       required: true
   - type: input
     id: platform
     attributes:
-      label: Windows version and installation source / Windows e origem da instalação
-      description: Include Windows build/architecture and official release or DEV commit. No username or device identifier.
+      label: OS, package revision and source / SO, revisão do pacote e origem
+      description: Include OS version, architecture, package revision and release tag or DEV commit. No username or device identifier.
     validations:
       required: true
   - type: textarea

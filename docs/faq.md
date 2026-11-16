@@ -1,45 +1,43 @@
 # Frequently asked questions
 
-## Is CyberSafe a replacement for Microsoft Defender?
+[Português de Portugal](faq.pt-PT.md) · [Downloads](downloads.md)
 
-No. It is an academic Windows desktop security and diagnostics project. Keep Windows protections enabled. An engine reporting Active is not a certificate of complete coverage.
+## Which edition should I download?
 
-## Which version and platform should I use?
+Windows v0.2.4 is stable for Windows 10/11 x64. Arch Preview 3 is experimental and uses account-based desktop entry. Nigor Preview 1 ships a dedicated package with a local panel and optional login. Use the [download index](downloads.md) and its exact package names.
 
-Use the [latest official Windows release](https://github.com/MatrixChill/cybersafe-assistant/releases/latest), currently v0.2.4 at this review, on Windows 10/11 x64. Linux Lite is experimental on a separate branch, with no Windows feature-parity promise.
+## Does Stable mean certified antivirus protection?
+
+Stable identifies the distribution channel. CyberSafe has no complete-coverage or antivirus-certification claim. Keep platform protections enabled. An Active engine or a successful benign scan does not prove full detection.
 
 ## Why does Windows show an unknown publisher?
 
-The Setup lacks Authenticode. The Ed25519 manifest verifies update metadata; it does not replace a Windows code-signing certificate. If Windows blocks execution, stop and retain the warning. See [installation](installation.md).
+The Setup lacks Authenticode. A signed update manifest does not supply Windows publisher trust. Keep Windows protections active and retain any blocked-execution warning. See [installation](installation.md).
 
-## Is the license MIT?
+## Is CyberSafe MIT-licensed?
 
-The npm metadata says MIT, but there is no approved root license text. Do not infer project-wide permissions from that mismatch. The owner needs to resolve [licensing](licensing.md); third-party notices retain their own terms.
-
-## Does an inconclusive scan mean a file is safe?
-
-No. An unavailable engine, timeout, limit or inaccessible file can leave analysis incomplete. Review the reason and engine results. Do not turn an unknown into a clean verdict.
+Original code uses the approved root [MIT license](../LICENSE). Third-party dependencies, rules, data and assets retain their terms. [Licensing and provenance](licensing.md) explains the distinction.
 
 ## Why can ClamAV be slow or degraded?
 
-Database loading, queue contention, process lifecycle and analysis itself have separate costs. The v0.2.4 lifecycle fix is published, but validation on the affected notebook remains pending in [PR #3](https://github.com/MatrixChill/cybersafe-assistant/pull/3). Report version, workload, timing and redacted errors; do not assume file count alone explains latency.
+Definition loading, queue waits, scan execution and process lifecycle have separate costs. Persistent Linux clamd can reduce repeated startup cost and uses substantial resident memory. It is optional. Report edition, workload, timings and redacted error reasons.
 
-## Is MATRIX always an online AI response?
+## Does inconclusive mean safe?
 
-No. Local diagnosis is a separate path. Online use requires provider configuration, a secure credential and consent. The presence of a chat response does not prove that a remote provider answered.
+Incomplete analysis remains inconclusive. Inspect unavailable engines, file access, timeouts and archive limits before interpreting a result.
 
-## Does CyberSafe send all my files to an AI service?
+## Is MATRIX always online?
 
-Do not infer a blanket cloud scan from MATRIX. Its local path and optional online provider have different data flows. Review the consent shown for the action and [MATRIX documentation](matrix.md) (PT-PT); never include credentials or private process/file data in a public report.
+Local diagnosis and optional provider requests have different origins. Online operation needs configuration, credentials and consent. Confirm the origin shown and the information sent for that request.
 
-## Are automatic updates ready?
+## Why can Nigor open without a CyberSafe account?
 
-Discovery, Ed25519 verification and download integrity are implemented. Assisted installation remains disabled without legitimate Authenticode. Do not describe a handoff fixture as an installed end-to-end update. See [updates](updates.md) (PT-PT).
+The dedicated edition exposes local functions without account login while preserving authenticated service access and private account API routes. Remembered login needs a supported unlocked keyring. Temporary login stays in memory. [Nigor guide](nigor-os/README.md).
 
-## Can I send a database or malicious file with a bug report?
+## Are installed automatic updates demonstrated?
 
-No. Use minimal benign reproduction steps and redacted logs. Never attach credentials, quarantine contents or personal databases. See [SECURITY](../SECURITY.md) for vulnerabilities and [CONTRIBUTING](../CONTRIBUTING.md) for ordinary bugs.
+Windows installation remains manual. Linux/Nigor have signed manifests, protected staging and consented helpers, with lab transactions documented in their release evidence. Full graphical polkit and installed public-feed acceptance remain explicit gates. [Channels](downloads.md#update-channels).
 
-## How do I help?
+## How should I report a problem?
 
-Review documentation, report a reproducible problem or discuss a scoped improvement. English and Portuguese are welcome. Clarify contribution terms before substantial code submissions. No stars, payments or personal identifiers are required for a report.
+Use minimal benign reproduction, edition/version and redacted diagnostics. Never attach malware, credentials, private databases or quarantine contents. Follow [support](support.md) for ordinary bugs and [SECURITY](../SECURITY.md) for vulnerabilities.

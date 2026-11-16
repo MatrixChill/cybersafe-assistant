@@ -1,35 +1,30 @@
 # Contributing to CyberSafe Assistant
 
-Thank you for helping make CyberSafe easier to understand and evaluate. Issues and pull requests may be written in **English or Portuguese (Portugal)**.
+[Português de Portugal](CONTRIBUTING.pt-PT.md) · [Code of Conduct](CODE_OF_CONDUCT.md)
 
-## Start small
+Issues and pull requests may be written in English or Portuguese. Code, documentation, translations, accessibility reviews and reproducible tests are welcome.
 
-- Report a reproducible bug using the [bug form](https://github.com/MatrixChill/cybersafe-assistant/issues/new?template=bug-report.yml).
-- Suggest an improvement using the [feature form](https://github.com/MatrixChill/cybersafe-assistant/issues/new?template=feature-request.yml).
-- Review documentation, translations, accessibility or a version-labelled screenshot.
-- Check existing issues and the [roadmap](docs/roadmap-public.md) before proposing a new area of work.
+## Before you start
 
-**Licensing is pending clarification.** Read [the licensing status](docs/licensing.md) before submitting substantial code or assuming redistribution rights. No CLA, license grant or replacement license is introduced here. Discuss the applicable terms with the owner first.
+Check existing issues, [downloads](docs/downloads.md), the [roadmap](docs/roadmap-public.md) and the relevant platform guide. Windows work starts from `main`. Coordinate Linux/Nigor changes with [PR #5](https://github.com/MatrixChill/cybersafe-assistant/pull/5) and its existing branch to avoid duplicating development.
 
-## Reproduce safely
+Original project code uses the [owner-approved MIT license](LICENSE). Third parties retain their own terms. Review [provenance](docs/licensing.md) before adding dependencies, rules, datasets or assets. No contributor license agreement is introduced here.
 
-Use disposable benign files and an isolated development profile. Do not scan another person's files, terminate personal/Windows processes, change Windows protections or test installation over personal data as part of a routine contribution. Never attach malware, quarantine contents, databases, credentials or unredacted diagnostic logs.
+## Reproduce and report
 
-For a suspected vulnerability, follow [SECURITY.md](SECURITY.md), not a public bug report.
+Use the [bug form](https://github.com/MatrixChill/cybersafe-assistant/issues/new?template=bug-report.yml) for ordinary bugs or the [feature form](https://github.com/MatrixChill/cybersafe-assistant/issues/new?template=feature-request.yml) for a scoped proposal. Identify Windows, generic Arch or Nigor, product and package versions, environment and observed results.
+
+Use disposable benign files and an isolated profile. Never attach credentials, private databases, quarantine contents or malware. Installation, process termination and privileged tests require an authorized disposable environment. Follow [SECURITY.md](SECURITY.md) before sharing vulnerability details.
 
 ## Pull requests
 
-1. Start a focused branch from current `main`; preserve unrelated work.
-2. Describe the user-visible problem and evidence. Separate observed results from hypotheses.
-3. Follow the [development guide](docs/development.md); run focused checks relevant to your changes. Document skipped or environment-dependent tests.
-4. For documentation, verify relative links, image provenance, version labels and consistency with current code. For behavior changes, include a regression test where practical.
-5. Review the diff for secrets, private paths, generated artifacts and unintended changes. Use `git diff --check`.
-6. Open a pull request with a clear scope and validation results. Wait for review; passing CI is not authorization to merge or publish.
+1. Preserve unrelated work and keep the change focused.
+2. Describe the concrete problem and resulting behavior. Separate measurement from inference.
+3. Follow the [development guide](docs/development.md), run relevant checks and record results, skips and pending manual acceptance.
+4. Verify document links, translations, image provenance and version labels. Add behavioral regressions where needed.
+5. Review for secrets, private paths, large generated files and unintended changes. Run `git diff --check`.
+6. Open a PR for review. CI success does not authorize merge, freeze or publication.
 
-Do not weaken verdicts or safety gates to make tests pass. Changes to signing, packaging, trust, installation and security-sensitive IPC need explicit review. Freeze approvals belong to exact source inventories and cannot be reused for changed trees.
+Preserve verdicts, consent and security gates. Signing, trust, packaging and IPC changes require explicit review. Freeze approvals bind exact inventories and cannot be reused for changed trees. Review AI-assisted work and disclose material tool assistance in the PR.
 
-AI-assisted work must be reviewed by its submitter. Do not invent evidence, participants, benchmarks or sources; disclose material tool assistance in the PR so the maintainer can assess it.
-
-## Community
-
-Follow the [Code of Conduct](CODE_OF_CONDUCT.md). This academic project has no promised support SLA. Helpful reports include the product version, platform, minimal steps and redacted results, without requiring personal identifiers.
+This project has no guaranteed support SLA. See [support](docs/support.md) for safe diagnostic details.

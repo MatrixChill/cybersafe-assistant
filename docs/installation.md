@@ -1,6 +1,6 @@
 # Install and update on Windows
 
-[Português de Portugal](installation.pt-PT.md) · [README](../README.md)
+[Português de Portugal](installation.pt-PT.md) · [All editions](downloads.md) · [README](../README.md)
 
 ## Requirements and download
 
