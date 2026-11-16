@@ -140,6 +140,26 @@ export function installationPreflight(staged,run=systemTool,dbLock='/var/lib/pac
   if(dependencies.length&&run('/usr/bin/pacman',['-T','--',...dependencies]).status!==0)fail('dependencies-unsatisfied');
 }
 
+/**
+ * Lock de instalação com dono. Um lock deixado por uma instalação interrompida
+ * (processo dono morto e pacman sem db.lck) é recuperado: o diretório é
+ * renomeado para `.install.lock.stale-*` (preservado como evidência) e o
+ * pedido continua. Lock com dono vivo, ou pacman ocupado, recusa.
+ */
+export function acquireInstallLock(stagingRoot,{proc='/proc',dbLock='/var/lib/pacman/db.lck',pid=process.pid}={}){
+  const lock=join(stagingRoot,'.install.lock');
+  const take=()=>{mkdirSync(lock,{mode:0o700});writeFileSync(join(lock,'owner'),String(pid),{mode:0o600,flag:'wx'});return lock;};
+  try{return take();}catch(error){if(error.code!=='EEXIST')throw error;}
+  const st=lstatSync(lock);
+  if(!st.isDirectory()||st.isSymbolicLink())fail('installation-lock-unsafe');
+  let owner=NaN;
+  try{owner=Number(readFileSync(join(lock,'owner'),'utf8').trim());}catch{/* lock antigo sem dono registado */}
+  const alive=Number.isSafeInteger(owner)&&owner>0&&existsSync(join(proc,String(owner)));
+  if(alive||existsSync(dbLock))fail('installation-busy');
+  renameSync(lock,join(stagingRoot,`.install.lock.stale-${Date.now()}`));
+  return take();
+}
+
 if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
   let staged, installLock;
   const report=(state,reason)=>console.log(JSON.stringify({schema:1,state,reason,transaction:staged?basename(staged.directory):null}));
@@ -166,10 +186,7 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
       try{mkdirSync(directory,{mode:0o700});}catch(error){if(error.code!=='EEXIST')throw error;}
       rootOwnedPath(directory);
     }
-    const lockDirectory=join(stagingRoot,'.install.lock');
-    try { mkdirSync(lockDirectory,{mode:0o700}); }
-    catch(error){if(error.code==='EEXIST')fail('installation-busy-or-interrupted');throw error;}
-    installLock=lockDirectory;
+    installLock=acquireInstallLock(stagingRoot);
     assertProductStopped();
     staged=await stageVerifiedPackage({packageFile,manifestFile,signatureFile,expectedSha256,uid,config,stagingRoot});
     journal('verified');installationPreflight(staged);
@@ -189,6 +206,6 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
     try{if(staged)journal('failed');}catch{report('error','journal-write-failed');}
     report('error',/^[a-z][a-z0-9-]+$/.test(error.code??'')?error.code:'installation-error');process.exitCode=1;
   }finally{
-    if(installLock){try{rmdirSync(installLock);}catch{report('error','installation-lock-cleanup');process.exitCode=1;}}
+    if(installLock){try{rmSync(join(installLock,'owner'),{force:true});rmdirSync(installLock);}catch{report('error','installation-lock-cleanup');process.exitCode=1;}}
   }
 }
