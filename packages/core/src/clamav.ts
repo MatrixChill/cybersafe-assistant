@@ -146,7 +146,7 @@ function firstLineOf(value: string): string {
  * pior do que não attributir.
  */
 function pathKey(file: string): string {
-  return platformFileKey(file);
+  return platformFileKey(file).replace(/^\\+/, "");
 }
 
 function baseName(file: string): string {
