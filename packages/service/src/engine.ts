@@ -429,6 +429,20 @@ export class ProtectionEngineService {
   /** Admission can be OFF while a previous module teardown remains unconfirmed. */
   private protectionStopUnconfirmed = false;
   private readonly realtimeQueue = new RealtimeFileQueue();
+  /**
+   * Lote ClamAV do tempo real (16/11). Cada ficheiro observado custava um
+   * `clamscan` próprio (recarga da base: ~5–8 s e ~1 GB RSS no Nigor), e uma
+   * rajada de centenas de ficheiros demorava minutos. Quando um job arranca com
+   * outros à espera, UM `clamscan` analisa o lote; os jobs seguintes reutilizam
+   * o veredicto ClamAV do seu ficheiro só se a impressão digital admitida for a
+   * mesma e o resultado for recente. YARA, HashDB e Native correm por ficheiro
+   * como antes; mudança de conteúdo continua a ser apanhada por `changed`.
+   */
+  private readonly realtimeTargets = new Map<string, { path: string; fingerprint: string }>();
+  private readonly realtimeClamavCache = new Map<string, { fingerprint: string; outcome: ClamavFileOutcome; at: number }>();
+  private realtimeBatchSeq = 0;
+  static readonly REALTIME_CLAMAV_BATCH = 32;
+  static readonly REALTIME_CLAMAV_TTL_MS = 120_000;
   private readonly realtimeRecovery = new RealtimeRecovery({ onIdle: () => this.scheduleOverflowOutcome() });
   private quarantinePolicy: QuarantinePolicy = "warn";
   /** Prova de arranque do ClamAV em segundo plano (testes e encerramento podem esperar por ela). */
@@ -1466,7 +1480,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
   async stopProtection(): Promise<ServiceResponseMap["monitor.stop"]> {
     ++this.protectionGeneration;
-    this.realtimeQueue.clear();
+    this.realtimeQueue.clear(); this.realtimeTargets.clear(); this.realtimeClamavCache.clear();
     this.realtimeRecovery.clear();
     // A contagem de perda é por sessão de proteção: sem ela, um número de
     // ontem é apresentado como se fosse do estado atual.
@@ -2354,11 +2368,15 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     const signal = this.backgroundAbort.signal;
     const queuedAt = performance.now();
     const resolvedPath = path.resolve(filePath);
-    const admission = this.realtimeQueue.enqueue(platformFileKey(resolvedPath), fingerprint, async () => {
+    const realtimeKey = platformFileKey(resolvedPath);
+    const admission = this.realtimeQueue.enqueue(realtimeKey, fingerprint, async () => {
+      if (this.realtimeTargets.get(realtimeKey)?.fingerprint === fingerprint) this.realtimeTargets.delete(realtimeKey);
       if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || signal.aborted) return;
       const startedAt = performance.now();
       if (trace) console.log(`[RealtimePerf] id=${traceId} stage=start queueWaitMs=${(startedAt-queuedAt).toFixed(1)} observedToStartMs=${(startedAt-observedAt).toFixed(1)}`);
-      const result = await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true, priority: "realtime", realtimeTraceId: trace ? traceId : undefined });
+      const clamavOutcome = this.takeRealtimeClamav(realtimeKey, fingerprint)
+        ?? await this.realtimeClamavBatch(realtimeKey, resolvedPath, fingerprint, signal);
+      const result = await this.scanArtifact(filePath, "service", { backgroundSignal: signal, skipVirusTotal: true, priority: "realtime", realtimeTraceId: trace ? traceId : undefined, ...(clamavOutcome ? { clamavOutcome } : {}) });
       if (generation === this.protectionGeneration) {
         const desfecho = await this.realtimeAnalysisOutcome(filePath, fingerprint, result?.results[0]?.verdict);
         this.realtimeRecovery.noteAnalyzed(resolvedPath, fingerprint, desfecho);
@@ -2369,6 +2387,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       if (trace) console.log(`[RealtimePerf] id=${traceId} stage=returned pipelineMs=${(performance.now()-startedAt).toFixed(1)} observedToReturnedMs=${(performance.now()-observedAt).toFixed(1)} verdict=${result?.results[0]?.verdict ?? "cancelled"}`);
     }, this.realtimePriority(filePath), 0);
     if (trace) console.log(`[RealtimePerf] id=${traceId} stage=admission outcome=${admission} metadataMs=${(queuedAt-observedAt).toFixed(1)} queueDepth=${this.realtimeQueue.size}`);
+    if (admission === "queued") this.realtimeTargets.set(realtimeKey, { path: resolvedPath, fingerprint });
     if (admission === "full") { this.reportRealtimeOverflow(filePath, "analysis", retry); return false; }
     // Uma versão deste caminho entrou (ou já estava em espera/analisada). Isto
     // só cancela a repetição; a lacuna fecha quando a análise dela terminar.
@@ -2682,7 +2701,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     ++this.protectionGeneration;
     this.resetOverflowEpisode();
     this.backgroundAbort.abort();
-    this.realtimeQueue.clear();
+    this.realtimeQueue.clear(); this.realtimeTargets.clear(); this.realtimeClamavCache.clear();
     this.realtimeRecovery.clear();
     // Idempotente: pode ser chamado pelo shutdown e pelo handler de sinais.
     if (this.disposed) return;
@@ -3201,6 +3220,43 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
    * ficheiro. Nunca lanca: uma falha aqui tem de deixar o scan continuar com
    * o clamscan por ficheiro, que e lento mas correcto.
    */
+  /** Veredicto ClamAV de um lote anterior, só para a MESMA versão admitida e recente. */
+  private takeRealtimeClamav(key: string, fingerprint: string): ClamavFileOutcome | undefined {
+    const hit = this.realtimeClamavCache.get(key);
+    if (!hit) return undefined;
+    this.realtimeClamavCache.delete(key);
+    if (hit.fingerprint !== fingerprint || Date.now() - hit.at > ProtectionEngineService.REALTIME_CLAMAV_TTL_MS) return undefined;
+    if (hit.outcome.verdict === "error") return undefined; // erro no lote: este ficheiro tenta de novo sozinho
+    return hit.outcome;
+  }
+
+  /**
+   * Um único `clamscan` para este ficheiro e os que estão à espera. Sem outros
+   * à espera devolve `undefined` e o caminho individual de sempre corre.
+   */
+  private async realtimeClamavBatch(key: string, resolvedPath: string, fingerprint: string, signal: AbortSignal): Promise<ClamavFileOutcome | undefined> {
+    const peers = this.realtimeQueue.peekPending(ProtectionEngineService.REALTIME_CLAMAV_BATCH - 1)
+      .map(k => [k, this.realtimeTargets.get(k)] as const)
+      .filter((e): e is readonly [string, { path: string; fingerprint: string }] => e[1] !== undefined && e[0] !== key);
+    if (peers.length === 0) return undefined;
+    const batchId = `realtime-batch-${++this.realtimeBatchSeq}`;
+    try {
+      const batch = await this.clamav.scanFiles([resolvedPath, ...peers.map(([, t]) => t.path)], { signal, scanId: batchId, priority: "realtime" });
+      if (signal.aborted) return undefined;
+      const byKey = new Map(batch.files.map(f => [ProtectionEngineService.prefetchKey(f.file), f]));
+      const at = Date.now();
+      for (const [peerKey, target] of peers) {
+        const outcome = byKey.get(ProtectionEngineService.prefetchKey(target.path));
+        if (outcome) this.realtimeClamavCache.set(peerKey, { fingerprint: target.fingerprint, outcome, at });
+      }
+      while (this.realtimeClamavCache.size > 512) this.realtimeClamavCache.delete(this.realtimeClamavCache.keys().next().value!);
+      const own = byKey.get(ProtectionEngineService.prefetchKey(resolvedPath));
+      return own && own.verdict !== "error" ? own : undefined;
+    } catch {
+      return undefined; // sem lote: o caminho individual continua correto
+    }
+  }
+
   async prefetchClamav(
     filePaths: string[],
     scanId?: string,
