@@ -190,6 +190,7 @@ struct Engine { EngineState state = EngineState::Unknown; EngineReason reason = 
 struct Engines { Engine clamav, yara, hashDb, native; };
 
 struct ScanSummary {
+  std::optional<std::string> id;
   ScanStatus status = ScanStatus::Unknown;
   std::optional<std::string> endedAt;
   std::optional<int64_t> filesAnalyzed, filesFailed, filesInconclusive, threatsFound;
@@ -199,13 +200,16 @@ struct ScanSummary {
   }
 };
 
-struct Alert { std::string type; std::optional<std::string> severity, timestamp; };
+struct Alert { std::string type; std::optional<std::string> severity, timestamp, id, scanId; };
 
 struct Status {
   int version = 0;
   std::optional<bool> serviceRunning;
   ProtectionStatus protection = ProtectionStatus::Unknown;
   std::optional<bool> monitoringEnabled;
+  std::optional<std::string> monitoringMode;
+  std::optional<bool> preventionConfirmed;
+  std::optional<int64_t> queueDepth, monitoredRootCount;
   Engines engines;
   std::optional<ScanSummary> latestScan;
   std::vector<ScanSummary> history;
@@ -268,6 +272,7 @@ inline std::optional<double> percent(const Json* j) {
 inline std::optional<std::string> str(const Json* j) { return j ? j->str() : std::nullopt; }
 inline ScanSummary scan(const Json& j) {
   ScanSummary s;
+  s.id = str(j.get("id"));
   auto st = str(j.get("status"));
   s.status = !st ? ScanStatus::Unknown : *st == "completed" ? ScanStatus::Completed : *st == "cancelled" ? ScanStatus::Cancelled : *st == "failed" ? ScanStatus::Failed : ScanStatus::Unknown;
   s.endedAt = str(j.get("endedAt"));
@@ -295,6 +300,12 @@ inline Result<Status> parseStatus(std::string_view text) {
     if (auto* e = p->get("enabled")) s.monitoringEnabled = e->boolean();
   }
   const Json* engines = json->get("engines");
+  if (auto* m = json->get("monitoring")) {
+    s.monitoringMode = detail::str(m->get("mode"));
+    if (auto* p = m->get("preventionConfirmed")) s.preventionConfirmed = p->boolean();
+    s.queueDepth = detail::count(m->get("queueDepth"));
+    s.monitoredRootCount = detail::count(m->get("rootCount"));
+  }
   const Json* reasons = json->get("engineReasons");
   auto fill = [&](Engine& e, const char* key) {
     e.state = detail::engineState(engines ? engines->get(key) : nullptr);
@@ -307,7 +318,7 @@ inline Result<Status> parseStatus(std::string_view text) {
     for (auto& e : *a->arr()) {
       auto type = detail::str(e.get("type"));
       if (!type) continue;
-      s.alerts.push_back({*type, detail::str(e.get("severity")), detail::str(e.get("timestamp"))});
+      s.alerts.push_back({*type, detail::str(e.get("severity")), detail::str(e.get("timestamp")), detail::str(e.get("id")), detail::str(e.get("scanId"))});
     }
   }
   s.alertsScope = detail::str(json->get("alertsScope"));
@@ -339,7 +350,7 @@ inline Result<UpdateStatus> parseUpdate(std::string_view text) {
 /// Consulta compatível com o painel: qualquer motor fora de Active impede «proteção completa».
 inline bool fullyProtected(const Status& s) {
   auto active = [](const Engine& e) { return e.state == EngineState::Active; };
-  return s.serviceRunning == true && s.monitoringEnabled == true && s.protection == ProtectionStatus::Safe &&
+  return s.preventionConfirmed == true && s.serviceRunning == true && s.monitoringEnabled == true && s.protection == ProtectionStatus::Safe &&
          active(s.engines.clamav) && active(s.engines.yara) && active(s.engines.hashDb) && active(s.engines.native);
 }
 

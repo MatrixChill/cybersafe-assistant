@@ -11,7 +11,7 @@ const engineStates = new Set(["active", "degraded", "unavailable", "error"]);
 const engineReasons = new Set(["not-installed", "no-definitions", "exec-failed", "starting"]);
 const protectionStates = new Set(["safe", "attention", "critical", "degraded"]);
 const scanStates = new Set(["completed", "cancelled", "failed"]);
-const alertTypes = new Set(["threat.detected", "quarantine.failed", "process.blocked"]);
+const alertTypes = new Set(["threat.detected", "quarantine.added", "quarantine.failed", "process.blocked"]);
 const alertSeverities = new Set(["low", "medium", "high", "critical"]);
 
 function known(value: string | undefined, values: Set<string>) {
@@ -26,6 +26,9 @@ function timestamp(value: string | undefined) {
 
 function count(value: number | undefined) {
   return typeof value === "number" && Number.isSafeInteger(value) && value >= 0 ? value : null;
+}
+function identifier(value: string | undefined) {
+  return typeof value === "string" && /^[a-f0-9]{8}-[a-f0-9-]{27}$/i.test(value) ? value : null;
 }
 
 function percent(value: number | null | undefined, status: string | undefined) {
@@ -62,6 +65,7 @@ export function projectNigorProcesses(result: ServiceResponseMap["processes.list
 export function projectNigorStatus({ protection, scans, events, hardware }: Snapshot) {
   const { engine } = protection;
   const history = scans.entries.slice(0, 5).map((scan) => ({
+    id: identifier(scan.id),
     status: known(scan.status, scanStates),
     endedAt: timestamp(scan.endedAt),
     filesAnalyzed: count(scan.filesAnalyzed),
@@ -76,6 +80,14 @@ export function projectNigorStatus({ protection, scans, events, hardware }: Snap
     protection: {
       status: known(protection.status, protectionStates),
       enabled: typeof protection.protectionEnabled === "boolean" ? protection.protectionEnabled : null,
+    },
+    // Additive v1 capability facts; no filenames, root paths or invented
+    // percentage. A file watch is post-write, never a permission gate.
+    monitoring: {
+      mode: "post-write",
+      preventionConfirmed: false,
+      queueDepth: count(engine.realtimeQueueDepth),
+      rootCount: Array.isArray(engine.monitoredPaths) ? engine.monitoredPaths.length : null,
     },
     engines: {
       clamav: known(engine.clamav?.status, engineStates),
@@ -96,6 +108,8 @@ export function projectNigorStatus({ protection, scans, events, hardware }: Snap
     // O replay chega do mais antigo para o mais recente: os alertas são os
     // cinco MAIS RECENTES (antes eram os cinco mais antigos da janela).
     alerts: events.filter(({ type }) => alertTypes.has(type)).reverse().slice(0, 5).map((event) => ({
+      id: identifier(event.id),
+      scanId: identifier(event.scanId),
       type: event.type,
       severity: known(event.severity, alertSeverities),
       timestamp: timestamp(event.timestamp),

@@ -1,7 +1,7 @@
 # Generated recipe inputs are filled by prepare-recipe.sh from a Git commit.
 pkgname=cybersafe-assistant-linux-lite
 pkgver=@VERSION@
-pkgrel=2
+pkgrel=3
 pkgdesc='Academic desktop security and diagnostics for Linux (experimental)'
 arch=('x86_64')
 url='https://github.com/MatrixChill/cybersafe-assistant'
@@ -14,7 +14,8 @@ optdepends=('zenity: native graphical quick-status panel'
             'polkit: authorised pacman steps for assisted install and updates'
             'clamav: signature scanner and database tooling'
             'yara: rule scanner'
-            'libsecret: supported desktop credential storage')
+            'libsecret: supported desktop credential storage'
+            'gnome-keyring: Secret Service for remembered sessions on Nigor or custom desktops')
 options=('!strip' '!debug')
 source=('cybersafe-source.tar.gz')
 sha256sums=('@SHA256@')
@@ -51,6 +52,8 @@ package() {
   install -Dm755 scripts/linux-lite/arch/nigor-launcher.sh "$pkgdir/usr/bin/cybersafe-nigor-status"
   install -Dm644 scripts/linux-lite/arch/run-service.mjs "$target/run-service.mjs"
   install -Dm644 scripts/linux-lite/arch/cybersafe-linux.service "$pkgdir/usr/lib/systemd/user/cybersafe-linux.service"
+  install -Dm644 scripts/linux-lite/arch/cybersafe-clamd.service "$pkgdir/usr/lib/systemd/user/cybersafe-clamd.service"
+  install -Dm644 scripts/linux-lite/arch/clamav-profile.mjs "$target/clamav-profile.mjs"
   ln -s /opt/cybersafe-assistant-linux-lite/cybersafe-assistant-linux-lite \
     "$pkgdir/usr/bin/cybersafe-assistant-linux-lite"
   install -Dm644 scripts/linux-lite/arch/diagnose.mjs "$target/diagnose.mjs"

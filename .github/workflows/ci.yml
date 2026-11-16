@@ -62,6 +62,15 @@ jobs:
           packages/service/test/p1-1-error-live-child.test.js
       - name: Complete desktop suite on Linux
         run: npm test -w @cybersafe/desktop
+      - name: Linux persistent ClamAV and cross-volume safety contracts
+        run: |
+          node --test packages/core/test/linux-*.test.js
+          node --test packages/service/test/linux-clamav-profile.test.js packages/service/test/linux-process-observation.test.js packages/service/test/linux-monitoring-profile.test.js packages/service/test/linux-realtime-case.test.js
+          node --test packages/native-windows/test/linux-watcher-persistence.test.js
+          node --test scripts/test/linux-clamd-profile.test.mjs
+          cmake -S integrations/nigor -B output/nigor-ci -DCYBERSAFE_NIGOR_REFERENCE=OFF
+          cmake --build output/nigor-ci
+          ctest --test-dir output/nigor-ci --output-on-failure
       # This source/runtime job does not certify Arch packaging, graphical
       # Nigor/Wayland sessions, USB hardware or the full cross-platform suite.
   verify:

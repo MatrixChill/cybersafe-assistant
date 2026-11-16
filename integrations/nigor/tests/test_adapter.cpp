@@ -51,6 +51,8 @@ static void testUnknownIsNotSafe() {
   CHECK(r.value->engines.native.state == EngineState::Unknown);
   CHECK(!r.value->latestScan.has_value());
   CHECK(!fullyProtected(*r.value));
+  auto active = parseStatus(R"({"version":1,"serviceRunning":true,"protection":{"status":"safe","enabled":true},"engines":{"clamav":"active","yara":"active","hashDb":"active","native":"active"},"monitoring":{"mode":"post-write","preventionConfirmed":false,"queueDepth":3,"rootCount":2}})");
+  CHECK(active.ok() && !fullyProtected(*active.value));
   // Contagem desconhecida não é «limpa».
   auto partial = parseStatus(R"({"version":1,"latestScan":{"status":"completed","filesAnalyzed":2}})");
   CHECK(partial.ok() && !partial.value->latestScan->clean());

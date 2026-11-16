@@ -39,3 +39,14 @@ test('ameaça no histórico sem alertas é explicada pelo âmbito dos alertas', 
   assert.deepEqual(s.alerts, []);
   assert.equal(s.alertsScope, 'service-session');
 });
+
+test('Nigor distinguishes quarantine outcomes and reports post-write coverage without paths',()=>{
+ const source=base([ev(1,'quarantine.added'),ev(2,'quarantine.failed')],{realtimeQueueDepth:3,monitoredPaths:['/private/user/Downloads']});
+ source.scans.entries[0].id='aaaaaaaa-aaaa-4aaa-aaaa-aaaaaaaaaaaa';
+ const s=projectNigorStatus(source);
+ assert.equal(s.monitoring.mode,'post-write');assert.equal(s.monitoring.preventionConfirmed,false);
+ assert.equal(s.monitoring.queueDepth,3);assert.equal(s.monitoring.rootCount,1);
+ assert.equal(s.latestScan.id,source.scans.entries[0].id);
+ assert.deepEqual(s.alerts.map(e=>e.type),['quarantine.failed','quarantine.added']);
+ assert.doesNotMatch(JSON.stringify(s),/private\/user/);
+});
