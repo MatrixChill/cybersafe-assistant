@@ -20,6 +20,37 @@ export class ClamdUnixClient {
   private disposed = false;
   constructor(private readonly socketPath: string) {}
 
+  private async trustedSocket(): Promise<boolean> {
+    if (process.platform !== "linux" || !path.isAbsolute(this.socketPath)) return false;
+    const uid = process.getuid!(), parent = path.dirname(this.socketPath);
+    const p = await fs.lstat(parent), s = await fs.lstat(this.socketPath);
+    return p.isDirectory() && await fs.realpath(parent) === parent && (p.uid === 0 || p.uid === uid)
+      && !(p.mode & 0o022) && s.isSocket() && (s.uid === 0 || s.uid === uid) && !(s.mode & 0o077);
+  }
+
+  /** VERSION describes the database actually loaded in the daemon, not the
+   * files most recently downloaded to disk. A mismatch cannot be called fresh. */
+  async databaseVersion(): Promise<number | null> {
+    try { if (this.disposed || !await this.trustedSocket()) return null; } catch { return null; }
+    return new Promise(resolve => {
+      const socket = net.createConnection(this.socketPath); this.sockets.add(socket);
+      let data = "", done = false;
+      const finish = (version: number | null) => {
+        if (done) return; done = true; clearTimeout(timer); socket.destroy(); resolve(version);
+      };
+      const timer = setTimeout(() => finish(null), 1000);
+      socket.once("connect", () => socket.write("zVERSION\0"));
+      socket.on("data", bytes => {
+        data += bytes.toString("utf8"); if (data.length > 4096) return finish(null);
+        if (!data.includes("\0")) return;
+        const match = /^ClamAV [^/\r\n]+\/(\d+)\//.exec(data);
+        finish(match ? Number(match[1]) : null);
+      });
+      socket.on("error", () => finish(null));
+      socket.on("close", () => { this.sockets.delete(socket); finish(null); });
+    });
+  }
+
   dispose() { this.disposed = true; for (const socket of this.sockets) socket.destroy(); }
 
   async scan(file: string, options: { timeoutMs: number; signal?: AbortSignal }): Promise<ClamdResult> {
@@ -30,12 +61,7 @@ export class ClamdUnixClient {
     if (this.disposed || options.signal?.aborted) return refused("aborted");
     let input: Awaited<ReturnType<typeof fs.open>>;
     try {
-      if (process.platform !== "linux" || !path.isAbsolute(this.socketPath)) return refused();
-      const uid = process.getuid!();
-      const parent = path.dirname(this.socketPath);
-      const p = await fs.lstat(parent), s = await fs.lstat(this.socketPath);
-      if (!p.isDirectory() || await fs.realpath(parent) !== parent || (p.uid !== 0 && p.uid !== uid)
-        || (p.mode & 0o022) || !s.isSocket() || (s.uid !== 0 && s.uid !== uid) || (s.mode & 0o077)) return refused();
+      if (!await this.trustedSocket()) return refused();
       input = await fs.open(file, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const stat = await input.stat();
       if (!stat.isFile() || stat.size > 100 * 1024 * 1024) { await input.close(); return refused("limits-exceeded"); }

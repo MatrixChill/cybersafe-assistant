@@ -599,12 +599,15 @@ export class ProtectionEngineService {
     this.realtimeQueue.onSpace(() => this.realtimeRecovery.nudge());
     this.baseDir = baseDir ?? serviceBaseDir();
     this.definitionsDir = path.join(this.baseDir, "definitions");
+    const linuxClamavProfile = process.platform === "linux" ? readLinuxClamavProfile() : undefined;
     this.clamav = new ClamavBridge({
       definitionsDir: this.definitionsDir,
       linuxDaemonSocket: process.platform === "linux"
         ? (process.env.CYBERSAFE_CLAMAV_MODE === "economy" ? undefined
-          : process.env.CYBERSAFE_CLAMAV_MODE === "performance" ? process.env.CYBERSAFE_CLAMD_SOCKET : readLinuxClamavProfile())
+          : process.env.CYBERSAFE_CLAMAV_MODE === "performance" ? process.env.CYBERSAFE_CLAMD_SOCKET : linuxClamavProfile?.socketPath)
         : undefined,
+      linuxDaemonDatabaseDir: process.env.CYBERSAFE_CLAMAV_MODE === "performance"
+        ? process.env.CYBERSAFE_CLAMD_DATABASE : linuxClamavProfile?.databaseDirectory,
       proofLog: (line) => { void this.actionsLog?.write("[CLAMAV-PROOF] " + line + " at=" + new Date().toISOString()); },
       fallbackDatabaseDir: async () => {
         const seed = await seedClamavDatabase({ seedDir: process.env.CYBERSAFE_CLAMAV_SEED_DIR, definitionsDir: this.definitionsDir });

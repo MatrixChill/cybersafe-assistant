@@ -7,7 +7,7 @@ export function buildClamdProfile({ uid, database = '/var/lib/clamav', mode }) {
   if (!Number.isSafeInteger(uid) || uid <= 0 || !['economy','performance'].includes(mode)
     || !path.posix.isAbsolute(database) || /[\r\n\0]/.test(database)) throw new Error('Perfil ClamAV inválido.');
   const socketPath = `/run/user/${uid}/cybersafe-clamd/clamd.sock`;
-  return {profile:{mode,socketPath},config:[
+  return {profile:{mode,socketPath,databaseDirectory:database},config:[
     '# CyberSafe: local detection only; no automatic activation or prevention.',
     'Foreground yes', `DatabaseDirectory ${database}`, `LocalSocket ${socketPath}`,
     'LocalSocketMode 0600', 'FixStaleSocket yes', 'MaxThreads 1', 'MaxQueue 8',

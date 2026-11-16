@@ -20,7 +20,9 @@ async function fixture(t, reply = 'stream: OK\0', delay = 0) {
     let input = Buffer.alloc(0), command = false, payload = Buffer.alloc(0);
     socket.on('data', chunk => {
       input = Buffer.concat([input, chunk]);
-      if (!command) { const n = input.indexOf(0); if (n < 0) return; assert.equal(input.subarray(0,n).toString(), 'zINSTREAM'); input = input.subarray(n+1); command = true; }
+      if (!command) { const n = input.indexOf(0); if (n < 0) return;
+        if(input.subarray(0,n).toString()==='zVERSION'){socket.end('ClamAV 1.5.4/1/Test\0');return;}
+        assert.equal(input.subarray(0,n).toString(), 'zINSTREAM'); input = input.subarray(n+1); command = true; }
       while (input.length >= 4) {
         const size = input.readUInt32BE(); if (input.length < size+4) return;
         payload = Buffer.concat([payload, input.subarray(4,4+size)]);
@@ -64,14 +66,15 @@ test('cancelled before admission sends no bytes',linux,async t=>{
 });
 
 function bridge(t,f,timeout=1000) {
-  const b=new ClamavBridge({linuxDaemonSocket:f.socketPath,scanTimeoutMs:timeout});
+  const b=new ClamavBridge({linuxDaemonSocket:f.socketPath,linuxDaemonDatabaseDir:f.root,scanTimeoutMs:timeout});
   // Transport/scheduler contract test, not a DB load proof. Real bases are
   // exercised separately by the opt-in benchmark.
-  b.isAvailable=async()=>true;b._hasSignatures=true;b._health={status:'active'};b._databaseHealth={status:'active'};
+  b.isAvailable=async()=>true;b._hasSignatures=true;b._health={status:'active'};b._databaseHealth={status:'active'};b._dbDir=f.root;
   t.after(()=>b.dispose());return b;
 }
 test('persistent backend: realtime overtakes 30 admitted jobs; all background finishes',linux,async t=>{
   const f=await fixture(t,'stream: OK\0',15);const b=bridge(t,f);
+  await fs.writeFile(path.join(f.root,'daily.cvd'),'ClamAV-VDB:Test:1:10:90:hash:sig:builder:1');
   const jobs=Array.from({length:30},()=>b.scanFiles([f.file],{priority:'background'}));
   while(clamavSlotStats().waitingBackground<29)await new Promise(r=>setTimeout(r,1));
   const urgent=path.join(f.root,'new-download');await fs.writeFile(urgent,'new-download');
@@ -82,7 +85,19 @@ test('persistent backend: realtime overtakes 30 admitted jobs; all background fi
 });
 test('persistent timeout poisons admission until a real late terminal response',linux,async t=>{
   const f=await fixture(t,'stream: OK\0',100);const b=bridge(t,f,30);
+  await fs.writeFile(path.join(f.root,'daily.cvd'),'ClamAV-VDB:Test:1:10:90:hash:sig:builder:1');
   const r=await b.scanFiles([f.file]);assert.equal(r.files[0].reason,'timeout');assert.equal(clamavSlotStats().poisoned,1);
   assert.equal((await b.scanFiles([f.file])).errorCount,1);
   await new Promise(r=>setTimeout(r,130));assert.equal(clamavSlotStats().poisoned,0);assert.equal(clamavSlotStats().active,0);
+});
+
+test('daemon loaded daily version is observable for freshness gating',linux,async t=>{
+ const f=await fixture(t);assert.equal(await f.client.databaseVersion(),1);
+});
+
+test('stale daemon uses the explicit cold fallback, never reports it as persistent coverage',linux,async t=>{
+ const f=await fixture(t);const b=bridge(t,f);let fallback=0;
+ await fs.writeFile(path.join(f.root,'daily.cvd'),'ClamAV-VDB:Test:2:10:90:hash:sig:builder:1');
+ b.options.spawn=()=>{fallback++;return {pid:undefined,killTree(){},outcome:Promise.resolve({code:0,stdout:`${f.file}: OK\n`,stderr:'',killed:false})};};
+ const r=await b.scanFiles([f.file]);assert.equal(fallback,1);assert.equal(f.bytes().length,0);assert.equal(r.timing,undefined);
 });

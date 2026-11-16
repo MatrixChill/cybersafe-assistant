@@ -1,6 +1,6 @@
 import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { open, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { open, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import * as path from "node:path";
@@ -719,6 +719,7 @@ export interface ClamavBridgeOptions {
   /** Linux opt-in. Uses a locally managed clamd with the supplied safe config.
    * No implicit daemon start and no TCP. Missing sockets fall back explicitly. */
   linuxDaemonSocket?: string;
+  linuxDaemonDatabaseDir?: string;
   /**
    * Telemetria da prova de carga (v0.2.4): uma linha por evento, com id de
    * correlação, PID, prazo e contadores da vaga. Sem caminhos de ficheiros
@@ -4257,6 +4258,29 @@ export class ClamavBridge {
     let poisoned = false;
     const outcomes: ClamavFileOutcome[] = [];
     try {
+      // A daemon may still have yesterday's DB loaded, or use a different
+      // directory from the definitions selected by the existing health gate.
+      let matching = false;
+      try {
+        const db = this.options.linuxDaemonDatabaseDir ?? "/var/lib/clamav";
+        if (this._dbDir && await realpath(db) === await realpath(this._dbDir)) {
+          for (const name of ["daily.cld", "daily.cvd"]) {
+            try {
+              const fd = await open(path.join(db, name), "r");
+              const header = Buffer.alloc(512);
+              try { await fd.read(header, 0, header.length, 0); } finally { await fd.close(); }
+              const version = /^ClamAV-VDB:[^:]+:(\d+):/.exec(header.toString("ascii"))?.[1];
+              if (version && Number(version) === await this.daemon!.databaseVersion()) matching = true;
+              break;
+            } catch { /* try the other official daily format */ }
+          }
+        }
+      } catch { /* unverified database identity is never a fresh daemon */ }
+      if (!matching) {
+        this.daemonUnavailableUntil = Date.now() + 30_000;
+        scanPerfLog("CLAMD_FALLBACK", options.scanId, "reason=database-identity-or-loaded-version-mismatch cooldownMs=30000");
+        return null;
+      }
       for (const file of files) {
         const result = await this.daemon!.scan(file, { timeoutMs: this.options.scanTimeoutMs ?? 30_000, signal: options.signal });
         if (result.uncertain) {
