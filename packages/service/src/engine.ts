@@ -3813,6 +3813,7 @@ if (processInfo.path) {
       }
       return {
         fonte: bruta.fonte,
+        ...(bruta.fonte === "clamav" && this.updater.clamavManagement ? {gestao: this.updater.clamavManagement} : {}),
         estado,
         ultimaBemSucedidaAtMs: bruta.ultimaBemSucedidaAtMs,
         ultimaTentativaAtMs: bruta.ultimaTentativaAtMs,

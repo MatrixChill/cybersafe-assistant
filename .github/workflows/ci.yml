@@ -65,7 +65,7 @@ jobs:
       - name: Linux persistent ClamAV and cross-volume safety contracts
         run: |
           node --test packages/core/test/linux-*.test.js
-          node --test packages/service/test/linux-clamav-profile.test.js packages/service/test/linux-process-observation.test.js packages/service/test/linux-monitoring-profile.test.js packages/service/test/linux-realtime-case.test.js
+          node --test packages/service/test/linux-clamav-profile.test.js packages/service/test/linux-process-observation.test.js packages/service/test/linux-monitoring-profile.test.js packages/service/test/linux-realtime-case.test.js packages/service/test/external-clamav-manager.test.js
           node --test packages/native-windows/test/linux-watcher-persistence.test.js
           node --test scripts/test/linux-clamd-profile.test.mjs
           cmake -S integrations/nigor -B output/nigor-ci -DCYBERSAFE_NIGOR_REFERENCE=OFF

@@ -1052,6 +1052,8 @@ export type DefinitionsSourceState =
   | "nunca_verificado";
 
 export interface DefinitionsSourceStatus {
+  /** Quem gere o ciclo ClamAV; ausência = ainda não observado nesta sessão. */
+  gestao?: {state: "none" | "unknown"} | {state: "managed"; unit: string};
   fonte: "clamav" | "yara" | "hashes";
   estado: DefinitionsSourceState;
   /** Epoch ms do último SUCESSO; `null` se nunca houve um. */
