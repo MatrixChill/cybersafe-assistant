@@ -222,6 +222,7 @@ enum class UpdateState { NotConfigured, NoRelease, UpToDate, Available, Downgrad
 struct UpdateStatus {
   UpdateState state = UpdateState::Unknown;
   std::optional<std::string> installed, available, checkedAt, notes, channel;
+  std::optional<std::string> packageSha256, downloadState, installState, installError;
   std::optional<int64_t> size;
   bool signatureVerified = false;
 };
@@ -343,6 +344,12 @@ inline Result<UpdateStatus> parseUpdate(std::string_view text) {
     u.notes = detail::str(a->get("notes"));
     u.size = detail::count(a->get("size"));
     u.signatureVerified = detail::str(a->get("signature")).value_or("") == "ed25519-verified";
+    u.packageSha256 = detail::str(a->get("sha256"));
+  }
+  if (auto* download = json->get("download")) u.downloadState = detail::str(download->get("state"));
+  if (auto* install = json->get("install")) {
+    u.installState = detail::str(install->get("state"));
+    u.installError = detail::str(install->get("error"));
   }
   return {u, {}};
 }
@@ -456,11 +463,28 @@ class Client {
   }
 
   Result<UpdateStatus> updates() const {
-    auto p = runProcess({cfg_.updateBinary, "check"}, cfg_.statusTimeout);
+    return updateCommand({cfg_.updateBinary, "check"}, std::chrono::seconds(65));
+  }
+
+  Result<UpdateStatus> downloadUpdate() const {
+    return updateCommand({cfg_.updateBinary, "download"}, std::chrono::minutes(32));
+  }
+
+  Result<UpdateStatus> requestUpdateInstall(const std::string& sha256, bool consent) const {
+    if (!consent || sha256.size() != 64 || sha256.find_first_not_of("0123456789abcdef") != std::string::npos)
+      return {std::nullopt, {ErrorKind::Refused, "Confirme a instalação do pacote verificado."}};
+    return updateCommand({cfg_.updateBinary, "install", "--consent", "--graphical", "--sha256=" + sha256}, std::chrono::minutes(32));
+  }
+
+ private:
+  static Result<UpdateStatus> updateCommand(const std::vector<std::string>& args, std::chrono::milliseconds timeout) {
+    auto p = runProcess(args, timeout);
     if (p.spawnFailed) return {std::nullopt, {ErrorKind::NotInstalled, "Atualizador Linux não instalado nesta versão."}};
     if (p.timedOut) return {std::nullopt, {ErrorKind::Timeout, "O atualizador não respondeu a tempo."}};
     return parseUpdate(p.out);  // exit ≠ 0 também traz JSON com state error/invalid
   }
+
+ public:
 
   /// Lança a aplicação CyberSafe na sessão do utilizador, sem argumentos privados.
   bool openApp() const {

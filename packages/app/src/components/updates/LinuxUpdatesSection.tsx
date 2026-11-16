@@ -45,10 +45,14 @@ export function LinuxUpdatesSection() {
 
       {confirming ? (
         <div className="rounded-lg border border-border p-3 space-y-2">
-          <p className="text-sm">Instalar a versão {view.available ?? "nova"}? O sistema vai pedir a sua autorização e o pacman faz a instalação.</p>
+          <p className="text-sm">Preparar a versão {view.available ?? "nova"}? Termine as análises e saia pela tray antes de confirmar no terminal. O pacman pede autorização para instalar.</p>
           <div className="flex gap-2">
             <button type="button" className="px-3 py-1.5 rounded-md bg-primary text-primary-foreground text-sm" disabled={busy !== null}
-              onClick={() => { setConfirming(false); void run("install", () => api.install(true)); }}>Confirmar e instalar</button>
+              onClick={() => {
+                setConfirming(false);
+                const sha256 = view.packageSha256;
+                if (sha256) void run("install", () => api.install(true, sha256));
+              }}>Pedir instalação</button>
             <button type="button" className="px-3 py-1.5 rounded-md border border-border text-sm" onClick={() => setConfirming(false)}>Cancelar</button>
           </div>
         </div>

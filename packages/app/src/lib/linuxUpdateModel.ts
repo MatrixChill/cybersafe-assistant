@@ -27,6 +27,7 @@ export interface LinuxUpdateView {
   downloadText: string | null;
   canDownload: boolean;
   canInstall: boolean;
+  packageSha256: string | null;
   channel: string | null;
 }
 
@@ -51,7 +52,7 @@ export function linuxUpdateView(wire: LinuxUpdateWire | null): LinuxUpdateView {
   const empty: LinuxUpdateView = {
     title: "Ainda não verificado", detail: "Use «Verificar atualizações» para consultar o canal oficial.", tone: "neutral",
     installed: null, available: null, sizeText: null, notes: null, checkedAt: null, signatureText: null,
-    downloadText: null, canDownload: false, canInstall: false, channel: null,
+    downloadText: null, canDownload: false, canInstall: false, channel: null, packageSha256: null,
   };
   if (!wire) return empty;
   if (!wire.result) return { ...empty, title: "Não foi possível verificar", detail: ERROR_TEXT[wire.error ?? "invalid-response"], tone: "error" };
@@ -68,8 +69,15 @@ export function linuxUpdateView(wire: LinuxUpdateWire | null): LinuxUpdateView {
     checkedAt: str(r.checkedAt),
     channel: r.channel === "experimental" ? "Experimental" : r.channel === "stable" ? "Estável" : null,
     signatureText: available?.signature === "ed25519-verified" ? "Manifesto com assinatura Ed25519 verificada" : null,
+    packageSha256: typeof available?.sha256 === "string" && /^[a-f0-9]{64}$/.test(available.sha256) ? available.sha256 : null,
   };
   if (install) {
+    if (install.state === "terminal-requested") return { ...base, title: "Instalação solicitada", tone: "info",
+      detail: "Termine as análises, saia pela tray e siga as instruções no terminal. A instalação ainda não foi confirmada." };
+    if (install.error === "terminal-required") return {...base,title:"Terminal indisponível",tone:"warn",
+      detail:"Abra um terminal e use cybersafe-linux-update install --consent. Confirme a versão apresentada antes de instalar."};
+    if (install.error === "offered-package-changed") return {...base,title:"O pacote disponível mudou",tone:"warn",
+      detail:"Volte a verificar e descarregar a versão agora disponível para confirmar a instalação."};
     const ok = install.ok === true;
     return { ...base, title: ok ? "Atualização instalada" : "Instalação não concluída", tone: ok ? "ok" : "error",
       detail: ok ? `Versão instalada agora: ${str(install.installedAfter) ?? "—"}. Reabra o CyberSafe para usar a nova versão.`
@@ -78,7 +86,7 @@ export function linuxUpdateView(wire: LinuxUpdateWire | null): LinuxUpdateView {
   if (download) {
     const state = download.state;
     if (state === "verified") return { ...base, title: "Pronta a instalar", tone: "info", downloadText: "Descarregada e verificada (tamanho e SHA-256 do manifesto assinado).",
-      detail: "A instalação usa o pacman e pede a autorização do sistema.", canInstall: true };
+      detail: "A instalação usa o pacman e pede a autorização do sistema.", canInstall: base.packageSha256 !== null && base.signatureText !== null };
     return { ...base, title: "Download não concluído", tone: "warn", canDownload: true,
       detail: download.resumable === true ? "O download foi interrompido; pode retomar." : download.reason === "sha256" ? "O ficheiro não corresponde ao manifesto assinado e foi apagado." : "Não foi possível descarregar a atualização." };
   }
@@ -88,6 +96,8 @@ export function linuxUpdateView(wire: LinuxUpdateWire | null): LinuxUpdateView {
     case "up-to-date":
       return { ...base, title: "O CyberSafe está atualizado", tone: "ok", detail: null };
     case "not-configured":
+      if(r.reason === "installed-package-unverified") return {...base,title:"Pacote instalado não confirmado",tone:"warn",
+        detail:"A atualização assistida requer o pacote Arch oficial registado no pacman."};
       return { ...base, title: "Canal de atualizações não configurado", tone: "warn", detail: "Este pacote não tem chave pública de atualizações; instale uma versão mais recente manualmente." };
     case "no-release":
       return { ...base, title: "Sem versões neste canal", tone: "neutral", detail: "Ainda não há versões publicadas no canal escolhido." };

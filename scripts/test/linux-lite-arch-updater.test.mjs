@@ -5,7 +5,7 @@ import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSy
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
-  checkForUpdate, compareVersions, downloadUpdate, installPlan, loadChannelConfig, parseVersion, validateManifest,
+  checkForUpdate, compareVersions, downloadUpdate, installPlan, loadChannelConfig, parseVersion, terminalPlan, validateManifest,
 } from '../linux-lite/arch/updater.mjs';
 
 // Chaves efémeras, só em memória durante o teste: nenhuma chave entra no repositório.
@@ -141,7 +141,7 @@ test('download interrompido retoma com Range; conteúdo errado é apagado', asyn
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
 
-test('instalação: exige consentimento, utilizador normal e o mesmo SHA-256; só pkexec pacman -U', async () => {
+test('instalação: exige consentimento, utilizador normal, prova assinada e staging privilegiado', async () => {
   const dir = mkdtempSync(join(tmpdir(), 'cs-upd-'));
   try {
     const file = join(dir, 'cybersafe-assistant-linux-lite-0.2.5-1-x86_64.pkg.tar.zst');
@@ -149,8 +149,10 @@ test('instalação: exige consentimento, utilizador normal e o mesmo SHA-256; s�
     assert.equal((await installPlan({ file, expectedSha256: SHA, consent: false, uid: 1000 })).error, 'consent-required');
     assert.equal((await installPlan({ file, expectedSha256: SHA, consent: true, uid: 0 })).error, 'run-as-user');
     assert.equal((await installPlan({ file, expectedSha256: 'a'.repeat(64), consent: true, uid: 1000 })).error, 'sha256');
-    const plan = await installPlan({ file, expectedSha256: SHA, consent: true, uid: 1000 });
-    assert.deepEqual(plan.argv.slice(0, 3), ['pkexec', 'pacman', '-U']);
+    assert.equal((await installPlan({file,expectedSha256:SHA,consent:true,uid:1000})).error,'proof-required');
+    const plan = await installPlan({ file, expectedSha256: SHA, consent: true, uid: 1000, manifestFile:join(dir,'manifest.json'), signatureFile:join(dir,'manifest.sig') });
+    assert.deepEqual(plan.argv.slice(0, 2), ['/usr/bin/pkexec','/opt/cybersafe-assistant-linux-lite/update-install-helper.mjs']);
+    assert.equal(plan.argv.at(-1),SHA);
     assert.equal(plan.argv.some((a) => /noconfirm|SigLevel/i.test(a)), false);
   } finally { rmSync(dir, { recursive: true, force: true }); }
 });
@@ -233,4 +235,12 @@ test('overlapping downloads are serialized by a private cache lock',async()=>{
  await entry;assert.equal((await downloadUpdate({available,cacheDir:dir,fetchImpl:fakeFetch().impl})).reason,'busy');
  release();assert.equal((await first).state,'verified');assert.equal(existsSync(join(dir,'.download.lock')),false);
  }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('graphical adapter passes only the package digest to a fixed terminal command', () => {
+  assert.equal(terminalPlan('invalid', () => true), null);
+  assert.equal(terminalPlan(SHA, () => false), null);
+  assert.deepEqual(terminalPlan(SHA, candidate => candidate === '/usr/bin/xdg-terminal-exec'), [
+    '/usr/bin/xdg-terminal-exec','/usr/bin/cybersafe-linux-update','install','--consent',`--sha256=${SHA}`,
+  ]);
 });

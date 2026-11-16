@@ -21,12 +21,15 @@ test('check usa o binário fixo, sem shell, e devolve o JSON', async () => {
   assert.equal(seen[0].opts.shell, undefined);
 });
 
-test('install exige consentimento e só então passa --consent', async () => {
+test('install exige consentimento e liga o pedido gráfico ao SHA-256 autorizado', async () => {
   const seen = [];
   assert.equal((await runLinuxUpdate('install', false, 'linux', fakeExec('{}', null, seen))).error, 'consent-required');
   assert.equal(seen.length, 0);
-  await runLinuxUpdate('install', true, 'linux', fakeExec('pacman output\n{"schema":1,"install":{"ok":true}}', null, seen));
-  assert.deepEqual(seen[0].args, ['install', '--consent']);
+  const sha = 'a'.repeat(64);
+  assert.equal((await runLinuxUpdate('install', true, 'linux',fakeExec('{}',null,seen),'--unsafe')).error,'invalid-response');
+  assert.equal(seen.length,0);
+  await runLinuxUpdate('install', true, 'linux', fakeExec('{"schema":1,"install":{"state":"terminal-requested"}}', null, seen),sha);
+  assert.deepEqual(seen[0].args, ['install', '--consent','--graphical',`--sha256=${sha}`]);
 });
 
 test('binário ausente, timeout e resposta inválida são distinguidos', async () => {

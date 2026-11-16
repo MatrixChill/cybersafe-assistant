@@ -184,7 +184,7 @@ contextBridge.exposeInMainWorld("electronAPI", {
     linuxUpdate: {
       check: () => invoke("linux-update:run", "check", false),
       download: () => invoke("linux-update:run", "download", false),
-      install: (consent: boolean) => invoke("linux-update:run", "install", consent === true),
+      install: (consent: boolean, sha256: string) => invoke("linux-update:run", "install", consent === true, sha256),
     },
   } : {}),
   appUpdate: {

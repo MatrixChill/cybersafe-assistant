@@ -120,6 +120,17 @@ static void testProcesses() {
 
   cfg.updateBinary = fixtures + "/sem-atualizador";
   CHECK(Client(cfg).updates().error.kind == ErrorKind::NotInstalled);
+  cfg.updateBinary = script("update-flow.sh", "case \"$1\" in\n"
+    "download) printf '{\"schema\":1,\"state\":\"available\",\"download\":{\"state\":\"verified\"}}';;\n"
+    "install) [ \"$2\" = --consent ] && [ \"$3\" = --graphical ] && [ \"$4\" = --sha256=$(printf 'a%.0s' $(seq 1 64)) ] || exit 2; "
+    "printf '{\"schema\":1,\"state\":\"available\",\"install\":{\"state\":\"terminal-requested\",\"ok\":false}}';;\n"
+    "*) exit 1;;\nesac");
+  auto download = Client(cfg).downloadUpdate();
+  CHECK(download.ok() && download.value->downloadState == "verified");
+  CHECK(Client(cfg).requestUpdateInstall(std::string(64, 'a'), false).error.kind == ErrorKind::Refused);
+  CHECK(Client(cfg).requestUpdateInstall("--unsafe", true).error.kind == ErrorKind::Refused);
+  auto request = Client(cfg).requestUpdateInstall(std::string(64, 'a'), true);
+  CHECK(request.ok() && request.value->installState == "terminal-requested");
 }
 
 static void testPoller() {

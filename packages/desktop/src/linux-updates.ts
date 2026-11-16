@@ -13,7 +13,7 @@ export type LinuxUpdateCommand = "check" | "download" | "install";
 const TIMEOUTS: Record<LinuxUpdateCommand, number> = {
   check: 30_000,
   download: 30 * 60_000,
-  install: 45 * 60_000, // inclui a espera pela autorização do utilizador
+  install: 31 * 60_000, // download/reverificação e pedido de abertura do terminal
 };
 
 export interface LinuxUpdateWire {
@@ -29,11 +29,15 @@ export function runLinuxUpdate(
   consent: boolean,
   platform: NodeJS.Platform = process.platform,
   exec: ExecFile = execFile,
+  expectedSha256?: unknown,
 ): Promise<LinuxUpdateWire> {
   if (platform !== "linux") return Promise.resolve({ ok: false, result: null, error: "not-linux" });
   if (!(command in TIMEOUTS)) return Promise.resolve({ ok: false, result: null, error: "invalid-response" });
   if (command === "install" && consent !== true) return Promise.resolve({ ok: false, result: null, error: "consent-required" });
-  const args = command === "install" ? ["install", "--consent"] : [command];
+  if (command === "install" && (typeof expectedSha256 !== "string" || !/^[a-f0-9]{64}$/.test(expectedSha256))) {
+    return Promise.resolve({ok:false,result:null,error:"invalid-response"});
+  }
+  const args = command === "install" ? ["install", "--consent", "--graphical", `--sha256=${expectedSha256}`] : [command];
   return new Promise((resolve) => {
     exec(LINUX_UPDATE_BINARY, args, { timeout: TIMEOUTS[command], maxBuffer: 1 << 20, env: { ...process.env, LC_ALL: "C.UTF-8" } },
       (error, stdout) => {

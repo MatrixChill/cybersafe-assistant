@@ -1550,9 +1550,9 @@ function registerIpc(
   handle("app:update-get-snapshot", async () =>
     appUpdater ? toAppUpdateSnapshot(appUpdater.snapshotCopy()) : failureSnapshot("unconfigured", updateVersion(), "updater não inicializado"));
   // Atualizações Linux (pacote Arch): canal próprio, nunca o updater Windows.
-  handle("linux-update:run", (_event, command: unknown, consent: unknown) =>
+  handle("linux-update:run", (_event, command: unknown, consent: unknown, sha256: unknown) =>
     command === "check" || command === "download" || command === "install"
-      ? runLinuxUpdate(command, consent === true)
+      ? runLinuxUpdate(command, consent === true, undefined, undefined, sha256)
       : Promise.resolve({ ok: false, result: null, error: "invalid-response" }));
   handle("app:update-check", () => withUpdater((u) => u.check()));
   handle("app:update-download", () => withUpdater((u) => u.download()));

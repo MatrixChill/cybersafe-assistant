@@ -339,6 +339,7 @@ class SecurityCenter {
   }
 
   void drawUpdates(int x0) {
+    std::lock_guard lock(jobM_);
     text(x0, 40, "Atualizações do CyberSafe Linux", theme_.fg, title_);
     button(x0, 60, updateBusy_ ? "A verificar…" : "Verificar", "check-update", !updateBusy_);
     int y = 112;
@@ -353,7 +354,17 @@ class SecurityCenter {
     text(x0, y, state, u.state == UpdateState::Available ? theme_.accent : theme_.fg, bold_);
     text(x0, y + 24, "Instalada: " + u.installed.value_or("—") + "   Disponível: " + u.available.value_or("—"), theme_.muted);
     if (u.size) text(x0, y + 46, "Tamanho: " + std::to_string(*u.size / (1024 * 1024)) + " MB   Assinatura: " + (u.signatureVerified ? "verificada" : "não verificada"), theme_.muted);
-    if (u.state == UpdateState::Available) text(x0, y + 72, "Para instalar: cybersafe-linux-update install --consent (pede autorização do sistema).", theme_.fg);
+    if (u.installState == "terminal-requested") {
+      text(x0, y + 72, "Pedido enviado. Termine as análises, saia do CyberSafe e confirme no terminal.", theme_.muted);
+    } else if (u.installError) {
+      const bool missingTerminal = u.installError == "terminal-required";
+      text(x0, y + 72, missingTerminal ? "Use um terminal: cybersafe-linux-update install --consent"
+                                      : "Instalação recusada. Volte a verificar a versão disponível.", theme_.warn);
+    } else if (u.downloadState == "verified" && u.signatureVerified && u.packageSha256) {
+      button(x0, y + 64, "Pedir instalação", "request-update-install", !updateBusy_);
+    } else if (u.state == UpdateState::Available) {
+      button(x0, y + 64, "Descarregar", "download-update", !updateBusy_);
+    }
   }
 
   void drawSettings(int x0) {
@@ -406,8 +417,22 @@ class SecurityCenter {
         if (p.exitCode == 0 && !p.out.empty()) { std::string s = p.out; while (!s.empty() && (s.back() == '\n')) s.pop_back(); std::lock_guard l(jobM_); path_ = s; }
       });
     } else if (id == "check-update") {
-      updateBusy_ = true;
+      { std::lock_guard lock(jobM_); if (updateBusy_) return; updateBusy_ = true; }
       background([this] { auto u = client_.updates(); std::lock_guard l(jobM_); update_ = u; updateBusy_ = false; });
+    } else if (id == "download-update") {
+      { std::lock_guard lock(jobM_); if (updateBusy_) return; updateBusy_ = true; }
+      background([this] { auto u = client_.downloadUpdate(); std::lock_guard l(jobM_); update_ = std::move(u); updateBusy_ = false; });
+    } else if (id == "request-update-install") {
+      std::string digest;
+      {
+        std::lock_guard lock(jobM_);
+        if (updateBusy_ || !update_ || !update_->ok()) return;
+        const auto& u = *update_->value;
+        if (u.downloadState != "verified" || !u.signatureVerified || !u.packageSha256) return;
+        digest = *u.packageSha256;
+        updateBusy_ = true;
+      }
+      background([this, digest] { auto result = client_.requestUpdateInstall(digest, true); std::lock_guard l(jobM_); update_ = std::move(result); updateBusy_ = false; });
     }
   }
   void setJob(std::string m) { std::lock_guard l(jobM_); jobMessage_ = std::move(m); }

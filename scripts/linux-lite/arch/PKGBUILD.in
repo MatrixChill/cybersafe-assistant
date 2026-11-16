@@ -12,6 +12,8 @@ depends=('alsa-lib' 'at-spi2-core' 'gtk3' 'libcups' 'libdrm' 'libx11'
 makedepends=('nodejs-lts-krypton' 'npm' 'python' 'cmake')
 optdepends=('zenity: native graphical quick-status panel'
             'polkit: authorised pacman steps for assisted install and updates'
+            'xdg-terminal-exec: open the interactive update from the desktop'
+            'xterm: fallback interactive terminal for X11 desktops'
             'clamav: signature scanner and database tooling'
             'yara: rule scanner'
             'libsecret: supported desktop credential storage'
@@ -60,6 +62,7 @@ package() {
   install -Dm644 scripts/linux-lite/arch/firewall.mjs "$target/firewall.mjs"
   install -Dm755 scripts/linux-lite/arch/diagnose-launcher.sh "$pkgdir/usr/bin/cybersafe-linux-diagnose"
   install -Dm644 scripts/linux-lite/arch/updater.mjs "$target/updater.mjs"
+  install -Dm755 scripts/linux-lite/arch/update-install-helper.mjs "$target/update-install-helper.mjs"
   install -Dm644 scripts/linux-lite/arch/update-channel.json "$target/update-channel.json"
   install -Dm755 scripts/linux-lite/arch/update-launcher.sh "$pkgdir/usr/bin/cybersafe-linux-update"
   # Componentes de integração Nigor (fontes C++20 + documentação), sem binários.

@@ -57,7 +57,7 @@ export interface ElectronAPI {
   linuxUpdate?: {
     check: () => Promise<import("./lib/linuxUpdateModel").LinuxUpdateWire>;
     download: () => Promise<import("./lib/linuxUpdateModel").LinuxUpdateWire>;
-    install: (consent: boolean) => Promise<import("./lib/linuxUpdateModel").LinuxUpdateWire>;
+    install: (consent: boolean, sha256: string) => Promise<import("./lib/linuxUpdateModel").LinuxUpdateWire>;
   };
   getServiceConnectionState: () => Promise<{ connected: boolean }>;
   onServiceConnectionState: (callback: (state: { connected: boolean }) => void) => () => void;

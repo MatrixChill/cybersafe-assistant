@@ -3,7 +3,7 @@ import assert from "node:assert/strict";
 import { linuxUpdateView } from "../src/lib/linuxUpdateModel";
 
 const available = { schema: 1, state: "available", installed: "0.2.4-2", channel: "experimental", checkedAt: "2026-11-14T17:00:00Z",
-  available: { version: "0.2.5-1", size: 112044826, notes: "Correções", signature: "ed25519-verified" } };
+  available: { version: "0.2.5-1", size: 112044826, notes: "Correções", signature: "ed25519-verified", sha256: "a".repeat(64) } };
 
 test("sem verificação não se afirma «atualizado»", () => {
   const v = linuxUpdateView(null);
@@ -41,4 +41,13 @@ test("instalação: sucesso indica a versão nova; recusa não finge sucesso", (
   assert.match(ok.detail ?? "", /0\.2\.5-1/);
   const no = linuxUpdateView({ ok: false, result: { ...available, download: { state: "verified" }, install: { ok: false, exitCode: 126 } } });
   assert.equal(no.title, "Instalação não concluída");
+});
+
+test("pedido no terminal e mudança do pacote não são apresentados como instalação", () => {
+  const launch = linuxUpdateView({ok:true,result:{...available,install:{state:"terminal-requested",ok:false}}});
+  assert.equal(launch.title,"Instalação solicitada");
+  assert.match(launch.detail ?? "",/ainda não foi confirmada/);
+  const changed = linuxUpdateView({ok:false,result:{...available,install:{error:"offered-package-changed"}}});
+  assert.equal(changed.title,"O pacote disponível mudou");
+  assert.equal(changed.canInstall,false);
 });

@@ -29,3 +29,25 @@
 - Pendências: USB/exFAT, Nigor/Wayland/keyring/tray, prevenção de produção,
   redescoberta geral de motores, corpus YARA representativo e testes legados.
   Não modificar Windows pessoal ou PAP. Nenhuma destas pendências é PASS.
+
+## Sessão e canais partilhados
+
+- `650772f`: identidade `arch-shared`, rotas de releases e download com limites.
+- `3bc3933`: delegação FreshClam ao gestor do sistema quando observado.
+- `f3bc060`: distribuição Windows, Arch e Nigor documentada. Preview 2 continua
+  pública com um único pacote partilhado. Windows v0.2.4 continua Latest.
+- `7cd41ca`: falha de persistência distinguida de autenticação e entrada
+  temporária explícita. CI Windows e Linux passaram. Candidata interna
+  0.2.4-3 construída e instalada no laboratório Arch, 207 ficheiros verificados,
+  zero alterações. SHA-256 `c4dba182a134309013828f1a43a850a71cd221ed22936a61b0e74cf776e787c6`.
+- A candidata `7cd41ca` inclui a correção de sessão e antecede o novo percurso
+  assistido de instalação. Guardar para rastreabilidade. O pacote seguinte deve
+  ser construído a partir do commit exato que inclua o novo percurso.
+- No pacote `7cd41ca` instalado, o formulário autenticou uma conta sintética
+  com «Lembrar-me», recuperou a sessão após reabrir, ofereceu entrada temporária
+  sem D-Bus e voltou ao formulário após sair e reabrir. O logout foi exercitado
+  separadamente no armazenamento Electron. Windows: app 3080/0 e desktop
+  707/0/3 skip com as alterações de sessão e integração gráfica presentes.
+- O verificador novo confirmou ao vivo a assinatura da Preview 2 e recusou o
+  downgrade de `0.2.4-3` para `0.2.4-2`. Um ensaio A→B instalado permanece uma
+  verificação separada.

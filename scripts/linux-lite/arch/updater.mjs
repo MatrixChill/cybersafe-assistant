@@ -10,9 +10,9 @@
 //  - downgrades e versões de outro canal são recusados;
 //  - o download vai para uma cache do utilizador, retoma com Range quando o
 //    servidor o permite, e só é promovido depois de tamanho + SHA-256 baterem;
-//  - a instalação é sempre explícita: `install --consent` corre
-//    `pkexec pacman -U <ficheiro verificado>`; o polkit pede a autorização e o
-//    pacman aplica as suas próprias verificações. Nunca corre como root, nunca
+//  - a instalação é sempre explícita: `install --consent` entrega a prova
+//    assinada ao helper root instalado, que verifica e copia o pacote para uma
+//    área protegida antes do pacman. Este cliente nunca corre como root, nunca
 //    usa shell, nunca `--noconfirm` nem desativa assinaturas do pacman.
 import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { spawn } from 'node:child_process';
@@ -20,6 +20,7 @@ import { constants, closeSync, createReadStream, existsSync, fstatSync, lstatSyn
 import { open } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
+import { createInterface } from 'node:readline/promises';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const PACKAGE_NAME = 'cybersafe-assistant-linux-lite';
@@ -114,8 +115,8 @@ async function restrictedFetch(fetchImpl, url, options = {}) {
   }
   throw Object.assign(new Error('Redirect limit'),{code:'redirect'});
 }
-async function fetchBytes(fetchImpl, url, limit) {
-  const res = await restrictedFetch(fetchImpl, url, {signal:AbortSignal.timeout(30_000)});
+async function fetchBytes(fetchImpl, url, limit, signal) {
+  const res = await restrictedFetch(fetchImpl, url, {signal});
   if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { code: 'http' });
   const chunks=[];let size=0;
   for await (const bytes of res.body) {
@@ -130,7 +131,7 @@ async function fetchBytes(fetchImpl, url, limit) {
  * Consulta o canal. Devolve sempre um objeto com `state`:
  *   not-configured | no-release | up-to-date | available | downgrade-refused | invalid | error
  */
-export async function checkForUpdate({ installed, channel = 'experimental', config, fetchImpl = fetch, now = () => new Date() }) {
+export async function checkForUpdate({ installed, channel = 'experimental', config, fetchImpl = fetch, now = () => new Date(), onVerifiedManifest = () => {} }) {
   const checkedAt = now().toISOString();
   const base = { schema: 1, edition: EDITION, channel, checkedAt, installed: installed ? formatVersion(installed) : null };
   if (config.edition !== undefined && config.edition !== EDITION) {
@@ -142,14 +143,15 @@ export async function checkForUpdate({ installed, channel = 'experimental', conf
   if (channel !== 'stable' && channel !== 'experimental') return { ...base, state: 'invalid', reason: 'channel' };
   try {
     const url = `${config.manifestBase.replace(/\/$/, '')}/manifest-${channel}.json`;
+    const signal = AbortSignal.timeout(25_000);
     let bytes;
     try {
-      bytes = await fetchBytes(fetchImpl, url, MAX_MANIFEST_BYTES);
+      bytes = await fetchBytes(fetchImpl, url, MAX_MANIFEST_BYTES, signal);
     } catch (error) {
       if (error?.message === 'HTTP 404') return { ...base, state: 'no-release', message: 'Ainda não há versões publicadas neste canal.' };
       throw error;
     }
-    const sig = (await fetchBytes(fetchImpl, `${url}.sig`, 1024)).toString('utf8');
+    const sig = (await fetchBytes(fetchImpl, `${url}.sig`, 1024, signal)).toString('utf8');
     if (!verifyManifestSignature(bytes, sig, config.publicKeys)) {
       return { ...base, state: 'invalid', reason: 'signature', message: 'Assinatura do manifesto inválida; a atualização foi ignorada.' };
     }
@@ -157,6 +159,7 @@ export async function checkForUpdate({ installed, channel = 'experimental', conf
     if (!parsed.ok) return { ...base, state: 'invalid', reason: parsed.reason };
     const m = parsed.manifest;
     if (m.channel !== channel) return { ...base, state: 'invalid', reason: 'channel-mismatch' };
+    await onVerifiedManifest(bytes,sig,m);
     const available = { version: formatVersion(m.parsedVersion), size: m.size, sha256: m.sha256, notes: m.notes ?? '', url: m.url, file: m.file, publishedAt: m.publishedAt, signature: 'ed25519-verified' };
     if (!installed) return { ...base, state: 'available', available };
     const cmp = compareVersions(m.parsedVersion, installed);
@@ -234,12 +237,35 @@ export async function downloadUpdate({ available, cacheDir, fetchImpl = fetch, o
 }
 
 // ── Instalação ───────────────────────────────────────────────────────────
-export async function installPlan({ file, expectedSha256, consent, uid }) {
+export async function installPlan({ file, expectedSha256, consent, uid, manifestFile, signatureFile }) {
   if (consent !== true) return { ok: false, error: 'consent-required' };
   if (!Number.isInteger(uid) || uid === 0) return { ok: false, error: 'run-as-user' };
   if (!FILE_RE.test(basename(file)) || !existsSync(file)) return { ok: false, error: 'file' };
   if (await sha256File(file) !== expectedSha256) return { ok: false, error: 'sha256' };
-  return { ok: true, argv: ['pkexec', 'pacman', '-U', resolve(file)] };
+  if (!manifestFile || !signatureFile) return {ok:false,error:'proof-required'};
+  return { ok: true, argv: ['/usr/bin/pkexec','/opt/cybersafe-assistant-linux-lite/update-install-helper.mjs',resolve(file),resolve(manifestFile),resolve(signatureFile),expectedSha256] };
+}
+
+export function terminalPlan(sha256, exists = existsSync) {
+  if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256)) return null;
+  const args = ['/usr/bin/cybersafe-linux-update', 'install', '--consent', `--sha256=${sha256}`];
+  if (exists('/usr/bin/xdg-terminal-exec')) return ['/usr/bin/xdg-terminal-exec', ...args];
+  if (exists('/usr/bin/xterm')) return ['/usr/bin/xterm', '-hold', '-T', 'Atualização CyberSafe', '-e', ...args];
+  return null;
+}
+
+function writePrivate(file, data) {
+  const temporary = `${file}.${process.pid}.tmp`;
+  writeFileSync(temporary, data, {flag:'wx', mode:0o600});
+  try { renameSync(temporary, file); }
+  finally { rmSync(temporary,{force:true}); }
+}
+
+function ensurePrivateDirectory(directory) {
+  mkdirSync(directory,{recursive:true,mode:0o700});
+  const stat=lstatSync(directory);
+  if(!stat.isDirectory()||stat.uid!==process.getuid()||(stat.mode&0o077)||realpathSync(directory)!==resolve(directory))
+    throw new Error('Diretório de atualização inseguro.');
 }
 
 export function installedVersion(run = spawn) {
@@ -274,34 +300,69 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
   const print = (o) => console.log(JSON.stringify(o));
   (async () => {
     if (process.platform !== 'linux' || process.getuid?.() === 0) { print({ schema: 1, state: 'error', reason: 'run-as-user' }); process.exitCode = 2; return; }
+    if(!['prefs','check','download','install'].includes(cmd)){print({schema:1,state:'error',reason:'unknown-command'});process.exitCode=2;return;}
+    if(cmd==='install'&&!rest.includes('--consent')){print({schema:1,state:'error',install:{ok:false,error:'consent-required'}});process.exitCode=2;return;}
+    const graphical=cmd==='install'&&rest.includes('--graphical');
+    const expectedHash=rest.find(arg=>arg.startsWith('--sha256='))?.slice('--sha256='.length);
+    if(cmd==='install'&&!graphical&&!process.stdin.isTTY){print({schema:1,state:'error',install:{ok:false,error:'terminal-required'}});process.exitCode=2;return;}
     const p = paths();
     const prefs = readPrefs(p.prefsFile);
     const statusFile = join(p.cacheDir, 'last-check.json');
     if (cmd === 'prefs') {
       const channel = rest.includes('--experimental') ? 'experimental' : rest.includes('--stable') ? 'stable' : prefs.channel;
       const next = { channel, autoDownload: rest.includes('--auto-download') ? true : rest.includes('--no-auto-download') ? false : prefs.autoDownload };
-      mkdirSync(dirname(p.prefsFile), { recursive: true, mode: 0o700 });
-      writeFileSync(p.prefsFile, JSON.stringify(next), { mode: 0o600 });
+      ensurePrivateDirectory(dirname(p.prefsFile));
+      writePrivate(p.prefsFile, JSON.stringify(next));
       return print({ schema: 1, prefs: next });
     }
-    const result = await checkForUpdate({ installed: await installedVersion(), channel: prefs.channel, config: loadChannelConfig() });
-    mkdirSync(p.cacheDir, { recursive: true, mode: 0o700 });
-    writeFileSync(statusFile, JSON.stringify(result), { mode: 0o600 });
+    const installed=await installedVersion();
+    if(!installed){print({schema:1,state:'not-configured',reason:'installed-package-unverified',edition:EDITION});process.exitCode=2;return;}
+    let proof;
+    const result = await checkForUpdate({ installed, channel: prefs.channel, config: loadChannelConfig(),onVerifiedManifest:(bytes,signature,manifest)=>{proof={bytes,signature,sha256:manifest.sha256};} });
+    ensurePrivateDirectory(p.cacheDir);
+    writePrivate(statusFile, JSON.stringify(result));
     if (cmd === 'check') { print({ ...result, prefs }); process.exitCode = result.state === 'error' || result.state === 'invalid' ? 1 : 0; return; }
     if (result.state !== 'available') { print(result); process.exitCode = result.state === 'up-to-date' ? 0 : 1; return; }
+    if(cmd==='install'&&(graphical||expectedHash!==undefined)&&expectedHash!==result.available.sha256){
+      print({...result,install:{ok:false,error:'offered-package-changed'}});process.exitCode=2;return;
+    }
     const dl = await downloadUpdate({ available: result.available, cacheDir: p.cacheDir });
     if (cmd === 'download' || dl.state !== 'verified') { print({ ...result, download: dl }); process.exitCode = dl.state === 'verified' ? 0 : 1; return; }
     if (cmd === 'install') {
-      const plan = await installPlan({ file: dl.file, expectedSha256: result.available.sha256, consent: rest.includes('--consent'), uid: process.getuid() });
+      if(graphical){
+        const terminal=terminalPlan(expectedHash);
+        if(!terminal){print({...result,download:dl,install:{ok:false,error:'terminal-required'}});process.exitCode=2;return;}
+        const [binary,...args]=terminal;
+        const child=spawn(binary,args,{detached:true,stdio:'ignore'});
+        child.once('error',()=>{print({...result,download:dl,install:{ok:false,error:'terminal-required'}});process.exitCode=1;});
+        child.once('spawn',()=>{child.unref();print({...result,download:dl,install:{ok:false,state:'terminal-requested'}});});
+        return;
+      }
+      const prompt=createInterface({input:process.stdin,output:process.stdout});
+      let response;
+      try {
+        response=await prompt.question(`Instalar CyberSafe ${result.available.version}? Conclua as análises, saia pela tray e pare o serviço CyberSafe do utilizador se estiver ativo. Escreva "instalar" para continuar: `);
+      } finally {prompt.close();}
+      if(response.trim().toLowerCase()!=='instalar'){print({...result,download:dl,install:{ok:false,error:'consent-cancelled'}});process.exitCode=2;return;}
+      const manifestFile=join(p.cacheDir,`proof-${proof.sha256}.json`),signatureFile=`${manifestFile}.sig`;
+      // Downloads have already proved a canonical private cache. Exclusive
+      // temporary writes avoid truncating a symlink while persisting the proof.
+      for(const [file,bytes] of [[manifestFile,proof.bytes],[signatureFile,proof.signature]]){
+        writePrivate(file,bytes);
+      }
+      const plan = await installPlan({ file: dl.file, expectedSha256: result.available.sha256, consent: true, uid: process.getuid(),manifestFile,signatureFile });
       if (!plan.ok) { print({ ...result, download: dl, install: plan }); process.exitCode = 2; return; }
-      const child = spawn('/usr/bin/pkexec', plan.argv.slice(1), { stdio: 'inherit', env: { PATH: '/usr/bin', HOME: homedir(), DISPLAY: process.env.DISPLAY ?? '', WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ?? '' } });
+      const child = spawn(plan.argv[0], plan.argv.slice(1), { stdio: 'inherit', env: { PATH: '/usr/bin', HOME: homedir(), DISPLAY: process.env.DISPLAY ?? '', WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ?? '' } });
+      child.once('error',()=>{print({schema:1,state:'error',install:{ok:false,error:'authorisation-unavailable'}});process.exitCode=1;});
       child.once('exit', async (code) => {
         const after = await installedVersion();
-        print({ ...result, download: dl, install: { ok: code === 0, exitCode: code, installedAfter: after ? formatVersion(after) : null } });
-        process.exitCode = code === 0 ? 0 : 1;
+        const confirmed=code===0&&after&&formatVersion(after)===result.available.version;
+        const error=code===126?'authorisation-cancelled':code===127?'authorisation-refused':confirmed?undefined:'installation-unconfirmed';
+        print({ ...result, download: dl, install: { ok: Boolean(confirmed), error, exitCode: code, health:'not-tested', installedAfter: after ? formatVersion(after) : null } });
+        process.exitCode = confirmed ? 0 : 1;
       });
       return;
     }
     print({ schema: 1, state: 'error', reason: 'unknown-command' }); process.exitCode = 2;
-  })();
+  })().catch(()=>{print({schema:1,state:'error',reason:'operation-failed'});process.exitCode=1;});
 }
