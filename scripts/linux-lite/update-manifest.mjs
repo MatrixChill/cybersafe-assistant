@@ -33,7 +33,7 @@ if (cmd === 'keygen') {
   const m = /^cybersafe-assistant-linux-lite-(\d+\.\d+\.\d+)-(\d+)-x86_64\.pkg\.tar\.zst$/.exec(file);
   if (!m) throw new Error('Nome de pacote inesperado.');
   const manifest = {
-    schema: 1, package: 'cybersafe-assistant-linux-lite', channel, arch: 'x86_64',
+    schema: 1, package: 'cybersafe-assistant-linux-lite', edition: 'arch-shared', channel, arch: 'x86_64',
     version: m[1], pkgrel: Number(m[2]), url,
     size: statSync(pkg).size,
     sha256: createHash('sha256').update(readFileSync(pkg)).digest('hex'),

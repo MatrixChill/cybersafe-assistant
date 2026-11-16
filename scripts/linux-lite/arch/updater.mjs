@@ -16,12 +16,14 @@
 //    usa shell, nunca `--noconfirm` nem desativa assinaturas do pacman.
 import { createHash, createPublicKey, verify as cryptoVerify } from 'node:crypto';
 import { spawn } from 'node:child_process';
-import { createReadStream, createWriteStream, existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { constants, closeSync, createReadStream, existsSync, fstatSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, renameSync, rmSync, statfsSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import { open } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import { basename, dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const PACKAGE_NAME = 'cybersafe-assistant-linux-lite';
+export const EDITION = 'arch-shared';
 const MAX_PACKAGE_BYTES = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const ALLOWED_HOSTS = new Set(['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com']);
@@ -31,7 +33,8 @@ const FILE_RE = /^cybersafe-assistant-linux-lite-(\d+\.\d+\.\d+)-(\d+)-x86_64\.p
 export function parseVersion(text) {
   const m = /^(\d+)\.(\d+)\.(\d+)(?:-(\d+))?$/.exec(String(text ?? '').trim());
   if (!m) return null;
-  return { major: +m[1], minor: +m[2], patch: +m[3], pkgrel: m[4] === undefined ? 1 : +m[4] };
+  const version = { major: +m[1], minor: +m[2], patch: +m[3], pkgrel: m[4] === undefined ? 1 : +m[4] };
+  return Object.values(version).every(Number.isSafeInteger) && version.pkgrel >= 1 ? version : null;
 }
 export function compareVersions(a, b) {
   for (const k of ['major', 'minor', 'patch', 'pkgrel']) if (a[k] !== b[k]) return a[k] < b[k] ? -1 : 1;
@@ -47,14 +50,24 @@ export function validateManifest(m) {
   if (m.package !== PACKAGE_NAME) return fail('package');
   if (m.channel !== 'stable' && m.channel !== 'experimental') return fail('channel');
   if (m.arch !== 'x86_64') return fail('arch');
+  // Nigor currently uses this exact Arch package, not a fictional second
+  // edition. A future distinct package must get an explicit identity contract.
+  if (m.edition !== undefined && m.edition !== 'arch-shared') return fail('edition');
   const version = parseVersion(`${m.version}-${m.pkgrel}`);
   if (!version || !Number.isSafeInteger(m.pkgrel) || m.pkgrel < 1) return fail('version');
   let url;
   try { url = new URL(m.url); } catch { return fail('url'); }
-  if (url.protocol !== 'https:' || !ALLOWED_HOSTS.has(url.hostname)) return fail('url-host');
-  const file = basename(decodeURIComponent(url.pathname));
+  if (!allowedUrl(url.href) || url.hostname !== 'github.com') return fail('url-host');
+  const releasePath = /^\/MatrixChill\/cybersafe-assistant\/releases\/download\/([^/]+)\/[^/]+$/.exec(url.pathname);
+  if (!releasePath || url.search || url.hash) return fail('release-route');
+  let file;
+  try { file = basename(decodeURIComponent(url.pathname)); } catch { return fail('url-encoding'); }
   const fm = FILE_RE.exec(file);
   if (!fm || fm[1] !== m.version || +fm[2] !== m.pkgrel) return fail('filename');
+  const tag = releasePath[1];
+  const previewPrefix = `linux-v${m.version}-arch-preview.`;
+  if (m.channel === 'stable' ? tag !== `linux-v${m.version}`
+    : !tag.startsWith(previewPrefix) || !/^[1-9]\d*$/.test(tag.slice(previewPrefix.length))) return fail('release-channel');
   if (!Number.isSafeInteger(m.size) || m.size <= 0 || m.size > MAX_PACKAGE_BYTES) return fail('size');
   if (typeof m.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(m.sha256)) return fail('sha256');
   if (m.notes !== undefined && (typeof m.notes !== 'string' || m.notes.length > 8000)) return fail('notes');
@@ -80,18 +93,37 @@ export function loadChannelConfig(file = join(dirname(fileURLToPath(import.meta.
   try {
     const c = JSON.parse(readFileSync(file, 'utf8'));
     const keys = Array.isArray(c.publicKeys) ? c.publicKeys.filter((k) => typeof k === 'string' && k.includes('PUBLIC KEY')) : [];
-    return { manifestBase: typeof c.manifestBase === 'string' ? c.manifestBase : null, publicKeys: keys };
+    return { manifestBase: typeof c.manifestBase === 'string' ? c.manifestBase : null, publicKeys: keys, edition: c.edition ?? EDITION };
   } catch {
     return { manifestBase: null, publicKeys: [] };
   }
 }
 
+function allowedUrl(url) {
+  try { const u = new URL(url); return u.protocol === 'https:' && ALLOWED_HOSTS.has(u.hostname)
+    && !u.username && !u.password && (!u.port || u.port === '443'); } catch { return false; }
+}
+async function restrictedFetch(fetchImpl, url, options = {}) {
+  for (let hop = 0; hop < 6; hop++) {
+    if (!allowedUrl(url)) throw Object.assign(new Error('Untrusted download route'), {code:'url-host'});
+    const res = await fetchImpl(url, {...options,redirect:'manual'});
+    if (![301,302,303,307,308].includes(res.status)) return res;
+    const location = res.headers.get('location'); await res.body?.cancel();
+    if (!location) throw Object.assign(new Error('Invalid redirect'),{code:'redirect'});
+    url = new URL(location,url).href;
+  }
+  throw Object.assign(new Error('Redirect limit'),{code:'redirect'});
+}
 async function fetchBytes(fetchImpl, url, limit) {
-  const res = await fetchImpl(url, { redirect: 'follow' });
+  const res = await restrictedFetch(fetchImpl, url, {signal:AbortSignal.timeout(30_000)});
   if (!res.ok) throw Object.assign(new Error(`HTTP ${res.status}`), { code: 'http' });
-  const buf = Buffer.from(await res.arrayBuffer());
-  if (buf.length > limit) throw Object.assign(new Error('too large'), { code: 'too-large' });
-  return buf;
+  const chunks=[];let size=0;
+  for await (const bytes of res.body) {
+    size+=bytes.length;
+    if(size>limit)throw Object.assign(new Error('too large'),{code:'too-large'});
+    chunks.push(Buffer.from(bytes));
+  }
+  return Buffer.concat(chunks);
 }
 
 /**
@@ -100,7 +132,10 @@ async function fetchBytes(fetchImpl, url, limit) {
  */
 export async function checkForUpdate({ installed, channel = 'experimental', config, fetchImpl = fetch, now = () => new Date() }) {
   const checkedAt = now().toISOString();
-  const base = { schema: 1, channel, checkedAt, installed: installed ? formatVersion(installed) : null };
+  const base = { schema: 1, edition: EDITION, channel, checkedAt, installed: installed ? formatVersion(installed) : null };
+  if (config.edition !== undefined && config.edition !== EDITION) {
+    return {...base, state:'not-configured', reason:'edition', message:'A edição instalada não corresponde a este atualizador Arch partilhado.'};
+  }
   if (!config.manifestBase || config.publicKeys.length === 0) {
     return { ...base, state: 'not-configured', message: 'Canal de atualizações sem chave pública confiável configurada neste pacote.' };
   }
@@ -141,43 +176,61 @@ export function sha256File(file) {
   });
 }
 
-export async function downloadUpdate({ available, cacheDir, fetchImpl = fetch, onProgress = () => {} }) {
-  if (!FILE_RE.test(available.file) || !/^[a-f0-9]{64}$/.test(available.sha256)) return { state: 'invalid', reason: 'manifest' };
-  mkdirSync(cacheDir, { recursive: true, mode: 0o700 });
-  const final = join(cacheDir, available.file);
-  const part = `${final}.part`;
-  if (existsSync(final)) {
-    if (statSync(final).size === available.size && await sha256File(final) === available.sha256) {
-      return { state: 'verified', file: final, reused: true };
-    }
-    rmSync(final, { force: true });
-  }
-  let offset = existsSync(part) ? statSync(part).size : 0;
-  if (offset > available.size) { rmSync(part, { force: true }); offset = 0; }
-  const headers = offset > 0 ? { Range: `bytes=${offset}-` } : {};
-  const res = await fetchImpl(available.url, { headers, redirect: 'follow' });
-  if (!(res.status === 200 || res.status === 206)) return { state: 'error', reason: `http-${res.status}` };
-  if (res.status === 200 && offset > 0) offset = 0; // servidor ignorou o Range: recomeça
-  const out = createWriteStream(part, { flags: offset > 0 ? 'a' : 'w', mode: 0o600 });
-  let received = offset;
+export async function downloadUpdate({ available, cacheDir, fetchImpl = fetch, onProgress = () => {}, signal = AbortSignal.timeout(30*60_000), freeBytes = () => {const s=statfsSync(cacheDir);return BigInt(s.bavail)*BigInt(s.bsize);} }) {
+  if (!available || !FILE_RE.test(available.file) || !/^[a-f0-9]{64}$/.test(available.sha256)
+    || !Number.isSafeInteger(available.size) || available.size<1 || available.size>MAX_PACKAGE_BYTES || !allowedUrl(available.url)) return { state: 'invalid', reason: 'manifest' };
+  const final=join(cacheDir,available.file),part=`${final}.part`,lock=join(cacheDir,'.download.lock');
+  let lockFd, lockInode;
+  const regular = file => {
+    try {const s=lstatSync(file);return s.isFile()&&!s.isSymbolicLink()&&s.nlink===1&&(process.platform!=='linux'||s.uid===process.getuid());}
+    catch(error){if(error.code==='ENOENT')return true;throw error;}
+  };
   try {
-    for await (const chunk of res.body) {
-      received += chunk.length;
-      if (received > available.size) throw Object.assign(new Error('oversize'), { code: 'size' });
-      if (!out.write(chunk)) await new Promise((r) => out.once('drain', r));
-      onProgress({ received, total: available.size });
+    mkdirSync(cacheDir,{recursive:true,mode:0o700});
+    const root=lstatSync(cacheDir);
+    if(!root.isDirectory()||root.isSymbolicLink()||(process.platform==='linux'&&(root.uid!==process.getuid()||(root.mode&0o077)||realpathSync(cacheDir)!==resolve(cacheDir)))
+      || !regular(final)||!regular(part))return {state:'invalid',reason:'cache-unsafe'};
+    try {lockFd=openSync(lock,'wx',0o600);lockInode=fstatSync(lockFd).ino;}
+    catch(error){if(error.code==='EEXIST')return {state:'error',reason:'busy'};throw error;}
+    if(existsSync(final)) {
+      if(statSync(final).size===available.size&&await sha256File(final)===available.sha256)return {state:'verified',file:final,reused:true};
+      rmSync(final,{force:true});
     }
-  } catch (error) {
-    // Fecha com flush: o que já chegou fica no .part para a retoma.
-    await new Promise((r) => out.end(r));
-    if (error?.code === 'size') { rmSync(part, { force: true }); return { state: 'invalid', reason: 'size' }; }
-    return { state: 'error', reason: 'interrupted', resumable: true };
+    let offset=existsSync(part)?statSync(part).size:0;
+    if(offset>available.size){rmSync(part);offset=0;}
+    if(BigInt(freeBytes())<BigInt(available.size-offset))return {state:'error',reason:'no-space'};
+    let res;
+    try {res=await restrictedFetch(fetchImpl,available.url,{headers:offset?{Range:`bytes=${offset}-`}:{},signal});}
+    catch(error){return {state:'error',reason:signal.aborted?'cancelled':error.code==='url-host'?'url-host':'network',resumable:offset>0};}
+    if(![200,206].includes(res.status))return {state:'error',reason:`http-${res.status}`};
+    if(res.status===206){
+      const range=/^bytes (\d+)-(\d+)\/(\d+)$/.exec(res.headers.get('content-range')??'');
+      if(!range||+range[1]!==offset||+range[2]<offset||+range[2]>=available.size||+range[3]!==available.size){await res.body?.cancel();return {state:'invalid',reason:'range'};}
+    }else offset=0;
+    let received=offset;
+    const out=await open(part,constants.O_WRONLY|constants.O_CREAT|(constants.O_NOFOLLOW??0)|(offset?constants.O_APPEND:constants.O_TRUNC),0o600);
+    let failed;
+    try {
+      const stat=await out.stat();if(!stat.isFile()||stat.nlink!==1||stat.size!==offset)throw Object.assign(new Error('unsafe partial'),{code:'cache-unsafe'});
+      for await(const chunk of res.body){
+        if(signal.aborted)throw Object.assign(new Error('cancelled'),{code:'cancelled'});
+        if(received+chunk.length>available.size)throw Object.assign(new Error('oversize'),{code:'size'});
+        await out.writeFile(chunk);received+=chunk.length;onProgress({received,total:available.size});
+      }
+      await out.sync();
+    }catch(error){failed=error;}
+    finally{await out.close();}
+    if(failed){
+      if(failed.code==='size'){rmSync(part,{force:true});return {state:'invalid',reason:'size'};}
+      return {state:'error',reason:failed.code==='ENOSPC'?'no-space':failed.code==='cache-unsafe'?'cache-unsafe':signal.aborted?'cancelled':'interrupted',resumable:true};
+    }
+    if(statSync(part).size!==available.size)return {state:'error',reason:'incomplete',resumable:true};
+    if(await sha256File(part)!==available.sha256){rmSync(part,{force:true});return {state:'invalid',reason:'sha256'};}
+    renameSync(part,final);return {state:'verified',file:final,reused:false};
+  }catch(error){return {state:'error',reason:error.code==='ENOSPC'?'no-space':'cache-io'};}
+  finally {
+    if(lockFd!==undefined){closeSync(lockFd);try{if(lstatSync(lock).ino===lockInode)unlinkSync(lock);}catch{ /* unknown lock retained */ }}
   }
-  await new Promise((r) => out.end(r));
-  if (statSync(part).size !== available.size) return { state: 'error', reason: 'incomplete', resumable: true };
-  if (await sha256File(part) !== available.sha256) { rmSync(part, { force: true }); return { state: 'invalid', reason: 'sha256' }; }
-  renameSync(part, final);
-  return { state: 'verified', file: final, reused: false };
 }
 
 // ── Instalação ───────────────────────────────────────────────────────────

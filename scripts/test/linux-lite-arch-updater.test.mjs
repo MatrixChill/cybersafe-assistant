@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { createHash, createPublicKey, generateKeyPairSync, sign } from 'node:crypto';
-import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync, symlinkSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import {
@@ -46,7 +46,7 @@ function fakeFetch({ m = manifest(), key = privateKey, tamper = false, pkg = PKG
         const stream = new ReadableStream({ pull(c) { if (!sent) { sent = true; c.enqueue(half); } else c.error(new Error('reset')); } });
         return new Response(stream, { status: 200 });
       }
-      return new Response(body, { status: range && rangeSupported ? 206 : 200 });
+      return new Response(body, { status: range && rangeSupported ? 206 : 200, headers: range && rangeSupported ? {'Content-Range':`bytes ${start}-${pkg.length-1}/${pkg.length}`} : {} });
     }
     return new Response('not found', { status: 404 });
   };
@@ -94,7 +94,7 @@ test('assinatura de outra chave ou manifesto adulterado → invalid', async () =
 test('downgrade e versão igual não são oferecidos; canal trocado é recusado', async () => {
   assert.equal((await checkForUpdate({ installed: v('0.2.6-1'), channel: 'experimental', config, fetchImpl: fakeFetch().impl })).state, 'downgrade-refused');
   assert.equal((await checkForUpdate({ installed: v('0.2.5-1'), channel: 'experimental', config, fetchImpl: fakeFetch().impl })).state, 'up-to-date');
-  const r = await checkForUpdate({ installed: v('0.2.4-1'), channel: 'experimental', config, fetchImpl: fakeFetch({ m: manifest({ channel: 'stable' }) }).impl });
+  const r = await checkForUpdate({ installed: v('0.2.4-1'), channel: 'experimental', config, fetchImpl: fakeFetch({ m: manifest({ channel: 'stable',url:manifest().url.replace('linux-v0.2.5-arch-preview.1','linux-v0.2.5') }) }).impl });
   assert.equal(r.reason, 'channel-mismatch');
 });
 
@@ -159,4 +159,78 @@ test('canal sem manifesto publicado (404) → no-release, não erro', async () =
   const impl = async () => new Response('not found', { status: 404 });
   const r = await checkForUpdate({ installed: v('0.2.4-2'), channel: 'stable', config, fetchImpl: impl });
   assert.equal(r.state, 'no-release');
+});
+
+test('manifest versions must be safe integers and malformed URL encoding is refused',()=>{
+ assert.equal(parseVersion('9007199254740992.0.1'),null);
+ assert.equal(validateManifest(manifest({url:manifest().url.replace('.pkg','.pkg%FF')})).ok,false);
+});
+
+test('same shared Arch package cannot silently change to another edition',async()=>{
+ const r=await checkForUpdate({installed:v('0.2.4-2'),config,fetchImpl:fakeFetch({m:manifest({edition:'nigor-distinct'})}).impl});
+ assert.equal(r.state,'invalid');assert.equal(r.reason,'edition');
+});
+
+test('platform routing rejects Windows tags, other repositories and credential-bearing URLs', () => {
+ for (const url of [
+  manifest().url.replace('linux-v0.2.5-arch-preview.1','v0.2.5'),
+  manifest().url.replace('MatrixChill/cybersafe-assistant','someone/another-project'),
+  manifest().url.replace('https://','https://user:secret@'),
+  manifest().url.replace('github.com/','github.com:444/'),
+  manifest().url.replace('linux-v0.2.5-arch-preview.1','nigor-v0.2.5-preview.1'),
+ ]) assert.equal(validateManifest(manifest({url})).ok,false,url);
+ assert.equal(validateManifest(manifest({edition:'arch-shared'})).ok,true);
+ assert.equal(validateManifest(manifest({channel:'stable',url:manifest().url.replace('linux-v0.2.5-arch-preview.1','linux-v0.2.5')})).ok,true);
+ assert.equal(validateManifest(manifest({channel:'stable'})).ok,false,'preview must never masquerade as stable');
+});
+
+test('unrecognised installed edition refuses all network requests, without an account',async()=>{
+ let calls=0;
+ const r=await checkForUpdate({installed:v('0.2.4-2'),config:{...config,edition:'nigor-distinct'},fetchImpl:async()=>{calls++;throw new Error('must not fetch')}});
+ assert.equal(r.state,'not-configured');assert.equal(r.reason,'edition');assert.equal(calls,0);
+});
+
+test('download network refusal is a structured resumable error, not an unhandled rejection',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'cs-upd-network-'));
+ try{const {available}=await checkForUpdate({installed:v('0.2.4-2'),config,fetchImpl:fakeFetch().impl});
+ const r=await downloadUpdate({available,cacheDir:dir,fetchImpl:async()=>{throw new Error('network unavailable')}});assert.equal(r.state,'error');assert.equal(r.reason,'network');
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('cache symlink is refused without truncating a different file',{skip:process.platform==='win32'},async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'cs-upd-link-'));
+ try{const {available}=await checkForUpdate({installed:v('0.2.4-2'),config,fetchImpl:fakeFetch().impl});
+ const target=join(dir,'other-file');writeFileSync(target,'must survive');symlinkSync(target,join(dir,available.file+'.part'));
+ const r=await downloadUpdate({available,cacheDir:dir,fetchImpl:fakeFetch().impl});assert.equal(r.state,'invalid');assert.equal(r.reason,'cache-unsafe');assert.equal(readFileSync(target,'utf8'),'must survive');
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('insufficient disk space refuses download before network access',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'cs-upd-space-'));
+ try{const {available}=await checkForUpdate({installed:v('0.2.4-2'),config,fetchImpl:fakeFetch().impl});let calls=0;
+ const r=await downloadUpdate({available,cacheDir:dir,freeBytes:()=>0n,fetchImpl:async()=>{calls++;return new Response(PKG)}});assert.equal(r.reason,'no-space');assert.equal(calls,0);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});
+
+test('manifest redirect to another host is never followed',async()=>{
+ let calls=0;const r=await checkForUpdate({installed:v('0.2.4-2'),config,fetchImpl:async()=>{calls++;return new Response(null,{status:302,headers:{location:'https://untrusted.invalid/manifest.json'}})}});
+ assert.equal(r.state,'error');assert.equal(r.reason,'url-host');assert.equal(calls,1);
+});
+
+test('oversized manifest stream is bounded and cancelled before signature processing',async()=>{
+ let cancelled=false,calls=0;
+ const r=await checkForUpdate({installed:v('0.2.4-2'),config,fetchImpl:async()=>{
+  calls++;return new Response(new ReadableStream({pull(c){c.enqueue(Buffer.alloc(70000,65));},cancel(){cancelled=true;}}));
+ }});
+ assert.equal(r.state,'error');assert.equal(r.reason,'too-large');assert.equal(calls,1);assert.equal(cancelled,true);
+});
+
+test('overlapping downloads are serialized by a private cache lock',async()=>{
+ const dir=mkdtempSync(join(tmpdir(),'cs-upd-busy-'));
+ try{const {available}=await checkForUpdate({installed:v('0.2.4-2'),config,fetchImpl:fakeFetch().impl});
+ let entered,release;const entry=new Promise(r=>entered=r),gate=new Promise(r=>release=r);
+ const first=downloadUpdate({available,cacheDir:dir,fetchImpl:async()=>{entered();await gate;return new Response(PKG)}});
+ await entry;assert.equal((await downloadUpdate({available,cacheDir:dir,fetchImpl:fakeFetch().impl})).reason,'busy');
+ release();assert.equal((await first).state,'verified');assert.equal(existsSync(join(dir,'.download.lock')),false);
+ }finally{rmSync(dir,{recursive:true,force:true});}
 });
