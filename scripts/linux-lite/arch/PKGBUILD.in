@@ -1,8 +1,16 @@
 # Generated recipe inputs are filled by prepare-recipe.sh from a Git commit.
 pkgname=cybersafe-assistant-linux-lite
 pkgver=@VERSION@
-pkgrel=3
+pkgrel=4
 pkgdesc='Academic desktop security and diagnostics for Linux (experimental)'
+_edition=@EDITION@
+conflicts=('cybersafe-assistant-nigor')
+if [[ $_edition == nigor ]]; then
+  pkgname=cybersafe-assistant-nigor
+  pkgrel=1
+  pkgdesc='CyberSafe Assistant Nigor OS Edition with optional account (experimental)'
+  conflicts=('cybersafe-assistant-linux-lite')
+fi
 arch=('x86_64')
 url='https://github.com/MatrixChill/cybersafe-assistant'
 license=('MIT')
@@ -10,6 +18,10 @@ depends=('alsa-lib' 'at-spi2-core' 'gtk3' 'libcups' 'libdrm' 'libx11'
          'libxcb' 'libxcomposite' 'libxdamage' 'libxext' 'libxfixes'
          'libxkbcommon' 'libxrandr' 'libxshmfence' 'mesa' 'nspr' 'nss' 'nodejs' 'gcc-libs')
 makedepends=('nodejs-lts-krypton' 'npm' 'python' 'cmake')
+if [[ $_edition == nigor ]]; then
+  depends+=('libxft' 'zlib')
+  makedepends+=('pkgconf')
+fi
 optdepends=('zenity: native graphical quick-status panel'
             'polkit: authorised pacman steps for assisted install and updates'
             'xdg-terminal-exec: open the interactive update from the desktop'
@@ -33,6 +45,10 @@ build() {
   cmake -S packages/native-engine -B packages/native-engine/build -DCMAKE_BUILD_TYPE=Release
   cmake --build packages/native-engine/build
   node scripts/linux-lite/package-linux.mjs --arch-stage
+  if [[ $_edition == nigor ]]; then
+    cmake -S integrations/nigor -B "$srcdir/nigor-reference" -DCMAKE_BUILD_TYPE=Release
+    cmake --build "$srcdir/nigor-reference"
+  fi
 }
 
 check() {
@@ -40,11 +56,14 @@ check() {
   node --test scripts/test/linux-lite-package*.test.mjs scripts/test/linux-lite-arch-*.test.mjs
   CYBERSAFE_TEST_LINUX_NATIVE=1 node --test packages/service/test/linux-native-arch.test.js
   node --test packages/desktop/test/nigor-status-integration.test.mjs packages/desktop/test/nigor-actions.test.mjs
+  if [[ $_edition == nigor ]]; then
+    ctest --test-dir "$srcdir/nigor-reference" --output-on-failure
+  fi
 }
 
 package() {
   cd "$srcdir/cybersafe"
-  local target="$pkgdir/opt/cybersafe-assistant-linux-lite"
+  local target="$pkgdir/opt/$pkgname"
   install -d "$target" "$pkgdir/usr/bin"
   cp -a packages/desktop/release-linux/linux-unpacked/. "$target/"
   install -Dm755 packages/native-engine/build/Release/scan-engine "$target/resources/scan-engine"
@@ -56,7 +75,7 @@ package() {
   install -Dm644 scripts/linux-lite/arch/cybersafe-linux.service "$pkgdir/usr/lib/systemd/user/cybersafe-linux.service"
   install -Dm644 scripts/linux-lite/arch/cybersafe-clamd.service "$pkgdir/usr/lib/systemd/user/cybersafe-clamd.service"
   install -Dm644 scripts/linux-lite/arch/clamav-profile.mjs "$target/clamav-profile.mjs"
-  ln -s /opt/cybersafe-assistant-linux-lite/cybersafe-assistant-linux-lite \
+  ln -s "/opt/$pkgname/cybersafe-assistant-linux-lite" \
     "$pkgdir/usr/bin/cybersafe-assistant-linux-lite"
   install -Dm644 scripts/linux-lite/arch/diagnose.mjs "$target/diagnose.mjs"
   install -Dm644 scripts/linux-lite/arch/firewall.mjs "$target/firewall.mjs"
@@ -73,6 +92,21 @@ package() {
     "$pkgdir/usr/share/applications/cybersafe-assistant-linux-lite.desktop"
   install -Dm644 assets/branding/generated/icon-256.png \
     "$pkgdir/usr/share/icons/hicolor/256x256/apps/cybersafe-assistant-linux-lite.png"
+  if [[ $_edition == nigor ]]; then
+    install -Dm755 "$srcdir/nigor-reference/cybersafe-security-center" "$pkgdir/usr/bin/cybersafe-nigor-center-reference"
+    install -Dm644 integrations/nigor/packaging/edition.json "$target/resources/edition.json"
+    install -Dm644 integrations/nigor/packaging/update-channel.json "$target/update-channel.json"
+    ln -s cybersafe-linux-update "$pkgdir/usr/bin/cybersafe-nigor-update"
+    install -Dm644 integrations/nigor/packaging/cybersafe-nigor-update-check.service "$pkgdir/usr/lib/systemd/user/cybersafe-nigor-update-check.service"
+    install -Dm644 integrations/nigor/packaging/cybersafe-nigor-update-check.timer "$pkgdir/usr/lib/systemd/user/cybersafe-nigor-update-check.timer"
+    # Keep command/service names and the per-user profile for explicit migration.
+    # Only executable paths change. No install script touches apps or user data.
+    sed -i "s@/opt/cybersafe-assistant-linux-lite/@/opt/$pkgname/@g" \
+      "$pkgdir/usr/bin/"{cybersafe-nigor-panel,cybersafe-nigor-status,cybersafe-linux-diagnose,cybersafe-linux-update} \
+      "$pkgdir/usr/lib/systemd/user/cybersafe-linux.service" "$target/diagnose.mjs"
+    sed -i 's/^Name=CyberSafe Assistant.*/Name=CyberSafe Assistant Nigor OS/' \
+      "$pkgdir/usr/share/applications/cybersafe-assistant-linux-lite.desktop"
+  fi
   ELECTRON_RUN_AS_NODE=1 node_modules/electron/dist/electron \
     scripts/linux-lite/arch/collect-licenses.mjs "$target" \
     "$pkgdir/usr/share/licenses/$pkgname" "$srcdir/cybersafe/LICENSE"

@@ -8,7 +8,7 @@ import {open} from 'node:fs/promises';
 import {basename,dirname,join,resolve} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
 import {spawn,spawnSync} from 'node:child_process';
-import {compareVersions,formatVersion,loadChannelConfig,PACKAGE_NAME,parseVersion,validateManifest,verifyManifestSignature} from './updater.mjs';
+import {compareVersions,formatVersion,installedUpdateEdition,loadChannelConfig,PACKAGE_NAME,parseVersion,sha256File,updateEdition,validateManifest,verifyManifestSignature} from './updater.mjs';
 
 export const INSTALL_ROOT='/opt/cybersafe-assistant-linux-lite';
 const MAX_PACKAGE_BYTES=512*1024*1024;
@@ -44,10 +44,10 @@ export async function stageVerifiedPackage({packageFile,manifestFile,signatureFi
   const bytes=await boundedOwnedBytes(manifestFile,uid,65536);
   const signature=(await boundedOwnedBytes(signatureFile,uid,1024)).toString('utf8');
   if(!verifyManifestSignature(bytes,signature,config.publicKeys))fail('signature');
-  const parsed=validateManifest(JSON.parse(bytes.toString('utf8')));
+  const parsed=validateManifest(JSON.parse(bytes.toString('utf8')),config);
   if(!parsed.ok)fail(`manifest-${parsed.reason}`);
   const manifest=parsed.manifest;
-  if(config.edition!=='arch-shared'||manifest.sha256!==expectedSha256||basename(packageFile)!==manifest.file)fail('request-mismatch');
+  if(manifest.sha256!==expectedSha256||basename(packageFile)!==manifest.file)fail('request-mismatch');
   const stat=lstatSync(stagingRoot);
   if(!stat.isDirectory()||stat.isSymbolicLink()||stat.uid!==process.getuid()||(stat.mode&0o077)||realpathSync(stagingRoot)!==resolve(stagingRoot)){
     fail('staging-unsafe');
@@ -83,10 +83,13 @@ export function validatePackageInfo(text,manifest){
     const values=fields.get(match[1])??[];values.push(match[2]);fields.set(match[1],values);
   }
   const exactly=(key,value)=>fields.get(key)?.length===1&&fields.get(key)[0]===value;
-  if(!exactly('pkgname',PACKAGE_NAME)||!exactly('pkgver',`${manifest.version}-${manifest.pkgrel}`)||!exactly('arch',manifest.arch))fail('package-identity');
+  const packageName=manifest.package ?? PACKAGE_NAME;
+  if(!exactly('pkgname',packageName)||!exactly('pkgver',`${manifest.version}-${manifest.pkgrel}`)||!exactly('arch',manifest.arch))fail('package-identity');
   const dependencies=fields.get('depend')??[];
   if(dependencies.length>256||dependencies.some(value=>!value||value.length>256||/[\0\r\n]/.test(value)))fail('package-identity');
-  if(fields.has('replaces')||fields.has('conflict'))fail('system-package-change');
+  const other=updateEdition(packageName===PACKAGE_NAME?'nigor':'arch-shared').package;
+  const conflicts=fields.get('conflict') ?? [];
+  if(fields.has('replaces')||conflicts.length>1||conflicts.some(value=>value!==other))fail('system-package-change');
   return {dependencies};
 }
 
@@ -99,14 +102,15 @@ function rootOwnedPath(file){
 }
 
 export function assertProductStopped(proc='/proc'){
+  const roots=[INSTALL_ROOT,updateEdition('nigor').root];
   for(const name of readdirSync(proc)){
     if(!/^\d+$/.test(name)||+name===process.pid)continue;
     try{
       const executable=readlinkSync(join(proc,name,'exe')).replace(/ \(deleted\)$/,'');
-      if(executable.startsWith(`${INSTALL_ROOT}/`))fail('application-running');
+      if(roots.some(root=>executable.startsWith(`${root}/`)))fail('application-running');
       // The service launcher is system Node; identify its exact installed entry.
       const args=readFileSync(join(proc,name,'cmdline')).toString('utf8').split('\0');
-      if(args.includes(`${INSTALL_ROOT}/run-service.mjs`)||args.some(arg=>arg.startsWith(`${INSTALL_ROOT}/resources/app.asar/`)))fail('service-running');
+      if(roots.some(root=>args.includes(`${root}/run-service.mjs`)||args.some(arg=>arg.startsWith(`${root}/resources/app.asar/`))))fail('service-running');
     }catch(error){if(!['ENOENT','ESRCH','EINVAL'].includes(error.code))throw error;}
   }
 }
@@ -118,9 +122,17 @@ function systemTool(binary,args){
 
 export function installationPreflight(staged,run=systemTool,dbLock='/var/lib/pacman/db.lck'){
   if(existsSync(dbLock))fail('pacman-busy');
-  const installed=run('/usr/bin/pacman',['-Q',PACKAGE_NAME]);
-  const current=installed.status===0?parseVersion(installed.stdout.trim().split(/\s+/)[1]):null;
+  const packageName=staged.manifest.package ?? PACKAGE_NAME;
+  const installed=run('/usr/bin/pacman',['-Q',packageName]);
+  const [name, version, ...extra]=(installed.stdout ?? '').trim().split(/\s+/);
+  const current=installed.status===0&&name===packageName&&!extra.length?parseVersion(version):null;
   if(!current)fail('installed-version-unknown');
+  if(staged.manifest.parsedMinClient&&compareVersions(current,staged.manifest.parsedMinClient)<0)fail('client-floor');
+  if(staged.manifest.schema===2){
+    const other=updateEdition(packageName===PACKAGE_NAME?'nigor':'arch-shared').package;
+    const otherInstalled=run('/usr/bin/pacman',['-Q',other]);
+    if(otherInstalled.error||otherInstalled.status!==1)fail('edition-conflict');
+  }
   if(compareVersions(staged.manifest.parsedVersion,current)<=0)fail('downgrade-or-equal');
   const info=run('/usr/bin/bsdtar',['-xOf',staged.file,'.PKGINFO']);
   if(info.status!==0)fail('package-metadata');
@@ -142,26 +154,36 @@ if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).hr
     const uid=Number(process.env.PKEXEC_UID);
     const [packageFile,manifestFile,signatureFile,expectedSha256,...extra]=process.argv.slice(2);
     if(!Number.isSafeInteger(uid)||uid<1||extra.length||!/^[a-f0-9]{64}$/.test(expectedSha256??''))fail('arguments');
-    if(resolve(fileURLToPath(import.meta.url))!==`${INSTALL_ROOT}/update-install-helper.mjs`)fail('helper-not-installed');
-    for(const file of ['update-install-helper.mjs','updater.mjs','update-channel.json'])rootOwnedPath(join(INSTALL_ROOT,file));
+    const edition=installedUpdateEdition(dirname(fileURLToPath(import.meta.url)));
+    if(!edition)fail('helper-not-installed');
+    for(const file of ['update-install-helper.mjs','updater.mjs','update-channel.json'])rootOwnedPath(join(edition.root,file));
+    const config=loadChannelConfig();
+    if(config.schema!==2||config.edition!==edition.id||config.manifestBase!==edition.feed)fail('installed-edition-unverified');
     if(!process.stdin.isTTY||!process.stdout.isTTY)fail('terminal-required');
-    const stagingRoot='/var/cache/cybersafe-assistant-linux-lite/updates';
-    mkdirSync(stagingRoot,{recursive:true,mode:0o700});rootOwnedPath(stagingRoot);
+    const stagingRoot=`/var/cache/${edition.package}/updates`;
+    rootOwnedPath('/var/cache');
+    for(const directory of [dirname(stagingRoot),stagingRoot]){
+      try{mkdirSync(directory,{mode:0o700});}catch(error){if(error.code!=='EEXIST')throw error;}
+      rootOwnedPath(directory);
+    }
     const lockDirectory=join(stagingRoot,'.install.lock');
     try { mkdirSync(lockDirectory,{mode:0o700}); }
     catch(error){if(error.code==='EEXIST')fail('installation-busy-or-interrupted');throw error;}
     installLock=lockDirectory;
     assertProductStopped();
-    staged=await stageVerifiedPackage({packageFile,manifestFile,signatureFile,expectedSha256,uid,config:loadChannelConfig(),stagingRoot});
-    journal('verified');installationPreflight(staged);assertProductStopped();
+    staged=await stageVerifiedPackage({packageFile,manifestFile,signatureFile,expectedSha256,uid,config,stagingRoot});
+    journal('verified');installationPreflight(staged);
+    rootOwnedPath(staged.file);
+    if(await sha256File(staged.file)!==staged.manifest.sha256)fail('package-integrity');
+    assertProductStopped();
     journal('installing');
     const result=await new Promise((ok,ko)=>{
       const child=spawn('/usr/bin/pacman',['-U','--',staged.file],{stdio:'inherit',env:{PATH:'/usr/bin',LC_ALL:'C'}});
       child.once('error',ko);child.once('exit',(code,signal)=>ok({code,signal}));
     });
     if(result.code!==0||result.signal)fail('package-installation-failed');
-    const after=systemTool('/usr/bin/pacman',['-Q',PACKAGE_NAME]);
-    if(after.status!==0||after.stdout.trim()!==`${PACKAGE_NAME} ${formatVersion(staged.manifest.parsedVersion)}`)fail('installed-version-mismatch');
+    const after=systemTool('/usr/bin/pacman',['-Q',edition.package]);
+    if(after.status!==0||after.stdout.trim()!==`${edition.package} ${formatVersion(staged.manifest.parsedVersion)}`)fail('installed-version-mismatch');
     journal('installed-health-pending');report('installed','restart-and-health-required');
   }catch(error){
     try{if(staged)journal('failed');}catch{report('error','journal-write-failed');}

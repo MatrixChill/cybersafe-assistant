@@ -1,7 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
-if [[ $# != 1 ]]; then
-  echo "Uso: bash scripts/linux-lite/arch/prepare-recipe.sh <novo-diretorio>" >&2
+edition=arch-shared
+if [[ $# == 2 && $1 == --nigor ]]; then
+  edition=nigor
+  shift
+fi
+if [[ $# != 1 || $1 == -* ]]; then
+  echo "Uso: bash scripts/linux-lite/arch/prepare-recipe.sh [--nigor] <novo-diretorio>" >&2
   exit 2
 fi
 
@@ -17,5 +22,5 @@ mkdir -- "$1"
 git -C "$root" archive --prefix=cybersafe/ --format=tar.gz "$commit" > "$1/cybersafe-source.tar.gz"
 read -r hash _ < <(sha256sum -- "$1/cybersafe-source.tar.gz")
 git -C "$root" show "$commit:scripts/linux-lite/arch/PKGBUILD.in" |
-  sed -e "s/@VERSION@/$version/g" -e "s/@SHA256@/$hash/g" > "$1/PKGBUILD"
-printf 'commit=%s\nversion=%s\nsource_sha256=%s\n' "$commit" "$version" "$hash" > "$1/SOURCE-IDENTITY"
+  sed -e "s/@VERSION@/$version/g" -e "s/@SHA256@/$hash/g" -e "s/@EDITION@/$edition/g" > "$1/PKGBUILD"
+printf 'commit=%s\nversion=%s\nedition=%s\nsource_sha256=%s\n' "$commit" "$version" "$edition" "$hash" > "$1/SOURCE-IDENTITY"

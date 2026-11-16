@@ -25,10 +25,21 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 
 export const PACKAGE_NAME = 'cybersafe-assistant-linux-lite';
 export const EDITION = 'arch-shared';
+const RELEASE_BASE = 'https://github.com/MatrixChill/cybersafe-assistant/releases/download';
+const EDITIONS = Object.freeze({
+  'arch-shared': Object.freeze({ id: 'arch-shared', package: PACKAGE_NAME, root: `/opt/${PACKAGE_NAME}`, feed: `${RELEASE_BASE}/linux-update-channel-v2`, tag: 'linux-v', preview: '-arch-preview.' }),
+  nigor: Object.freeze({ id: 'nigor', package: 'cybersafe-assistant-nigor', root: '/opt/cybersafe-assistant-nigor', feed: `${RELEASE_BASE}/nigor-update-channel-v2`, tag: 'nigor-v', preview: '-preview.' }),
+});
+export function updateEdition(id) {
+  return typeof id === 'string' && Object.hasOwn(EDITIONS, id) ? EDITIONS[id] : null;
+}
+export function installedUpdateEdition(root) {
+  return Object.values(EDITIONS).find(edition => edition.root === root) ?? null;
+}
 const MAX_PACKAGE_BYTES = 512 * 1024 * 1024;
 const MAX_MANIFEST_BYTES = 64 * 1024;
 const ALLOWED_HOSTS = new Set(['github.com', 'objects.githubusercontent.com', 'release-assets.githubusercontent.com']);
-const FILE_RE = /^cybersafe-assistant-linux-lite-(\d+\.\d+\.\d+)-(\d+)-x86_64\.pkg\.tar\.zst$/;
+const FILE_RE = /^(cybersafe-assistant-(?:linux-lite|nigor))-(\d+\.\d+\.\d+)-(\d+)-x86_64\.pkg\.tar\.zst$/;
 
 // ── Versões ──────────────────────────────────────────────────────────────
 export function parseVersion(text) {
@@ -44,18 +55,21 @@ export function compareVersions(a, b) {
 export const formatVersion = (v) => `${v.major}.${v.minor}.${v.patch}-${v.pkgrel}`;
 
 // ── Manifesto ────────────────────────────────────────────────────────────
-export function validateManifest(m) {
+export function validateManifest(m, config = {}) {
   const fail = (reason) => ({ ok: false, reason });
   if (!m || typeof m !== 'object' || Array.isArray(m)) return fail('not-an-object');
-  if (m.schema !== 1) return fail('schema');
-  if (m.package !== PACKAGE_NAME) return fail('package');
+  const schema = config.schema ?? 1;
+  const edition = updateEdition(config.edition ?? EDITION);
+  if (!edition || (schema === 1 && edition.id !== EDITION)) return fail('edition');
+  if (![1, 2].includes(schema) || m.schema !== schema) return fail('schema');
+  if (m.package !== edition.package) return fail('package');
   if (m.channel !== 'stable' && m.channel !== 'experimental') return fail('channel');
   if (m.arch !== 'x86_64') return fail('arch');
-  // Nigor currently uses this exact Arch package, not a fictional second
-  // edition. A future distinct package must get an explicit identity contract.
-  if (m.edition !== undefined && m.edition !== 'arch-shared') return fail('edition');
+  if ((schema === 2 || m.edition !== undefined) && m.edition !== edition.id) return fail('edition');
   const version = parseVersion(`${m.version}-${m.pkgrel}`);
   if (!version || !Number.isSafeInteger(m.pkgrel) || m.pkgrel < 1) return fail('version');
+  const minClient = schema === 2 ? parseVersion(m.minClient) : null;
+  if (schema === 2 && (!minClient || m.minClient !== formatVersion(minClient) || compareVersions(minClient, version) > 0)) return fail('client-floor');
   let url;
   try { url = new URL(m.url); } catch { return fail('url'); }
   if (!allowedUrl(url.href) || url.hostname !== 'github.com') return fail('url-host');
@@ -64,16 +78,16 @@ export function validateManifest(m) {
   let file;
   try { file = basename(decodeURIComponent(url.pathname)); } catch { return fail('url-encoding'); }
   const fm = FILE_RE.exec(file);
-  if (!fm || fm[1] !== m.version || +fm[2] !== m.pkgrel) return fail('filename');
+  if (!fm || fm[1] !== edition.package || fm[2] !== m.version || +fm[3] !== m.pkgrel) return fail('filename');
   const tag = releasePath[1];
-  const previewPrefix = `linux-v${m.version}-arch-preview.`;
-  if (m.channel === 'stable' ? tag !== `linux-v${m.version}`
+  const previewPrefix = `${edition.tag}${m.version}${edition.preview}`;
+  if (m.channel === 'stable' ? tag !== `${edition.tag}${m.version}`
     : !tag.startsWith(previewPrefix) || !/^[1-9]\d*$/.test(tag.slice(previewPrefix.length))) return fail('release-channel');
   if (!Number.isSafeInteger(m.size) || m.size <= 0 || m.size > MAX_PACKAGE_BYTES) return fail('size');
   if (typeof m.sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(m.sha256)) return fail('sha256');
   if (m.notes !== undefined && (typeof m.notes !== 'string' || m.notes.length > 8000)) return fail('notes');
   if (typeof m.publishedAt !== 'string' || !Number.isFinite(Date.parse(m.publishedAt))) return fail('publishedAt');
-  return { ok: true, manifest: { ...m, file, parsedVersion: version } };
+  return { ok: true, manifest: { ...m, file, parsedVersion: version, parsedMinClient: minClient } };
 }
 
 /** Assinatura Ed25519 destacada (base64) sobre os bytes exatos do manifesto. */
@@ -94,7 +108,7 @@ export function loadChannelConfig(file = join(dirname(fileURLToPath(import.meta.
   try {
     const c = JSON.parse(readFileSync(file, 'utf8'));
     const keys = Array.isArray(c.publicKeys) ? c.publicKeys.filter((k) => typeof k === 'string' && k.includes('PUBLIC KEY')) : [];
-    return { manifestBase: typeof c.manifestBase === 'string' ? c.manifestBase : null, publicKeys: keys, edition: c.edition ?? EDITION };
+    return { manifestBase: typeof c.manifestBase === 'string' ? c.manifestBase : null, publicKeys: keys, edition: c.edition ?? EDITION, schema: c.schema ?? 1 };
   } catch {
     return { manifestBase: null, publicKeys: [] };
   }
@@ -133,9 +147,13 @@ async function fetchBytes(fetchImpl, url, limit, signal) {
  */
 export async function checkForUpdate({ installed, channel = 'experimental', config, fetchImpl = fetch, now = () => new Date(), onVerifiedManifest = () => {} }) {
   const checkedAt = now().toISOString();
-  const base = { schema: 1, edition: EDITION, channel, checkedAt, installed: installed ? formatVersion(installed) : null };
-  if (config.edition !== undefined && config.edition !== EDITION) {
-    return {...base, state:'not-configured', reason:'edition', message:'A edição instalada não corresponde a este atualizador Arch partilhado.'};
+  const edition = updateEdition(config.edition ?? EDITION);
+  const base = { schema: 1, edition: edition?.id ?? null, channel, checkedAt, installed: installed ? formatVersion(installed) : null };
+  if (!edition || ((config.schema ?? 1) === 1 && edition.id !== EDITION)) {
+    return {...base, state:'not-configured', reason:'edition', message:'A edição instalada não corresponde ao canal de atualizações.'};
+  }
+  if (config.schema === 2 && config.manifestBase !== edition.feed) {
+    return {...base, state:'invalid', reason:'channel-route', message:'O canal de atualizações não corresponde à edição instalada.'};
   }
   if (!config.manifestBase || config.publicKeys.length === 0) {
     return { ...base, state: 'not-configured', message: 'Canal de atualizações sem chave pública confiável configurada neste pacote.' };
@@ -155,10 +173,13 @@ export async function checkForUpdate({ installed, channel = 'experimental', conf
     if (!verifyManifestSignature(bytes, sig, config.publicKeys)) {
       return { ...base, state: 'invalid', reason: 'signature', message: 'Assinatura do manifesto inválida; a atualização foi ignorada.' };
     }
-    const parsed = validateManifest(JSON.parse(bytes.toString('utf8')));
+    const parsed = validateManifest(JSON.parse(bytes.toString('utf8')), config);
     if (!parsed.ok) return { ...base, state: 'invalid', reason: parsed.reason };
     const m = parsed.manifest;
     if (m.channel !== channel) return { ...base, state: 'invalid', reason: 'channel-mismatch' };
+    if (m.parsedMinClient && (!installed || compareVersions(installed, m.parsedMinClient) < 0)) {
+      return { ...base, state: 'invalid', reason: 'client-floor', message: 'Esta atualização requer uma migração manual.' };
+    }
     await onVerifiedManifest(bytes,sig,m);
     const available = { version: formatVersion(m.parsedVersion), size: m.size, sha256: m.sha256, notes: m.notes ?? '', url: m.url, file: m.file, publishedAt: m.publishedAt, signature: 'ed25519-verified' };
     if (!installed) return { ...base, state: 'available', available };
@@ -237,18 +258,19 @@ export async function downloadUpdate({ available, cacheDir, fetchImpl = fetch, o
 }
 
 // ── Instalação ───────────────────────────────────────────────────────────
-export async function installPlan({ file, expectedSha256, consent, uid, manifestFile, signatureFile }) {
+export async function installPlan({ file, expectedSha256, consent, uid, manifestFile, signatureFile, edition = EDITIONS[EDITION] }) {
   if (consent !== true) return { ok: false, error: 'consent-required' };
   if (!Number.isInteger(uid) || uid === 0) return { ok: false, error: 'run-as-user' };
-  if (!FILE_RE.test(basename(file)) || !existsSync(file)) return { ok: false, error: 'file' };
+  if (FILE_RE.exec(basename(file))?.[1] !== edition.package || !existsSync(file)) return { ok: false, error: 'file' };
   if (await sha256File(file) !== expectedSha256) return { ok: false, error: 'sha256' };
   if (!manifestFile || !signatureFile) return {ok:false,error:'proof-required'};
-  return { ok: true, argv: ['/usr/bin/pkexec','/opt/cybersafe-assistant-linux-lite/update-install-helper.mjs',resolve(file),resolve(manifestFile),resolve(signatureFile),expectedSha256] };
+  return { ok: true, argv: ['/usr/bin/pkexec',`${edition.root}/update-install-helper.mjs`,resolve(file),resolve(manifestFile),resolve(signatureFile),expectedSha256] };
 }
 
-export function terminalPlan(sha256, exists = existsSync) {
+export function terminalPlan(sha256, exists = existsSync, edition = EDITION) {
   if (typeof sha256 !== 'string' || !/^[a-f0-9]{64}$/.test(sha256)) return null;
-  const args = ['/usr/bin/cybersafe-linux-update', 'install', '--consent', `--sha256=${sha256}`];
+  const launcher = edition === 'nigor' ? '/usr/bin/cybersafe-nigor-update' : '/usr/bin/cybersafe-linux-update';
+  const args = [launcher, 'install', '--consent', `--sha256=${sha256}`];
   if (exists('/usr/bin/xdg-terminal-exec')) return ['/usr/bin/xdg-terminal-exec', ...args];
   if (exists('/usr/bin/xterm')) return ['/usr/bin/xterm', '-hold', '-T', 'Atualização CyberSafe', '-e', ...args];
   return null;
@@ -268,20 +290,23 @@ function ensurePrivateDirectory(directory) {
     throw new Error('Diretório de atualização inseguro.');
 }
 
-export function installedVersion(run = spawn) {
+export function installedVersion(run = spawn, packageName = PACKAGE_NAME) {
   return new Promise((ok) => {
     let out = '';
-    const p = run('/usr/bin/pacman', ['-Q', PACKAGE_NAME], { env: { PATH: '/usr/bin', LC_ALL: 'C' } });
+    const p = run('/usr/bin/pacman', ['-Q', packageName], { env: { PATH: '/usr/bin', LC_ALL: 'C' } });
     p.stdout?.on('data', (d) => { out += d; });
     p.once('error', () => ok(null));
-    p.once('exit', (code) => ok(code === 0 ? parseVersion(out.trim().split(/\s+/)[1]) : null));
+    p.once('close', (code) => {
+      const [name, version, ...extra] = out.trim().split(/\s+/);
+      ok(code === 0 && name === packageName && !extra.length ? parseVersion(version) : null);
+    });
   });
 }
 
-export function paths(env = process.env) {
+export function paths(env = process.env, packageName = PACKAGE_NAME) {
   const cache = env.XDG_CACHE_HOME || join(homedir(), '.cache');
   const config = env.XDG_CONFIG_HOME || join(homedir(), '.config');
-  return { cacheDir: join(cache, PACKAGE_NAME, 'updates'), prefsFile: join(config, PACKAGE_NAME, 'updates.json') };
+  return { cacheDir: join(cache, packageName, 'updates-v2'), prefsFile: join(config, packageName, 'updates.json') };
 }
 
 export function readPrefs(file) {
@@ -305,7 +330,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     const graphical=cmd==='install'&&rest.includes('--graphical');
     const expectedHash=rest.find(arg=>arg.startsWith('--sha256='))?.slice('--sha256='.length);
     if(cmd==='install'&&!graphical&&!process.stdin.isTTY){print({schema:1,state:'error',install:{ok:false,error:'terminal-required'}});process.exitCode=2;return;}
-    const p = paths();
+    const edition = installedUpdateEdition(dirname(fileURLToPath(import.meta.url)));
+    const config = loadChannelConfig();
+    if (!edition || config.schema !== 2 || config.edition !== edition.id || config.manifestBase !== edition.feed) {
+      print({schema:1,state:'not-configured',reason:'installed-edition-unverified'});process.exitCode=2;return;
+    }
+    const p = paths(process.env, edition.package);
     const prefs = readPrefs(p.prefsFile);
     const statusFile = join(p.cacheDir, 'last-check.json');
     if (cmd === 'prefs') {
@@ -315,10 +345,10 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       writePrivate(p.prefsFile, JSON.stringify(next));
       return print({ schema: 1, prefs: next });
     }
-    const installed=await installedVersion();
-    if(!installed){print({schema:1,state:'not-configured',reason:'installed-package-unverified',edition:EDITION});process.exitCode=2;return;}
+    const installed=await installedVersion(spawn, edition.package);
+    if(!installed){print({schema:1,state:'not-configured',reason:'installed-package-unverified',edition:edition.id});process.exitCode=2;return;}
     let proof;
-    const result = await checkForUpdate({ installed, channel: prefs.channel, config: loadChannelConfig(),onVerifiedManifest:(bytes,signature,manifest)=>{proof={bytes,signature,sha256:manifest.sha256};} });
+    const result = await checkForUpdate({ installed, channel: prefs.channel, config,onVerifiedManifest:(bytes,signature,manifest)=>{proof={bytes,signature,sha256:manifest.sha256};} });
     ensurePrivateDirectory(p.cacheDir);
     writePrivate(statusFile, JSON.stringify(result));
     if (cmd === 'check') { print({ ...result, prefs }); process.exitCode = result.state === 'error' || result.state === 'invalid' ? 1 : 0; return; }
@@ -330,7 +360,7 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
     if (cmd === 'download' || dl.state !== 'verified') { print({ ...result, download: dl }); process.exitCode = dl.state === 'verified' ? 0 : 1; return; }
     if (cmd === 'install') {
       if(graphical){
-        const terminal=terminalPlan(expectedHash);
+        const terminal=terminalPlan(expectedHash,existsSync,edition.id);
         if(!terminal){print({...result,download:dl,install:{ok:false,error:'terminal-required'}});process.exitCode=2;return;}
         const [binary,...args]=terminal;
         const child=spawn(binary,args,{detached:true,stdio:'ignore'});
@@ -350,12 +380,12 @@ if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1]
       for(const [file,bytes] of [[manifestFile,proof.bytes],[signatureFile,proof.signature]]){
         writePrivate(file,bytes);
       }
-      const plan = await installPlan({ file: dl.file, expectedSha256: result.available.sha256, consent: true, uid: process.getuid(),manifestFile,signatureFile });
+      const plan = await installPlan({ file: dl.file, expectedSha256: result.available.sha256, consent: true, uid: process.getuid(),manifestFile,signatureFile,edition });
       if (!plan.ok) { print({ ...result, download: dl, install: plan }); process.exitCode = 2; return; }
       const child = spawn(plan.argv[0], plan.argv.slice(1), { stdio: 'inherit', env: { PATH: '/usr/bin', HOME: homedir(), DISPLAY: process.env.DISPLAY ?? '', WAYLAND_DISPLAY: process.env.WAYLAND_DISPLAY ?? '' } });
       child.once('error',()=>{print({schema:1,state:'error',install:{ok:false,error:'authorisation-unavailable'}});process.exitCode=1;});
       child.once('exit', async (code) => {
-        const after = await installedVersion();
+        const after = await installedVersion(spawn, edition.package);
         const confirmed=code===0&&after&&formatVersion(after)===result.available.version;
         const error=code===126?'authorisation-cancelled':code===127?'authorisation-refused':confirmed?undefined:'installation-unconfirmed';
         print({ ...result, download: dl, install: { ok: Boolean(confirmed), error, exitCode: code, health:'not-tested', installedAfter: after ? formatVersion(after) : null } });

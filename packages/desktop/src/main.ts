@@ -1554,11 +1554,8 @@ function registerIpc(
     appUpdater ? toAppUpdateSnapshot(appUpdater.snapshotCopy()) : failureSnapshot("unconfigured", updateVersion(), "updater não inicializado"));
   // Atualizações Linux (pacote Arch): canal próprio, nunca o updater Windows.
   handle("linux-update:run", (_event, command: unknown, consent: unknown, sha256: unknown) => {
-    if (isNigorInstall(editionRuntime())) {
-      return { ok: true, result: { schema: 1, state: "not-configured", reason: "nigor-channel-unavailable" } };
-    }
     return command === "check" || command === "download" || command === "install"
-      ? runLinuxUpdate(command, consent === true, undefined, undefined, sha256)
+      ? runLinuxUpdate(command, consent === true, undefined, undefined, sha256, isNigorInstall(editionRuntime()) ? "nigor" : "arch-shared")
       : { ok: false, result: null, error: "invalid-response" };
   });
   handle("app:update-check", () => withUpdater((u) => u.check()));

@@ -12,15 +12,16 @@ test('root staging binds exact signed bytes, rejects substitution and never trus
  const body=Buffer.from('synthetic package, never installed');
  const digest=createHash('sha256').update(body).digest('hex');
  const file='cybersafe-assistant-linux-lite-0.2.5-1-x86_64.pkg.tar.zst';
- const manifest={schema:1,package:'cybersafe-assistant-linux-lite',edition:'arch-shared',channel:'experimental',arch:'x86_64',version:'0.2.5',pkgrel:1,url:`https://github.com/MatrixChill/cybersafe-assistant/releases/download/linux-v0.2.5-arch-preview.1/${file}`,size:body.length,sha256:digest,publishedAt:'2026-11-16T00:00:00Z'};
+ const manifest={schema:2,package:'cybersafe-assistant-linux-lite',edition:'arch-shared',channel:'experimental',arch:'x86_64',version:'0.2.5',pkgrel:1,minClient:'0.2.4-4',url:`https://github.com/MatrixChill/cybersafe-assistant/releases/download/linux-v0.2.5-arch-preview.1/${file}`,size:body.length,sha256:digest,publishedAt:'2026-11-16T00:00:00Z'};
  const manifestFile=join(root,'manifest.json'),signatureFile=join(root,'manifest.sig'),packageFile=join(root,file);
  const bytes=Buffer.from(JSON.stringify(manifest));
  for(const [path,data] of [[manifestFile,bytes],[signatureFile,sign(null,bytes,privateKey).toString('base64')],[packageFile,body]])writeFileSync(path,data,{mode:0o600});
- const config={publicKeys:[publicKey.export({type:'spki',format:'pem'})],edition:'arch-shared'};
+ const config={schema:2,publicKeys:[publicKey.export({type:'spki',format:'pem'})],edition:'arch-shared'};
  const request={manifestFile,signatureFile,packageFile,expectedSha256:digest,uid:process.getuid(),config,stagingRoot:root};
  try{
   const staged=await stageVerifiedPackage(request);
   assert.deepEqual(readFileSync(staged.file),body);
+  await assert.rejects(stageVerifiedPackage({...request,config:{...config,edition:'nigor'}}),/manifest-package/);
   writeFileSync(packageFile,'changed after download');
   assert.deepEqual(readFileSync(staged.file),body,'privileged copy is independent from user cache');
   await assert.rejects(stageVerifiedPackage(request),/package-integrity/);

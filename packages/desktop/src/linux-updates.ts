@@ -8,6 +8,7 @@
 import { execFile } from "node:child_process";
 
 export const LINUX_UPDATE_BINARY = "/usr/bin/cybersafe-linux-update";
+const NIGOR_UPDATE_BINARY = "/usr/bin/cybersafe-nigor-update";
 export type LinuxUpdateCommand = "check" | "download" | "install";
 
 const TIMEOUTS: Record<LinuxUpdateCommand, number> = {
@@ -30,6 +31,7 @@ export function runLinuxUpdate(
   platform: NodeJS.Platform = process.platform,
   exec: ExecFile = execFile,
   expectedSha256?: unknown,
+  edition: "arch-shared" | "nigor" = "arch-shared",
 ): Promise<LinuxUpdateWire> {
   if (platform !== "linux") return Promise.resolve({ ok: false, result: null, error: "not-linux" });
   if (!(command in TIMEOUTS)) return Promise.resolve({ ok: false, result: null, error: "invalid-response" });
@@ -39,7 +41,8 @@ export function runLinuxUpdate(
   }
   const args = command === "install" ? ["install", "--consent", "--graphical", `--sha256=${expectedSha256}`] : [command];
   return new Promise((resolve) => {
-    exec(LINUX_UPDATE_BINARY, args, { timeout: TIMEOUTS[command], maxBuffer: 1 << 20, env: { ...process.env, LC_ALL: "C.UTF-8" } },
+    const binary = edition === "nigor" ? NIGOR_UPDATE_BINARY : LINUX_UPDATE_BINARY;
+    exec(binary, args, { timeout: TIMEOUTS[command], maxBuffer: 1 << 20, env: { ...process.env, LC_ALL: "C.UTF-8" } },
       (error, stdout) => {
         const code = (error as NodeJS.ErrnoException | null)?.code;
         if (code === "ENOENT") return resolve({ ok: false, result: null, error: "not-installed" });
@@ -50,6 +53,9 @@ export function runLinuxUpdate(
         try {
           const parsed = line ? JSON.parse(line) : null;
           if (!parsed || typeof parsed !== "object" || parsed.schema !== 1) return resolve({ ok: false, result: null, error: "invalid-response" });
+          if (edition === "nigor" && parsed.edition !== edition && (parsed.available || parsed.state === "available")) {
+            return resolve({ ok: false, result: null, error: "invalid-response" });
+          }
           resolve({ ok: !error, result: parsed });
         } catch {
           resolve({ ok: false, result: null, error: "invalid-response" });

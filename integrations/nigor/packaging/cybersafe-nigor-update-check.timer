@@ -1,0 +1,10 @@
+[Unit]
+Description=Check CyberSafe Nigor updates periodically
+
+[Timer]
+OnStartupSec=3min
+OnUnitActiveSec=12h
+RandomizedDelaySec=5min
+
+[Install]
+WantedBy=timers.target
