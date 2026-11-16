@@ -1,5 +1,9 @@
 # Continuidade Nigor / Arch — 13/11/2026
 
+**Registo histórico. Estado atual (16/11/2026):**
+[Linux Next](CONTINUIDADE-LINUX-NEXT.md). A licença MIT já foi aprovada;
+as referências a esse bloqueio abaixo descrevem apenas o estado histórico.
+
 - Branch: `codex/nigor-arch-20261113`; PR #5 draft. Não fazer merge ou Release.
 - Fontes do pacote de encerramento: `8a05d7b0637d9fb6fc66e4716c03635e38c51877`. CI Linux e Windows aprovadas nas runs `43509183249` e `43509191170`. A corrida de leitura de credencial vazia foi corrigida sem rotação.
 - Pacote local e SHA-256: ver [INTEGRACAO-NIGOR.md](INTEGRACAO-NIGOR.md). Fontes, receita, 131 hashes do payload e logs em `output/arch-closing-8a05d7b/` (ignorados pelo Git).

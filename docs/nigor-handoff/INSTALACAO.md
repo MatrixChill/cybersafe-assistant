@@ -6,7 +6,7 @@ Como utilizador normal, numa sessão gráfica. Nunca como root, nunca com `--no-
 # 1. Verificar o ficheiro descarregado da pré-release
 sha256sum -c SHA256SUMS.txt
 # 2. Instalar (o pacman pede a autorização normal)
-sudo pacman -U ./cybersafe-assistant-linux-lite-0.2.4-2-x86_64.pkg.tar.zst
+sudo pacman -U ./cybersafe-assistant-linux-lite-0.2.4-3-x86_64.pkg.tar.zst
 # 3. Dependências e motores
 cybersafe-linux-diagnose | python -m json.tool
 # se faltar algo, o diagnóstico indica o comando exato, p. ex.:

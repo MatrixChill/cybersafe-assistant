@@ -15,8 +15,8 @@
   continua a ser a evolução recomendada (ver nota abaixo).
 - A secção «Atualizações» da aplicação Electron em Linux usa este canal; ainda não
   foi testada numa sessão gráfica com agente polkit real (só testes de modelo/IPC).
-- O histórico não traz o ID da análise: o Nigor não consegue associar um
-  `scanId` aceite à entrada do histórico (extensão de contrato prevista).
+- Pacotes anteriores a 0.2.4-3 não trazem o ID de análise; a extensão aditiva
+  atual preserva o ID quando disponível. Os consumidores devem tolerar `null`.
 - Alertas só desde o arranque do serviço (registo em memória).
 - Uma análise pode contar ameaça por `highRiskCount` com severidade baixa sem gerar
   `threat.detected`; está documentado, a revisão da regra é trabalho futuro.

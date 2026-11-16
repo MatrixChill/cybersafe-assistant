@@ -27,12 +27,13 @@ Destino não absoluto, symlink, ID inválido ou falta de `--consent` → recusad
   "version": 1,
   "serviceRunning": true,
   "protection": { "status": "safe|attention|critical|degraded|null", "enabled": true },
+  "monitoring": { "mode": "post-write", "preventionConfirmed": false, "queueDepth": 0, "rootCount": 0 },
   "engines": { "clamav": "active|degraded|unavailable|error|null", "yara": "…", "hashDb": "…", "native": "…" },
   "engineReasons": { "clamav": "not-installed|no-definitions|exec-failed|starting|null", "yara": null, "hashDb": null, "native": null },
-  "latestScan": { "status": "completed|cancelled|failed|null", "endedAt": "ISO|null",
+  "latestScan": { "id": "UUID|null", "status": "completed|cancelled|failed|null", "endedAt": "ISO|null",
                   "filesAnalyzed": 0, "filesFailed": 0, "filesInconclusive": 0, "threatsFound": 0 },
   "history": [ "… até 5 análises, mesmo formato …" ],
-  "alerts": [ { "type": "threat.detected|quarantine.failed|process.blocked", "severity": "low|medium|high|critical|null", "timestamp": "ISO|null" } ],
+  "alerts": [ { "id": "UUID|null", "scanId": "UUID|null", "type": "threat.detected|quarantine.added|quarantine.failed|process.blocked", "severity": "low|medium|high|critical|null", "timestamp": "ISO|null" } ],
   "alertsScope": "service-session",
   "metrics": { "cpuPercent": 0, "ramPercent": 0 }
 }
@@ -47,8 +48,13 @@ Regras:
 - `alerts` vem do registo de eventos em memória desde o arranque do serviço
   (`alertsScope: "service-session"`); `history` é persistente. Uma ameaça no
   histórico sem alerta (p. ex. após reinício do serviço) não é contradição.
-- «Proteção completa» só com serviço ativo, monitorização ligada, `protection.status = safe`
-  e os quatro motores `active`.
+- `monitoring` e os IDs são aditivos a partir de 0.2.4-3; ausentes em clientes
+  anteriores significam desconhecido. IDs só quando o produtor os disponibiliza.
+- Quatro motores `active` não comprovam proteção completa. `post-write` significa
+  observação após gravação; `preventionConfirmed=false` não permite anunciar
+  bloqueio antes da execução. `rootCount` conta raízes, não percentagem de cobertura.
+- `quarantine.added` significa isolamento confirmado; `quarantine.failed` não
+  autoriza mostrar ficheiro isolado. `process.blocked` não prova prevenção de acesso.
 - `version` ≠ 1 → incompatível: mostrar «versão do CyberSafe incompatível», não adivinhar.
 
 ## Atualizações (`cybersafe-linux-update check`)

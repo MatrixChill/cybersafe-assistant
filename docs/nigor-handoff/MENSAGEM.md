@@ -1,5 +1,29 @@
 # Mensagem para o responsável do Nigor
 
+## Atualização Linux Next — 16/11/2026
+
+> Olá Higor. Tratámos do lado do CyberSafe o recarregamento ClamAV por ficheiro,
+> a quarentena entre volumes, o polling de processos Linux, os diretórios de
+> autostart e a sessão «Lembrar-me». O novo perfil clamd é opcional: mantém RAM
+> ocupada e precisa de margem; não o ativamos automaticamente. A documentação
+> inclui as medições reais e os comandos de configuração.
+>
+> O adaptador C++ e o JSON v1 distinguem agora monitorização após escrita de
+> prevenção, mostram a fila e os desfechos de quarentena e preservam IDs quando
+> disponíveis. Não anunciamos proteção integral. A prevenção funcionou apenas
+> numa prova isolada; não foi ativada no produto.
+>
+> Para «Lembrar-me», é necessário um Secret Service/porta-chaves ativo e
+> desbloqueado; polkit-gnome não substitui GNOME Keyring. O teste de escrita e
+> leitura por dois processos Electron passou com a carteira real no laboratório.
+>
+> Depois de disponibilizarmos o pacote verificado, precisamos apenas de validar
+> no Nigor a sessão gráfica/keyring, a rajada de ficheiros, USB/quarentena/restauro
+> e notificações. Qualquer defeito nos motores continua a ser responsabilidade
+> nossa. Guias: `LINUX-NEXT-20261116.md`, `SESSAO-LEMBRAR.md` e `CONTRATO.md`.
+
+## Mensagem anterior — preview.2 (histórico)
+
 > Olá! Já temos a próxima versão do CyberSafe para Linux preparada, com quase toda
 > a integração feita do nosso lado, para teres o mínimo de trabalho.
 >

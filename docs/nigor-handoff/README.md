@@ -5,6 +5,10 @@ Pasta de entrega da integração CyberSafe Linux para o Nigor OS (branch
 scanner, atualizador e adaptador está do lado do CyberSafe. No Nigor fica
 apenas ligar os componentes à `nigor-bar`, ao menu e ao tema.
 
+Atualização de 16/11/2026: [Linux Next — correções, perfis e medições](LINUX-NEXT-20261116.md)
+e [sessão «Lembrar-me»](SESSAO-LEMBRAR.md). A prevenção continua desativada no
+produto; os ensaios privilegiados descritos foram exclusivamente de laboratório.
+
 | Documento | Para quê |
 |---|---|
 | [INVENTARIO.md](INVENTARIO.md) | O que está pronto para integrar |
