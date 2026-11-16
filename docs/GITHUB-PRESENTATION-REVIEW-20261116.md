@@ -19,8 +19,9 @@ This documentation update extends [PR #4](https://github.com/MatrixChill/cybersa
 ## Review evidence
 
 - Official GitHub release metadata and unauthenticated HTTPS links were checked for Windows v0.2.4, Arch Preview 3 and Nigor Preview 1. Sizes and SHA-256 values in the download indexes match the release asset digests.
-- Local Markdown targets, fragments, language-pair release identifiers, issue YAML fields and image decoding are verified. New/changed text is checked for personal paths, credentials, conflict markers and oversized files.
-- GitHub's GFM API renders both READMEs and download pages, including tables, language navigation and Mermaid enrichment blocks. Graphical Mermaid layout remains a browser review item.
+- 288 local references, including 13 fragments, resolve in the changed documentation. The six referenced local images decode correctly. All three issue-template YAML files parse, edition fields are present and EN/PT release identifiers agree. New/changed text is checked for personal paths, credentials, conflict markers and oversized files.
+- Thirteen important public links return HTTP 200 without authentication, including the three actual installable assets and immutable integration references. Download links were tested as streaming requests; the checksums here are matched to GitHub's release metadata rather than a fresh full binary rehash.
+- GitHub's GFM API renders both READMEs and download pages. A browser review of the pushed branch confirms the three-edition table and the rendered English Mermaid diagram, including its service, API, engines, SQLite, update and Nigor paths. Portuguese uses the equivalent translated graph.
 - The existing product-version checks pass, seven tests with zero failures. They establish version-documentation consistency rather than installed acceptance.
 - Original official logo and banners are reused. Archived screenshots were visually inspected, preserving original bytes and actual labels.
 - The root MIT file matches the approved Linux/Nigor text byte-for-byte after newline normalization. Third-party notices and provenance retain their separate scopes.
