@@ -6,26 +6,36 @@ import { BrandLogo } from "../components/BrandLogo";
 
 interface LoginPageProps {
   onSwitchToRegister: () => void;
+  onUseLocal?: () => void;
+  onAuthenticated?: () => void;
 }
 
-export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
+export default function LoginPage({ onSwitchToRegister, onUseLocal, onAuthenticated }: LoginPageProps) {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [remember, setRemember] = useState(false);
   const [error, setError] = useState("");
+  const [sessionOnlyRetry, setSessionOnlyRetry] = useState(false);
   const [isLoading, setIsLoading] = useState(false);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
+    await submit(remember);
+  }
+
+  async function submit(keepSession: boolean) {
+    if (isLoading) return;
     setError("");
+    setSessionOnlyRetry(false);
     setIsLoading(true);
 
-    const result = await login({ email, password, remember });
+    const result = await login({ email, password, remember: keepSession });
     if (!result.success) {
       setError(result.error || "Erro ao fazer login.");
-    }
+      setSessionOnlyRetry(result.sessionOnlyRetry === true);
+    } else onAuthenticated?.();
     setIsLoading(false);
   }
 
@@ -76,11 +86,17 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
             <motion.div
               initial={{ opacity: 0, height: 0 }}
               animate={{ opacity: 1, height: "auto" }}
-              className="auth-error"
+              className="auth-error" role="alert"
             >
               <AlertCircle className="w-4 h-4 shrink-0 mt-[1px]" aria-hidden />
               <span className="min-w-0">{error}</span>
             </motion.div>
+          )}
+          {sessionOnlyRetry && (
+            <button type="button" className="auth-link" disabled={isLoading}
+              onClick={() => { setRemember(false); void submit(false); }}>
+              Entrar sem guardar a sessão
+            </button>
           )}
 
           {/* Email */}
@@ -93,7 +109,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
                 type="email"
                 placeholder="seu@email.com"
                 value={email}
-                onChange={(e) => setEmail(e.target.value)}
+                onChange={(e) => { setEmail(e.target.value); setSessionOnlyRetry(false); }}
                 className="auth-input"
                 required
                 autoComplete="email"
@@ -103,7 +119,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
 
           {/* Password */}
           <div className="auth-field">
-            <label className="auth-label" htmlFor="login-password">Senha</label>
+            <label className="auth-label" htmlFor="login-password">Palavra-passe</label>
             <div className="auth-input-wrapper">
               <Lock className="auth-input-icon" />
               <input
@@ -111,7 +127,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
                 type={showPassword ? "text" : "password"}
                 placeholder="••••••••"
                 value={password}
-                onChange={(e) => setPassword(e.target.value)}
+                onChange={(e) => { setPassword(e.target.value); setSessionOnlyRetry(false); }}
                 className="auth-input"
                 required
                 autoComplete="current-password"
@@ -120,6 +136,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
                 type="button"
                 onClick={() => setShowPassword(!showPassword)}
                 className="auth-input-action"
+                aria-label={showPassword ? "Ocultar palavra-passe" : "Mostrar palavra-passe"}
               >
                 {showPassword ? <EyeOff className="w-4 h-4" /> : <Eye className="w-4 h-4" />}
               </button>
@@ -133,12 +150,13 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
                 id="login-remember"
                 type="checkbox"
                 checked={remember}
-                onChange={(e) => setRemember(e.target.checked)}
+                onChange={(e) => { setRemember(e.target.checked); setSessionOnlyRetry(false); }}
                 className="auth-checkbox"
               />
               <span>Lembrar-me</span>
             </label>
           </div>
+          <p className="text-xs text-muted-foreground">Sem «Lembrar-me», a sessão termina ao sair da aplicação.</p>
 
           {/* Submit */}
           <motion.button
@@ -166,6 +184,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
             Criar conta
           </button>
         </div>
+        {onUseLocal && <button type="button" disabled={isLoading} onClick={onUseLocal} className="auth-link">Continuar sem conta</button>}
 
         {/* Decorative bottom line */}
         <div className="auth-card-line" />

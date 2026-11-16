@@ -17,5 +17,6 @@ export function createDefinitionsUpdateResult(result: UpdateResult, previousUpda
     success: yaraChecked && clamChecked && hashesChecked && errors.length === 0 && warnings.length === 0,
     updatedAt: anyUpdated ? checkedAt : previousUpdatedAt,
     checkedAt, yaraUpdated, clamUpdated, hashesUpdated, yaraChecked, clamChecked, hashesChecked, errors, warnings,
+    ...(result.clamManagement ? {clamManagement: result.clamManagement} : {}),
   };
 }

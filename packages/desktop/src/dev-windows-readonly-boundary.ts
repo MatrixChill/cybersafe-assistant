@@ -303,6 +303,7 @@ export const CANAIS_PERMITIDOS: ReadonlySet<string> = new Set([
   "app:get-auto-start",
   "app:get-notifications-enabled",
   "app:update-get-snapshot",
+  "app:account-policy",
   // Leituras RPC com equivalente permitido no gate do serviço.
   "service:get-protection-state",
   "service:get-protection-intent",

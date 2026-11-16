@@ -45,6 +45,36 @@ const CRED_B = "b".repeat(64);
 const lstatNormal = () => ({ isSymbolicLink: () => false, nlink: 1 });
 
 describe("credencial do pipe — por instalação, não por processo", () => {
+  it("adota uma credencial concorrente cujo ficheiro ainda estava vazio, sem substituir o vencedor", () => {
+    const dir = tempUserData("publication-window");
+    let reads = 0;
+    try {
+      const fake = {
+        existsSync: () => true,
+        lstatSync: lstatNormal,
+        readFileSync: () => ++reads === 1 ? "" : `${CRED_A}\n`,
+        writeFileSync: () => { throw new Error("must not replace the winner"); },
+        mkdirSync: () => {},
+        chmodSync: () => {},
+      };
+      const result = readOrCreatePipeCredential(dir, { fsImpl: fake });
+      assert.equal(result.credential, CRED_A);
+      assert.equal(result.created, false);
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
+  it("uma credencial permanentemente vazia continua recusada e não é regenerada", () => {
+    const dir = tempUserData("empty-invalid");
+    try {
+      const secrets = path.join(dir, "secrets");
+      fs.mkdirSync(secrets);
+      const file = path.join(secrets, PIPE_CREDENTIAL_FILENAME);
+      fs.writeFileSync(file, "");
+      assert.throws(() => readOrCreatePipeCredential(dir), /inválida/);
+      assert.equal(fs.readFileSync(file, "utf8"), "");
+    } finally { fs.rmSync(dir, { recursive: true, force: true }); }
+  });
+
   it("o segundo arranque da mesma instalação lê a MESMA credencial", () => {
     const dir = tempUserData("stable");
     try {

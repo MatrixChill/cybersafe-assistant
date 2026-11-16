@@ -10,6 +10,13 @@ function bridge(): Bridge | undefined {
   return typeof window === "undefined" ? undefined : window.electronAPI?.authSession;
 }
 export function getAuthToken(): string | null { return token; }
+
+/** A failed login must not erase a remembered session on disk. Invalidate
+ * any renderer restore in flight while a new authentication is attempted. */
+export function discardVolatileAuthSession(): void {
+  ++generation;
+  token = null;
+}
 /** Expiry is only used to drop local identity, never to grant access. */
 export function authTokenExpiresAt(value = token): number | null {
   try {
@@ -47,8 +54,7 @@ export async function saveAuthSession(next: string, remember: boolean): Promise<
   localStorage.removeItem(LOGGED_OUT);
 }
 export async function clearAuthSession(): Promise<void> {
-  ++generation;
-  token = null;
+  discardVolatileAuthSession();
   // Nonsecret, synchronous logout marker also protects against a crash before
   // the main process receives the request to remove the encrypted bearer.
   try {

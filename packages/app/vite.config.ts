@@ -58,6 +58,8 @@ export default defineConfig({
     cspDevPolicy(),
   ],
   base: './',
+  // Linux distribution retains the notices of the modules actually bundled.
+  build: { license: process.platform === 'linux' ? { fileName: 'THIRD-PARTY-RENDERER.md' } : false },
   resolve: {
     alias: {
       '@': path.resolve(__dirname, './src'),

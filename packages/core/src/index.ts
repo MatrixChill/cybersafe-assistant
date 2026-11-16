@@ -1,4 +1,5 @@
 export * from "./analysis.js";
+export * from "./file-path-key.js";
 export * from "./archive-limits.js";
 export * from "./clamav.js";
 export * from "./definitions.js";

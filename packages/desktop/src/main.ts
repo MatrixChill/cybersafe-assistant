@@ -11,7 +11,10 @@ import { configureAiChild } from "./ai-api-channel.js";
 import { windowsAppIdentity } from "./app-identity.js";
 import { createAuthSessionStore } from "./auth-session-store.js";
 import { registerAuthSessionIpc } from "./auth-session-ipc.js";
+import { configureLinuxSecretStore } from "./linux-secret-store.js";
+import { isNigorInstall, resolveAccountPolicy } from "./nigor-account-policy.js";
 import { app, shell, BrowserWindow, dialog, ipcMain, Menu, Notification, Tray, nativeImage, nativeTheme, screen, safeStorage } from "electron";
+configureLinuxSecretStore(app);
 import path from "node:path";
 import os from "node:os";
 import fs from "node:fs";
@@ -54,6 +57,7 @@ import {
 } from "./updater/bridge.js";
 import { runAutomaticCheck, startAutomaticChecks } from "./updater/automatic-checks.js";
 import { createProductionUpdater } from "./updater/production.js";
+import { runLinuxUpdate } from "./linux-updates.js";
 import type { Updater } from "./updater/updater.js";
 import type { UpdaterResult } from "./updater/index.js";
 import { PIPE_NAME, CLAMAV_BINARY_ENV, stripDevIsolationEnv } from "@cybersafe/core";
@@ -342,6 +346,9 @@ function createWindow() {
     requested: preferences.windowMaterial ?? null,
   });
 
+  const apiBase = process.env?.CYBERSAFE_API_BASE;
+  const preloadArguments = apiBase ? [`--cybersafe-api-base=${apiBase}`] : [];
+  if (process.env?.CYBERSAFE_DEBUG_SCAN === "1") preloadArguments.push("--cybersafe-debug-scan");
   mainWindow = new BrowserWindow({
     width: 1200,
     height: 820,
@@ -368,7 +375,8 @@ function createWindow() {
       preload: path.join(__dirname, "preload.cjs"),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: process.platform === "linux",
+      additionalArguments: preloadArguments,
     },
   });
 
@@ -448,6 +456,7 @@ import { spawn, type ChildProcess } from "node:child_process";
 
 let isServiceRunning = false;
 let serviceProcess: ChildProcess | null = null;
+let externalLinuxService = false;
 let statusInterval: ReturnType<typeof setInterval> | null = null;
 
 // API local empacotada (P0 — instalador). É AUXILIAR: se falhar, a proteção, a
@@ -552,6 +561,7 @@ async function startServiceProcess(): Promise<ServiceStartOutcome> {
     log: (message) => console.log(message),
   });
   if (reuse.status === "reused") {
+    externalLinuxService = process.platform === "linux";
     console.log("[Electron] Serviço existente autenticado.");
     return { status: "connected" };
   }
@@ -975,9 +985,13 @@ async function quitCyberSafe() {
   tray?.setToolTip("Encerrando CyberSafe...");
 
   console.log("[Electron] Electron shutdown requested");
-  console.log("[Electron] Enviando comando de shutdown ao serviço...");
-  await client.requestShutdown().catch((err) =>
-    console.error("[Electron] Shutdown request falhou:", err));
+  if (externalLinuxService) {
+    client.disconnect();
+  } else {
+    console.log("[Electron] Enviando comando de shutdown ao serviço...");
+    await client.requestShutdown().catch((err) =>
+      console.error("[Electron] Shutdown request falhou:", err));
+  }
   console.log("[Electron] Ligação ao serviço fechada; a terminar o Electron.");
   logExitEvent("quit-app-quit");
 
@@ -1506,6 +1520,8 @@ function registerIpc(
       envolverLeituraWindows(channel, handler),
     ));
   registerSession(handle);
+  const editionRuntime = () => ({ platform: process.platform, packaged: app.isPackaged, resourcesPath: process.resourcesPath });
+  handle("app:account-policy", () => resolveAccountPolicy(editionRuntime()));
   registerAiCredentialsIpc(handle, currentAiStore, async (store) => {
     const child = apiRuntime?.child ?? null;
     const applied = await configureAiChild(child, store);
@@ -1536,6 +1552,12 @@ function registerIpc(
   };
   handle("app:update-get-snapshot", async () =>
     appUpdater ? toAppUpdateSnapshot(appUpdater.snapshotCopy()) : failureSnapshot("unconfigured", updateVersion(), "updater não inicializado"));
+  // Atualizações Linux (pacote Arch): canal próprio, nunca o updater Windows.
+  handle("linux-update:run", (_event, command: unknown, consent: unknown, sha256: unknown) => {
+    return command === "check" || command === "download" || command === "install"
+      ? runLinuxUpdate(command, consent === true, undefined, undefined, sha256, isNigorInstall(editionRuntime()) ? "nigor" : "arch-shared")
+      : { ok: false, result: null, error: "invalid-response" };
+  });
   handle("app:update-check", () => withUpdater((u) => u.check()));
   handle("app:update-download", () => withUpdater((u) => u.download()));
   handle("app:update-reveal", () => withUpdater((u) => u.revealVerifiedDownload((file) => shell.showItemInFolder(file))));

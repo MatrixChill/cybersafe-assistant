@@ -115,7 +115,14 @@ describe("gatherFiles e gatherFilesQuick: a poda acontece antes de tocar no disc
         // podou (podar = 0 falhas; caminho mau = 1 falha contada).
         const files = [];
         const stats = { failed: 0, failedByReason: {} };
-        await chamar(esteManager(), "/var/run", files, stats);
+        // /var/run exists on real Linux. Use an absent child under a real
+        // temporary directory so this test never traverses host runtime data.
+        const raiz = mkdtempSync(join(tmpdir(), 'p3-missing-'));
+        try {
+          await chamar(esteManager(), join(raiz, 'run'), files, stats);
+        } finally {
+          rmSync(raiz, { recursive: true, force: true });
+        }
         assert.equal(stats.failed, 1, "não foi podado: encontrou o filesystem e falhou ao ler");
       });
     });

@@ -1,11 +1,13 @@
 import { execFile, spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { randomBytes } from "node:crypto";
-import { open, readdir, rm, stat, writeFile } from "node:fs/promises";
+import { open, readdir, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { StringDecoder } from "node:string_decoder";
 import * as path from "node:path";
 import * as os from "node:os";
 import { promisify } from "node:util";
+import { ClamdUnixClient } from "./clamd-linux.js";
+import { platformFileKey } from "./file-path-key.js";
 import type { EngineSubsystemHealth } from "@cybersafe/shared-types";
 import {
   type LeitorBinario,
@@ -80,6 +82,7 @@ export interface ClamavFileOutcome {
 }
 
 export interface ClamavBatchOutcome {
+  timing?: { backend: "clamd"; queueMs: number; executionMs: number };
   /** Um resultado por ficheiro pedido, pela mesma ordem. */
   files: ClamavFileOutcome[];
   /** `true` se pelo menos um ficheiro foi detectado. */
@@ -143,10 +146,11 @@ function firstLineOf(value: string): string {
  * pior do que não attributir.
  */
 function pathKey(file: string): string {
-  return file.replace(/\//g, "\\").replace(/^\\+/, "").toLowerCase();
+  return platformFileKey(file).replace(/^\\+/, "");
 }
 
 function baseName(file: string): string {
+  if (process.platform === "linux" && file.startsWith("/")) return path.posix.basename(file);
   const parts = file.replace(/\//g, "\\").split("\\");
   return (parts[parts.length - 1] ?? file).toLowerCase();
 }
@@ -712,6 +716,10 @@ function scanPerfLog(event: string, scanId?: string, details = ""): void {
 let clamavProofSeq = 0;
 
 export interface ClamavBridgeOptions {
+  /** Linux opt-in. Uses a locally managed clamd with the supplied safe config.
+   * No implicit daemon start and no TCP. Missing sockets fall back explicitly. */
+  linuxDaemonSocket?: string;
+  linuxDaemonDatabaseDir?: string;
   /**
    * Telemetria da prova de carga (v0.2.4): uma linha por evento, com id de
    * correlação, PID, prazo e contadores da vaga. Sem caminhos de ficheiros
@@ -2718,6 +2726,7 @@ export function classifyClamavHealth(facts: ClamavProbeFacts): { available: bool
         available: false,
         health: {
           status: "unavailable",
+          reason: "not-installed",
           detail:
             `ClamAV existe no disco mas não é motor desta plataforma: ${primeiro.nome} ${primeiro.motivo}${outros}. ` +
             "Instale o ClamAV do sistema (ex. apt install clamav) ou aponte CYBERSAFE_CLAMSCAN_PATH para um binário Linux.",
@@ -2726,7 +2735,13 @@ export function classifyClamavHealth(facts: ClamavProbeFacts): { available: bool
     }
     return {
       available: false,
-      health: { status: "unavailable", detail: `clamscan not found or failed: ${facts.versionError ?? "unknown"}` },
+      health: {
+        status: "unavailable",
+        // «Não instalado» só quando o sistema disse que o executável não existe;
+        // outra falha a correr `--version` é «erro ao executar».
+        reason: /ENOENT|not found|não encontrad/i.test(facts.versionError ?? "") || facts.versionError == null ? "not-installed" : "exec-failed",
+        detail: `clamscan not found or failed: ${facts.versionError ?? "unknown"}`,
+      },
     };
   }
   if (!facts.versionOutput.includes("ClamAV")) {
@@ -3351,11 +3366,13 @@ export function clamavProbeMarker(previous: EngineSubsystemHealth): EngineSubsys
   if (previous.status === "degraded") {
     return { status: "degraded", busy: true, detail: `A verificar o motor ClamAV… Último problema observado: ${previous.detail ?? "sem detalhe"}` };
   }
-  return { status: "unavailable", busy: true, detail: "A verificar o motor ClamAV…" };
+  return { status: "unavailable", busy: true, reason: "starting", detail: "A verificar o motor ClamAV…" };
 }
 
 export class ClamavBridge {
-  private _health: EngineSubsystemHealth = { status: "unavailable", busy: true, detail: "A iniciar ClamAV…" };
+  private daemon: ClamdUnixClient | null = null;
+  private daemonUnavailableUntil = 0;
+  private _health: EngineSubsystemHealth = { status: "unavailable", busy: true, reason: "starting", detail: "A iniciar ClamAV…" };
   /**
    * A saúde do ULTIMO probe: binario + base presentes + frescura das
    * definicoes. E a autoridade sobre a BASE; `_health` e o que a UI ve agora.
@@ -3409,6 +3426,7 @@ export class ClamavBridge {
   private probeSlotAbort: AbortController | null = null;
 
   constructor(private readonly options: ClamavBridgeOptions = {}) {
+    if (process.platform === "linux" && options.linuxDaemonSocket) this.daemon = new ClamdUnixClient(options.linuxDaemonSocket);
     this.loadProofEnabled = options.loadProofEnabled ?? clamavLoadProofDefaultEnabled();
   }
 
@@ -3523,6 +3541,7 @@ export class ClamavBridge {
    * nativo; o clamscan não tinha nada equivalente.
    */
   async dispose(): Promise<void> {
+    this.daemon?.dispose();
     this.disposed = true;
     // Cancela a ESPERA PELA VAGA da prova em curso: sem isto, um probe à
     // espera de vaga mantinha um timer de até 30 s vivo após o shutdown.
@@ -4224,6 +4243,75 @@ export class ClamavBridge {
    * `return` a meio da lógica: o `return await` acima espera o resultado
    * completo e só depois liberta.
    */
+  private async scanWithDaemon(
+    files: string[], options: ClamavScanOptions,
+    leaseBox: { lease: ClamDatabaseLeaseHandle | null; deferred: boolean },
+  ): Promise<ClamavBatchOutcome | null> {
+    const started = Date.now();
+    const priority = options.priority ?? (options.scanId ? "user" : "background");
+    const slot = await acquireClamavSlot(this.concurrencyLimit, priority, options.signal);
+    if (slot !== "granted") return {
+      files: files.map(file => ({ file, verdict: "error", reason: slot === "aborted" ? "aborted" : "exit-unknown" })),
+      detected: false, errorCount: files.length, status: { status: "unavailable", detail: "ClamAV persistente sem vaga segura para análise." },
+    };
+    const admitted = Date.now();
+    let poisoned = false;
+    const outcomes: ClamavFileOutcome[] = [];
+    try {
+      // A daemon may still have yesterday's DB loaded, or use a different
+      // directory from the definitions selected by the existing health gate.
+      let matching = false;
+      try {
+        const db = this.options.linuxDaemonDatabaseDir ?? "/var/lib/clamav";
+        if (this._dbDir && await realpath(db) === await realpath(this._dbDir)) {
+          for (const name of ["daily.cld", "daily.cvd"]) {
+            try {
+              const fd = await open(path.join(db, name), "r");
+              const header = Buffer.alloc(512);
+              try { await fd.read(header, 0, header.length, 0); } finally { await fd.close(); }
+              const version = /^ClamAV-VDB:[^:]+:(\d+):/.exec(header.toString("ascii"))?.[1];
+              if (version && Number(version) === await this.daemon!.databaseVersion()) matching = true;
+              break;
+            } catch { /* try the other official daily format */ }
+          }
+        }
+      } catch { /* unverified database identity is never a fresh daemon */ }
+      if (!matching) {
+        this.daemonUnavailableUntil = Date.now() + 30_000;
+        scanPerfLog("CLAMD_FALLBACK", options.scanId, "reason=database-identity-or-loaded-version-mismatch cooldownMs=30000");
+        return null;
+      }
+      for (const file of files) {
+        const result = await this.daemon!.scan(file, { timeoutMs: this.options.scanTimeoutMs ?? 30_000, signal: options.signal });
+        if (result.uncertain) {
+          // Closing a stream is not clamd cancellation. Keep both the global
+          // slot and DB lease until the server supplies a terminal response.
+          poisoned = true; poisonClamavSlot(); leaseBox.deferred = true;
+          void result.completion.then(confirmed => {
+            if (confirmed) { releasePoisonedClamavSlot(); leaseBox.lease?.release(); }
+          });
+        }
+        if (!poisoned && result.outcome.verdict === "error" && !outcomes.length && !options.signal?.aborted) {
+          this.daemonUnavailableUntil = Date.now() + 30_000;
+          scanPerfLog("CLAMD_FALLBACK", options.scanId, `reason=${result.outcome.reason} cooldownMs=30000`);
+          return null; // explicit cold fallback, only after confirmed idle
+        }
+        outcomes.push(result.outcome);
+        options.onProgress?.(outcomes.length);
+        if (poisoned || options.signal?.aborted) break;
+      }
+      for (const file of files.slice(outcomes.length)) outcomes.push({ file, verdict: "error", reason: "aborted" });
+      const errorCount = outcomes.filter(f => f.verdict === "error").length;
+      const status: EngineSubsystemHealth = errorCount
+        ? { status: "degraded", detail: "ClamAV persistente: análise incompleta; aguarde a recuperação do motor." }
+        : { ...(this._databaseHealth ?? this._health), detail: `${(this._databaseHealth ?? this._health).detail ?? "ClamAV"} · backend persistente clamd` };
+      this._health = status;
+      const timing = { backend: "clamd" as const, queueMs: admitted - started, executionMs: Date.now() - admitted };
+      scanPerfLog("CLAMD_BATCH_RESULT", options.scanId, `priority=${priority} queueMs=${timing.queueMs} executionMs=${timing.executionMs} files=${files.length} errors=${errorCount}`);
+      return { files: outcomes, detected: outcomes.some(f => f.verdict === "detected"), errorCount, status, timing };
+    } finally { if (!poisoned) releaseClamavSlot(); }
+  }
+
   private async runScanHoldingLease(
     leaseBox: { lease: ClamDatabaseLeaseHandle | null; deferred: boolean },
     filePaths: string[],
@@ -4242,6 +4330,10 @@ export class ClamavBridge {
         errorCount: filePaths.length,
         status: this._health,
       };
+    }
+    if (this.daemon && Date.now() >= this.daemonUnavailableUntil) {
+      const persistent = await this.scanWithDaemon(filePaths, options, leaseBox);
+      if (persistent) return persistent;
     }
     const datadir = this._dbDir;
 
@@ -4508,7 +4600,7 @@ export class ClamavBridge {
       // Um clamscan que não arranca não é deteção nem motor activo: dizemos
       // o que happened em vez de fingir que escaneámos.
       if (/ENOENT|not found|não.*encontrad/i.test(outcome.stderr) && outcome.code === null) {
-        this._health = { status: "unavailable", detail: "clamscan não encontrado" };
+        this._health = { status: "unavailable", reason: "not-installed", detail: "clamscan não encontrado" };
         return {
           files: filePaths.map((file) => ({ file, verdict: "error" as const, reason: "engine-missing" as const, detail: this._health.detail })),
           detected: false,

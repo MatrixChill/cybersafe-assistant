@@ -17,6 +17,12 @@ export class RealtimeFileQueue {
   get size(){return this.pending.size + this.priorityPending.size;}
   /** Avisado quando uma análise termina e há lugar livre (recuperação). */
   onSpace(listener:()=>void){this.spaceListener=listener;}
+  /** Chaves à espera, pela ordem em que vão correr (prioridade primeiro). Só leitura. */
+  peekPending(limit:number):string[]{
+    const out:string[]=[];
+    for(const map of [this.priorityPending,this.pending])for(const key of map.keys()){if(out.length>=limit)return out;out.push(key);}
+    return out;
+  }
   clear(){this.epoch++;this.pending.clear();this.priorityPending.clear();this.recent.clear();}
   /** `reserve`: lugares que este pedido não pode ocupar. As repetições da
       recuperação usam-no para nunca tirar a vaga a uma observação nova (medido:

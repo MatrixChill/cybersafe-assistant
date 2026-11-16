@@ -54,7 +54,7 @@ function entry(overrides) {
 function engineWithTruth(truth) {
   const engine = new ProtectionEngineService(TEST_BASE_DIR);
   const calls = { enumerations: 0 };
-  engine.processMonitor.list = async () => {
+  engine.enumerateProcesses = async () => {
     calls.enumerations += 1;
     return truth;
   };
@@ -112,7 +112,7 @@ describe("processes.list — cache hit e cache miss", () => {
     // acabou de meter o processo no cache.
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     let enumerations = 0;
-    engine.processMonitor.list = async () => {
+    engine.enumerateProcesses = async () => {
       enumerations += 1;
       return [entry({ pid: 100, name: "base.exe" })];
     };
@@ -135,7 +135,7 @@ describe("processes.list — cache hit e cache miss", () => {
     // ainda nao o viu. Overwrite simples apagava um processo VIVO da lista.
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     let calls = 0;
-    engine.processMonitor.list = async () => {
+    engine.enumerateProcesses = async () => {
       calls += 1;
       if (calls === 1) {
         // O monitor ja Publicou o nascimento, e a foto que a seguir se devolve
@@ -176,7 +176,7 @@ describe("processes.list — cache hit e cache miss", () => {
 
     // E mesmo que o SO (ou um evento atrasado) o traga de volta, o tombstone barra.
     const truth = [vivo, morto];
-    engine.processMonitor.list = async () => truth;
+    engine.enumerateProcesses = async () => truth;
     engine.processesEnumeratedAt = 0;
     const reconciliado = await listaDeProcessos(engine);
     assert.equal(

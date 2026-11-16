@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import type { DashboardSummary, EngineHealth } from "@cybersafe/shared-types";
-import { dashboardVerdict } from "../src/v2/dashboard/model";
+import { dashboardVerdict, friendlyEngineReason } from "../src/v2/dashboard/model";
 
 const engine = {
   serviceRunning: true,
@@ -66,7 +66,8 @@ test("snapshot produzido pelo serviço e serializado conserva as causas no Dashb
     assert.equal(wire.engine.yara.coverage, "unknown");
     const verdict = dashboardVerdict({ ...dashboard, systemStatus: wire.status, engineHealth: wire.engine }, { enabled: true, disponivel: true }, true);
     assert.equal(verdict.title, "Proteção com limitações");
-    for (const reason of wire.engine.degradedReasons.slice(0, 2)) assert.ok(verdict.description.includes(reason.trim()));
+    // As razões chegam normalizadas (frase curta, sem ENOENT/caminhos) — ver friendlyEngineReason.
+    for (const reason of wire.engine.degradedReasons.slice(0, 2)) assert.ok(verdict.description.includes(friendlyEngineReason(reason.trim(), wire.engine)));
     assert.doesNotMatch(verdict.title, /completa/i);
   } finally {
     await fs.rm(dir, { recursive: true, force: true });

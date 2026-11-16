@@ -237,6 +237,23 @@ function buildAnalyzer(clamavVerdict = "clean") {
     });
   });
 
+  it("DEV/test: localização POSIX tmp ou Downloads reforça o canário sem confundir nomes parciais", { skip: process.platform !== "linux" }, async () => {
+    const { analyzer } = buildAnalyzer();
+    const parentIsSuspicious = /\/(?:downloads|tmp|temp)\//.test(`${tmpDir.toLowerCase()}/`);
+    await withNodeEnv("test", async () => {
+      for (const folder of ["tmp", "Downloads", "Downloads-extra"]) {
+        const dir = path.join(tmpDir, folder);
+        await fs.mkdir(dir, { recursive: true });
+        const file = path.join(dir, "canary.txt");
+        await fs.writeFile(file, DEV_CANARY_CONTENT, "utf8");
+        const result = await analyzer.analyze(file);
+        const expected = folder !== "Downloads-extra" || parentIsSuspicious;
+        assert.equal(result.rulesTriggered.includes("suspicious_location"), expected, folder);
+        assert.equal(result.severity, expected ? "medium" : "low", folder);
+      }
+    });
+  });
+
   it("production: o MESMO ficheiro-canário fica limpo (safe/low, sem deteção)", async () => {
     const canaryPath = path.join(tmpDir, "cybersafe-prod.txt");
     await fs.writeFile(canaryPath, DEV_CANARY_CONTENT, "utf8");

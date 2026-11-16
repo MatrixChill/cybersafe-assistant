@@ -15,6 +15,7 @@ const {createAuthSessionStore}=compiled.exports;
 const key=randomBytes(32);
 const encryption={isEncryptionAvailable:()=>true,encryptString(s){const iv=randomBytes(12);const c=createCipheriv('aes-256-gcm',key,iv);const body=Buffer.concat([c.update(s,'utf8'),c.final()]);return Buffer.concat([iv,c.getAuthTag(),body])},decryptString(b){const d=createDecipheriv('aes-256-gcm',key,b.subarray(0,12));d.setAuthTag(b.subarray(12,28));return Buffer.concat([d.update(b.subarray(28)),d.final()]).toString()}};
 const token='fixture.payload.signature';
+encryption.getSelectedStorageBackend=()=> 'gnome_libsecret';
 const root=()=>fs.mkdtempSync(path.join(os.tmpdir(),'cybersafe-session-store-'));
 test('persistent session is encrypted and read by a new storage instance',()=>{const dir=root();createAuthSessionStore(dir,encryption).write(token,true);assert.equal(createAuthSessionStore(dir,encryption).read(),token);assert.equal(fs.readFileSync(path.join(dir,'secrets/auth-session.bin')).includes(token),false)});
 test('temporary session exists only in this instance and removes previous persistence',()=>{const dir=root();const store=createAuthSessionStore(dir,encryption);store.write(token,true);store.write(token,false);assert.equal(store.read(),token);assert.equal(createAuthSessionStore(dir,encryption).read(),null)});
@@ -22,3 +23,39 @@ test('logout removes persisted session',()=>{const dir=root();const store=create
 test('corrupt ciphertext never authenticates',()=>{const dir=root();const store=createAuthSessionStore(dir,encryption);store.write(token,true);fs.writeFileSync(path.join(dir,'secrets/auth-session.bin'),'corrupt fixture');assert.equal(createAuthSessionStore(dir,encryption).read(),null)});
 test('no encryption means no plaintext persistence fallback',()=>{const dir=root();const store=createAuthSessionStore(dir,{...encryption,isEncryptionAvailable:()=>false});assert.throws(()=>store.write(token,true));assert.equal(fs.existsSync(path.join(dir,'secrets')),false)});
 test('invalid payload or nonregular storage is refused',()=>{const dir=root();const store=createAuthSessionStore(dir,encryption);assert.throws(()=>store.write('bad',true));fs.mkdirSync(path.join(dir,'secrets'));fs.mkdirSync(path.join(dir,'secrets/auth-session.bin'));assert.throws(()=>store.write(token,true));assert.throws(()=>store.clear())});
+
+test('Linux basic_text and unknown backend never persist a remembered bearer',()=>{
+ for(const backend of ['basic_text','unknown',undefined]){
+  const dir=root();const store=createAuthSessionStore(dir,{...encryption,getSelectedStorageBackend:()=>backend},{platform:'linux'});
+  assert.throws(()=>store.write(token,true),/SESSION_KEYRING_UNAVAILABLE/);
+  assert.equal(fs.existsSync(path.join(dir,'secrets/auth-session.bin')),false);
+  store.write(token,false);assert.equal(store.read(),token);
+ }
+});
+
+test('Linux keyring failing after backend selection is reported separately; existing ciphertext survives',()=>{
+ const dir=root();
+ try{
+  createAuthSessionStore(dir,encryption,{platform:'linux'}).write(token,true);
+  const file=path.join(dir,'secrets/auth-session.bin'),before=fs.readFileSync(file);
+  const locked={...encryption,encryptString(){throw new Error('private backend diagnostic must not escape')},decryptString(){throw new Error('locked')}};
+  const store=createAuthSessionStore(dir,locked,{platform:'linux'});
+  assert.throws(()=>store.write(token,true),/^Error: SESSION_KEYRING_UNAVAILABLE$/);
+  assert.deepEqual(fs.readFileSync(file),before);
+  assert.equal(store.read(),null);assert.deepEqual(fs.readFileSync(file),before);
+  assert.equal(createAuthSessionStore(dir,encryption,{platform:'linux'}).read(),token,'reopening after keyring unlock restores saved bearer');
+  store.write(token,false);assert.equal(store.read(),token,'explicit temporary session does not call encryption');
+  assert.equal(createAuthSessionStore(dir,locked,{platform:'linux'}).read(),null);
+  store.clear();assert.equal(store.read(),null);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('unavailable backend inspection does not block a Linux temporary session or expose diagnostics',()=>{
+ const dir=root();
+ try{
+  const backend={...encryption,isEncryptionAvailable(){throw new Error('private diagnostic')}};
+  const store=createAuthSessionStore(dir,backend,{platform:'linux'});
+  assert.throws(()=>store.write(token,true),/^Error: SESSION_KEYRING_UNAVAILABLE$/);
+  store.write(token,false);assert.equal(store.read(),token);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});

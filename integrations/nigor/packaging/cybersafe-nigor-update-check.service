@@ -1,0 +1,9 @@
+[Unit]
+Description=Check CyberSafe Nigor updates
+
+[Service]
+Type=oneshot
+ExecStart=/usr/bin/cybersafe-linux-update check
+TimeoutStartSec=45
+NoNewPrivileges=yes
+UMask=0077

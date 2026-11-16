@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { restoreAuthSession, saveAuthSession, clearAuthSession, getAuthToken } from "../src/lib/authSession";
+import { restoreAuthSession, saveAuthSession, clearAuthSession, discardVolatileAuthSession, getAuthToken } from "../src/lib/authSession";
+import { authSessionFailure } from "../src/lib/authSessionFailure";
 const values = new Map<string, string>();
 let clears = 0;
 let read: () => Promise<string | null> = async () => null;
@@ -38,4 +39,30 @@ test("a legacy bearer is removed, never silently opted into new persistence", as
   values.clear(); values.set("cybersafe_token", "fixture.legacy.signature"); read = async () => null;
   assert.equal((await restoreAuthSession()) === "fixture.legacy.signature", true);
   assert.equal(values.has("cybersafe_token"), false); await clearAuthSession();
+});
+
+test("refused persistence preserves the saved session and requires explicit temporary retry", async () => {
+  values.clear();
+  const previous = "fixture.saved.signature";
+  const next = "fixture.new.signature";
+  let saved: string | null = previous;
+  read = async () => saved;
+  const before = clears;
+  assert.equal(await restoreAuthSession(), previous);
+  discardVolatileAuthSession();
+  write = async () => { throw new Error("SESSION_KEYRING_UNAVAILABLE"); };
+  await assert.rejects(saveAuthSession(next, true), error => {
+    assert.equal(authSessionFailure(error, true).sessionOnlyRetry, true);
+    assert.equal(authSessionFailure(error, false).sessionOnlyRetry, false);
+    return true;
+  });
+  assert.equal(getAuthToken(), null);
+  assert.equal(saved, previous);
+  assert.equal(clears, before);
+  assert.equal(authSessionFailure(new Error('private path'),true).error.includes('private path'),false);
+  write = async () => { saved = null; };
+  await saveAuthSession(next, false);
+  assert.equal(getAuthToken(), next);
+  assert.equal(values.has("cybersafe_token"), false);
+  await clearAuthSession();
 });

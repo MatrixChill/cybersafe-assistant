@@ -71,7 +71,7 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
     const osTruth = [];
     for (let i = 0; i < 331; i++) osTruth.push(processEntry({ pid: 4000 + i, name: `app-${i}.exe` }));
     let enumerations = 0;
-    engine.processMonitor.list = async () => {
+    engine.enumerateProcesses = async () => {
       enumerations += 1;
       return osTruth;
     };
@@ -89,7 +89,7 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const truth = [processEntry({ pid: 11, name: "a.exe" })];
     let calls = 0;
-    engine.processMonitor.list = async () => {
+    engine.enumerateProcesses = async () => {
       calls += 1;
       return truth;
     };
@@ -116,7 +116,7 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     const truth = [processEntry({ pid: 11, name: "a.exe" })];
     let enumerations = 0;
-    engine.processMonitor.list = async () => {
+    engine.enumerateProcesses = async () => {
       enumerations += 1;
       return truth;
     };
@@ -163,7 +163,7 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
     // de inatividade e a descoberta volta a ficar lenta. Cada `processes.list`
     // é o pedido de "há alguém a olhar".
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
-    engine.processMonitor.list = async () => [processEntry({ pid: 11, name: "a.exe" })];
+    engine.enumerateProcesses = async () => [processEntry({ pid: 11, name: "a.exe" })];
     let marked = 0;
     engine.processMonitor.noteObserver = () => {
       marked += 1;
@@ -176,7 +176,7 @@ describe("processes.list — verdade do SO reconciliada a pedido (P0)", () => {
   it("enumeração falhou → serve o cache de eventos e DISSO-o: nunca lista vazia silenciosa", async () => {
     const engine = new ProtectionEngineService(TEST_BASE_DIR);
     engine.processes = [processEntry({ pid: 777, name: "mantido.exe" })];
-    engine.processMonitor.list = async () => {
+    engine.enumerateProcesses = async () => {
       throw new Error("PowerShell caiu");
     };
     const { processes: list, truth } = await engine.listProcesses();

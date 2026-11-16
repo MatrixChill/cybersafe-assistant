@@ -2,6 +2,7 @@
   "name": "@cybersafe/desktop",
   "version": "0.1.2",
   "private": true,
+  "license": "MIT",
   "description": "CyberSafe Assistant desktop shell",
   "author": "CyberSafe Team",
   "main": "dist/main.js",

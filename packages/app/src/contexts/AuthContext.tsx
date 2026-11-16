@@ -1,5 +1,6 @@
 import { validateSavedSession } from "../lib/authSessionValidation";
-import { restoreAuthSession, saveAuthSession, clearAuthSession, getAuthToken, authTokenExpiresAt } from "../lib/authSession";
+import {authSessionFailure} from "../lib/authSessionFailure";
+import { restoreAuthSession, saveAuthSession, clearAuthSession, discardVolatileAuthSession, getAuthToken, authTokenExpiresAt } from "../lib/authSession";
 import { createContext, useContext, useState, useEffect, useCallback, useRef, type ReactNode } from "react";
 import type { AccountType, PlanType, Role } from "../lib/featureControl";
 
@@ -49,6 +50,8 @@ export interface ResultadoDeAutenticacao {
   success: boolean;
   error?: string;
   campo?: CampoDeErro;
+  /** Explicit retry after Linux persistence failure; never a silent fallback. */
+  sessionOnlyRetry?: boolean;
 }
 
 interface AuthContextType {
@@ -200,7 +203,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     setIsLoading(false);
     const generation = ++authGeneration.current;
     setUser(null);
-    try { await clearAuthSession(); } catch { return { success: false, error: "Não foi possível limpar a sessão anterior.", campo: "geral" as CampoDeErro }; }
+    discardVolatileAuthSession();
     let res: Response;
     try {
       res = await fetch(`${API_BASE}/auth/login`, {
@@ -222,7 +225,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!corpo?.user?.id || typeof corpo.token !== "string" || !corpo.token) return { success: false, error: "O servidor não devolveu uma sessão válida.", campo: "geral" as CampoDeErro };
     if (generation !== authGeneration.current) return { success: false };
     try { await saveAuthSession(corpo.token, data.remember === true); }
-    catch { return { success: false, error: "Não foi possível guardar a sessão com segurança.", campo: "geral" as CampoDeErro }; }
+    catch (error) { return {success:false,...authSessionFailure(error,data.remember === true)}; }
     if (generation !== authGeneration.current) return { success: false };
     setUser(normalizeUser(corpo.user));
     setIsLoading(false);

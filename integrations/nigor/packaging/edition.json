@@ -1,0 +1,6 @@
+{
+  "schema": 1,
+  "edition": "nigor",
+  "package": "cybersafe-assistant-nigor",
+  "accountMode": "local-optional"
+}

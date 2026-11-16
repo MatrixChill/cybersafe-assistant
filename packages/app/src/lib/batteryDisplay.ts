@@ -8,14 +8,15 @@
 //   · unavailable → sem leitura atual (>60 s).
 //   · error       → o provider falhou sem leitura boa.
 //   error e unavailable NUNCA se mostram como «sem bateria».
-// - `timeRemaining` null (ou 0) → «—», nunca «0 min».
-// - `updatedAt?` (ISO, 3.º argumento de batteryDisplay) só serve para a idade da nota; `source?` não é usado.
+// - `timeRemaining` null, 0 ou implausível → «Estimativa indisponível», nunca «0 min» nem «216 h».
+// - `updatedAt?` (ISO, 3.º argumento de batteryDisplay) só serve para a idade da nota; `source?` dá a linha de origem (só fontes Linux conhecidas).
 // - Legado (sem status): `hasBattery`/`percent` não decidem sozinhos. hasBattery:false
 //   é «Sem bateria ou sem leitura»; percent 0 com hasBattery:true não é medição.
 //
 // `status`, `updatedAt` e `source` estão em `shared-types` (C2, OpenCode).
 
 import type { HardwareSnapshot } from "@cybersafe/shared-types";
+import { plausibleBatteryMinutes } from "@cybersafe/shared-types";
 import { resolveSurfaceDataOrigin, type SurfaceDataOrigin } from "./dashboardUsage";
 
 type Battery = HardwareSnapshot["battery"];
@@ -37,8 +38,13 @@ export interface BatteryDisplay {
   percent: number | null;
   percentText: string | null;
   chargingText: string | null;
-  /** Autonomia a descarregar; «—» quando o valor não existe ou é zero. */
+  /**
+   * Autonomia a descarregar. «Estimativa indisponível» quando a taxa de
+   * descarga é zero, ausente ou dá um valor implausível (ex.: 216 h).
+   */
   timeText: string | null;
+  /** Origem da leitura (ex.: kernel Linux); `null` quando o serviço não a diz. */
+  sourceText: string | null;
   /**
    * Saúde da bateria, em texto. `null` = sem leitura de saúde a apresentar.
    * «Não aplicável» para um PC sem bateria; «Indisponível» quando o firmware
@@ -51,6 +57,15 @@ export interface BatteryDisplay {
   cyclesText: string | null;
   /** Motivo da indisponibilidade da saúde (porquê, não só "indisponível"). */
   healthHint: string | null;
+}
+
+export const BATTERY_ESTIMATE_UNAVAILABLE = "Estimativa indisponível";
+
+/** Texto da origem da leitura. Só fontes reais e conhecidas; desconhecida → null. */
+export function batterySourceText(source: string | null | undefined): string | null {
+  if (source === "linux:sysfs-power_supply") return "Origem: kernel Linux (/sys/class/power_supply)";
+  if (source === "linux:upower") return "Origem: UPower";
+  return null;
 }
 
 const NO_READ_LABEL = "Sem bateria ou sem leitura";
@@ -197,6 +212,7 @@ export function batteryDisplay(
     percentText: null,
     chargingText: null,
     timeText: null,
+    sourceText: null,
     healthText: null,
     capacityText: null,
     cyclesText: null,
@@ -227,18 +243,18 @@ export function batteryDisplay(
   }
   if (b.status === "present") {
     const percent = validPercentOf(b.percent, true);
-    const t = b.timeRemaining;
-    const timeOk = !b.isCharging && typeof t === "number" && Number.isFinite(t) && t > 0;
+    const minutes = plausibleBatteryMinutes({ minutes: b.timeRemaining, percent: b.percent, isCharging: b.isCharging });
     return {
       origin,
       originText,
       snapshotNote,
+      sourceText: batterySourceText(b.source),
       label: percent === null ? "Percentagem indisponível" : "Bateria",
       hint: percent === null ? "A bateria existe, mas a percentagem não foi lida." : null,
       percent,
       percentText: percent === null ? null : `${percent}%`,
       chargingText: b.isCharging ? "A carregar" : "A descarregar",
-      timeText: b.isCharging ? null : timeOk ? formatTimeRemaining(t as number) : "—",
+      timeText: b.isCharging ? null : minutes !== null ? formatTimeRemaining(minutes) : BATTERY_ESTIMATE_UNAVAILABLE,
       ...healthDisplayOf(b),
     };
   }
@@ -250,8 +266,7 @@ export function batteryDisplay(
 
   // 0 não é tratado como medição no legado: é o valor que o produtor usa em falha.
   const percent = validPercentOf(b.percent, false);
-  const t = b.timeRemaining;
-  const showTime = !b.isCharging && typeof t === "number" && Number.isFinite(t) && t > 0;
+  const legacyMinutes = plausibleBatteryMinutes({ minutes: b.timeRemaining, percent: b.percent, isCharging: b.isCharging });
 
   return {
     origin,
@@ -262,7 +277,8 @@ export function batteryDisplay(
     percent,
     percentText: percent === null ? null : `${percent}%`,
     chargingText: b.isCharging ? "A carregar" : "A descarregar",
-    timeText: showTime ? formatTimeRemaining(t as number) : null,
+    timeText: legacyMinutes !== null ? formatTimeRemaining(legacyMinutes) : null,
+    sourceText: batterySourceText(b.source),
     // Legado: sem `healthStatus` não há saúde a afirmar; o helper devolve null
     // em vez de inventar um valor a partir de campos ausentes.
     ...healthDisplayOf(b),

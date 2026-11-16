@@ -1,0 +1,8 @@
+{
+  "schema": 2,
+  "edition": "arch-shared",
+  "manifestBase": "https://github.com/MatrixChill/cybersafe-assistant/releases/download/linux-update-channel-v2",
+  "publicKeys": [
+    "-----BEGIN PUBLIC KEY-----\nMCowBQYDK2VwAyEA5H000sNermLR7kOgq8uhU9Q3pGdesYQgry/QY0bdYe4=\n-----END PUBLIC KEY-----\n"
+  ]
+}

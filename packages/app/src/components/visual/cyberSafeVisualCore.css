@@ -1,0 +1,58 @@
+/* CyberSafe Visual Core — versão CSS. Só `transform`/`opacity` animam (composição),
+   e `prefers-reduced-motion` ou `data-motion="off"` param tudo. */
+.cs-visual-core {
+  --cs-core-orbit: #5ce6ed;
+  --cs-core-orbit-2: #9c95ee;
+  position: relative;
+  display: inline-flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  width: var(--cs-core-size, 160px);
+}
+.cs-visual-core--sm { --cs-core-size: 72px; }
+.cs-visual-core--md { --cs-core-size: 160px; }
+.cs-visual-core--lg { --cs-core-size: 260px; }
+.cs-visual-core[data-tone="attention"],
+.cs-visual-core[data-tone="degraded"] { --cs-core-orbit: #eac17c; }
+.cs-visual-core[data-tone="critical"] { --cs-core-orbit: #ff9caa; }
+.cs-visual-core[data-tone="protected"] { --cs-core-orbit: #77dbb0; }
+
+.cs-visual-core .three-scene { width: var(--cs-core-size); height: var(--cs-core-size); }
+
+.cs-visual-core__css {
+  position: relative;
+  width: var(--cs-core-size);
+  height: var(--cs-core-size);
+}
+.cs-visual-core__css > * { position: absolute; inset: 0; width: 100%; height: 100%; }
+.cs-visual-core__orbit { overflow: visible; }
+.cs-visual-core__orbit ellipse { fill: none; stroke: var(--cs-core-orbit); stroke-width: 0.8; opacity: 0.7; }
+.cs-visual-core__orbit circle { fill: var(--cs-core-orbit); }
+.cs-visual-core__orbit--a { transform: rotate(-18deg); }
+.cs-visual-core__orbit--b { transform: rotate(24deg); }
+.cs-visual-core__orbit--b ellipse { stroke: var(--cs-core-orbit-2); }
+.cs-visual-core__orbit--b circle { fill: var(--cs-core-orbit-2); }
+.cs-visual-core__hex polygon {
+  fill: color-mix(in srgb, var(--cs-core-orbit) 8%, transparent);
+  stroke: color-mix(in srgb, var(--cs-core-orbit) 55%, transparent);
+  stroke-width: 1;
+}
+.cs-visual-core__logo { inset: 24% !important; width: 52% !important; height: 52% !important; object-fit: contain; }
+.cs-visual-core__center { display: grid; place-items: center; }
+.cs-visual-core__label {
+  margin-top: 0.5rem;
+  font-family: var(--font-mono, ui-monospace, monospace);
+  font-size: 10px;
+  letter-spacing: 0.12em;
+  color: var(--muted-foreground, #9baabd);
+}
+
+@keyframes cs-core-spin-a { from { transform: rotate(-18deg); } to { transform: rotate(342deg); } }
+@keyframes cs-core-spin-b { from { transform: rotate(24deg); } to { transform: rotate(-336deg); } }
+.cs-visual-core[data-motion="on"] .cs-visual-core__orbit--a { animation: cs-core-spin-a 18s linear infinite; }
+.cs-visual-core[data-motion="on"] .cs-visual-core__orbit--b { animation: cs-core-spin-b 26s linear infinite; }
+
+@media (prefers-reduced-motion: reduce) {
+  .cs-visual-core .cs-visual-core__orbit { animation: none !important; }
+}

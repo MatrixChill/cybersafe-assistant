@@ -14,7 +14,12 @@
  *  - sem leitura nao se inventa nada: os numeros so aparecem quando estao
  *    de facto no detail medido.
  */
-import type { EngineSubsystemCoverage, EngineSubsystemHealth, EngineSubsystemStatus } from "./index.js";
+import type {
+  EngineSubsystemCoverage,
+  EngineSubsystemHealth,
+  EngineSubsystemReason,
+  EngineSubsystemStatus,
+} from "./index.js";
 import { ENGINE_DISPLAY_NAME } from "./index.js";
 
 export interface EngineContextCopy {
@@ -82,6 +87,50 @@ function coberturaCopy(
   }
 }
 
+/**
+ * Motivo legível para a UI principal. Usa o `reason` estruturado quando o
+ * serviço o envia; para serviços antigos classifica o `detail` de forma
+ * conservadora (só padrões inequívocos). `null` = sem motivo especial.
+ */
+export function engineUserReason(name: string, sub?: EngineSubsystemHealth): EngineSubsystemReason | null {
+  if (!sub || sub.status === "active") return null;
+  if (sub.reason) return sub.reason;
+  const detail = sub.detail ?? "";
+  if (sub.busy === true && sub.status === "unavailable") return "starting";
+  if (name === "clamav") {
+    if (sub.status === "unavailable" && /ENOENT|not found|não encontrad|não instalad|não é motor desta plataforma/i.test(detail)) return "not-installed";
+    if (sub.status === "degraded" && /sem base|no database|freshclam|sem assinaturas|signature database/i.test(detail)) return "no-definitions";
+    if (sub.status === "error") return "exec-failed";
+    return null;
+  }
+  if (name === "yara") {
+    if ((sub.status === "unavailable" || sub.status === "error") && /indisponível neste sistema|ENOENT|not found|não encontrad|não instalad/i.test(detail)) return "not-installed";
+    if (sub.status === "error") return "exec-failed";
+    return null;
+  }
+  return null;
+}
+
+const NOT_INSTALLED_TEXT: Record<string, string> = {
+  clamav: "ClamAV não instalado neste sistema.",
+  yara: "YARA não instalado neste sistema.",
+};
+
+/**
+ * Frase curta (≤ 1 linha) para listas e para o hero do Dashboard. Nunca leva
+ * o `detail` técnico: esse fica no diagnóstico completo.
+ */
+export function engineUserSummary(name: string, sub?: EngineSubsystemHealth): string {
+  const label = ENGINE_DISPLAY_NAME[name] ?? name;
+  switch (engineUserReason(name, sub)) {
+    case "not-installed": return `${label} não instalado`;
+    case "no-definitions": return `${label} instalado, sem bases de assinaturas`;
+    case "exec-failed": return `${label}: erro ao executar`;
+    case "starting": return `${label}: a verificar`;
+  }
+  return `${label}: ${engineStatusPt(sub?.status ?? "unknown")}`;
+}
+
 export function engineContextCopy(name: string, sub?: EngineSubsystemHealth): EngineContextCopy {
   const status = sub?.status ?? "unknown";
   const estado = engineStatusPt(status);
@@ -89,6 +138,30 @@ export function engineContextCopy(name: string, sub?: EngineSubsystemHealth): En
 
   if (status === "unknown") {
     return { estado, texto: `Sem leitura do ${ENGINE_DISPLAY_NAME[name] ?? name} nesta vista.` };
+  }
+
+  // Motivo estruturado primeiro: «não instalado» não é «erro crítico», e o
+  // ENOENT/caminho do provider nunca chega a esta frase.
+  const reason = engineUserReason(name, sub);
+  if (reason === "not-installed") {
+    return {
+      estado: "Não instalado",
+      texto: NOT_INSTALLED_TEXT[name] ?? `${ENGINE_DISPLAY_NAME[name] ?? name} não instalado neste sistema.`,
+      contexto: "Os restantes motores continuam a funcionar. O diagnóstico completo mostra o que foi procurado.",
+    };
+  }
+  if (reason === "starting") {
+    return { estado: "A verificar", texto: `A verificar o ${ENGINE_DISPLAY_NAME[name] ?? name}…` };
+  }
+  if (reason === "exec-failed") {
+    return {
+      estado: "Erro ao executar",
+      texto: `O ${ENGINE_DISPLAY_NAME[name] ?? name} está instalado, mas falhou ao executar.`,
+      contexto: "O detalhe técnico está no diagnóstico completo.",
+    };
+  }
+  if (reason === "no-definitions" && name !== "clamav") {
+    return { estado: "Sem bases", texto: `${ENGINE_DISPLAY_NAME[name] ?? name} instalado, sem bases utilizáveis.` };
   }
 
   switch (name) {

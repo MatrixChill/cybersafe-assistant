@@ -25,6 +25,7 @@ import type { UpdateDenialReason } from "./clam-database-gate.js";
 import { downloadYaraRulesText } from "./yara-rules-download.js";
 import { WINDOWS_READONLY_ENV } from "./dev-windows-readonly.js";
 import { FIXTURE_SCAN_FLAG } from "./dev-fixture-gate.js";
+import {probeClamavManagement, type ClamavManagement} from "./external-clamav-manager.js";
 
 /**
  * A recuperação do corpus YARA pode fazer rede e escrever definições?
@@ -312,6 +313,7 @@ function describeYaraCompilerError(source: string, error: YaraClassicDiagnostic)
 }
 
 export interface UpdateResult {
+  clamManagement?: ClamavManagement;
   yaraUpdated: boolean;
   clamUpdated: boolean;
   hashesUpdated: boolean;
@@ -478,6 +480,10 @@ export class DefinitionUpdater {
    * «não configurado», não como falha de formato nem como sucesso.
    */
   private readonly hashAuthKey: string | null;
+  private readonly probeClamavManager: () => Promise<ClamavManagement>;
+  private clamManagement: ClamavManagement | undefined;
+
+  get clamavManagement(): ClamavManagement | undefined { return this.clamManagement; }
 
   constructor(
     definitionsDir: string,
@@ -514,9 +520,11 @@ export class DefinitionUpdater {
        * segura. Nunca há valor embutido no código.
        */
       hashAuthKey?: string | null;
+      probeClamavManager?: () => Promise<ClamavManagement>;
     } = {},
   ) {
     this.definitionsDir = definitionsDir;
+    this.probeClamavManager = options.probeClamavManager ?? probeClamavManagement;
     this.yaraPath = path.join(definitionsDir, "yara", "default.yar");
     this.hashesPath = path.join(definitionsDir, "hashes", "default.json");
     this.metaPath = path.join(definitionsDir, ".update-meta.json");
@@ -641,12 +649,19 @@ export class DefinitionUpdater {
     // renova a prova deste componente (o próximo ciclo volta a tentar).
     if (stale.clamav) {
       try {
-        await this.updateClamAV();
-        result.clamChecked = true;
-        result.clamUpdated = true;
-        this.limparFalha("clamav");
-        updated.clamav = true;
-        console.log("[Updater] ClamAV atualizado via freshclam.");
+        const management = await this.updateClamAV();
+        if (management && management.state !== "none") {
+          result.clamManagement = management;
+          result.warnings.push(management.state === "managed"
+            ? "ClamAV: definições geridas pelo sistema; o CyberSafe não iniciou outro FreshClam nem confirmou uma atualização da base."
+            : "ClamAV: não foi possível confirmar quem gere as definições; atualização adiada para evitar outro escritor.");
+        } else {
+          result.clamChecked = true;
+          result.clamUpdated = true;
+          this.limparFalha("clamav");
+          updated.clamav = true;
+          console.log("[Updater] ClamAV atualizado via freshclam.");
+        }
       } catch (err: any) {
         // ClamAV não é obrigatório — freshclam pode não estar instalado
         result.errors.push(`ClamAV: ${err.message}`);
@@ -1121,7 +1136,12 @@ export class DefinitionUpdater {
    */
   private static liveGates = new Set<ClamDatabaseGate>();
 
-  private updateClamAV(options: { diagnostic?: boolean } = {}): Promise<void> {
+  private async updateClamAV(options: { diagnostic?: boolean } = {}): Promise<ClamavManagement | void> {
+    // This policy delegates the whole ClamAV update component when an OS
+    // manager exists. It does not assert both tools use the same DB directory.
+    this.clamManagement = await this.probeClamavManager();
+    if (this.clamManagement.state !== "none") return this.clamManagement;
+    if (this.abortController.signal.aborted) throw new Error("Atualização cancelada: serviço a encerrar.");
     return new Promise((resolve, reject) => {
       const clamDbDir = path.join(this.definitionsDir, "clamav");
       fs.mkdirSync(clamDbDir, { recursive: true });
@@ -1283,7 +1303,12 @@ export class DefinitionUpdater {
       child.on("close", (code) => {
         fecharGate();
         DefinitionUpdater.activeProcesses.delete(child);
-        if (code === 0) resolve();
+        // FreshClam 1.5.4 can exit zero during the CDN cooldown without
+        // checking any database. Preserve failure/backoff and do not advance
+        // the successful-check timestamp or invoke the reload hook.
+        if (code === 0 && /You are still on cool-down until after:/i.test(stdout + "\n" + stderr)) {
+          reject(new Error("FreshClam em período de espera do CDN; definições não verificadas nesta tentativa."));
+        } else if (code === 0) resolve();
         else {
           // O `--quiet` e omitido em diagnostico, por isso o stderr tem o erro
           // real. Traduzir em vez de despejar o bruto no log.

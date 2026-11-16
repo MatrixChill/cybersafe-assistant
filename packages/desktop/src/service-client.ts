@@ -72,10 +72,12 @@ export class ServiceClient {
   private readonly pipeName: string;
 
   private readonly pipeToken?: string;
+  private readonly log: typeof console.log;
 
-  constructor(pipeName: string = PIPE_NAME, pipeToken?: string) {
+  constructor(pipeName: string = PIPE_NAME, pipeToken?: string, log = console.log) {
     this.pipeName = pipeName;
     this.pipeToken = pipeToken;
+    this.log = log;
   }
 
   async connect() {
@@ -314,7 +316,7 @@ export class ServiceClient {
           });
         });
         this.connectionCount += 1;
-        console.log(`[ServiceClient] Connected to pipe successfully! (ligação #${this.connectionCount})`);
+        this.log(`[ServiceClient] Connected to pipe successfully! (ligação #${this.connectionCount})`);
         return;
       } catch (err: any) {
         if (signal.aborted) throw err;
@@ -323,7 +325,7 @@ export class ServiceClient {
         // 29 322 ms com o log a dizer "Pipe not ready" — que era mentira.
         if (isAuthRefused(err)) throw err;
         if (i === retries - 1) throw err;
-        console.log(`[ServiceClient] Pipe not ready, retrying (${i + 1}/${retries})...`);
+        this.log(`[ServiceClient] Pipe not ready, retrying (${i + 1}/${retries})...`);
         await delay(1_000, undefined, { signal });
       }
     }

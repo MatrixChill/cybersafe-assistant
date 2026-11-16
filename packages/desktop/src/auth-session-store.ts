@@ -3,6 +3,7 @@ import path from "node:path";
 import { randomUUID } from "node:crypto";
 
 export interface SessionEncryption {
+  getSelectedStorageBackend?(): string;
   isEncryptionAvailable(): boolean;
   encryptString(value: string): Buffer;
   decryptString(value: Buffer): string;
@@ -19,10 +20,19 @@ const validToken = (token: unknown): token is string =>
  * On Windows safeStorage uses DPAPI: protects at rest from other users, not
  * from software already running as this user. No plaintext fallback.
  */
-export function createAuthSessionStore(userData: string, encryption: SessionEncryption): AuthSessionStore {
+export function createAuthSessionStore(userData: string, encryption: SessionEncryption, options = { platform: process.platform as string }): AuthSessionStore {
   const directory = path.join(userData, "secrets");
   const file = path.join(directory, "auth-session.bin");
   let memory: string | null = null;
+  const canPersist = () => {
+    try {
+      return encryption.isEncryptionAvailable() && (options.platform !== "linux"
+        || ["gnome_libsecret", "kwallet", "kwallet5", "kwallet6"].includes(encryption.getSelectedStorageBackend?.() ?? ""));
+    } catch (error) {
+      if (options.platform === "linux") return false;
+      throw error;
+    }
+  };
   function guard(target: string, directoryExpected: boolean) {
     try {
       const stat = fs.lstatSync(target);
@@ -36,7 +46,7 @@ export function createAuthSessionStore(userData: string, encryption: SessionEncr
     read() {
       if (memory) return memory;
       check();
-      if (!fs.existsSync(file) || !encryption.isEncryptionAvailable()) return null;
+      if (!fs.existsSync(file) || !canPersist()) return null;
       if (fs.statSync(file).size > 32768) return null;
       try {
         const token = encryption.decryptString(fs.readFileSync(file));
@@ -51,8 +61,15 @@ export function createAuthSessionStore(userData: string, encryption: SessionEncr
         memory = token;
         return;
       }
-      if (!encryption.isEncryptionAvailable()) throw new Error("A proteção da sessão não está disponível.");
-      const encrypted = encryption.encryptString(token);
+      if (!canPersist()) throw new Error(options.platform === "linux" ? "SESSION_KEYRING_UNAVAILABLE" : "A proteção da sessão não está disponível.");
+      let encrypted: Buffer;
+      try { encrypted = encryption.encryptString(token); }
+      catch (error) {
+        // Availability is only a snapshot. A locked/disappearing Secret
+        // Service must not be misreported as wrong account credentials.
+        if (options.platform === "linux") throw new Error("SESSION_KEYRING_UNAVAILABLE");
+        throw error;
+      }
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
       check();
       const temporary = path.join(directory, ".auth-" + randomUUID() + ".tmp");

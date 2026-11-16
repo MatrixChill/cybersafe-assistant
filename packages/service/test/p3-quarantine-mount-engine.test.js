@@ -63,8 +63,10 @@ async function motor(t) {
 }
 
 /**
- * A montagem a usar, ou `null` quando a máquina não tem nenhuma montagem que
- * este portão seja o único a proteger. `hasReparseFreePath` é chamada aqui pelo
+ * A montagem a usar, ou `null` quando a máquina não tem nenhuma fora das raízes
+ * protegidas e sem redirecionamento. Um diretório pode ser recusado antes da
+ * consulta de montagens; o teste verifica o motivo conforme o tipo real.
+ * `hasReparseFreePath` é chamada aqui pelo
  * teste (não pelo motor) só para confirmar que o caso exercita mesmo a regra das
  * montagens: se um dos dois portões anteriores já recusasse, o `reason` esperado
  * seria outro e o teste provaria a coisa errada.
@@ -102,7 +104,11 @@ test("Linux: o motor recusa uma montagem real antes de a mover", { skip: process
   assert.equal(isolado.success, false, "um ponto de montagem nunca pode ser isolado");
   const falha = eventos.find((event) => event.type === "quarantine.failed");
   assert.ok(falha, "a recusa tem de ser publicada");
-  assert.equal(falha.data.reason, "mount-point", `motivo esperado «mount-point», veio «${falha.data.reason}»`);
+  // Directories are rejected by the regular-file gate before mount lookup.
+  // A file bind mount reaches the mount gate. Both must preserve the target;
+  // the pure gate tests separately exercise file mounts on every POSIX host.
+  const expectedReason = antes.isFile() ? "mount-point" : "not-a-file";
+  assert.equal(falha.data.reason, expectedReason, `motivo esperado «${expectedReason}», veio «${falha.data.reason}»`);
   assert.equal(falha.data.artifactPath, montagem);
   assert.equal(eventos.some((event) => event.type === "quarantine.requested"), false, "o pedido de quarentena nem deve ser anunciado");
   assert.equal(eventos.some((event) => event.type === "quarantine.added"), false);

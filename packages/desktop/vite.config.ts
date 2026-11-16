@@ -25,7 +25,7 @@ export default defineConfig({
   plugins: [
     electron([
       {
-        entry: 'src/main.ts',
+        entry: { main: 'src/main.ts', 'nigor-client': 'src/nigor-client.ts' },
         vite: {
           build: {
             ssr: true,

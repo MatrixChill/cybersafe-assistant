@@ -16,6 +16,7 @@ import type {
 } from "@cybersafe/shared-types";
 import { normalizeProcessListResult } from "@cybersafe/shared-types";
 import { AuthProvider, useAuth } from "./contexts/AuthContext";
+import { accountEntrySurface, type AccountPolicy } from "./lib/accountEntryPolicy";
 import { AppearanceProvider, useAppearance } from "./contexts/AppearanceContext";
 import { deriveProtectionLevel } from "./lib/protectionHealth";
 import { protectionOverview } from "./lib/protectionOverview";
@@ -165,7 +166,7 @@ function buildDashboard(protection: ProtectionState | null, threats: ThreatEvent
   };
 }
 
-function AuthenticatedApp() {
+function AuthenticatedApp({ onOpenAccount }: { onOpenAccount?: () => void } = {}) {
   const { user, logout } = useAuth();
   const { identity, effects } = useAppearance();
   const [page, setPage] = useState<Page>("dashboard");
@@ -1076,9 +1077,13 @@ function AuthenticatedApp() {
               <Bell size={18} aria-hidden />
               {toasts.length > 0 && <i aria-hidden />}
             </button>
-            <span className="user-avatar" title={user?.name ?? "Sem sessão"} aria-hidden>
-              {(user?.name ?? "?").trim().charAt(0).toUpperCase()}
-            </span>
+            {!user && onOpenAccount ? (
+              <button type="button" className="rounded-md border border-border px-3 py-1 text-sm" onClick={onOpenAccount}>Iniciar sessão</button>
+            ) : (
+              <span className="user-avatar" title={user?.name ?? "Sem sessão"} aria-hidden>
+                {(user?.name ?? "?").trim().charAt(0).toUpperCase()}
+              </span>
+            )}
           </div>
         </div>
 
@@ -1235,16 +1240,28 @@ function AuthLoadingScreen() {
 
 function AppContent() {
   const { isAuthenticated, isLoading } = useAuth();
-  const [authPage, setAuthPage] = useState<AuthPage>("login");
+  const [authPage, setAuthPage] = useState<AuthPage | null>(null);
+  const [policy, setPolicy] = useState<AccountPolicy>("required");
+  useEffect(() => {
+    let active = true;
+    void window.electronAPI?.getAccountPolicy?.().then(value => {
+      if (active && value === "local-optional") setPolicy(value);
+    }).catch(() => { /* The account requirement stays in force. */ });
+    return () => { active = false; };
+  }, []);
 
-  if (isLoading) return <AuthLoadingScreen />;
-  if (!isAuthenticated) {
-    return authPage === "login"
-      ? <LoginPage onSwitchToRegister={() => setAuthPage("register")} />
-      : <RegisterPage onSwitchToLogin={() => setAuthPage("login")} />;
+  const localAllowed = policy === "local-optional";
+  const closeAccount = () => setAuthPage(null);
+  const surface = accountEntrySurface(policy, isLoading, isAuthenticated, authPage !== null);
+  if (surface === "loading") return <AuthLoadingScreen />;
+  if (surface === "account") {
+    const onUseLocal = localAllowed ? closeAccount : undefined;
+    return authPage === "register"
+      ? <RegisterPage onSwitchToLogin={() => setAuthPage("login")} onUseLocal={onUseLocal} onAuthenticated={closeAccount} />
+      : <LoginPage onSwitchToRegister={() => setAuthPage("register")} onUseLocal={onUseLocal} onAuthenticated={closeAccount} />;
   }
 
-  return <AuthenticatedApp />;
+  return <AuthenticatedApp onOpenAccount={localAllowed ? () => setAuthPage("login") : undefined} />;
 }
 
 export default function App() {
