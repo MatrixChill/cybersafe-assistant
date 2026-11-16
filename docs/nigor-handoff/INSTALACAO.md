@@ -1,9 +1,8 @@
 # Instalar e testar (Arch / Nigor OS)
 
-**Canal público atual:** [Preview 2](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/linux-v0.2.4-arch-preview.2),
-pacote `0.2.4-2`. O `0.2.4-3` referido abaixo é a candidata Linux Next desta branch,
-não uma versão pública já distribuída. Use sempre o nome e o hash da release escolhida.
-Ver [distribuição e atualizações](DISTRIBUICAO-ATUALIZACOES.md).
+**Pacote público atual:** `0.2.4-3`, [Preview 3](PREVIEW-3.md).
+Use o [procedimento manual com backup e verificação](PREVIEW-3.md) para atualizar
+da Preview 2. O endpoint experimental continua a servir o manifesto da Preview 2.
 
 Como utilizador normal, numa sessão gráfica. Nunca como root, nunca com `--no-sandbox`.
 

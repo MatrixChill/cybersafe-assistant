@@ -14,8 +14,8 @@ o número da versão da aplicação não demonstra equivalência de capacidades.
 ## O que descarregar agora
 
 - [Windows v0.2.4](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/v0.2.4).
-- [Linux/Arch e Nigor Preview 2](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/linux-v0.2.4-arch-preview.2):
-  `cybersafe-assistant-linux-lite-0.2.4-2-x86_64.pkg.tar.zst`,
+- [Linux/Arch e Nigor Preview 3](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/linux-v0.2.4-arch-preview.3):
+  `cybersafe-assistant-linux-lite-0.2.4-3-x86_64.pkg.tar.zst`,
   `SHA256SUMS.txt`, `THIRD-PARTY-NOTICES-LINUX.tar.gz`, `SOURCE-IDENTITY` e guias.
 - Os antigos `.deb` e `.AppImage` pertencem ao percurso Linux Lite documentado
   em [Linux Lite](linux-lite/README.md). Não são pacotes Arch e não são alvos
@@ -23,9 +23,10 @@ o número da versão da aplicação não demonstra equivalência de capacidades.
   as distribuições Linux. Uma futura distribuição não Arch exige um adaptador
   de instalação e ensaios próprios, reutilizando o verificador comum.
 
-As correções Linux Next posteriores à Preview 2 permanecem nesta branch até
-passarem os gates de distribuição. Não atribuir testes novos ao pacote público
-anterior. Nenhuma release anterior é removida, renomeada ou substituída.
+A Preview 3 é distribuída para [instalação manual](nigor-handoff/PREVIEW-3.md).
+O canal público ainda aponta para a Preview 2. A próxima revisão do canal precisa
+de separar os clientes que entregam ao pacman uma cópia protegida dos antigos.
+A [edição Nigor com entrada local](nigor-handoff/EDICAO-NIGOR.md) está em preparação.
 
 ## Identidade e segurança
 

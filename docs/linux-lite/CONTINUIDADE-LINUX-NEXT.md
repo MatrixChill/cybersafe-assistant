@@ -51,3 +51,19 @@
 - O verificador novo confirmou ao vivo a assinatura da Preview 2 e recusou o
   downgrade de `0.2.4-3` para `0.2.4-2`. Um ensaio A→B instalado permanece uma
   verificação separada.
+
+## Entrega pública Preview 3
+
+- Publicada a pré-release manual `linux-v0.2.4-arch-preview.3` a partir de
+  `32e627bbbeaee0b933e2ab505f674499e688c354`. Os onze ficheiros foram conferidos
+  por HTTPS e a tag aponta para o commit da CI verde. SHA-256 do pacote de
+  112065428 bytes: `54bd4c2914c516cbf969d92db36eebd97d3e531ae9b2a81d65dbb18b65da2a3c`.
+- Assinatura Ed25519, leitura do manifesto anexado com o verificador legado,
+  disponibilidade para `0.2.4-2`, versão atual para `0.2.4-3`, recusa de downgrade,
+  download e reuse de cache verificados. O endpoint `linux-update-channel`
+  continua na Preview 2 porque o instalador legado passa ao pacman uma cache
+  que pode mudar após a verificação. Para um canal assistido novo, separar o
+  feed e o consumidor que suportam cópia protegida e validar o percurso polkit.
+- [Entrega e aceitação Nigor](../nigor-handoff/PREVIEW-3.md). O código de entrada
+  local por opção da [próxima edição](../nigor-handoff/EDICAO-NIGOR.md) está acima
+  da tag Preview 3 na branch. Ainda precisa de pacote, migração e canal próprios.

@@ -1,5 +1,19 @@
 # Mensagem para o responsável do Nigor
 
+## Entrega Preview 3
+
+> Olá Higor. A Preview 3 já está pública. Usa o pacote Arch x86_64 `0.2.4-3`
+> no Nigor e segue o [roteiro de instalação e aceitação](PREVIEW-3.md), incluindo
+> backup e verificação de hash. Atualiza a partir da Preview 2 por instalação
+> manual. O canal existente ainda aponta para a Preview 2.
+>
+> O CyberSafe já inclui o cliente local autenticado, o adaptador C++20, o
+> Security Center de referência, as correções de sessão e o serviço de utilizador.
+> No Nigor, falta ligar os componentes à barra e aos menus, disponibilizar o
+> terminal e o agente polkit e [configurar Secret Service](SESSAO-LEMBRAR.md).
+> Confirma a sessão após reiniciar, o logout e a integridade do histórico e da
+> quarentena. A edição com entrada local sem conta está em preparação.
+
 ## Atualização Linux Next — 16/11/2026
 
 > Olá Higor. Tratámos do lado do CyberSafe o recarregamento ClamAV por ficheiro,

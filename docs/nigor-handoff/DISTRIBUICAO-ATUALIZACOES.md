@@ -2,35 +2,36 @@
 
 ## Para o Higor
 
-A distribuição pública atual é [Linux/Arch Preview 2](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/linux-v0.2.4-arch-preview.2).
+A distribuição pública atual é [Linux/Arch Preview 3](PREVIEW-3.md).
 Usar **o pacote Arch dessa release**, também em Nigor OS, e os seus checksums.
 O pacote contém os componentes em
 `/usr/share/cybersafe-assistant-linux-lite/nigor-integration/`; o arquivo separado
-`cybersafe-nigor-integration.tar.gz` é útil para consultar as fontes sem instalar
-a aplicação. Não é um segundo antivírus nem um binário de edição diferente.
+da Preview 2 continua disponível para consultar as fontes históricas. O guia e
+os componentes da Preview 3 correspondem ao pacote `0.2.4-3`.
 
 Não instalar o pacote em Debian/Ubuntu. Não usar a release Windows para Nigor.
-As melhorias Linux Next descritas na branch/PR #5 ainda não pertencem à Preview 2;
-aguardar o pacote novo verificado antes de esperar essas correções no sistema.
+A Preview 3 inclui as melhorias Linux Next verificadas na sua fonte. A
+[edição com entrada opcional por conta](EDICAO-NIGOR.md) destina-se a uma candidata posterior.
 
 ## Instalar e consultar atualizações
 
 1. Descarregar o `.pkg.tar.zst`, SHA256SUMS, avisos e instruções da mesma release.
    Verificar `sha256sum -c SHA256SUMS.txt` com os ficheiros referidos presentes.
-2. Instalar com `sudo pacman -U ./cybersafe-assistant-linux-lite-0.2.4-2-x86_64.pkg.tar.zst`,
+2. Instalar com `sudo pacman -U ./cybersafe-assistant-linux-lite-0.2.4-3-x86_64.pkg.tar.zst`,
    respeitando a política de assinaturas do sistema. Se for recusado, guardar o
    erro; não enfraquecer `SigLevel` para facilitar a instalação.
 3. Executar `cybersafe-linux-diagnose` e abrir a aplicação como utilizador normal.
    Para lembrar a conta, fornecer um Secret Service/porta-chaves desbloqueado
    na sessão Nigor; ver [sessões](SESSAO-LEMBRAR.md).
-4. Consultar `cybersafe-linux-update check`. O canal experimental é o predefinido;
-   `prefs --stable` escolhe Stable, que pode legitimamente ainda não ter manifesto.
+4. Consultar `cybersafe-linux-update check`. O canal experimental predefinido
+   ainda oferece a Preview 2. Um resultado de downgrade recusado na Preview 3
+   é esperado. `prefs --stable` escolhe Stable.
 5. `cybersafe-linux-update download` verifica e guarda o pacote. A instalação
    é um pedido separado com consentimento e autorização do sistema; não indicar
    sucesso antes de versão e saúde pós-instalação serem confirmadas. O percurso
    instalado A→B pelo Security Center ainda precisa de validação própria.
 
-## Instalação assistida na próxima candidata
+## Instalação assistida na Preview 3
 
 Em **Definições → Atualizações** e no exemplo **Security Center**, verificar a
 versão, descarregar o pacote e escolher **Pedir instalação**. O pedido abre o
