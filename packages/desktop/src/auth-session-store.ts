@@ -24,8 +24,15 @@ export function createAuthSessionStore(userData: string, encryption: SessionEncr
   const directory = path.join(userData, "secrets");
   const file = path.join(directory, "auth-session.bin");
   let memory: string | null = null;
-  const canPersist = () => encryption.isEncryptionAvailable() && (options.platform !== "linux"
-    || ["gnome_libsecret", "kwallet", "kwallet5", "kwallet6"].includes(encryption.getSelectedStorageBackend?.() ?? ""));
+  const canPersist = () => {
+    try {
+      return encryption.isEncryptionAvailable() && (options.platform !== "linux"
+        || ["gnome_libsecret", "kwallet", "kwallet5", "kwallet6"].includes(encryption.getSelectedStorageBackend?.() ?? ""));
+    } catch (error) {
+      if (options.platform === "linux") return false;
+      throw error;
+    }
+  };
   function guard(target: string, directoryExpected: boolean) {
     try {
       const stat = fs.lstatSync(target);
@@ -55,7 +62,14 @@ export function createAuthSessionStore(userData: string, encryption: SessionEncr
         return;
       }
       if (!canPersist()) throw new Error(options.platform === "linux" ? "SESSION_KEYRING_UNAVAILABLE" : "A proteção da sessão não está disponível.");
-      const encrypted = encryption.encryptString(token);
+      let encrypted: Buffer;
+      try { encrypted = encryption.encryptString(token); }
+      catch (error) {
+        // Availability is only a snapshot. A locked/disappearing Secret
+        // Service must not be misreported as wrong account credentials.
+        if (options.platform === "linux") throw new Error("SESSION_KEYRING_UNAVAILABLE");
+        throw error;
+      }
       fs.mkdirSync(directory, { recursive: true, mode: 0o700 });
       check();
       const temporary = path.join(directory, ".auth-" + randomUUID() + ".tmp");

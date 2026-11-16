@@ -32,3 +32,30 @@ test('Linux basic_text and unknown backend never persist a remembered bearer',()
   store.write(token,false);assert.equal(store.read(),token);
  }
 });
+
+test('Linux keyring failing after backend selection is reported separately; existing ciphertext survives',()=>{
+ const dir=root();
+ try{
+  createAuthSessionStore(dir,encryption,{platform:'linux'}).write(token,true);
+  const file=path.join(dir,'secrets/auth-session.bin'),before=fs.readFileSync(file);
+  const locked={...encryption,encryptString(){throw new Error('private backend diagnostic must not escape')},decryptString(){throw new Error('locked')}};
+  const store=createAuthSessionStore(dir,locked,{platform:'linux'});
+  assert.throws(()=>store.write(token,true),/^Error: SESSION_KEYRING_UNAVAILABLE$/);
+  assert.deepEqual(fs.readFileSync(file),before);
+  assert.equal(store.read(),null);assert.deepEqual(fs.readFileSync(file),before);
+  assert.equal(createAuthSessionStore(dir,encryption,{platform:'linux'}).read(),token,'reopening after keyring unlock restores saved bearer');
+  store.write(token,false);assert.equal(store.read(),token,'explicit temporary session does not call encryption');
+  assert.equal(createAuthSessionStore(dir,locked,{platform:'linux'}).read(),null);
+  store.clear();assert.equal(store.read(),null);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});
+
+test('unavailable backend inspection does not block a Linux temporary session or expose diagnostics',()=>{
+ const dir=root();
+ try{
+  const backend={...encryption,isEncryptionAvailable(){throw new Error('private diagnostic')}};
+  const store=createAuthSessionStore(dir,backend,{platform:'linux'});
+  assert.throws(()=>store.write(token,true),/^Error: SESSION_KEYRING_UNAVAILABLE$/);
+  store.write(token,false);assert.equal(store.read(),token);
+ }finally{fs.rmSync(dir,{recursive:true,force:true});}
+});

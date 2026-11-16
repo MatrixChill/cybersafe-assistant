@@ -16,10 +16,13 @@ sessões Nigor, preservando um `--password-store` explícito e os restantes
 desktops. A gravação/leitura persistente recusa `basic_text` e backends
 desconhecidos. Não existe fallback para token em texto simples/localStorage.
 
-Se faltar o porta-chaves, o login apresenta a instrução para o ativar ou
-desmarcar «Lembrar-me» e utilizar apenas a sessão atual. Não altera contas,
-ficheiros anteriores ou palavras-passe. Uma sessão antiga cifrada com outro
-backend pode exigir uma nova autenticação; a conta mantém-se.
+Se o servidor aceitar a conta e o porta-chaves estiver indisponível, a
+aplicação explica que falhou a gravação da sessão e oferece **Entrar sem
+guardar a sessão**. Esse botão faz uma nova autenticação e conserva o token
+apenas em memória até sair da aplicação. Uma falha de entrada ou de gravação
+preserva a sessão cifrada anterior. Uma entrada temporária bem-sucedida
+substitui a sessão anterior e remove a persistência. O logout remove o ficheiro
+da sessão e pede a revogação do token à API. A conta SQLite mantém-se.
 
 ## Integração da sessão gráfica
 
@@ -30,15 +33,48 @@ backend pode exigir uma nova autenticação; a conta mantém-se.
   login/PAM; o CyberSafe não modifica PAM nem configura passwords.
 - Identificar o desktop como Nigor em `XDG_CURRENT_DESKTOP`/`DESKTOP_SESSION`.
 - Não utilizar `--password-store=basic` nem `--no-sandbox` como solução.
-- Confirmar no Nigor: login com «Lembrar-me», fechar normalmente, reabrir e
-  validar a identidade; depois sair da conta e confirmar novo pedido de login.
+- O Higor deve incluir `libsecret` e `gnome-keyring` na imagem e garantir um
+  único D-Bus de sessão, herdado pelo processo Nigor, pelo lançador e pela
+  aplicação. Um arranque Xlib sem D-Bus pode lançar a sessão gráfica inteira
+  através de `dbus-run-session`. Se a sessão já tiver um bus, reutilizá-lo.
+- No arranque gráfico, exportar `XDG_CURRENT_DESKTOP=Nigor` e inicializar o
+  componente `secrets` com `gnome-keyring-daemon --start --components=secrets`
+  no mesmo utilizador e no mesmo D-Bus. Se o login do Nigor usar PAM, integrar
+  `pam_gnome_keyring.so` nessa pilha para desbloquear a carteira com a palavra-passe
+  de login. Sem PAM ou com login automático, disponibilizar o diálogo de
+  desbloqueio da carteira. Nunca inserir palavras-passe no script.
+
+Da sessão gráfica, confirmar o alias da carteira predefinida e a propriedade
+`Locked`. Usar o caminho devolvido pelo primeiro comando no segundo. `/`
+significa que ainda falta configurar a carteira predefinida.
+
+```sh
+gdbus call --session --dest org.freedesktop.secrets \
+  --object-path /org/freedesktop/secrets \
+  --method org.freedesktop.Secret.Service.ReadAlias default
+gdbus call --session --dest org.freedesktop.secrets \
+  --object-path /org/freedesktop/secrets/collection/login \
+  --method org.freedesktop.DBus.Properties.Get org.freedesktop.Secret.Collection Locked
+```
+
+Com a carteira desbloqueada, testar «Lembrar-me», sair normalmente da aplicação
+e reabri-la. Repetir após terminar e voltar a iniciar a sessão gráfica. Fazer
+logout, reabrir e confirmar que o formulário de entrada regressa. Com a carteira
+bloqueada, testar a recuperação explícita sem persistência e voltar a abrir a
+aplicação para confirmar que a sessão temporária terminou. O Higor pode fazer
+todo este percurso sem alterações ao código do CyberSafe.
 
 ## Evidência disponível
 
-11 testes dirigidos de armazenamento, IPC e seleção do backend passaram.
-No Arch/WSL com Xvfb, D-Bus privado e GNOME Keyring real, um processo Electron
-33.4.11 gravou uma sessão sintética e outro processo independente recuperou-a;
-ambos confirmaram `gnome_libsecret`. Não foram usadas credenciais pessoais.
-Este ensaio não substitui a confirmação na sessão Nigor do utilizador.
+Treze testes dirigidos de armazenamento, IPC e seleção do backend e onze
+testes do estado de autenticação no renderer passaram no Windows.
+No Arch/WSL com Xvfb, D-Bus privado e GNOME Keyring real, sete etapas passaram
+com Electron 33.4.11 e um token sintético. Foram exercitados a gravação cifrada,
+a reabertura, a indisponibilidade de D-Bus com preservação do ficheiro, a
+recuperação após criar um novo bus e desbloquear a carteira, o logout, a
+sessão temporária e a reabertura sem sessão. Estes resultados cobrem o
+armazenamento Electron. O percurso visual e o reinício no Nigor físico ainda
+requerem confirmação.
 
 Referência: [Electron safeStorage](https://www.electronjs.org/docs/latest/api/safe-storage).
+[Manual do GNOME Keyring](https://man.archlinux.org/man/extra/gnome-keyring/gnome-keyring-daemon.1.en).
