@@ -1,0 +1,21 @@
+[Unit]
+Description=CyberSafe optional per-user persistent ClamAV (detection only)
+StartLimitIntervalSec=120
+StartLimitBurst=3
+
+[Service]
+Type=simple
+ExecStart=/usr/sbin/clamd --config-file=%h/.config/cybersafe-assistant-linux-lite/clamd.conf
+RuntimeDirectory=cybersafe-clamd
+RuntimeDirectoryMode=0700
+Restart=on-failure
+RestartSec=10
+TimeoutStopSec=30
+UMask=0077
+NoNewPrivileges=yes
+MemoryHigh=1400M
+MemoryMax=1800M
+CPUQuota=100%
+Nice=5
+
+# Deliberately no Install section: never enabled automatically by packaging.

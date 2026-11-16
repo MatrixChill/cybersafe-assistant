@@ -109,6 +109,10 @@ export class NativeWindowsWatcher extends EventEmitter {
 
   getDefaultPaths() {
     const home = os.homedir();
+    if (process.platform === "linux") return [
+      path.join(home, "Downloads"), path.join(home, "Desktop"), path.join(home, "Documents"), os.tmpdir(),
+      path.join(home, ".config", "autostart"), path.join(home, ".config", "systemd", "user"),
+    ];
     return [
       path.join(home, "Downloads"),
       path.join(home, "Desktop"),
@@ -283,6 +287,9 @@ export class NativeWindowsWatcher extends EventEmitter {
       `[NativeWindowsWatcher] File watcher started on ${this.validatedPaths.length} paths`
     );
 
+    // Linux persistence is observed through explicit user autostart roots.
+    // Windows Run-key polling is neither applicable nor a fallback there.
+    if (process.platform !== "win32") return;
     await this.captureRegistrySnapshot();
     if (generation !== this.generation) return;
     this.registryTimer = setInterval(() => {

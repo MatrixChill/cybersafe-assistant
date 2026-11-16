@@ -1,3 +1,4 @@
+import { platformFileKey } from "@cybersafe/core";
 export type SaturationStage = "metadata" | "analysis";
 type Retry = (signal: AbortSignal) => Promise<boolean>;
 type Entry = { run: Retry; firstAt: number; attempts: number; revision: number; high: boolean };
@@ -86,7 +87,7 @@ export class RealtimeRecovery {
     this.onIdle = options.onIdle;
   }
   defer(path: string, stage: SaturationStage, run: Retry, priority: "high" | "normal" = "normal"): "scheduled" | "deduplicated" | "full" {
-    const key = path.toLowerCase(); const now = this.now();
+    const key = platformFileKey(path); const now = this.now();
     this.recordRejection(path, stage);
     for(const [old,until] of this.terminal) if(until<=now)this.terminal.delete(old);
     if((this.terminal.get(key) ?? 0)>now){this.suppressed++;return "full";}
@@ -97,7 +98,7 @@ export class RealtimeRecovery {
     this.entries.set(key,{run,firstAt:now,attempts:0,revision:0,high:priority==="high"});this.schedule();return "scheduled";
   }
   recordRejection(path: string, stage: SaturationStage): void {
-    const key=path.toLowerCase();
+    const key=platformFileKey(path);
     if(stage==="metadata")this.metadataRejections++;else this.analysisRejections++;
     this.lastEventAt=new Date(this.now()).toISOString();this.lastStage=stage;
     if(this.affected.size<this.maxTracked || this.affected.has(key))this.affected.add(key);else this.affectedCapped=true;
@@ -108,7 +109,7 @@ export class RealtimeRecovery {
       nova ou repetição. Só caminhos afetados são seguidos. Cancela a repetição
       pendente; a lacuna só fecha quando a ANÁLISE dessa versão terminar. */
   noteAdmitted(path: string, fingerprint: string): void {
-    const key=path.toLowerCase();const t=this.tracked.get(key);if(!t)return;
+    const key=platformFileKey(path);const t=this.tracked.get(key);if(!t)return;
     if(t.state==="waiting"||t.state==="given-up")this.recovered++;
     // Duplicado de uma versão já analisada com veredicto: não reabre.
     if(t.state==="confirmed" && t.fingerprint===fingerprint)return;
@@ -119,14 +120,14 @@ export class RealtimeRecovery {
   /** A análise de `fingerprint` terminou. Ignora versões antigas: se entretanto
       foi admitida outra versão, é essa que tem de ser confirmada. */
   noteAnalyzed(path: string, fingerprint: string, outcome: AnalysisOutcome): void {
-    const t=this.tracked.get(path.toLowerCase());
+    const t=this.tracked.get(platformFileKey(path));
     if(!t || t.state!=="queued" || t.fingerprint!==fingerprint)return;
     t.state=outcome==="verdict"?"confirmed":outcome==="inconclusive"?"inconclusive":"stale";
   }
   /** O ficheiro desapareceu antes de ser analisado: a versão que causou a
       rejeição nunca foi vista. Não se finge confirmação. */
   noteVanished(path: string): void {
-    const key=path.toLowerCase();const t=this.tracked.get(key);if(!t)return;
+    const key=platformFileKey(path);const t=this.tracked.get(key);if(!t)return;
     // v0.2.3: no notebook, centenas de temporários apagados numa instalação
     // ficavam para sempre «alterados/removidos sem confirmação». Um ficheiro que
     // já não existe não tem versão atual a analisar; fica contado à parte.
@@ -135,7 +136,7 @@ export class RealtimeRecovery {
   }
   /** Afinal não é ficheiro (diretório, junction): não há cobertura a confirmar. */
   forget(path: string): void {
-    const key=path.toLowerCase();if(!this.tracked.delete(key))return;
+    const key=platformFileKey(path);if(!this.tracked.delete(key))return;
     const entry=this.entries.get(key);
     if(entry){this.entries.delete(key);this.terminal.set(key,this.holdUntil(entry));this.idleCheck();}
   }
@@ -144,7 +145,7 @@ export class RealtimeRecovery {
    * volta a agendar a admissão da versão atual. Não conta como nova rejeição.
    */
   requeue(path: string, run: Retry, priority: "high" | "normal" = "normal"): void {
-    const key=path.toLowerCase();const t=this.tracked.get(key);if(!t || this.entries.has(key))return;
+    const key=platformFileKey(path);const t=this.tracked.get(key);if(!t || this.entries.has(key))return;
     if(this.entries.size>=this.maxPaths)return;
     t.state="waiting";this.terminal.delete(key);
     this.entries.set(key,{run,firstAt:this.now(),attempts:0,revision:0,high:priority==="high"});this.schedule();

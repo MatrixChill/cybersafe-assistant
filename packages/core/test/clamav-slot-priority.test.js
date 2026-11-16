@@ -288,7 +288,10 @@ describe("P0 STARVATION — o scan do utilizador não espera atrás da fila de b
   it("um cancelamento que chega DURANTE a escrita da lista não deixa nascer o clamscan", async (t) => {
     // Interceta só a conclusão da escrita: os bytes e o cleanup são reais.
     // O portão evita depender da velocidade do disco ou de uma lista de 22 MB.
-    const many = Array.from({ length: 200 }, (_, i) => target(i));
+    // Derive from the argv budget: POSIX temp roots are shorter than Windows
+    // roots; a fixed 200 did not exercise file-list creation on Linux.
+    const pathCost = target(0).length + 3;
+    const many = Array.from({ length: Math.ceil(8000 / pathCost) + 1 }, (_, i) => target(i));
     const prefix = `cybersafe-clamav-batch-${process.pid}-`;
     const originalWriteFile = fs.writeFile;
     let releaseWrite;

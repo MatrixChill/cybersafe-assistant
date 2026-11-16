@@ -148,6 +148,12 @@ function garantirRaizViva(raiz: string): void {
 }
 
 function ignorado(absoluto: string): boolean {
+  // An explicitly selected Linux root may itself be hidden (.config). Apply
+  // hidden-entry exclusions BELOW that root, rather than ignoring every event.
+  if (process.platform === "linux") {
+    const root = [...vigias.keys()].filter(r => absoluto.startsWith(r + path.sep)).sort((a,b)=>b.length-a.length)[0];
+    if (root) absoluto = path.relative(root, absoluto);
+  }
   for (const padrao of IGNORADOS) if (padrao.test(absoluto)) return true;
   return false;
 }

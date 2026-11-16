@@ -1,4 +1,7 @@
 import { WatcherReconciler, reconcileRecentWatcherRoot } from "./watcher-reconciliation.js";
+import { readLinuxClamavProfile } from "./linux-clamav-profile.js";
+import { readLinuxMonitoringProfile } from "./linux-monitoring-profile.js";
+import { platformFileKey } from "@cybersafe/core";
 import { RpcRequestQueue, INDEPENDENT_READ_METHODS } from './rpc-request-queue.js';
 import { createDefinitionsUpdateResult } from "./definition-update-result.js";
 import {
@@ -528,7 +531,11 @@ export class ProtectionEngineService {
   private readonly analyzer: MalwareAnalyzer;
   private readonly quarantine: QuarantineManager;
   private readonly watcher = new NativeWindowsWatcher();
-  private readonly processMonitor = new ProcessMonitor();
+  // Reuse the poll/diff/lifecycle machinery, but feed it Linux identities.
+  // UI enumeration already used this provider; background polling still used CIM.
+  private readonly processMonitor = new ProcessMonitor(process.platform === "linux"
+    ? async () => new Map(this.posixProcessProvider.list().map(row => [row.pid, row]))
+    : undefined);
   /**
    * Fornecedor de processos POSIX. O `ProcessMonitor` acima é o CIM do
    * Windows: em Linux lança `spawn powershell.exe ENOENT`, e o Gestor de
@@ -594,6 +601,10 @@ export class ProtectionEngineService {
     this.definitionsDir = path.join(this.baseDir, "definitions");
     this.clamav = new ClamavBridge({
       definitionsDir: this.definitionsDir,
+      linuxDaemonSocket: process.platform === "linux"
+        ? (process.env.CYBERSAFE_CLAMAV_MODE === "economy" ? undefined
+          : process.env.CYBERSAFE_CLAMAV_MODE === "performance" ? process.env.CYBERSAFE_CLAMD_SOCKET : readLinuxClamavProfile())
+        : undefined,
       proofLog: (line) => { void this.actionsLog?.write("[CLAMAV-PROOF] " + line + " at=" + new Date().toISOString()); },
       fallbackDatabaseDir: async () => {
         const seed = await seedClamavDatabase({ seedDir: process.env.CYBERSAFE_CLAMAV_SEED_DIR, definitionsDir: this.definitionsDir });
@@ -1277,7 +1288,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
       const pendingFiles = new Map<string, string>();
       const fileCapture = (event: FileObservation) => {
         if (this.isShuttingDown || this.exclusions.isExcluded(event.path) || this.clamav.isProbeArtifact(event.path)) return;
-        const key = path.resolve(event.path).toLowerCase();
+        const key = platformFileKey(path.resolve(event.path));
         if (!pendingFiles.has(key) && pendingFiles.size >= 64) { this.reportRealtimeOverflow(event.path); return; }
         pendingFiles.set(key, event.path);
       };
@@ -1315,8 +1326,10 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
         const msg = err instanceof Error ? `${err.name}: ${err.message}` : String(err);
         return msg.replace(/[A-Za-z]:[\\/](?:Users|users)[\\/][^\\/\s"']+/g, "C:\\Users\\<utilizador>").slice(0, 200);
       };
+      const linuxRoots = process.platform === "linux" ? readLinuxMonitoringProfile(path.join(this.baseDir, "monitoring.json")) : undefined;
+      if (linuxRoots?.error) degraded.push({ label: "watcher-config", reason: "Diretórios adicionais recusados: configuração inválida ou permissões inseguras. A cobertura predefinida mantém-se." });
       for (const [label, action] of [
-        ["watcher", () => this.watcher.start()],
+        ["watcher", () => this.watcher.start(linuxRoots ? [...new Set([...this.watcher.getDefaultPaths(), ...linuxRoots.directories])] : undefined)],
         ["processMonitor", () => this.processMonitor.start()],
         ["etwConsumer", () => this.etwConsumer.start()],
         ["amsiProvider", () => this.amsiProvider.start()],
@@ -2338,7 +2351,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
     const signal = this.backgroundAbort.signal;
     const queuedAt = performance.now();
     const resolvedPath = path.resolve(filePath);
-    const admission = this.realtimeQueue.enqueue(resolvedPath.toLowerCase(), fingerprint, async () => {
+    const admission = this.realtimeQueue.enqueue(platformFileKey(resolvedPath), fingerprint, async () => {
       if (!this.protectionState || this.isShuttingDown || generation !== this.protectionGeneration || signal.aborted) return;
       const startedAt = performance.now();
       if (trace) console.log(`[RealtimePerf] id=${traceId} stage=start queueWaitMs=${(startedAt-queuedAt).toFixed(1)} observedToStartMs=${(startedAt-observedAt).toFixed(1)}`);
@@ -2379,8 +2392,8 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
   /** Downloads primeiro: e onde o EICAR chega e onde a detecao tardia se nota. */
   private realtimePriority(filePath: string): "high" | "normal" {
     const home = process.env.USERPROFILE || os.homedir();
-    const downloads = path.resolve(home, "Downloads").toLowerCase() + path.sep;
-    return path.resolve(filePath).toLowerCase().startsWith(downloads) ? "high" : "normal";
+    const downloads = platformFileKey(path.resolve(home, "Downloads")) + path.sep;
+    return platformFileKey(path.resolve(filePath)).startsWith(downloads) ? "high" : "normal";
   }
 
   private reportRealtimeOverflow(caminho = "", stage: SaturationStage = "analysis", retry = false): void {
@@ -3177,7 +3190,7 @@ await this.signatures.load(path.join(this.definitionsDir, "hashes", "default.jso
 
   /** Chave de comparacao: o mesmo ficheiro escrito de outra maneira tem de casar. */
   private static prefetchKey(file: string): string {
-    return file.replace(/\//g, "\\").toLowerCase();
+    return platformFileKey(file);
   }
 
   /**
