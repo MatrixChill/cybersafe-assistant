@@ -85,10 +85,28 @@ Os clientes anteriores ao protocolo protegido (helper com staging privado)
 precisam de uma instalação manual uma única vez. Os manifestos v2 exigem um
 `minClient` protegido (Arch `0.2.4-4`, Nigor `0.2.4-1`) e a edição certa.
 
+## Publicado (16/11)
+
+- Candidatas de `b1f38b1`: `linux-lite 0.2.4-5` (não publicada; a Preview 3 continua a ser o
+  download Linux genérico) e `nigor 0.2.4-2`, publicada como
+  [nigor-v0.2.4-preview.1](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/nigor-v0.2.4-preview.1).
+- Aceitação da candidata Nigor no laboratório: migração da Preview 3 pública
+  (SHA256SUMS verificados), `pacman -Qkk` 220/0, SQLite com o mesmo hash,
+  abertura sem conta sob Xvfb, `/health` 200, rotas privadas 401, serviço e
+  análise benigna, atualizador ciente da edição.
+- Canal [nigor-update-channel-v2](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/nigor-update-channel-v2)
+  com manifesto v2 assinado; o cliente instalado responde `up-to-date` /
+  `ed25519-verified`. O canal Linux antigo (Preview 2) não foi alterado.
+- Entrega e mensagem: [ENTREGA-NIGOR-PREVIEW-1.md](ENTREGA-NIGOR-PREVIEW-1.md).
+
 ## Ponto de continuidade
 
-1. Candidatas de `b1f38b1` (`linux-lite 0.2.4-5`, `nigor 0.2.4-2`) em construção no laboratório.
-2. Validá-las: instalação limpa e migração Preview 3 → Nigor, entrada sem conta,
-   rotas privadas 401, scanner, quarentena, `pacman -Qkk`, licenças.
-3. Só depois: publicar `nigor-v0.2.4-preview.1` como pré-release, e o manifesto
-   v2 assinado apenas no feed Nigor; atualizar o PR #5 e a mensagem ao Higor.
+1. «Lembrar-me» não foi testado de novo nesta candidata: o código de autenticação
+   não mudou desde `e829dc8`, onde o outro agente o validou.
+2. Login obrigatório na candidata genérica `0.2.4-5`, e eventual publicação dela
+   como `linux-v0.2.4-arch-preview.4` com manifesto v2 no feed Arch.
+3. Agente polkit gráfico com a palavra-passe certa (impossível no WSL sem sessão logind).
+4. Documentos de entrega do outro agente, ainda por commitar (`README.md`, `MENSAGEM.md`,
+   `EDICAO-NIGOR.md`, `CONTRATO.md`, `DISTRIBUICAO-ATUALIZACOES.md`,
+   `distribution-channels.md`, `VALIDACAO-EDICOES-V2.md`): rever e commitar
+   em conjunto com esta entrega.
