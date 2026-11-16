@@ -32,6 +32,7 @@ export class QuarantineManager {
         throw new Error("Diretório de quarentena com redirecionamento; operação recusada.");
       }
       await fs.chmod(this.quarantineDir, 0o700);
+      if (((await fs.stat(this.quarantineDir)).mode & 0o777) !== 0o700) throw new Error("O volume não garante permissões privadas de quarentena.");
     }
     try {
       const parsed = JSON.parse(await fs.readFile(this.manifestPath, "utf-8")) as StoredQuarantineEntry[];
@@ -192,6 +193,7 @@ export class QuarantineManager {
           if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error;
         }
         await fs.chmod(quarantinePath, 0o000);
+        if (process.platform === "linux" && ((await fs.stat(quarantinePath)).mode & 0o777) !== 0) throw new Error("O volume não confirmou as permissões de isolamento.");
         const confirmed: StoredQuarantineEntry = {...entry,isolationStatus:"confirmed"};
         const confirmedEntries = new Map(this.entries).set(id,confirmed);
         await this.flush(confirmedEntries);
@@ -277,8 +279,18 @@ export class QuarantineManager {
           throw new Error("Digest de quarentena diferente; restauro recusado.");
         }
         // Exclusive publication: EEXIST refuses even a destination created after the check.
-        // Cross-volume/unsupported hard links fail closed; never fall back to rename.
-        await fs.link(staging, original);
+        // Stage is on the destination volume. On FAT/exFAT-like filesystems
+        // without hard links, publication cannot be atomic: use an exclusive
+        // copy, verify and sync it, retaining quarantine on ANY interruption.
+        // Never use an overwriting rename or remove a partial destination.
+        try { await fs.link(staging, original); }
+        catch (error) {
+          if (process.platform !== "linux" || !["EOPNOTSUPP", "ENOSYS", "EPERM"].includes((error as NodeJS.ErrnoException).code ?? "")) throw error;
+          await fs.copyFile(staging, original, constants.COPYFILE_EXCL);
+          const restored = await fs.open(original, "r+");
+          try { await restored.sync(); } finally { await restored.close(); }
+          if (await this.digest(original) !== entry.sha256.toLowerCase()) throw new Error("Cópia restaurada não confirmada; quarentena preservada.");
+        }
         published = true;
         await this.syncDirectory(path.dirname(original));
         await fs.unlink(staging);

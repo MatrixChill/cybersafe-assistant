@@ -69,3 +69,10 @@ test('Linux: concurrent source replacement during cross-volume copy is not delet
   assert.equal(await fs.readFile(source, 'utf8'), 'replacement must survive');
   assert.equal(q.list().some(e => e.isolationStatus === 'confirmed'), false);
 });
+
+test('Linux: restore to a filesystem without hard links uses exclusive verified copying',linux,async t=>{
+ const {q,source,bytes,analysis}=await fixture(t);const entry=await q.quarantine(analysis);assert.ok(entry);
+ const link=fs.link;fs.link=async(a,b)=>{if(b===source)throw Object.assign(new Error('no hard links'),{code:'EOPNOTSUPP'});return link(a,b);};
+ let r;try{r=await q.restore(entry.id);}finally{fs.link=link;}
+ assert.equal(r.success,true,r.error);assert.equal(r.error,undefined);assert.deepEqual(await fs.readFile(source),bytes);
+});

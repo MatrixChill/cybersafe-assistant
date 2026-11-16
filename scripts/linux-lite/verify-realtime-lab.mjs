@@ -17,7 +17,7 @@ engine.watcher.getDefaultPaths=()=>[downloads];
 engine.eventBus.on('event',e=>{
  events.push(e);
  const file=e.data?.artifactPath??e.data?.filePath??e.data?.path??e.data?.originalPath;
- if(file&&times.has(file))times.get(file).events.push({type:e.type,elapsedMs:performance.now()-times.get(file).created});
+ if(file&&times.has(file))times.get(file).events.push({type:e.type,elapsedMs:performance.now()-times.get(file).created,...(e.type==='artifact.analyzed'?{verdict:e.data.verdict,analysisState:e.data.analysisState}: {})});
 });
 try{
  await engine.init();await engine.clamav.isAvailable();await NativeEngineBridge.probe();
@@ -43,7 +43,10 @@ try{
   assert.ok(history.includes('quarantine.added'),'persistent isolation history required');
  }
  const percent=(values,p)=>values.sort((a,b)=>a-b)[Math.ceil(values.length*p)-1];
- const result={kind:'real service, watcher and engines; no GUI',files:rows,summary:{count:rows.length,medianVerdictMs:percent(rows.map(r=>r.events.find(e=>e.type==='artifact.analyzed').elapsedMs),.5),p95VerdictMs:percent(rows.map(r=>r.events.find(e=>e.type==='artifact.analyzed').elapsedMs),.95)},threatDetected:events.some(e=>e.type==='threat.detected'),quarantineConfirmed:events.some(e=>e.type==='quarantine.added'),historyPersisted:true};
+ const firstVerdicts=rows.map(r=>r.events.find(e=>e.type==='artifact.analyzed'));
+ const result={kind:'real service, watcher and engines; no GUI',files:rows,summary:{count:rows.length,medianVerdictMs:percent(firstVerdicts.map(e=>e.elapsedMs),.5),p95VerdictMs:percent(firstVerdicts.map(e=>e.elapsedMs),.95),inconclusive:firstVerdicts.filter(e=>e.verdict==='inconclusive').length,failed:firstVerdicts.filter(e=>e.analysisState==='failed').length},threatDetected:events.some(e=>e.type==='threat.detected'),quarantineConfirmed:events.some(e=>e.type==='quarantine.added'),historyPersisted:true};
+ assert.equal(result.summary.inconclusive,0,'no initial fixture verdict may be silently inconclusive');
+ assert.equal(result.summary.failed,0);
  const output=process.argv.find(a=>a.startsWith('--output='))?.slice(9);if(output)await fs.writeFile(output,JSON.stringify(result,null,2));
  console.log(JSON.stringify(result));
 }finally{await engine.dispose();/* Retain private synthetic history for inspection, never restore test detections. */}
