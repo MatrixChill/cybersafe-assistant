@@ -1,10 +1,11 @@
 import fs from "node:fs/promises";
+import { constants } from "node:fs";
 import path from "node:path";
 import crypto from "node:crypto";
 import { spawn, type ChildProcess } from "node:child_process";
 import type { AnalysisResult, ProcessKillProtectionReason, QuarantineEntry, KillProcessResult } from "@cybersafe/shared-types";
 
-type StoredQuarantineEntry = QuarantineEntry & { originalMode?: number };
+type StoredQuarantineEntry = QuarantineEntry & { originalMode?: number; sourceRecoveryPath?: string };
 type QuarantineResult = { success: boolean; error?: string };
 
 export class QuarantineManager {
@@ -19,7 +20,19 @@ export class QuarantineManager {
   }
 
   async init() {
-    await fs.mkdir(this.quarantineDir, { recursive: true });
+    if (process.platform === "linux") {
+      const parent = path.dirname(this.quarantineDir);
+      await fs.mkdir(parent, { recursive: true, mode: 0o700 });
+      if (await fs.realpath(parent) !== parent) throw new Error("Pasta de quarentena com redirecionamento.");
+    }
+    await fs.mkdir(this.quarantineDir, { recursive: true, mode: 0o700 });
+    if (process.platform === "linux") {
+      const root = await fs.lstat(this.quarantineDir);
+      if (!root.isDirectory() || root.isSymbolicLink() || await fs.realpath(this.quarantineDir) !== this.quarantineDir) {
+        throw new Error("Diretório de quarentena com redirecionamento; operação recusada.");
+      }
+      await fs.chmod(this.quarantineDir, 0o700);
+    }
     try {
       const parsed = JSON.parse(await fs.readFile(this.manifestPath, "utf-8")) as StoredQuarantineEntry[];
       this.entries = new Map(parsed.map((entry) => [entry.id, entry]));
@@ -45,9 +58,16 @@ export class QuarantineManager {
         await handle.close();
       }
       await fs.rename(temporary, this.manifestPath);
+      await this.syncDirectory(this.quarantineDir);
     } finally {
       await fs.rm(temporary, { force: true }).catch(() => undefined);
     }
+  }
+
+  private async syncDirectory(directory: string) {
+    if (process.platform !== "linux") return;
+    const handle = await fs.open(directory, "r");
+    try { await handle.sync(); } finally { await handle.close(); }
   }
 
   // No recursive removal and no aliases outside the direct quarantine directory.
@@ -92,11 +112,47 @@ export class QuarantineManager {
     } finally { await handle.close(); }
   }
 
+  /** EXDEV is expected for /tmp, USB and other mounts. Never remove the
+   * source until the synced copy is verified. A concurrent replacement is
+   * retained, with a recovery entry, rather than reporting isolation. */
+  private async isolateAcrossVolumes(entry: StoredQuarantineEntry, expected: Awaited<ReturnType<typeof fs.lstat>>, copied: () => void) {
+    const source = entry.originalPath;
+    const temporary = `${entry.quarantinePath}.tmp`;
+    const same = (s: Awaited<ReturnType<typeof fs.lstat>>) => s.isFile() && !s.isSymbolicLink()
+      && s.nlink === 1 && s.ino === expected.ino && s.dev === expected.dev
+      && s.size === expected.size && s.mtimeMs === expected.mtimeMs;
+    try {
+      await fs.copyFile(source, temporary, constants.COPYFILE_EXCL);
+      await fs.chmod(temporary, 0o600);
+      const output = await fs.open(temporary, "r+");
+      try { await output.sync(); } finally { await output.close(); }
+      if (await this.digest(temporary) !== entry.sha256 || !same(await fs.lstat(source))) {
+        throw new Error("Origem alterada durante a cópia; isolamento recusado.");
+      }
+      await fs.link(temporary, entry.quarantinePath); // atomic, no overwrite
+      copied();
+      await this.syncDirectory(this.quarantineDir);
+      // Persisted before this rename: interrupted operations retain both
+      // the verified copy and the location of a temporarily claimed source.
+      await fs.rename(source, entry.sourceRecoveryPath!);
+      await this.syncDirectory(path.dirname(source));
+      if (!same(await fs.lstat(entry.sourceRecoveryPath!)) || await this.digest(entry.sourceRecoveryPath!) !== entry.sha256) {
+        // Do not delete an unexpected file. Restore its name only if vacant.
+        await fs.link(entry.sourceRecoveryPath!, source);
+        throw new Error("Identidade da origem alterada; recuperação necessária.");
+      }
+      await fs.unlink(entry.sourceRecoveryPath!);
+      await this.syncDirectory(path.dirname(source));
+    } finally { await fs.rm(temporary, { force: true }).catch(() => undefined); }
+  }
+
   async quarantine(analysis: AnalysisResult): Promise<QuarantineEntry | null> {
     return this.serialize(async () => {
       let entry: StoredQuarantineEntry | undefined;
       let moved = false;
       try {
+        if (process.platform === "linux" && (!path.isAbsolute(analysis.artifactPath)
+          || await fs.realpath(path.dirname(analysis.artifactPath)) !== path.dirname(path.resolve(analysis.artifactPath)))) return null;
         const stat = await fs.lstat(analysis.artifactPath);
         if (!stat.isFile() || stat.isSymbolicLink() || stat.nlink !== 1) return null;
         const sha256 = await this.digest(analysis.artifactPath);
@@ -114,12 +170,17 @@ export class QuarantineManager {
           detectionReason: rules.length > 0 ? rules.join(", ") : undefined,
           quarantinedAt: new Date().toISOString(), originalMode: stat.mode & 0o777,
           isolationStatus: "recovery-required",
+          sourceRecoveryPath: process.platform === "linux" ? path.join(path.dirname(analysis.artifactPath), `.cybersafe-${id}.pending`) : undefined,
         };
         // Persist recovery metadata before moving the only copy.
         const next = new Map(this.entries).set(id, entry);
         await this.flush(next);
         this.entries = next;
-        await fs.rename(analysis.artifactPath, quarantinePath);
+        try { await fs.rename(analysis.artifactPath, quarantinePath); }
+        catch (error) {
+          if (process.platform !== "linux" || (error as NodeJS.ErrnoException).code !== "EXDEV") throw error;
+          await this.isolateAcrossVolumes(entry, stat, () => { moved = true; });
+        }
         moved = true;
         if (await this.digest(quarantinePath) !== sha256) throw new Error("Destino alterado durante o isolamento.");
         const destination = await fs.lstat(quarantinePath);
@@ -159,7 +220,9 @@ export class QuarantineManager {
     return this.serialize(async () => {
       const entry = this.entries.get(id);
       if (!entry) return { success: false, error: "Entrada de quarentena nao encontrada." };
-      const staging = path.join(this.quarantineDir, `.restore-${crypto.randomUUID()}.tmp`);
+      // Stage on the destination volume, then publish with an exclusive link.
+      // No cross-volume hard link and no overwrite/rename fallback.
+      const staging = path.join(process.platform === "linux" ? path.dirname(entry.originalPath) : this.quarantineDir, `.restore-${crypto.randomUUID()}.tmp`);
       let published = false;
       try {
         const source = await this.checkedSource(entry);
@@ -217,6 +280,7 @@ export class QuarantineManager {
         // Cross-volume/unsupported hard links fail closed; never fall back to rename.
         await fs.link(staging, original);
         published = true;
+        await this.syncDirectory(path.dirname(original));
         await fs.unlink(staging);
         const mode = entry.originalMode;
         await fs.chmod(original, Number.isInteger(mode) && mode! >= 0 && mode! <= 0o777 ? mode! : 0o600);
