@@ -32,7 +32,9 @@ function costura({ leitura = null, enqueue = "accepted", reads = 0 } = {}) {
     protectionGeneration: 1,
     fileObservationReads: reads,
     backgroundAbort: new AbortController(),
-    realtimeQueue: { size: 0, clear: () => {}, enqueue: (...args) => { eventos.push(["enqueue", args[0]]); return enqueue; } },
+    realtimeQueue: { size: 0, clear: () => {}, peekPending: () => [], enqueue: (...args) => { eventos.push(["enqueue", args[0]]); return enqueue; } },
+    // Lote ClamAV do tempo real (1b36b8c): sem pares à espera não há lote.
+    realtimeTargets: new Map(), realtimeClamavCache: new Map(), realtimeBatchSeq: 0,
     realtimeRecovery: recovery,
     loss: { noteQueueRejection: () => {}, summary: () => ({ queueRejections: 0, queueDistinctPaths: 0, queuePathsCapped: false }) },
     eventBus: { publish: (...args) => eventos.push(["publish", args[1], args[3]?.admissionStage]) },
@@ -44,6 +46,8 @@ function costura({ leitura = null, enqueue = "accepted", reads = 0 } = {}) {
     resetOverflowEpisode: () => ProtectionEngineService.prototype["resetOverflowEpisode"].call(e),
     overflowEventData: (...args) => ProtectionEngineService.prototype["overflowEventData"].call(e, ...args),
     realtimeAnalysisOutcome: (...args) => ProtectionEngineService.prototype["realtimeAnalysisOutcome"].call(e, ...args),
+    takeRealtimeClamav: (...args) => ProtectionEngineService.prototype["takeRealtimeClamav"].call(e, ...args),
+    realtimeClamavBatch: (...args) => ProtectionEngineService.prototype["realtimeClamavBatch"].call(e, ...args),
     exclusions: { isExcluded: () => false },
     realtimePriority: (filePath) => realtimePriority.call(e, filePath),
     scanArtifact: async () => leitura,
@@ -141,6 +145,7 @@ test("parar a proteção limpa as retomas pendentes", async () => {
     networkTimer: null,
     protectionTransition: null,
     realtimeDroppedEvents: 0,
+    realtimeTargets: new Map(), realtimeClamavCache: new Map(),
   });
   e.loss.reset = () => {};
   e.loss.summary = () => ({ queueRejections: 0, queueDistinctPaths: 0, queuePathsCapped: false, watcherCallbacksIndeterminate: false });
