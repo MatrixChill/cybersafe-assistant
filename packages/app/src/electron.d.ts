@@ -53,6 +53,7 @@ export interface AiCredentialsResultado extends Partial<AiCredentialsEstado> {
 }
 
 export interface ElectronAPI {
+  getAccountPolicy?: () => Promise<import("./lib/accountEntryPolicy").AccountPolicy | null>;
   /** Só presente em Linux: atualizações do pacote Arch (cybersafe-linux-update). */
   linuxUpdate?: {
     check: () => Promise<import("./lib/linuxUpdateModel").LinuxUpdateWire>;

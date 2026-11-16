@@ -12,6 +12,7 @@ import { windowsAppIdentity } from "./app-identity.js";
 import { createAuthSessionStore } from "./auth-session-store.js";
 import { registerAuthSessionIpc } from "./auth-session-ipc.js";
 import { configureLinuxSecretStore } from "./linux-secret-store.js";
+import { isNigorInstall, resolveAccountPolicy } from "./nigor-account-policy.js";
 import { app, shell, BrowserWindow, dialog, ipcMain, Menu, Notification, Tray, nativeImage, nativeTheme, screen, safeStorage } from "electron";
 configureLinuxSecretStore(app);
 import path from "node:path";
@@ -1519,6 +1520,8 @@ function registerIpc(
       envolverLeituraWindows(channel, handler),
     ));
   registerSession(handle);
+  const editionRuntime = () => ({ platform: process.platform, packaged: app.isPackaged, resourcesPath: process.resourcesPath });
+  handle("app:account-policy", () => resolveAccountPolicy(editionRuntime()));
   registerAiCredentialsIpc(handle, currentAiStore, async (store) => {
     const child = apiRuntime?.child ?? null;
     const applied = await configureAiChild(child, store);
@@ -1550,10 +1553,14 @@ function registerIpc(
   handle("app:update-get-snapshot", async () =>
     appUpdater ? toAppUpdateSnapshot(appUpdater.snapshotCopy()) : failureSnapshot("unconfigured", updateVersion(), "updater não inicializado"));
   // Atualizações Linux (pacote Arch): canal próprio, nunca o updater Windows.
-  handle("linux-update:run", (_event, command: unknown, consent: unknown, sha256: unknown) =>
-    command === "check" || command === "download" || command === "install"
+  handle("linux-update:run", (_event, command: unknown, consent: unknown, sha256: unknown) => {
+    if (isNigorInstall(editionRuntime())) {
+      return { ok: true, result: { schema: 1, state: "not-configured", reason: "nigor-channel-unavailable" } };
+    }
+    return command === "check" || command === "download" || command === "install"
       ? runLinuxUpdate(command, consent === true, undefined, undefined, sha256)
-      : Promise.resolve({ ok: false, result: null, error: "invalid-response" }));
+      : { ok: false, result: null, error: "invalid-response" };
+  });
   handle("app:update-check", () => withUpdater((u) => u.check()));
   handle("app:update-download", () => withUpdater((u) => u.download()));
   handle("app:update-reveal", () => withUpdater((u) => u.revealVerifiedDownload((file) => shell.showItemInFolder(file))));

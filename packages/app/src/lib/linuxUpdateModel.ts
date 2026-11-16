@@ -96,6 +96,8 @@ export function linuxUpdateView(wire: LinuxUpdateWire | null): LinuxUpdateView {
     case "up-to-date":
       return { ...base, title: "O CyberSafe está atualizado", tone: "ok", detail: null };
     case "not-configured":
+      if(r.reason === "nigor-channel-unavailable") return {...base,title:"Canal Nigor ainda indisponível",tone:"warn",
+        detail:"Esta edição requer um canal de atualizações próprio."};
       if(r.reason === "installed-package-unverified") return {...base,title:"Pacote instalado não confirmado",tone:"warn",
         detail:"A atualização assistida requer o pacote Arch oficial registado no pacman."};
       return { ...base, title: "Canal de atualizações não configurado", tone: "warn", detail: "Este pacote não tem chave pública de atualizações; instale uma versão mais recente manualmente." };

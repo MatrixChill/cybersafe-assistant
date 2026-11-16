@@ -6,9 +6,11 @@ import { BrandLogo } from "../components/BrandLogo";
 
 interface LoginPageProps {
   onSwitchToRegister: () => void;
+  onUseLocal?: () => void;
+  onAuthenticated?: () => void;
 }
 
-export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
+export default function LoginPage({ onSwitchToRegister, onUseLocal, onAuthenticated }: LoginPageProps) {
   const { login } = useAuth();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -33,7 +35,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
     if (!result.success) {
       setError(result.error || "Erro ao fazer login.");
       setSessionOnlyRetry(result.sessionOnlyRetry === true);
-    }
+    } else onAuthenticated?.();
     setIsLoading(false);
   }
 
@@ -182,6 +184,7 @@ export default function LoginPage({ onSwitchToRegister }: LoginPageProps) {
             Criar conta
           </button>
         </div>
+        {onUseLocal && <button type="button" disabled={isLoading} onClick={onUseLocal} className="auth-link">Continuar sem conta</button>}
 
         {/* Decorative bottom line */}
         <div className="auth-card-line" />

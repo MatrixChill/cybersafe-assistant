@@ -105,7 +105,8 @@ for (const packaged of [false, true]) {
     // app:update-set-preview changes the persisted channel preference and must use the same sender guard.
     // + linux-update:run (atualizações do pacote Arch, 14/11): argumentos fixos
     //   check|download|install, install só com consentimento; mesma guarda de emissor.
-    assert.equal(f.handlers.size, 70, "audit covers every currently registered channel; review any surface change");
+    assert.equal(f.handlers.size, 71, "audit covers every currently registered channel; review any surface change");
+    assert.ok(f.handlers.has("app:account-policy"));
     assert.ok(f.handlers.has("linux-update:run"));
     assert.ok(f.handlers.has("app:update-set-preview"));
     assert.ok(f.handlers.has("app:update-reveal")); // folder reveal: same trusted document guard
@@ -224,14 +225,14 @@ test("report window has no privileged preload; missing main window fails closed"
   assert.throws(() => handler({sender:{},senderFrame:{url:"http://localhost:5173/"}}), /Emissor IPC não autorizado/);
   assert.equal(effects, 0);
 });
-test("preload surface is explicitly limited to the 61 reviewed capabilities", () => {
+test("preload surface is explicitly limited to the reviewed capabilities", () => {
   const {api} = bridge(fixture());
   // 52 revistas originalmente + getProtectionIntent/setProtectionIntent (intenção de
   // proteção, 19/10) + appUpdate (objecto de actualização da app, 19/10). O sub-objecto
   // é auditado à parte abaixo: contar `appUpdate` como capacidade e não verificar as
   // suas chaves seria um ledger mais fraco do que antes.
   const expected = "aiCredentials,prepareProcessTermination,confirmProcessTermination,cancelProcessTermination,beginShutdown,getProtectionState,setProtection,pauseProtection,getServiceConnectionState,onServiceConnectionState,getSecurityEvents,getThreatEvents,getProcesses,getConnections,getQuarantineFiles,clearThreatEvents,scanFile,scanFullSystem,killProcessTree,analyzeProcess,getHardwareSnapshot,getWindowsHealth,getPCState,restoreQuarantine,deleteQuarantine,allowHash,allowPublisher,runRestrictedAnalysis,updateDefinitions,getDefinitionsStatus,startScan,getActiveScan,getLastScan,getScanHistory,cancelScan,threatAction,openFileDialog,getPathForFile,openFolderDialog,onSecurityEvent,onScanProgress,onScanSession,onExitConfirmRequest,respondExitConfirm,ackExitConfirm,onNavigateRequest,getAutoStart,setAutoStart,getNotificationsEnabled,setNotificationsEnabled,setTitleBarOverlay,openReportWindow,exportReportPdf,getUsbProtection,configureUsbProtection,usbScan,usbCancel,getProtectionIntent,setProtectionIntent,appUpdate,authSession,getExclusions,updateExclusions,getQuarantinePolicy,setQuarantinePolicy".split(",");
-  assert.deepEqual(Object.keys(api).sort(), expected.sort());
+  assert.deepEqual(Object.keys(api).sort(), [...expected, "getAccountPolicy"].sort());
   for (const [nome, method] of Object.entries(api)) {
     if (nome === "appUpdate" || nome === "authSession" || nome === "aiCredentials") continue;
     assert.equal(typeof method, "function", `${nome} tem de continuar a ser uma função`);

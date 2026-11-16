@@ -36,6 +36,7 @@ if (apiBase) {
 }
 
 contextBridge.exposeInMainWorld("electronAPI", {
+  getAccountPolicy: () => invoke("app:account-policy"),
   /** Marca o encerramento na bridge (o renderer já parou os pollers). */
   beginShutdown: () => {
     shuttingDown = true;

@@ -9,6 +9,8 @@ import {
 
 interface RegisterPageProps {
   onSwitchToLogin: () => void;
+  onUseLocal?: () => void;
+  onAuthenticated?: () => void;
 }
 
 export interface DadosDeRegisto {
@@ -155,7 +157,7 @@ export function MensagemDeErro({ campo, erros }: { campo: CampoDeErro; erros: Pa
   );
 }
 
-export default function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
+export default function RegisterPage({ onSwitchToLogin, onUseLocal, onAuthenticated }: RegisterPageProps) {
   const { register } = useAuth();
   // Pessoal é o estado por defeito: uma conta de uso individual é o que este
   // produto é para quem o instala numa máquina. Antes começava em `null`, e o
@@ -286,6 +288,7 @@ export default function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
         : undefined,
     });
     setIsLoading(false);
+    if (result.success) onAuthenticated?.();
 
     if (!result.success) {
       // A falha da API vai para o campo a que pertence (email ocupado → email),
@@ -580,6 +583,7 @@ export default function RegisterPage({ onSwitchToLogin }: RegisterPageProps) {
           <span>Já tens uma conta?</span>
           <button onClick={onSwitchToLogin} className="auth-link">Iniciar sessão</button>
         </div>
+        {onUseLocal && <button type="button" disabled={isLoading} onClick={onUseLocal} className="auth-link">Continuar sem conta</button>}
         <div className="auth-card-line" />
       </div>
 
