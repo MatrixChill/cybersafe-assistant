@@ -12,6 +12,21 @@
 
 <p align="center"><a href="https://github.com/MatrixChill/cybersafe-assistant/releases/latest"><b>Descarregar para Windows</b></a> · <a href="docs/README.md">Documentação</a> · <a href="https://github.com/MatrixChill/cybersafe-assistant/tree/experimental/linux-lite">Linux Lite experimental</a></p>
 
+## Escolher a distribuição
+
+| Sistema | Download e estado | Instalação e atualizações |
+|---|---|---|
+| **Windows 10/11 x64** | [Release Windows](https://github.com/MatrixChill/cybersafe-assistant/releases/latest); tags `vX.Y.Z` | Setup Windows; [instruções](docs/installation.md). |
+| **Linux / Arch x86_64** | [Arch Preview 2](https://github.com/MatrixChill/cybersafe-assistant/releases/tag/linux-v0.2.4-arch-preview.2), experimental | Pacote `.pkg.tar.zst`, pacman e canal Linux Ed25519. Não instalar este pacote em Debian/Ubuntu. |
+| **Nigor OS / Arch x86_64** | **O mesmo pacote Arch verificado**, incluindo a integração Nigor; experimental | [Entrega ao responsável do Nigor](docs/nigor-handoff/DISTRIBUICAO-ATUALIZACOES.md); porta-chaves e integração gráfica dependem do sistema. |
+
+Linux partilha o serviço, Scanner, motores, quarentena e interface do projeto;
+as capacidades e os ensaios dependem da plataforma. A integração Nigor acrescenta
+o cliente local, adaptador C++ e componentes de referência, sem duplicar o
+atualizador ou assumir as atualizações do sistema operativo.
+[Distribuições, requisitos e política de canais](docs/distribution-channels.md).
+As alterações Linux Next desta branch ainda não estão incluídas na Preview 2.
+
 O **CyberSafe Assistant** é uma aplicação desktop de segurança para Windows. Reúne análise de ficheiros com quatro motores, monitorização do sistema, quarentena e assistência MATRIX numa interface comum.
 
 Criado por **Caio Amorim** no âmbito da **Prova de Aptidão Profissional**, explora a integração entre software desktop, componentes nativos e decisões de segurança explicáveis. É um projeto académico: complementa as proteções do Windows e apresenta limitações quando uma análise não pode ser concluída.

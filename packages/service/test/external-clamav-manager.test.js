@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {mkdtemp,rm} from 'node:fs/promises';
+import {mkdtemp,readFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
 import {DefinitionUpdater} from '../dist/updater.js';
@@ -28,12 +28,14 @@ test('system-managed definitions are delegated without claiming a check, changin
  const updater=new DefinitionUpdater(root,{probeClamavManager:async()=>({state:'managed',unit:'clamav-freshclam-once.timer'})});
  let spawns=0;updater.runFreshclam=()=>{spawns++;throw new Error('must not spawn')};
  updater.componentStale=component=>component==='clamav';
+ const metadataBefore=await readFile(join(root,'.update-meta.json'),'utf8');
  try{
   const result=await updater.checkAndUpdate();
   assert.equal(result.clamChecked,false);assert.equal(result.clamUpdated,false);
   assert.equal(result.clamManagement.state,'managed');assert.equal(result.errors.length,0);
   assert.match(result.warnings.join(' '),/sistema/);assert.equal(spawns,0);
   assert.equal(updater.gate.state.updateActive,false);
+  assert.equal(await readFile(join(root,'.update-meta.json'),'utf8'),metadataBefore);
  }finally{updater.stopScheduler();DefinitionUpdater.dispose();await rm(root,{recursive:true,force:true});}
 });
 

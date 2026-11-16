@@ -1,5 +1,12 @@
 # CyberSafe Assistant Linux Lite — README
 
+> **Referência histórica Linux Lite.** As medições abaixo pertencem ao trabalho
+> original Ubuntu/WSL e não certificam a versão Arch atual. Para escolher um
+> download, consultar [distribuições e canais](../distribution-channels.md);
+> para Arch/Nigor atual, consultar a [entrega Nigor](../nigor-handoff/README.md).
+> Existem agora pré-releases Arch públicas; a ausência de releases referida
+> no relato histórico abaixo não descreve o estado atual do repositório.
+
 Edição experimental do CyberSafe Assistant para Linux, na branch
 `experimental/linux-lite-qoder` do repositório isolado em
 `C:\Users\caioc\.cybersafe-integration\qoder-linux-lite\repo`. Não é um produto

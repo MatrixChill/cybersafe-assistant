@@ -13,6 +13,7 @@ produto; os ensaios privilegiados descritos foram exclusivamente de laboratório
 |---|---|
 | [INVENTARIO.md](INVENTARIO.md) | O que está pronto para integrar |
 | [INSTALACAO.md](INSTALACAO.md) | Instalar e testar a versão Linux |
+| [DISTRIBUICAO-ATUALIZACOES.md](DISTRIBUICAO-ATUALIZACOES.md) | Release correta, canal partilhado e responsabilidades do Nigor |
 | [CONTRATO.md](CONTRATO.md) | Comandos, JSON, erros, estados, consentimento, systemd |
 | [INTEGRACAO.md](INTEGRACAO.md) | Compilar e usar o adaptador C++ e o Security Center |
 | [INSTRUCOES-NIGOR.md](INSTRUCOES-NIGOR.md) | O que falta programar exclusivamente no Nigor |
