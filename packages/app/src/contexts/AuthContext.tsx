@@ -222,7 +222,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     if (!corpo?.user?.id || typeof corpo.token !== "string" || !corpo.token) return { success: false, error: "O servidor não devolveu uma sessão válida.", campo: "geral" as CampoDeErro };
     if (generation !== authGeneration.current) return { success: false };
     try { await saveAuthSession(corpo.token, data.remember === true); }
-    catch { return { success: false, error: "Não foi possível guardar a sessão com segurança.", campo: "geral" as CampoDeErro }; }
+    catch (error) { return { success: false, error: String(error).includes("SESSION_KEYRING_UNAVAILABLE")
+      ? "Lembrar-me requer um porta-chaves ativo e desbloqueado (GNOME Keyring ou KWallet). Ativa-o na sessão Linux ou desmarca Lembrar-me para entrar só nesta sessão."
+      : "Não foi possível guardar a sessão com segurança.", campo: "geral" as CampoDeErro }; }
     if (generation !== authGeneration.current) return { success: false };
     setUser(normalizeUser(corpo.user));
     setIsLoading(false);
