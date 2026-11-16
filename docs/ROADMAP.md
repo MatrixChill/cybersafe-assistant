@@ -1,3 +1,5 @@
+> **Historical snapshot — October 2026.** Preserved for traceability; old pending items and version numbers are not current status. Use the [public roadmap](roadmap-public.md) for v0.2.4.
+
 # Roadmap — estado real e próximos passos
 
 Este documento descreve o que **existe no código**, o que está **parcialmente validado** e o que

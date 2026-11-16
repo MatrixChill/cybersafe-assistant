@@ -1,0 +1,68 @@
+name: Bug report / Erro
+description: Report a reproducible problem, in English or Portuguese.
+title: "[Bug]: "
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Do not attach credentials, personal databases, quarantine contents or malware.
+        For vulnerabilities, read SECURITY.md before submitting any details publicly.
+        Pode escrever em português. Não publique dados pessoais ou segredos.
+  - type: input
+    id: version
+    attributes:
+      label: Product version / Versão do produto
+      description: Use the product version shown in the app, not an npm workspace version.
+      placeholder: Windows v0.2.4; Arch 0.2.4-3; Nigor Preview 1 / 0.2.4-2
+    validations:
+      required: true
+  - type: dropdown
+    id: edition
+    attributes:
+      label: Edition / Edição
+      options:
+        - Windows Stable
+        - Linux / Arch Experimental
+        - Nigor OS Edition Experimental
+        - Development checkout / Checkout de desenvolvimento
+    validations:
+      required: true
+  - type: input
+    id: platform
+    attributes:
+      label: OS, package revision and source / SO, revisão do pacote e origem
+      description: Include OS version, architecture, package revision and release tag or DEV commit. No username or device identifier.
+    validations:
+      required: true
+  - type: textarea
+    id: reproduction
+    attributes:
+      label: Safe reproduction / Reprodução segura
+      description: Minimal steps using benign disposable files. Do not ask others to disable protections.
+    validations:
+      required: true
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected result / Resultado esperado
+    validations:
+      required: true
+  - type: textarea
+    id: observed
+    attributes:
+      label: Observed result / Resultado observado
+      description: Include errors, inconclusive states, timing and engine health if relevant. Separate measured facts from assumptions.
+    validations:
+      required: true
+  - type: textarea
+    id: diagnostics
+    attributes:
+      label: Redacted diagnostics / Diagnóstico sem dados privados
+      description: Optional short log excerpt or version-labelled screenshot. Remove names, file paths, command lines, keys and personal content first.
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy check / Verificação de privacidade
+      options:
+        - label: I reviewed this public report and removed secrets, personal data and harmful attachments.
+          required: true

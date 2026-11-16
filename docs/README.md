@@ -1,26 +1,32 @@
-# Documentação CyberSafe Assistant
+# CyberSafe documentation / Documentação
 
-Ponto de entrada para utilizar, desenvolver e avaliar o projeto. A **main** contém a edição Windows; a [branch Linux Lite](https://github.com/MatrixChill/cybersafe-assistant/tree/experimental/linux-lite) é experimental e permanece separada.
+Choose a [download](downloads.md) before following platform-specific instructions. Windows Stable, generic Arch Preview and Nigor OS Edition have different installation and update contracts.
 
-| Começar por | Conteúdo |
-|---|---|
-| [Instalação](installation.md) | Download oficial, checksums e atualização manual |
-| [Arquitetura](ARCHITECTURE.md) | Camadas, IPC e serviço local |
-| [Motores](engines.md) | ClamAV, YARA, HashDB e Native C++ |
-| [MATRIX](matrix.md) | Diagnóstico local, IA online e consentimento |
-| [Desenvolvimento](development.md) | Ambiente, comandos de testes e build |
-| [Testes e segurança](security-and-testing.md) | Evidência, limitações e comunicação responsável |
-| [Atualizações](updates.md) | Feed, Ed25519, integridade e gates de release |
-| [PAP](../PAP-EVIDENCIAS-TECNICAS/README.md) | Evidências técnicas e contexto académico |
+| Task | English | Português de Portugal |
+|---|---|---|
+| Choose a distribution | [Downloads and channels](downloads.md) | [Downloads e canais](downloads.pt-PT.md) |
+| Install Windows | [Installation / recovery](installation.md) | [Instalação / recuperação](installation.pt-PT.md) |
+| Install Arch Linux | [Arch guide](linux/README.md) | [Guia Arch](linux/README.pt-PT.md) |
+| Install or integrate Nigor | [Nigor Edition](nigor-os/README.md) | [Edição Nigor](nigor-os/README.pt-PT.md) |
+| Understand the system | [Architecture](architecture/README.md) | [Arquitetura](architecture/README.pt-PT.md) |
+| Build and test | [Development](development.md) | [Desenvolvimento](development.pt-PT.md) |
+| Ask a usage question | [FAQ](faq.md) | [Perguntas frequentes](faq.pt-PT.md) |
+| Contribute | [Contributor guide](../CONTRIBUTING.md) | [Contribuir](../CONTRIBUTING.pt-PT.md) |
 
-## Referências e arquivo técnico
+[Support / Suporte](support.md) · [Security reporting](../SECURITY.md) · [License / Licença](licensing.md) · [Roadmap](roadmap-public.md) · [Archive / Arquivo](archive/README.md)
+
+Technical references retain their original language. [Engines](engines.md), [MATRIX](matrix.md), [Windows update implementation](updates.md) and [testing evidence](security-and-testing.md) are in PT-PT. Use the edition guides to interpret platform-specific availability.
+
+The [capture index](images/README.md) labels historical screenshots. The [EN/PT demo script](demo.md) prepares a real benign recording. [Outreach drafts](outreach.md) are historical review material and require a fresh review before use.
+
+## Historical references / Referências históricas
 
 Os documentos datados abaixo e os checkpoints preservam decisões e evidências históricas. Não representam automaticamente o estado da versão atual. Não foram eliminados para evitar perder a reprodutibilidade dos builds e dos ensaios.
 
 | Documento | Conteúdo |
 |-----------|-----------|
 | [ARCHITECTURE.md](./ARCHITECTURE.md) | Camadas, fluxo de pedidos, motores, serviço e segurança aplicada |
-| [ROADMAP.md](./ROADMAP.md) | Estado real, validação pendente e próximos passos |
+| [ROADMAP.md](./ROADMAP.md) | Snapshot histórico de outubro; [roadmap público atual](roadmap-public.md) |
 | [PAP-TRANSFERENCIA-20261031.md](./PAP-TRANSFERENCIA-20261031.md) | Transferência para a revisão do relatório PAP: factos, lacunas e capítulos a atualizar |
 | [../PAP-EVIDENCIAS-TECNICAS/README.md](../PAP-EVIDENCIAS-TECNICAS/README.md) | Índice dos oito documentos de evidência técnica |
 | [FAQ-ENTREGA-PROFESSOR.md](./FAQ-ENTREGA-PROFESSOR.md) | Perguntas típicas (Electron, motor, C++, indústria) |
